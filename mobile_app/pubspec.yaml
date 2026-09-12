@@ -1,0 +1,113 @@
+name: mobile_app
+description: Workplace document scanner mobile app
+publish_to: "none"
+version: 1.1.3+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.8.0+1
+  firebase_core: ^4.6.0
+  firebase_messaging: ^16.1.2
+  flutter_riverpod: ^2.6.1
+  flutter_secure_storage: ^9.2.4
+  image: ^4.5.4
+  intl: ^0.20.2
+  open_filex: ^4.7.0
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  pdf: ^3.11.3
+  shared_preferences: ^2.5.3
+  socket_io_client: ^3.1.2
+  uuid: ^4.5.1
+  file_picker: ^10.1.9
+  flutter_local_notifications: ^19.4.0
+  cached_network_image: ^3.4.1
+  permission_handler: ^12.0.1
+  record: ^6.0.0
+  just_audio: ^0.10.5
+  package_info_plus: ^8.0.0
+  gal: ^2.3.2
+  connectivity_plus: ^7.1.0
+  crypto: ^3.0.6
+  animated_emoji: ^3.2.1
+  lottie: ^3.3.3
+  iconsax: ^0.0.8
+  mobile_scanner: ^7.2.0
+  flutter_svg: ^2.2.0
+  simple_splash_view: ^0.3.2
+  google_mlkit_document_scanner: ^0.5.0
+  google_fonts: ^8.2.0
+  share_plus: ^12.0.2
+  timezone: ^0.10.1
+  url_launcher: ^6.3.2
+  animations: ^3.0.0
+  flutter_animate: ^4.5.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/animated_emoji_lottie/angry.json
+    - assets/animated_emoji_lottie/checkMark.json
+    - assets/animated_emoji_lottie/clap.json
+    - assets/animated_emoji_lottie/eyes.json
+    - assets/animated_emoji_lottie/fire.json
+    - assets/animated_emoji_lottie/foldedHands.json
+    - assets/animated_emoji_lottie/grin.json
+    - assets/animated_emoji_lottie/handshake.json
+    - assets/animated_emoji_lottie/heartEyes.json
+    - assets/animated_emoji_lottie/joy.json
+    - assets/animated_emoji_lottie/loudlyCrying.json
+    - assets/animated_emoji_lottie/ok.json
+    - assets/animated_emoji_lottie/oneHundred.json
+    - assets/animated_emoji_lottie/partyingFace.json
+    - assets/animated_emoji_lottie/partyPopper.json
+    - assets/animated_emoji_lottie/redHeart.json
+    - assets/animated_emoji_lottie/sad.json
+    - assets/animated_emoji_lottie/sunglassesFace.json
+    - assets/animated_emoji_lottie/thinkingFace.json
+    - assets/animated_emoji_lottie/thumbsUp.json
+    - assets/notification_sounds/default_tone.wav
+    - assets/notification_sounds/chime_tone.wav
+    - assets/notification_sounds/alert_tone.wav
+    - assets/images/logo.png
+
+
+simple_splash_view:
+  image: assets/images/logo.png
+  image_dark: assets/images/logo.png
+  text: "Copyright © 2026 Yousef Mohamed"
+  background_color: "#F4F5F7"
+  background_color_dark: "#050505"
+  text_color: "#1E1E1E"
+  text_color_dark: "#FAFAFA"
+  indicator: false
+  indicator_style: dots
+  indicator_color: "#FF5722"
+  indicator_color_dark: "#FFC107"
+  indicator_position: above_text
+  text_position: bottom
+  indicator_offset_y: 0
+  text_offset_y: 0
+  visual_offset_y: -12
+  visual_width: 200
+  visual_height: 200
+  indicator_width: 72
+  indicator_height: 72
+  text_size: 16
+  duration: 5800
+  theme:
+    mode: system
+    app_theme: "Theme.App"
+    splash_theme: "Theme.Splash"

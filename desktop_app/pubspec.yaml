@@ -1,0 +1,71 @@
+name: desktop_app
+description: Workplace document manager desktop app
+publish_to: "none"
+version: 1.1.14+2
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.8.0+1
+  flutter_riverpod: ^2.6.1
+  file_picker: ^10.3.10
+  intl: ^0.20.2
+  open_filex: ^4.7.0
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  shared_preferences: ^2.5.3
+  socket_io_client: ^3.1.4
+  flutter_local_notifications: ^19.4.0
+  desktop_drop: ^0.6.1
+  cached_network_image: ^3.4.1
+  crypto: ^3.0.6
+  just_audio: ^0.10.5
+  just_audio_windows: ^0.2.3
+  package_info_plus: ^8.3.1
+  screen_capturer: ^0.2.3
+  webview_windows: ^0.4.0
+  animated_emoji: ^3.2.1
+  lottie: ^3.3.3
+  iconsax: ^0.0.8
+  flutter_svg: ^2.2.0
+  timezone: ^0.10.1
+  url_launcher: ^6.3.2
+  emoji_picker_flutter: ^4.5.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/animated_emoji_lottie/
+    - assets/images/
+    - assets/json/
+    - assets/notification_sounds/default_tone.wav
+    - assets/notification_sounds/chime_tone.wav
+    - assets/notification_sounds/alert_tone.wav
+  fonts:
+    - family: NotoSans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/NotoSans-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/NotoSans-ExtraBold.ttf
+          weight: 800
+    - family: NotoSansArabic
+      fonts:
+        - asset: assets/fonts/NotoSansArabic-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansArabic-Bold.ttf
+          weight: 700

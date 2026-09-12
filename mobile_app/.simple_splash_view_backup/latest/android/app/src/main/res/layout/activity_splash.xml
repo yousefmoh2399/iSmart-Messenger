@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/simple_splash_view_background">
+    <ImageView
+        android:id="@+id/simple_splash_view_image"
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/simple_splash_view_image"
+        android:translationY="-12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+    <LinearLayout
+        android:id="@+id/simple_splash_view_indicator"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/simple_splash_view_text"
+        android:layout_marginBottom="16dp"
+        android:clipToPadding="false">
+        <View
+            android:id="@+id/simple_splash_view_dot_1"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_margin="3dp"
+            android:background="@drawable/simple_splash_view_indicator_dot" />
+        <View
+            android:id="@+id/simple_splash_view_dot_2"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_margin="3dp"
+            android:background="@drawable/simple_splash_view_indicator_dot" />
+        <View
+            android:id="@+id/simple_splash_view_dot_3"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_margin="3dp"
+            android:background="@drawable/simple_splash_view_indicator_dot" />
+    </LinearLayout>
+    <TextView
+        android:id="@+id/simple_splash_view_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Copyright © 2026 Yousef Mohamed"
+        android:textColor="@color/simple_splash_view_text"
+        android:textSize="16sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        android:layout_marginBottom="32dp"
+        app:layout_constraintVertical_bias="1.0"
+    />
+</androidx.constraintlayout.widget.ConstraintLayout>

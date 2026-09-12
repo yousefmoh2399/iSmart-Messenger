@@ -1,0 +1,34 @@
+# Node
+backend/node_modules/
+
+# Environment files (never commit real secrets)
+
+deployment/
+
+# Flutter / Dart
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub/
+**/build/
+**/coverage/
+**/ios/Flutter/.last_build_id
+
+# IDE
+.idea/
+**/.idea/
+*.iml
+.vscode/
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log
+
+# Generated local files
+backend/uploads/**
+!backend/uploads/.gitkeep
+backend/releases/**
+backend/backups/**
+backend/dist/

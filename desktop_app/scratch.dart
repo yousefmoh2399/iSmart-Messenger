@@ -1,0 +1,1 @@
+import 'package:dio/dio.dart'; void main() async { final dio = Dio(); try { final res = await dio.get('https://httpstat.us/401', options: Options(responseType: ResponseType.bytes)); print('Success: ' + res.statusCode.toString()); } catch (e) { print('Error caught: ' + e.toString()); } }

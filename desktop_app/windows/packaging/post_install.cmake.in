@@ -1,0 +1,69 @@
+if(CMAKE_INSTALL_CONFIG_NAME STREQUAL "Debug")
+  message(STATUS "Skipping installer packaging for Debug configuration.")
+  return()
+endif()
+
+set(_bundle_dir "${CMAKE_INSTALL_PREFIX}")
+set(_output_dir "@PROJECT_BINARY_DIR@/installer/${CMAKE_INSTALL_CONFIG_NAME}")
+set(_script_path "@CMAKE_CURRENT_SOURCE_DIR@/packaging/create_installer.ps1")
+set(_release_package_script "@CMAKE_CURRENT_SOURCE_DIR@/packaging/create_release_package.ps1")
+
+file(MAKE_DIRECTORY "${_output_dir}")
+
+execute_process(
+  COMMAND powershell.exe
+    -NoProfile
+    -ExecutionPolicy Bypass
+    -File "${_script_path}"
+    -BundleDir "${_bundle_dir}"
+    -OutputDir "${_output_dir}"
+    -AppName "iSmart Messenger"
+    -ExeName "iSmartMessenger.exe"
+    -Version "@FLUTTER_VERSION@"
+  RESULT_VARIABLE _package_result
+  OUTPUT_VARIABLE _package_stdout
+  ERROR_VARIABLE _package_stderr
+)
+
+if(NOT _package_result EQUAL 0)
+  message(WARNING
+    "Automatic Windows installer packaging failed.\n"
+    "stdout:\n${_package_stdout}\n"
+    "stderr:\n${_package_stderr}\n"
+    "bundle_dir=${_bundle_dir}\n"
+    "output_dir=${_output_dir}")
+else()
+  message(STATUS "Windows installer artifacts generated in ${_output_dir}")
+endif()
+
+execute_process(
+  COMMAND powershell.exe
+    -NoProfile
+    -ExecutionPolicy Bypass
+    -File "${_release_package_script}"
+    -BundleDir "${_bundle_dir}"
+    -OutputDir "${_output_dir}"
+    -AppName "iSmart Messenger"
+    -ExeName "iSmartMessenger.exe"
+    -Version "@FLUTTER_VERSION@"
+    -Channel "stable"
+    -PackageType "full"
+    -PackageLayout "bundle_zip"
+    -TargetArchitecture "x64"
+  RESULT_VARIABLE _release_result
+  OUTPUT_VARIABLE _release_stdout
+  ERROR_VARIABLE _release_stderr
+)
+
+if(NOT _release_result EQUAL 0)
+  message(WARNING
+    "Automatic Windows release-package generation failed.\n"
+    "stdout:\n${_release_stdout}\n"
+    "stderr:\n${_release_stderr}\n"
+    "bundle_dir=${_bundle_dir}\n"
+    "output_dir=${_output_dir}")
+else()
+  message(STATUS "Windows update package artifacts generated in ${_output_dir}")
+endif()
+
+

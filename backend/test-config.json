@@ -1,0 +1,1 @@
+{"JWT_SECRET": "testsecret123", "DATA_DIR": "C:\\test-data", "MONGODB_URI": "mongodb://127.0.0.1:27017/workplace_documents", "CORS_ORIGIN": "http://localhost:3000", "BOOTSTRAP_ADMIN_ENABLED": "true", "BOOTSTRAP_ADMIN_FORCE": "true", "BOOTSTRAP_ADMIN_USERNAME": "admin", "BOOTSTRAP_ADMIN_PASSWORD": "adminpassword"}

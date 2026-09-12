@@ -1,0 +1,72 @@
+{
+    "name":  "ismart-messenger-electron",
+    "version":  "1.1.14",
+    "private":  true,
+    "description":  "Electron wrapper for iSmart Messenger web build",
+    "main":  "main.js",
+    "scripts":  {
+                    "start":  "electron .",
+                    "dist:win7:ia32":  "electron-builder --win nsis --ia32"
+                },
+    "devDependencies":  {
+                            "electron":  "22.3.27",
+                            "electron-builder":  "24.13.3"
+                        },
+    "build":  {
+                  "appId":  "com.ismart.messenger.webwrapper",
+                  "productName":  "iSmart Messenger",
+                  "asar":  true,
+                  "directories":  {
+                                      "output":  "dist",
+                                      "buildResources":  "build"
+                                  },
+                  "files":  [
+                                "main.js",
+                                "preload.js",
+                                "receive-preload.js",
+                                "printing/**/*",
+                                "package.json",
+                                {
+                                    "from":  "../build/web",
+                                    "to":  "web",
+                                    "filter":  [
+                                                   "**/*"
+                                               ]
+                                }
+                            ],
+                  "extraResources":  [
+                                         {
+                                             "from":  "build/icon.ico",
+                                             "to":  "build/icon.ico"
+                                         }
+                                     ],
+                  "win":  {
+                              "icon":  "icon.ico",
+                              "target":  [
+                                             {
+                                                 "target":  "nsis",
+                                                 "arch":  [
+                                                              "ia32"
+                                                          ]
+                                             }
+                                         ],
+                              "requestedExecutionLevel":  "asInvoker"
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "perMachine":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "createDesktopShortcut":  true,
+                               "createStartMenuShortcut":  true,
+                               "shortcutName":  "iSmart Messenger",
+                               "include":  "installer.nsh",
+                               "installerIcon":  "icon.ico",
+                               "uninstallerIcon":  "icon.ico",
+                               "installerHeaderIcon":  "icon.ico",
+                               "installerHeader":  "header.bmp",
+                               "installerSidebar":  "sidebar.bmp",
+                               "uninstallerSidebar":  "sidebar.bmp",
+                               "deleteAppDataOnUninstall":  false
+                           }
+              }
+}

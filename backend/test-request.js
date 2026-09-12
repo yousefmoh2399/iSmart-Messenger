@@ -1,0 +1,1 @@
+const fs = require('fs'); const token = fs.readFileSync('token.txt', 'utf8'); fetch('http://localhost:5000/api/it-assets/reports/assets.pdf', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.arrayBuffer()).then(b => fs.writeFileSync('assets2.pdf', Buffer.from(b)));

@@ -1,0 +1,435 @@
+<!------------------------------------------------------------------------->
+<!-- Copyright (C) 2011 KYOCERA MITA Corporation.                        -->
+<!-- All rights reserved.                                                -->
+<!------------------------------------------------------------------------->
+<html dir="ltr">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta http-equiv="Content-Style-Type" content="text/css">
+<meta http-equiv="Content-Script-Type" content="text/javascript">
+<meta name="viewport" content="width=device-width,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title></title>
+<script language="JavaScript" type="text/javascript" src="../js/jsallWLM.js"></script>
+<script language="JavaScript" type="text/javascript" src="../js/LocalNavigationWLM.js"></script>
+<script language="JavaScript" type="text/javascript">
+if(checkForPcMobile() == "Mobile") {
+document.write('<link rel="stylesheet" href="../css/mainBaseMobile.css">');
+} else {
+document.write('<link rel="stylesheet" href="../css/mainBase.css">');
+}
+SelectLang(parent.lang);
+var browser_Check = whichBrs();
+parent.browser = browser_Check;
+if(location.search == "?arg1=1")
+parent.logincheck = 1;
+else
+parent.logincheck = 0;
+parent.OEMFlag = 0;
+curSelDiv = "";
+var jobCancelFLAG;
+parent.jobCancelFLAG = "";
+
+if(parent.document.getElementById('maindivindex')!=null){
+parent.document.getElementById('maindivindex').style.height = '1100px';
+}
+if(parent.document.getElementById('main')!=null){
+parent.document.getElementById('main').style.height = '1500px';
+}
+
+var loginStatus = 1;
+function Add4ColMatrixMobile1(sCol1Label,sCol1Data,sCol2Label,sCol2Data,sCol3Label,sCol3Data,sCol4Data){
+var titleCols = new Array(sCol1Label, sCol2Label,sCol3Label);
+var dataCols = new Array();
+for(var i=0;i<sCol1Data.length;i++)
+dataCols[i] = new Array(sCol1Data[i], sCol2Data[i], sCol3Data[i], sCol4Data[i]);
+AddStripe4MatrixMobile1(titleCols,dataCols);
+}
+function AddStripe4MatrixMobile1(titleCol, dataCol, DMflag){
+var str = new String();
+str = '<div id ="outerdiv" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+str += '<table id = "headerrad"  width="100%" border="0" cellspacing="0" cellpading = "2">';
+str += '<tr valign="middle" height=33px>';
+str += '<td width=5px></td>';
+str += '<td  colspan = 10   id="tdValue"  >'+titleCol[0]+tSpace+'</td><td id="imgcommon" width = 5%>&nbsp;</td>';
+str += '</tr>';
+str += '<tr height=5px><td></hr></td></tr>';
+str += strEndTable;
+
+
+str += '<table id = "contentrow" width="100%" height = 25% border="0"  cellspacing="0" cellpading = "2" >';
+str += '<tr height =15px valign="center"><td width = 1% rowspan = 15 ></td>';
+for (var j = 1; j < titleCol.length; j++) {
+if (titleCol[j] == '') titleCol[j] = tSpace;
+str += '<td   id="tdValue"  colspan=2>&nbsp;&nbsp;' + titleCol[j] + '</td>';
+}
+str += '<td></td><td width = 1% rowspan = 15 ></td>';
+str += '</tr>';
+str += GetLineTwo2();
+for(var i=0;i<dataCol.length;i++)
+{
+alternate = i;
+halfalternate = (alternate / 2);
+makewhole = (Math.floor(halfalternate));
+if(makewhole == halfalternate) {evenorodd = "even"} else evenorodd = "odd";
+if(evenorodd == "even")
+{str += '<tr height =45px valign="middle" bgcolor="#d8d8d8">';}
+else
+{str += '<tr height =45px valign="middle">';}
+for(var j=0;j<4;j++)
+{
+if(dataCol[i][j] == '') dataCol[i][j] = tSpace;
+if(j == 0) {
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;<img  align="center" src="../images/'+dataCol[i][j]+'" border = 0></td>';
+}else {
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;<img align="center" src="../images/'+dataCol[i][j]+'" border = 0></td>';
+}
+j++;
+if(j == 1)
+str+='<td width = 40% valign = "middle"   id="tdValue"  >'+dataCol[i][j]+ '</td>';
+else
+str+='<td width =46% valign = "middle"   id="tdValue"  colspan = 1>'+dataCol[i][j]+ '</td>';
+}
+str += '</tr><tr height = 1%><td ></td></tr>';
+if(i < 3)
+str += GetLineTwo2();
+}
+str += strEndTable;
+str += '</div>';
+output(str);
+}
+function DisplayLoginUserName(){
+var loginname="";
+var deptname="";
+if("1" != "1" && "1" != "0"){
+loginname = "";
+deptname = "_invalid_cert_id";
+if(deptname == "Others"){
+deptname = GeneralStrings[83];
+}
+if("1" == "_mode_off"){
+if(parent.document.getElementById('loginid')!=null){
+parent.document.getElementById('loginid').innerHTML =  loginname;
+}
+if("4" !="_dept_mode_off"){
+if(parent.document.getElementById('logindeptid')!=null){
+parent.document.getElementById('logindeptid').innerHTML =  deptname;
+}
+}else{
+}
+}else{
+if(parent.document.getElementById('loginid')!=null){
+parent.document.getElementById('loginid').innerHTML =  loginname;
+}
+if("4" !="_dept_mode_off"){
+if(parent.document.getElementById('logindeptid')!=null){
+parent.document.getElementById('logindeptid').innerHTML =  deptname;
+}
+}else{}
+}
+}
+var lastUpdate = "2026/06/10 22:04:18";
+var a = checkPage("","","","","","","","","","","","","",lastUpdate,"","");
+if(parent.document.getElementById('docustomdown') != null){
+parent.document.getElementById('docustomdown').style.display = 'none';
+}
+}
+function Add4ColMatrix(sCol1Label,sCol1Data,sCol2Label,sCol2Data,sCol3Label,sCol3Data,sCol4Data){
+var titleCols = new Array(sCol1Label, sCol2Label,sCol3Label);
+var dataCols = new Array();
+for(var i=0;i<sCol1Data.length;i++)
+dataCols[i] = new Array(sCol1Data[i], sCol2Data[i], sCol3Data[i], sCol4Data[i]);
+AddStripe4Matrix(titleCols,dataCols);
+}
+function AddStripe4Matrix(titleCol, dataCol, DMflag){
+var str = new String();
+var browserCheck = whichBrs();
+if (browserCheck == "Internet Explorer") {
+str = '<div id ="outerdivIE" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+else {
+str = '<div id ="outerdiv" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+str += '<table id = "headerrad"  width="100%" border="0" cellspacing="0" cellpading = "2">';
+str += '<tr valign="middle" height="33px" >';
+str += '<td width=5px></td>';
+str += '<td  colspan = 10 >'+titleCol[0]+tSpace+'</td><td id="imgcommon" width = 5%>&nbsp;</td>';
+str += '</tr>';
+str += '<tr height=5px><td></hr></td></tr>';
+str += strEndTable;
+
+str += '<table id = "contentrow" width="100%" height = 25% border="0"  cellspacing="0" cellpading = "2" >';
+str += '<tr height =5px valign="center"><td width = 1% rowspan = 15 ></td>';
+for (var j = 1; j < titleCol.length; j++) {
+if (titleCol[j] == '') titleCol[j] = tSpace;
+str += '<td  /* id="fontset"  */ colspan=2>&nbsp;&nbsp;<font style="font-family:Arial; font-size: 13px; color:#0f3b85; font-style:normal; font-weight:normal;">' + titleCol[j] + '</font></td>';
+}
+var browserCheck = whichBrs();
+var IEVersionCheck = msieversion();
+if((parent.idxlangnum == 971) && (browserCheck == "Internet Explorer") && (IEVersionCheck == 10)){
+str += '<td></td><td width = 20px rowspan = 15 ></td>';
+}else{
+str += '<td></td><td width = 1% rowspan = 15 ></td>';
+}
+
+str += '</tr>';
+str += GetLineTwo2();
+for(var i=0;i<dataCol.length;i++)
+{
+alternate = i;
+halfalternate = (alternate / 2);
+makewhole = (Math.floor(halfalternate));
+if(makewhole == halfalternate) {evenorodd = "even"} else evenorodd = "odd";
+if(evenorodd == "even")
+{str += '<tr height =45px valign="middle" bgcolor="#d8d8d8">';}
+else
+{str += '<tr height =45px valign="middle">';}
+for(var j=0;j<4;j++)
+{
+
+if(dataCol[i][j] == '') dataCol[i][j] = tSpace;
+if(j == 0) {
+if(dataCol[i][j] != tSpace)
+{
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;<img align="center" src="../images/'+dataCol[i][j]+'" border = 0></td>';
+}
+else
+{
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>';
+}
+}else {
+if(dataCol[i][j] != tSpace)
+{
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;<img align="center" src="../images/'+dataCol[i][j]+'" border = 0></td>';
+}
+else
+{
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>';
+}
+
+}
+j++;
+if(j == 1){
+str+='<td width = 40% valign = "middle" >'+dataCol[i][j]+ '</td>';
+}else{
+var browserCheck = whichBrs();
+var IEVersionCheck = msieversion();
+if((parent.idxlangnum == 971) && (browserCheck == "Internet Explorer") && (IEVersionCheck == 10)){
+str+='<td width =37% valign = "middle" colspan = 1>'+dataCol[i][j]+ '</td>';
+}else{
+str+='<td width =46% valign = "middle" colspan = 1>'+dataCol[i][j]+ '</td>';
+}
+}
+}
+str += '</tr><tr height = 1%><td colspan="5"></td></tr>';
+if(i == 4)
+str += '<tr width = 100% height=5px ><td colspan="5" style="padding-left:5px;"><div id= "line"></div></td></tr>';
+else
+str += '<tr width = 100% height=5px ><td colspan="5" style="padding-left:1px;"><div id= "line"></div></td></tr>';
+}
+str += strEndTable;
+str += '</div>';
+output(str);
+}
+</script>
+</head>
+<body id="devicepage" onLoad="checkOnLoad(1);DisplayLoginUserName()">
+<form >
+
+<script language="JavaScript" type="text/javascript">
+
+var sleep_status = "other";
+var index_cnt = 0;
+
+if(checkForPcMobile() == "Mobile") {
+document.write('<link rel="stylesheet" href="../css/mainBaseMobile.css">');
+document.write('<div id="content"   style="width:100%;" >');
+var sLabel = Array();
+sLabel[0] = mes[45];
+sLabel[1] = mes[46];
+if( parent.FaxCardSupport == "Installed") {
+sLabel[2] = mes[47];
+if("0" == "2"){
+sLabel[3] = mes[47];
+sLabel[4] = mes[48];
+}else{
+sLabel[3] = mes[48];
+}
+} else {
+sLabel[2] = mes[48];
+}
+var Status = Array();
+Status[0] = Device_Status[2][0];
+index_cnt++;
+Status[1] = Device_Status[2][0];
+index_cnt++;
+if( parent.FaxCardSupport == "Installed") {
+Status[2] = Device_Status[10][0];
+index_cnt++;
+if("0" == "2"){
+Status[3] = Device_Status[10][0];
+index_cnt++;
+Status[4] = "Preparing to print...";
+}else{
+Status[3] = "Preparing to print...";
+}
+}else {
+Status[2] = "Preparing to print...";
+}
+var DvColor = Array();
+DvColor[0] = "dev_printer.png";
+DvColor[1] = "dev_scanner.png";
+
+if( parent.FaxCardSupport == "Installed") {
+DvColor[2] = "dev_fax.png";
+DvColor[3] = "StatusMess.png";
+} else {
+DvColor[2] = "StatusMess.png";
+}
+var StColor = Array();
+StColor[0] = Device_Status[2][1];
+StColor[1] = Device_Status[2][1];
+if( parent.FaxCardSupport == "Installed") {
+StColor[2] = Device_Status[10][1];
+if("0" == "2"){
+StColor[3] = Device_Status[10][1];
+if("0" == "2"){
+StColor[4] = Current_Status[1];
+}else if("0" == "1"){
+StColor[4] = Current_Status[2];
+}else{
+StColor[4] = Current_Status[0];
+}
+}else{
+if("0" == "2"){
+StColor[3] = Current_Status[1];
+}else if("0" == "1"){
+StColor[3] = Current_Status[2];
+}else{
+StColor[3] = Current_Status[0];
+}
+}
+} else {
+if("0" == "2"){
+StColor[2] = Current_Status[1];
+}else if("0" == "1"){
+StColor[2] = Current_Status[2];
+}else{
+StColor[2] = Current_Status[0];
+}
+}
+
+if(sleep_status == "low_power" || sleep_status == "sleep"){
+for( var i=0; i < index_cnt; i++ ){
+Status[i] = mes[586];
+StColor[i] = Current_Status[0];
+}
+}
+
+Add4ColMatrixMobile1(mes[42], DvColor, mes[43], sLabel, mes[44], StColor, Status);
+document.write('</div>');
+} else {
+var browserCheck = whichBrs();
+if (browserCheck == "Internet Explorer") {
+document.write('<div id="content">');}
+else {
+document.write('<div id="content"   style="width:585px;" >');
+}
+
+var sLabel = Array();
+sLabel[0] = mes[45];
+sLabel[1] = mes[46];
+if( parent.FaxCardSupport == "Installed") {
+sLabel[2] = mes[47];
+if("0" == "2"){
+sLabel[2] = mes[196];
+sLabel[3] = mes[197];
+sLabel[4] = mes[48];
+}else{
+sLabel[3] = mes[48];
+}
+} else {
+sLabel[2] = mes[48];
+}
+var Status = Array();
+Status[0] = Device_Status[2][0];
+index_cnt++;
+Status[1] = Device_Status[2][0];
+index_cnt++;
+if( parent.FaxCardSupport == "Installed") {
+Status[2] = Device_Status[10][0];
+index_cnt++;
+if("0" == "2"){
+Status[3] = Device_Status[10][0];
+index_cnt++;
+Status[4] = "Preparing to print...";
+}else{
+Status[3] = "Preparing to print...";
+}
+} else {
+Status[2] = "Preparing to print...";
+}
+var DvColor = Array();
+DvColor[0] = "dev_printer.png";
+DvColor[1] = "dev_scanner.png";
+if( parent.FaxCardSupport == "Installed") {
+DvColor[2] = "dev_fax.png";
+if("0" == "2"){
+DvColor[3] = "dev_fax.png";
+DvColor[4] = "StatusMess.png";
+}else{
+DvColor[3] = "StatusMess.png";
+}
+} else {
+DvColor[2] = "StatusMess.png";
+}
+var StColor = Array();
+StColor[0] = Device_Status[2][1];
+StColor[1] = Device_Status[2][1];
+if( parent.FaxCardSupport == "Installed") {
+StColor[2] = Device_Status[10][1];
+if("0" == "2"){
+StColor[3] = Device_Status[10][1];
+if("0" == "2"){
+StColor[4] = Current_Status[1];
+}else if("0" == "1"){
+StColor[4] = Current_Status[2];
+}else{
+StColor[4] = Current_Status[0];
+}
+}else{
+if("0" == "2"){
+StColor[3] = Current_Status[1];
+}else if("0" == "1"){
+StColor[3] = Current_Status[2];
+}else{
+StColor[3] = Current_Status[0];
+}
+}
+} else {
+if("0" == "2"){
+StColor[2] = Current_Status[1];
+}else if("0" == "1"){
+StColor[2] = Current_Status[2];
+}else{
+StColor[2] = Current_Status[0];
+}
+}
+
+if(sleep_status == "low_power" || sleep_status == "sleep"){
+if( parent.FaxCardSupport == "Installed") {
+Status[2] = mes[586];
+StColor[2] = Current_Status[0];
+if("0" == "2"){
+Status[3] = mes[586];
+StColor[3] = Current_Status[0];
+}
+}
+}
+
+Add4ColMatrix(mes[42], DvColor, mes[43], sLabel, mes[44], StColor, Status);
+document.write('</div>');
+}
+</script>
+</form>
+</body>
+</html>

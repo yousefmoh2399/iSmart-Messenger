@@ -1,0 +1,315 @@
+<!------------------------------------------------------------------------->
+<!-- Copyright (C) 2011 KYOCERA MITA Corporation.                        -->
+<!-- All rights reserved.                                                -->
+<!------------------------------------------------------------------------->
+<html dir="ltr">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta http-equiv="Content-Style-Type" content="text/css">
+<meta http-equiv="Content-Script-Type" content="text/javascript">
+<meta name="viewport" content="width=device-width,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title></title>
+<link rel="stylesheet" href="../css/mainBase.css">
+<script language="JavaScript" type="text/javascript" src="../js/jsallWLM.js"></script>
+<script language="JavaScript" type="text/javascript">
+if(checkForPcMobile() == "Mobile") {
+document.write('<link rel="stylesheet" href="../css/mainBaseMobile.css">');
+} else {
+document.write('<link rel="stylesheet" href="../css/mainBase.css">');
+}
+SelectLang(parent.lang);
+var browser_Check = whichBrs();
+parent.browser = browser_Check;
+if(location.search == "?arg1=1")
+parent.logincheck = 1;
+else
+parent.logincheck = 0;
+parent.OEMFlag = 0;
+curSelDiv = "";
+
+
+
+function Add3ColMatrixMobile(sCol1Label, sCol1Data, sCol2Label, sCol2Data, sCol3Label, sCol3Data)
+{
+var titleCols = new Array(sCol1Label,sCol2Label,sCol3Label);
+var dataCols = new Array();
+for(var i=0;i<sCol1Data.length;i++)
+dataCols[i] = new Array(sCol1Data[i], sCol2Data[i], sCol3Data[i]);
+AddStripe3MatrixMobile(titleCols, dataCols);
+}
+
+function AddStripe3MatrixMobile(titleCol, dataCol, DMflag)
+{
+
+var str = new String();
+var k = 0,tLevel=0;
+var browserCheck = whichBrs();
+if (browserCheck == "Internet Explorer") {
+str = '<div id ="outerdivIE" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+else {
+str = '<div id ="outerdiv" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+str += '<table id = "headerrad"  width="100%" border="0" cellspacing="0" cellpading = "2">';
+str += '<tr valign="middle" height=33px>';
+str += '<td width=5px></td>';
+str += '<td  colspan = 10 id="tdValue" >'+titleCol[0]+tSpace+'</td><td id="imgcommon" width = 5%>&nbsp;</td>';
+str += '</tr>';
+str += '<tr height=5px><td></hr></td></tr>';
+str += strEndTable;
+
+
+
+
+str += '<table id = "contentrow" width="100%" border="0"  cellspacing="0" cellpading = "2" >';
+str += '<tr  height =15px valign="center"><td width = 1% rowspan = 15 ></td>';
+for (var j = 1; j < titleCol.length; j++) {
+if (titleCol[j] == '') titleCol[j] = tSpace;
+if(j==1)
+str += '<td id="tdValue" style="padding-left:10px;">' + titleCol[j] + '</td>';
+else
+str += '<td id="tdValue" style="padding-left:15px;">' + titleCol[j] + '</td>';
+}
+str += '<td>&nbsp;</td><td width = 1% rowspan = 15 ></td>';
+str += '</tr>';
+str += GetLineTwo();
+for(var i=0;i<dataCol.length;i++)
+{
+alternate = i;
+halfalternate = (alternate / 2);
+makewhole = (Math.floor(halfalternate));
+if(makewhole == halfalternate) {evenorodd = "even"} else evenorodd = "odd";
+if(evenorodd == "even")
+{str += '<tr  height =45px valign="middle" bgcolor="#d8d8d8">';}
+else
+{str += '<tr valign="middle"  height =45px>';}
+for(var j=0;j<titleCol.length;j++)
+{
+if(dataCol[i][j] == '') dataCol[i][j] = tSpace;
+if(j == 1) {
+tLevel = parseInt(dataCol[k][2]);
+str += '<td width = 30% valign="middle" align = "left" id="tonertab"><table cellspacing="0" cellpading = "0" height = 2px border=0 width=100%><tr width=100%><td width=10%></td><td width="' + tLevel + '" bgcolor="' + TbgColor[k] + '">&nbsp;</td>';
+if (tLevel == 100)
+str+='</tr>';
+else
+str+='<td bgcolor="#ffffff">&nbsp;</td></tr>';
+str+='</table> </td>';
+k++;
+}else if(j == 0){
+
+str+='<td align="left" style="padding-left:15px;" id="tdValue" width = 20%>'+dataCol[i][j]+'</td>';
+}else {
+
+str+='<td align="left" style="padding-left:20px;" id="tdValue" width = 50%>'+dataCol[i][j]+'</td>';
+}
+}
+str += '</tr>';
+if(i != 3)
+str += GetLineTwo();
+}
+str += strEndTable;
+str += '</div>';
+output(str);
+}
+function Add3ColMatrix(sCol1Label, sCol1Data, sCol2Label, sCol2Data, sCol3Label, sCol3Data,wastToner)
+{
+var titleCols = new Array(sCol1Label,sCol2Label,sCol3Label);
+var dataCols = new Array();
+for(var i=0;i<sCol1Data.length;i++)
+dataCols[i] = new Array(sCol1Data[i], sCol2Data[i], sCol3Data[i]);
+AddStripe3Matrix(titleCols, dataCols,wastToner);
+}
+
+function AddStripe3Matrix(titleCol, dataCol, wastToner)
+{
+
+var str = new String();
+var k = 0,tLevel=0;
+var browserCheck = whichBrs();
+if (browserCheck == "Internet Explorer") {
+str = '<div id ="outerdivIE" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+else {
+str = '<div id ="outerdiv" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+str += '<table id = "headerrad"  width="100%" border="0" cellspacing="0" cellpading = "2">';
+str += '<tr valign="middle" height="33px" >';
+str += '<td width=5px></td>';
+str += '<td  colspan = 10 >'+titleCol[0]+tSpace+'</td><td id="imgcommon" width = 5%>&nbsp;</td>';
+str += '</tr>';
+str += '<tr height=5px><td></hr></td></tr>';
+str += strEndTable;
+
+
+
+
+str += '<table id = "contentrow" width="100%" border="0"  cellspacing="0" cellpading = "2" >';
+str += '<tr height =5px valign="center"><td width = 1% rowspan = 15 ></td>';
+for (var j = 1; j < titleCol.length; j++) {
+if (titleCol[j] == '') titleCol[j] = tSpace;
+if(j==1)
+{
+
+str += '<td style="padding-left:10px;">' + titleCol[j] + '</td>';
+}
+else
+str += '<td >' + titleCol[j] + '</td>';
+}
+
+var IEVersionCheck = msieversion();
+if((parent.idxlangnum == 971) && (browserCheck == "Internet Explorer") && (IEVersionCheck == 10)){
+str += '<td>&nbsp;</td><td width = 2% rowspan = 15 ></td>';
+}else{
+str += '<td>&nbsp;</td><td width = 1% rowspan = 15 ></td>';
+}
+str += '</tr>';
+str += GetLineTwo();
+for(var i=0;i<dataCol.length;i++)
+{
+alternate = i;
+halfalternate = (alternate / 2);
+makewhole = (Math.floor(halfalternate));
+if(makewhole == halfalternate) {evenorodd = "even"} else evenorodd = "odd";
+if(evenorodd == "even")
+{
+str += '<tr height =28px valign="middle" bgcolor="#d8d8d8">';
+}else{
+str += '<tr valign="middle" height =28px>';}
+
+for(var j=0;j<titleCol.length;j++)
+{
+if(dataCol[i][j] == '') dataCol[i][j] = tSpace;
+if(j == 1) {
+if(parseInt(dataCol[i][2])!= -1){
+tLevel = parseInt(dataCol[k][2]);
+if (tLevel == 100){
+str += '<td width = 30% style="padding-left:9px;" valign="middle" align = "left" id="tonertab"><table cellspacing="0" cellpading = "0" height = 2px border=0 width=100% bgcolor="#ffffff"><tr width=100%><td width="' + tLevel + '%" bgcolor="' + TbgColor[k] + '">&nbsp;</td></tr></table></td>';
+}
+else if(tLevel > 0){
+str += '<td width = 30% valign="middle" style="padding-left:9px;" align = "left" id="tonertab"><table cellspacing="0" cellpading = "0" height = 2px border=0 width=100% bgcolor="#ffffff"><tr width=100%><td width="' + tLevel + '%" bgcolor="' + TbgColor[k] + '"></td><td>&nbsp;</td></tr></table></td>';
+}
+else if(tLevel == 0){
+str += '<td width = 30% valign="middle" style="padding-left:9px;" align = "left" id="tonertab"><table cellspacing="0" cellpading = "0" height = 2px border=0 width=100% bgcolor="#ffffff"><tr width=100%><td></td><td>&nbsp;</td></tr></table></td>';
+}
+}else{
+str+='<td align="left" width = 30%>&nbsp;</td>';
+}
+k++;
+}else if(j == 0){
+str+='<td align="left" style="padding-left:20px;" width = 20%>'+dataCol[i][j]+'</td>';
+}else {
+if(parseInt(dataCol[i][2])!= -1){
+if((parent.idxlangnum == 971) && (browserCheck == "Internet Explorer") && (IEVersionCheck == 10)){
+str+='<td align="left" style="padding-left:20px;" width = 47%>'+dataCol[i][j]+'</td>';
+}else{
+str+='<td align="left" style="padding-left:20px;" width = 50%>'+dataCol[i][j]+'</td>';
+}
+}else{
+if((parent.idxlangnum == 971) && (browserCheck == "Internet Explorer") && (IEVersionCheck == 10)){
+str+='<td align="left"  width = 47%>&nbsp;</td>';
+}else{
+str+='<td align="left"  width = 50%>&nbsp;</td>';
+}
+}
+}
+}
+str += '</tr>';
+if(i != dataCol.length){
+str += GetLineTwo();
+}else{
+k++;
+}
+}
+if(dataCol.length >0){
+//str += '<tr height =28px valign="middle" bgcolor="#d8d8d8"><td>&nbsp;&nbsp;&nbsp;'+mes[70]+'</td><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'+wastToner+'</td><td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td></tr>';
+if(dataCol.length == 1)
+{
+
+str += '<tr height =28px valign="middle"><td style="padding-left:20px;">'+mes[70]+'</td><td style="padding-left:10px;">'+wastToner+'</td><td></td></tr>';
+}
+else
+{
+
+str += '<tr height =28px valign="middle" bgcolor="#d8d8d8"><td style="padding-left:20px;">'+mes[70]+'</td><td style="padding-left:10px;">'+wastToner+'</td><td></td></tr>';
+}
+}
+str += GetLineTwo();
+str += strEndTable;
+str += '</div>';
+output(str);
+
+
+}
+</script>
+</head>
+<body id="tonerpage">
+<form >
+
+<script language="JavaScript">
+if(checkForPcMobile() == "Mobile") {
+var browserCheck = whichBrs();
+
+document.write('<div id="content"   style="width:100%;" >');
+var TonerColor = Array();
+TonerColor[0] = mes[66];
+TonerColor[1] = mes[67];
+TonerColor[2] = mes[68];
+TonerColor[3] = mes[69];
+var Toner = Array();
+Toner[0] = "black3.png";
+Toner[1] = "blue3.png";
+Toner[2] = "majenta3.png";
+Toner[3] = "yellow3.png";
+var Renaming = Array();
+Renaming[0] = -1 + "%";
+Renaming[1] = -1 + "%";
+Renaming[2] = -1 + "%";
+Renaming[3] = -1 + "%";
+
+var WasteTonerSts = Array();
+WasteTonerSts[0] = mes[137];
+WasteTonerSts[1] = mes[133];
+WasteTonerSts[2] = mes[132];
+WasteTonerSts[3] = mes[134];
+var wasteToner = WasteTonerSts[2];
+
+Add3ColMatrixMobile(mes[64], TonerColor,mes[65], Toner, mes[263], Renaming);
+document.write('</div>');}
+else {
+var browserCheck = whichBrs();
+if (browserCheck == "Internet Explorer") {
+document.write('<div id="content">');}
+else {
+document.write('<div id="content"   style="width:585px;" >');
+}
+var TonerColor = Array();
+TonerColor[0] = mes[66];
+TonerColor[1] = mes[67];
+TonerColor[2] = mes[68];
+TonerColor[3] = mes[69];
+var Toner = Array();
+Toner[0] = "black3.png";
+Toner[1] = "blue3.png";
+Toner[2] = "majenta3.png";
+Toner[3] = "yellow3.png";
+var Renaming = Array();
+Renaming[0] = -1 + "%";
+Renaming[1] = -1 + "%";
+Renaming[2] = -1 + "%";
+Renaming[3] = -1 + "%";
+
+var WasteTonerSts = Array();
+WasteTonerSts[0] = mes[137];
+WasteTonerSts[1] = mes[133];
+WasteTonerSts[2] = mes[132];
+WasteTonerSts[3] = mes[134];
+var wasteToner = WasteTonerSts[2];
+
+Add3ColMatrix(mes[64], TonerColor, mes[65], Toner, mes[263], Renaming, wasteToner);
+document.write('</div>');}
+
+</script>
+
+</form>
+</body>
+</html>

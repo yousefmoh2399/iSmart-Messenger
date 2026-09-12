@@ -1,0 +1,1 @@
+const mongoose = require('mongoose'); mongoose.connect('mongodb://127.0.0.1:27017/workplace_documents').then(() => require('./src/chat/models/role.model').updateOne({roleName: 'admin'}, {"set": {'permissions.canExportItReports': true, 'permissions.canManageItAssets': true}})).then(() => process.exit(0));

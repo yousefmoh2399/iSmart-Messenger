@@ -1,0 +1,156 @@
+<!------------------------------------------------------------------------->
+<!-- Copyright (C) 2011 KYOCERA MITA Corporation.                        -->
+<!-- All rights reserved.                                                -->
+<!------------------------------------------------------------------------->
+<html dir="ltr">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta http-equiv="Content-Style-Type" content="text/css">
+<meta http-equiv="Content-Script-Type" content="text/javascript">
+<meta name="viewport" content="width=device-width,minimum-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title></title>
+<link rel="stylesheet" href="../css/mainBase.css">
+<script language="JavaScript" type="text/javascript" src="../js/jsallWLM.js"></script>
+<script language="JavaScript" type="text/javascript">
+SelectLang(parent.lang);
+var browser_Check = whichBrs();
+parent.browser = browser_Check;
+if(location.search == "?arg1=1")
+parent.logincheck = 1;
+else
+parent.logincheck = 0;
+parent.OEMFlag = 0;
+curSelDiv = "";
+
+
+function Add4ColMatrixMobile1(sCol1Label,sCol1Data,sCol2Label,sCol2Data,sCol3Label,sCol3Data,sCol4Data){
+var titleCols = new Array(sCol1Label, sCol2Label,sCol3Label);
+var dataCols = new Array();
+for(var i=0;i<sCol1Data.length;i++)
+dataCols[i] = new Array(sCol1Data[i], sCol2Data[i], sCol3Data[i], sCol4Data[i]);
+AddStripe4MatrixMobile1(titleCols,dataCols);
+}
+function AddStripe4MatrixMobile1(titleCol, dataCol, DMflag){
+var str = new String();
+var browserCheck = whichBrs();
+if (browserCheck == "Internet Explorer") {
+str = '<div id ="outerdivIE" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+else {
+str = '<div id ="outerdiv" style="border-right:#b8b8b8 0px solid; border-left:#b8b8b8 0px solid; border-bottom:#b8b8b8 0px solid;border-top:#b8b8b8 0px solid;">';
+}
+str += '<table id = "headerrad"  width="100%" border="0" cellspacing="0" cellpading = "2">';
+str += '<tr valign="middle" height=33px>';
+str += '<td width=5px></td>';
+str += '<td  colspan = 10   id="tdValue"  >'+titleCol[0]+tSpace+'</td><td id="imgcommon" width = 5%>&nbsp;</td>';
+str += '</tr>';
+str += '<tr height=5px><td></hr></td></tr>';
+str += strEndTable;
+
+str += '<table id = "contentrow" width="100%" height = 25% border="0"  cellspacing="0" cellpading = "2" >';
+str += '<tr height =15px valign="center"><td width = 1% rowspan = 15 ></td>';
+for (var j = 1; j < titleCol.length; j++) {
+if (titleCol[j] == '') titleCol[j] = tSpace;
+str += '<td   id="tdValue"  colspan=2>&nbsp;&nbsp;' + titleCol[j] + '</td>';
+}
+str += '<td></td><td width = 1% rowspan = 15 ></td>';
+str += '</tr>';
+str += GetLineTwo2();
+for(var i=0;i<dataCol.length;i++)
+{
+alternate = i;
+halfalternate = (alternate / 2);
+makewhole = (Math.floor(halfalternate));
+if(makewhole == halfalternate) {evenorodd = "even"} else evenorodd = "odd";
+if(evenorodd == "even")
+{str += '<tr height =45px valign="middle" bgcolor="#d8d8d8">';}
+else
+{str += '<tr height =45px valign="middle">';}
+for(var j=0;j<4;j++)
+{
+if(dataCol[i][j] == '') dataCol[i][j] = tSpace;
+if(j == 0) {
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;<img  align="center" src="../images/'+dataCol[i][j]+'" border = 0></td>';
+}else {
+str+='<td width = 10% valign = "middle" id="imgcommon">&nbsp;&nbsp;<img align="center" src="../images/'+dataCol[i][j]+'" border = 0></td>';
+}
+j++;
+if(j == 1)
+str+='<td width = 40% valign = "middle"   id="tdValue"  >'+dataCol[i][j]+ '</td>';
+else
+str+='<td width =46% valign = "middle"   id="tdValue"  colspan = 1>'+dataCol[i][j]+ '</td>';
+
+
+}
+str += '</tr><tr height = 1%><td ></td></tr>';
+if(i < 3)
+str += GetLineTwo2();
+}
+str += strEndTable;
+str += '</div>';
+output(str);
+}
+
+</script>
+</head>
+<body id="panelusagepage">
+<form >
+<script language="JavaScript">
+var browserCheck = whichBrs();
+if(checkForPcMobile() == "Mobile") {
+document.write('<link rel="stylesheet" href="../css/mainBaseMobile.css">');
+document.write('<div id="content"   style="width:100%;" >');
+var Device = Array();
+Device[0] = "DBACD";
+var model_type = "_Venus2_Model_";
+var usage_type = "0";
+if( usage_type == "22" && model_type == "_Mercury2_Model_" ){
+usage_type = "31";
+}
+var Status = Array();
+Status[0] = Panel_Status[usage_type][0];
+var DvColor = Array();
+DvColor[0] = "User_sm.png";
+var StColor = Array();
+StColor[0] = Panel_Status[usage_type][1];
+Add4ColMatrixMobile1(mes[49], DvColor, mes[50], Device, mes[44], StColor, Status);
+}
+else
+{
+if (browserCheck == "Internet Explorer") {
+document.write('<div id="content">');}
+else {
+document.write('<div id="content"   style="width:585px;" >');
+}
+
+if(checkForPcMobile() == "Mobile") {
+document.write('<link rel="stylesheet" href="../css/mainBaseMobile.css">');
+} else {
+document.write('<link rel="stylesheet" href="../css/mainBase.css">');
+}
+var Device = Array();
+if(parent.logintextboxvalidate != "_Local_Admin_login")
+Device[0] = "DBACD";
+else
+Device[0] = "";
+
+//Device[0] = "KYOCERA";// "DBACD";
+var model_type = "_Venus2_Model_";
+var usage_type = "0";
+if( usage_type == "22" && model_type == "_Mercury2_Model_" ){
+usage_type = "31";
+}
+var Status = Array();
+Status[0] = Panel_Status[usage_type][0];
+var DvColor = Array();
+DvColor[0] = "User_sm.png";
+var StColor = Array();
+StColor[0] = "";
+Add4ColMatrix(mes[49], DvColor, mes[50], Device, mes[44], StColor, Status);
+}
+
+</script>
+</div>
+</form>
+</body>
+</html>

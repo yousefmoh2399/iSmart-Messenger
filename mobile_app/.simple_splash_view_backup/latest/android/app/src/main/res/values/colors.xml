@@ -1,0 +1,5 @@
+<resources>
+    <color name="simple_splash_view_background">#F4F5F7</color>
+    <color name="simple_splash_view_text">#1E1E1E</color>
+    <color name="simple_splash_view_indicator">#FF5722</color>
+</resources>
