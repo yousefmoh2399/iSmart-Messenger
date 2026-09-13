@@ -34,6 +34,9 @@ async function startServer() {
   app.set("io", io);
   startPrinterScheduler();
 
+  const { startMessageScheduler } = require("./services/scheduler.service");
+  startMessageScheduler(io);
+
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {

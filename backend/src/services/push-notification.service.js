@@ -188,6 +188,10 @@ async function sendChatPushNotifications({
     return { enabled: false, sentCount: 0, skippedCount: recipientUserIds.length };
   }
 
+  if (message?.metadata?.silent === true) {
+    return { enabled: true, sentCount: 0, skippedCount: recipientUserIds.length };
+  }
+
   const userIds = normalizeUserIds(recipientUserIds);
   if (userIds.length === 0) {
     return { enabled: true, sentCount: 0, skippedCount: 0 };

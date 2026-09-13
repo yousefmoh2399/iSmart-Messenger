@@ -1557,8 +1557,12 @@ async function createMessage(currentUser, payload, file) {
     delete normalizedMetadata.attachmentArchive;
   }
 
-  if (!content && !storedFilePath) {
+  if (!content && !storedFilePath && payload.messageType !== "poll") {
     throw new ApiError(400, "Message content or attachment is required.");
+  }
+
+  if (payload.isSilent) {
+    normalizedMetadata.silent = true;
   }
 
   const targetRecipientIds = recipientIds.filter((userId) => userId !== currentUser.id);
@@ -1577,6 +1581,8 @@ async function createMessage(currentUser, payload, file) {
     seenBy: [{ userId: currentUser.id, at: new Date() }],
     deliveredTo: await buildDeliveryReceipts(targetRecipientIds),
     metadata: Object.keys(normalizedMetadata).length > 0 ? normalizedMetadata : null,
+    isScheduled: payload.isScheduled || false,
+    scheduledFor: payload.scheduledFor ? new Date(payload.scheduledFor) : null,
   });
 
   conversation.lastMessage = {
@@ -1950,6 +1956,7 @@ async function setConversationPinnedMessage(currentUser, conversationId, payload
 
   const now = new Date();
   conversation.pinnedMessage = {
+    messageId: payload?.messageId || null,
     content,
     setBy: currentUser.id,
     setByName: currentUser.fullName || currentUser.username || "",

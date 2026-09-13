@@ -89,6 +89,16 @@ const messageSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
+    isScheduled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    scheduledFor: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

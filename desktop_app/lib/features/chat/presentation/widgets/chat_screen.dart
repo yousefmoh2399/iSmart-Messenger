@@ -2213,7 +2213,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  Future<void> _sendText() async {
+  Future<void> _sendText({bool isSilent = false, DateTime? scheduledFor}) async {
     if (_isUploadingAttachment) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2268,6 +2268,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         content,
         replyToMessageId: _replyingTo?.id,
         metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+        isSilent: isSilent,
+        scheduledFor: scheduledFor,
       );
     }
 
@@ -2279,6 +2281,68 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       _editingMessage = null;
     });
     _scrollToBottom();
+  }
+
+  void _showSendOptions() {
+    // In desktop app, we can use showMenu
+    // Need to find the button's position. For simplicity, we could just show a dialog,
+    // or standard dialog if we don't have position. Let's use a dialog to be safe.
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('خيارات الإرسال'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.notifications_off_rounded),
+                title: const Text('إرسال بدون صوت'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _sendText(isSilent: true);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.schedule_rounded),
+                title: const Text('جدولة الرسالة'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final selectedDate = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (selectedDate != null && mounted) {
+                    final selectedTime = await showTimePicker(
+                      context: context,
+                      initialTime: TimeOfDay.now(),
+                    );
+                    if (selectedTime != null) {
+                      final scheduledFor = DateTime(
+                        selectedDate.year,
+                        selectedDate.month,
+                        selectedDate.day,
+                        selectedTime.hour,
+                        selectedTime.minute,
+                      );
+                      if (scheduledFor.isAfter(DateTime.now())) {
+                        _sendText(scheduledFor: scheduledFor);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('يجب أن يكون الوقت في المستقبل.')),
+                        );
+                      }
+                    }
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _sendFile([String? droppedPath]) async {
@@ -4097,60 +4161,67 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
               if (liveConversation.pinnedMessage?.content.trim().isNotEmpty ==
                   true)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1A2735)
-                        : const Color(0xFFF4F8FC),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: const Color(0xFF3390EC).withValues(alpha: 0.35),
+                GestureDetector(
+                  onTap: () {
+                    if (liveConversation.pinnedMessage!.messageId != null) {
+                      _scrollToMessageById(liveConversation.pinnedMessage!.messageId!);
+                    }
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
                     ),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.only(top: 2),
-                        child: Icon(
-                          Icons.push_pin_rounded,
-                          size: 16,
-                          color: Color(0xFF3390EC),
-                        ),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF1A2735)
+                          : const Color(0xFFF4F8FC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: const Color(0xFF3390EC).withValues(alpha: 0.35),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'رسالة مثبتة',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF3390EC),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Icon(
+                            Icons.push_pin_rounded,
+                            size: 16,
+                            color: Color(0xFF3390EC),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'رسالة مثبتة',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF3390EC),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(liveConversation.pinnedMessage!.content),
-                          ],
+                              const SizedBox(height: 2),
+                              Text(liveConversation.pinnedMessage!.content),
+                            ],
+                          ),
                         ),
-                      ),
-                      if (canManagePinnedMessage)
-                        IconButton(
-                          tooltip: 'تعديل',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: widget.onToggleRightPanel,
-                          icon: const Icon(Icons.edit_note_rounded, size: 20),
-                        ),
-                    ],
+                        if (canManagePinnedMessage)
+                          IconButton(
+                            tooltip: 'تعديل',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: widget.onToggleRightPanel,
+                            icon: const Icon(Icons.edit_note_rounded, size: 20),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
 
@@ -4454,6 +4525,19 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                           .toggleFavoriteMessage(
                                             messageId: message.id,
                                           ),
+                                      onPin: canManagePinnedMessage
+                                          ? () => ref
+                                              .read(
+                                                chatOverviewControllerProvider.notifier,
+                                              )
+                                              .setGroupPinnedMessage(
+                                                conversationId: _conversationId,
+                                                content: message.content.isNotEmpty
+                                                    ? message.content
+                                                    : (message.fileName ?? 'Ù…Ø±Ù Ù‚'),
+                                                messageId: message.id,
+                                              )
+                                          : null,
                                       onVotePoll: (options) =>
                                           _votePoll(message.id, options),
                                       onExportPoll: () =>
@@ -4714,6 +4798,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 enterSendsMessage: enterSendsMessage,
                 onChanged: (_) => _scheduleStopTyping(),
                 onSend: _sendText,
+                onSendOptions: _showSendOptions,
                 onAttachFile: () => _sendFile(),
                 onPickImage: _sendImage,
                 onSendScreenshot: _sendScreenshotFromOpenWindow,

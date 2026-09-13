@@ -322,6 +322,9 @@ class ChatRepository {
     Map<String, dynamic>? metadata,
     String? messageType,
     String? fileUrl,
+    bool isSilent = false,
+    bool isScheduled = false,
+    DateTime? scheduledFor,
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages',
@@ -332,6 +335,9 @@ class ChatRepository {
         if (metadata != null) 'metadata': metadata,
         if (messageType != null) 'messageType': messageType,
         if (fileUrl != null) 'fileUrl': fileUrl,
+        if (isSilent) 'isSilent': isSilent,
+        if (isScheduled) 'isScheduled': isScheduled,
+        if (scheduledFor != null) 'scheduledFor': scheduledFor.toIso8601String(),
       },
     );
     return ChatPostResult(
@@ -521,10 +527,14 @@ class ChatRepository {
   Future<ChatConversation> setGroupPinnedMessage({
     required String conversationId,
     required String content,
+    String? messageId,
   }) async {
     final response = await _apiClient.dio.patch<Map<String, dynamic>>(
       '/api/chat/conversations/$conversationId/pinned-message',
-      data: {'content': content.trim()},
+      data: {
+        'content': content.trim(),
+        if (messageId != null) 'messageId': messageId,
+      },
     );
     return ChatConversation.fromJson(
       response.data?['conversation'] as Map<String, dynamic>,
@@ -1118,5 +1128,60 @@ class ChatRepository {
     return ChatConversation.fromJson(
       response.data?['conversation'] as Map<String, dynamic>,
     );
+  }
+
+  // --- Chat Folders ---
+  Future<List<ChatFolder>> getFolders() async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>('/api/chat/folders');
+    final data = response.data?['data'] as List?;
+    if (data == null) return [];
+    return data.map((json) => ChatFolder.fromJson(json as Map<String, dynamic>)).toList();
+  }
+
+  Future<ChatFolder> createFolder({
+    required String name,
+    String? icon,
+    List<String> conversationIds = const [],
+  }) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/folders',
+      data: {
+        'name': name,
+        if (icon != null) 'icon': icon,
+        'conversationIds': conversationIds,
+      },
+    );
+    return ChatFolder.fromJson(response.data?['data'] as Map<String, dynamic>);
+  }
+
+  Future<ChatFolder> updateFolder({
+    required String folderId,
+    String? name,
+    String? icon,
+    List<String>? conversationIds,
+  }) async {
+    final response = await _apiClient.dio.put<Map<String, dynamic>>(
+      '/api/chat/folders/$folderId',
+      data: {
+        if (name != null) 'name': name,
+        if (icon != null) 'icon': icon,
+        if (conversationIds != null) 'conversationIds': conversationIds,
+      },
+    );
+    return ChatFolder.fromJson(response.data?['data'] as Map<String, dynamic>);
+  }
+
+  Future<void> deleteFolder(String folderId) async {
+    await _apiClient.dio.delete<void>('/api/chat/folders/$folderId');
+  }
+
+  Future<List<ChatFolder>> reorderFolders(List<String> folderIds) async {
+    final response = await _apiClient.dio.put<Map<String, dynamic>>(
+      '/api/chat/folders/reorder',
+      data: {'folderIds': folderIds},
+    );
+    final data = response.data?['data'] as List?;
+    if (data == null) return [];
+    return data.map((json) => ChatFolder.fromJson(json as Map<String, dynamic>)).toList();
   }
 }

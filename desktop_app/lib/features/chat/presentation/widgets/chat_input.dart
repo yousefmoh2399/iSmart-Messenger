@@ -9,6 +9,7 @@ class ChatInput extends StatefulWidget {
     required this.controller,
     required this.onChanged,
     required this.onSend,
+    required this.onSendOptions,
     required this.onAttachFile,
     required this.onPickImage,
     required this.onSendScreenshot,
@@ -26,6 +27,7 @@ class ChatInput extends StatefulWidget {
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final VoidCallback onSend;
+  final VoidCallback onSendOptions;
   final VoidCallback onAttachFile;
   final VoidCallback onPickImage;
   final VoidCallback onSendScreenshot;
@@ -314,29 +316,34 @@ class _ChatInputState extends State<ChatInput> {
                     ),
                   ),
                 ),
-                ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: widget.controller,
-                  builder: (context, value, _) {
-                    final canSend =
-                        widget.enabled &&
-                        !widget.isUploading &&
-                        value.text.trim().isNotEmpty;
-                    return FilledButton(
-                      onPressed: canSend ? widget.onSend : null,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(44, 44),
-                        shape: const CircleBorder(),
-                        padding: EdgeInsets.zero,
-                      ),
-                      child: Icon(
-                        widget.isEditing
-                            ? Icons.check_rounded
-                            : Icons.send_rounded,
-                        size: 18,
-                      ),
-                    );
-                  },
-                ),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: widget.controller,
+                    builder: (context, value, _) {
+                      final canSend =
+                          widget.enabled &&
+                          !widget.isUploading &&
+                          value.text.trim().isNotEmpty;
+                      return GestureDetector(
+                        onSecondaryTap: canSend && !widget.isEditing
+                            ? widget.onSendOptions
+                            : null,
+                        child: FilledButton(
+                          onPressed: canSend ? widget.onSend : null,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(44, 44),
+                            shape: const CircleBorder(),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: Icon(
+                            widget.isEditing
+                                ? Icons.check_rounded
+                                : Icons.send_rounded,
+                            size: 18,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
           ],

@@ -820,10 +820,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   Future<ChatConversation> setGroupPinnedMessage({
     required String conversationId,
     required String content,
+    String? messageId,
   }) async {
     final conversation = await _repository().setGroupPinnedMessage(
       conversationId: conversationId,
       content: content,
+      messageId: messageId,
     );
     _applyConversationUpdate(conversation);
     return conversation;
@@ -1421,12 +1423,16 @@ class ConversationMessagesController
     String content, {
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
+    bool isSilent = false,
+    DateTime? scheduledFor,
   }) async {
     return sendMessage(
       content: content,
       replyToMessageId: replyToMessageId,
       metadata: metadata,
       messageType: 'text',
+      isSilent: isSilent,
+      scheduledFor: scheduledFor,
     );
   }
 
@@ -1436,6 +1442,8 @@ class ConversationMessagesController
     String? fileUrl,
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
+    bool isSilent = false,
+    DateTime? scheduledFor,
   }) async {
     _socketService?.markActivity();
     final result = await _guardAuth(
@@ -1446,6 +1454,9 @@ class ConversationMessagesController
         metadata: metadata,
         messageType: messageType,
         fileUrl: fileUrl,
+        isSilent: isSilent,
+        isScheduled: scheduledFor != null,
+        scheduledFor: scheduledFor,
       ),
     );
     final current =

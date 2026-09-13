@@ -551,6 +551,68 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     });
   }
 
+  void _showSendOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.notifications_off_rounded),
+                title: const Text('Ø¥Ø±Ø³Ø§Ù„ Ø¨Ø¯ÙˆÙ† ØµÙˆØª'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _sendText(isSilent: true);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.schedule_rounded),
+                title: const Text('Ø¬Ø¯ÙˆÙ„Ø© Ø§Ù„Ø±Ø³Ø§Ù„Ø©'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final selectedDate = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                  );
+                  if (selectedDate != null && mounted) {
+                    final selectedTime = await showTimePicker(
+                      context: context,
+                      initialTime: TimeOfDay.now(),
+                    );
+                    if (selectedTime != null) {
+                      final scheduledFor = DateTime(
+                        selectedDate.year,
+                        selectedDate.month,
+                        selectedDate.day,
+                        selectedTime.hour,
+                        selectedTime.minute,
+                      );
+                      // check if it's in the future
+                      if (scheduledFor.isAfter(DateTime.now())) {
+                        _sendText(scheduledFor: scheduledFor);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø§Ù„ÙˆÙ‚Øª Ù ÙŠ Ø§Ù„Ù…Ø³ØªÙ‚Ø¨Ù„.')),
+                        );
+                      }
+                    }
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _insertMention(ChatDirectoryUser user) {
     final text = _messageController.text;
     final selection = _messageController.selection;
@@ -629,7 +691,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     return mentions.toSet().toList(); // Ensure unique mentions
   }
 
-  Future<void> _sendText() async {
+  Future<void> _sendText({bool isSilent = false, DateTime? scheduledFor}) async {
     if (_isUploadingAttachment) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -674,6 +736,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         text,
         replyToMessageId: _replyingTo?.id,
         metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+        isSilent: isSilent,
+        scheduledFor: scheduledFor,
       );
     }
 
@@ -2654,6 +2718,22 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       });
                     },
                   ),
+                if (_canManagePinnedMessage(authUserId))
+                  _TelegramActionTile(
+                    icon: Icons.push_pin_outlined,
+                    label: 'ØªØ«Ø¨ÙŠØª',
+                    color: const Color(0xFF9A6400),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await ref
+                          .read(chatOverviewControllerProvider.notifier)
+                          .setGroupPinnedMessage(
+                            conversationId: widget.conversation.id,
+                            content: previewText,
+                            messageId: message.id,
+                          );
+                    },
+                  ),
                 if (canDelete && !message.isDeleted)
                   _TelegramActionTile(
                     icon: Icons.delete_outline_rounded,
@@ -3774,65 +3854,72 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   ),
                 if (_data.pinnedMessage != null &&
                     _data.pinnedMessage!.content.trim().isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainer,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: colorScheme.outlineVariant.withValues(
-                          alpha: 0.5,
+                  GestureDetector(
+                    onTap: () {
+                      if (_data.pinnedMessage!.messageId != null) {
+                        _scrollToMessageById(_data.pinnedMessage!.messageId!);
+                      }
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainer,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: colorScheme.outlineVariant.withValues(
+                            alpha: 0.5,
+                          ),
                         ),
                       ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 2),
-                          child: Icon(Icons.push_pin_rounded, size: 16),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'رسالة مثبتة',
-                                style: TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_data.pinnedMessage!.content),
-                            ],
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Icon(Icons.push_pin_rounded, size: 16),
                           ),
-                        ),
-                        if (canManagePinnedMessage)
-                          PopupMenuButton<String>(
-                            tooltip: 'إدارة الرسالة المثبتة',
-                            onSelected: (value) async {
-                              if (value == 'edit') {
-                                await _upsertPinnedMessage(edit: true);
-                              } else if (value == 'remove') {
-                                await _clearPinnedMessage();
-                              }
-                            },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
-                                value: 'edit',
-                                child: Text('تعديل'),
-                              ),
-                              PopupMenuItem(
-                                value: 'remove',
-                                child: Text('حذف'),
-                              ),
-                            ],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'رسالة مثبتة',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(_data.pinnedMessage!.content),
+                              ],
+                            ),
                           ),
-                      ],
+                          if (canManagePinnedMessage)
+                            PopupMenuButton<String>(
+                              tooltip: 'إدارة الرسالة المثبتة',
+                              onSelected: (value) async {
+                                if (value == 'edit') {
+                                  await _upsertPinnedMessage(edit: true);
+                                } else if (value == 'remove') {
+                                  await _clearPinnedMessage();
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('تعديل'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'remove',
+                                  child: Text('إزالة'),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 Expanded(
@@ -4935,6 +5022,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         ? _deleteVoiceDraft
                         : _cancelVoiceRecording,
                     onSend: _sendText,
+                    onSendOptions: _showSendOptions,
                     isRecordingVoice: _isRecordingVoice,
                     isVoiceHoldActive: _isVoiceHoldActive,
                     isVoiceLocked: _isVoiceRecordingLocked,
@@ -5836,6 +5924,7 @@ class _MessageComposer extends StatefulWidget {
     required this.onSendVoiceNote,
     required this.onCancelVoiceNote,
     required this.onSend,
+    required this.onSendOptions,
     required this.isRecordingVoice,
     required this.isVoiceHoldActive,
     required this.isVoiceLocked,
@@ -5870,6 +5959,7 @@ class _MessageComposer extends StatefulWidget {
   final VoidCallback onSendVoiceNote;
   final VoidCallback onCancelVoiceNote;
   final VoidCallback onSend;
+  final VoidCallback onSendOptions;
   final bool isRecordingVoice;
   final bool isVoiceHoldActive;
   final bool isVoiceLocked;
@@ -6111,6 +6201,9 @@ class _MessageComposerState extends State<_MessageComposer> {
                                     onTapDown: (_) => _scaleSendButton(true),
                                     onTapUp: (_) => _scaleSendButton(false),
                                     onTapCancel: () => _scaleSendButton(false),
+                                    onLongPress: enabled && !isUploading && !isEditing
+                                        ? widget.onSendOptions
+                                        : null,
                                     child: AnimatedScale(
                                       scale: _sendScale,
                                       duration: const Duration(

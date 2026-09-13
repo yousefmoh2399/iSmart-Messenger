@@ -262,6 +262,9 @@ router.post(
     body("forwardFromMessageId").optional({ nullable: true }).isMongoId(),
     body("replyToMessageId").optional({ nullable: true }).isMongoId(),
     body("fileName").optional().isString().isLength({ min: 1, max: 255 }),
+    body("isScheduled").optional().isBoolean(),
+    body("scheduledFor").optional().isISO8601(),
+    body("isSilent").optional().isBoolean(),
   ],
   validateRequest,
   postChatMessage
@@ -406,6 +409,35 @@ router.post(
   [param("id").isMongoId().withMessage("Invalid message id.")],
   validateRequest,
   restoreAttachment
+);
+
+const {
+  getFolders,
+  postFolder,
+  putFolder,
+  removeFolder,
+  putFoldersReorder,
+} = require("../controllers/chat-folder.controller");
+
+router.get("/folders", getFolders);
+router.post(
+  "/folders",
+  [body("name").isString().notEmpty()],
+  validateRequest,
+  postFolder
+);
+router.put("/folders/reorder", putFoldersReorder);
+router.put(
+  "/folders/:folderId",
+  [param("folderId").isMongoId()],
+  validateRequest,
+  putFolder
+);
+router.delete(
+  "/folders/:folderId",
+  [param("folderId").isMongoId()],
+  validateRequest,
+  removeFolder
 );
 
 module.exports = router;

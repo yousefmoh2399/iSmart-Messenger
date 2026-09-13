@@ -46,6 +46,7 @@ class MessageBubble extends StatefulWidget {
     this.forwardedFrom,
     this.onEdit,
     this.onDelete,
+    this.onPin,
     this.token,
     this.highlightQuery,
     this.selected = false,
@@ -77,6 +78,7 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onExportPoll;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final VoidCallback? onPin;
   final String? token;
   final String? highlightQuery;
   final bool selected;
@@ -121,6 +123,9 @@ class _MessageBubbleState extends State<MessageBubble> {
         break;
       case _BubbleMenuAction.delete:
         widget.onDelete?.call();
+        break;
+      case _BubbleMenuAction.pin:
+        widget.onPin?.call();
         break;
     }
   }
@@ -182,6 +187,15 @@ class _MessageBubbleState extends State<MessageBubble> {
               icon: Icons.edit_outlined,
               label: 'تعديل',
               color: Color(0xFFF59E0B),
+            ),
+          ),
+        if (widget.onPin != null)
+          const PopupMenuItem(
+            value: _BubbleMenuAction.pin,
+            child: _PopupActionRow(
+              icon: Icons.push_pin_outlined,
+              label: 'تثبيت',
+              color: Color(0xFF9A6400),
             ),
           ),
         if (widget.onDelete != null)
@@ -880,6 +894,7 @@ enum _BubbleMenuAction {
   saveAttachment,
   edit,
   delete,
+  pin,
 }
 
 class _PopupActionRow extends StatelessWidget {

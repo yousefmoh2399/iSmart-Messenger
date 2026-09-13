@@ -17,6 +17,7 @@ const lastMessageSchema = new mongoose.Schema(
 
 const pinnedMessageSchema = new mongoose.Schema(
   {
+    messageId: { type: mongoose.Schema.Types.ObjectId, ref: "Message", default: null },
     content: { type: String, default: "", maxlength: 2000 },
     setBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     setByName: { type: String, default: "" },

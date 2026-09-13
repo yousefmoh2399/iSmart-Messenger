@@ -530,7 +530,10 @@ const postChatMessage = asyncHandler(async (req, res) => {
   }
   const result = await createMessage(req.user, req.body, req.file);
   const io = req.app.get("io");
-  if (io) {
+  
+  const isScheduledFuture = result.message.isScheduled && new Date(result.message.scheduledFor) > new Date();
+
+  if (io && !isScheduledFuture) {
     emitMessageToRecipients(io, result.message);
     const audienceIds = [
       ...new Set((result.audienceUserIds || []).map((entry) => String(entry))),

@@ -285,6 +285,7 @@ class ChatLastMessage {
 
 class ChatPinnedMessage {
   const ChatPinnedMessage({
+    this.messageId,
     required this.content,
     required this.setBy,
     required this.setByName,
@@ -292,6 +293,7 @@ class ChatPinnedMessage {
     required this.updatedAt,
   });
 
+  final String? messageId;
   final String content;
   final String? setBy;
   final String setByName;
@@ -301,13 +303,14 @@ class ChatPinnedMessage {
   factory ChatPinnedMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
     return ChatPinnedMessage(
+      messageId: map['messageId'] as String?,
       content: map['content'] as String? ?? '',
       setBy: map['setBy'] as String?,
       setByName: map['setByName'] as String? ?? '',
-      createdAt: map['createdAt'] is String
+      createdAt: map['createdAt'] != null
           ? DateTime.tryParse(map['createdAt'] as String)
           : null,
-      updatedAt: map['updatedAt'] is String
+      updatedAt: map['updatedAt'] != null
           ? DateTime.tryParse(map['updatedAt'] as String)
           : null,
     );
@@ -974,3 +977,55 @@ class ChatSystemError {
     );
   }
 }
+c l a s s   C h a t F o l d e r   {  
+     f i n a l   S t r i n g   i d ;  
+     f i n a l   S t r i n g   n a m e ;  
+     f i n a l   S t r i n g ?   i c o n ;  
+     f i n a l   L i s t < S t r i n g >   c o n v e r s a t i o n I d s ;  
+     f i n a l   i n t   o r d e r ;  
+  
+     C h a t F o l d e r ( {  
+         r e q u i r e d   t h i s . i d ,  
+         r e q u i r e d   t h i s . n a m e ,  
+         t h i s . i c o n ,  
+         r e q u i r e d   t h i s . c o n v e r s a t i o n I d s ,  
+         r e q u i r e d   t h i s . o r d e r ,  
+     } ) ;  
+  
+     f a c t o r y   C h a t F o l d e r . f r o m J s o n ( M a p < S t r i n g ,   d y n a m i c >   j s o n )   {  
+         r e t u r n   C h a t F o l d e r (  
+             i d :   j s o n [ ' _ i d ' ]   a s   S t r i n g ?   ? ?   j s o n [ ' i d ' ]   a s   S t r i n g ,  
+             n a m e :   j s o n [ ' n a m e ' ]   a s   S t r i n g ,  
+             i c o n :   j s o n [ ' i c o n ' ]   a s   S t r i n g ? ,  
+             c o n v e r s a t i o n I d s :   ( j s o n [ ' c o n v e r s a t i o n I d s ' ]   a s   L i s t ? ) ? . c a s t < S t r i n g > ( )   ? ?   [ ] ,  
+             o r d e r :   j s o n [ ' o r d e r ' ]   a s   i n t ?   ? ?   0 ,  
+         ) ;  
+     }  
+  
+     M a p < S t r i n g ,   d y n a m i c >   t o J s o n ( )   {  
+         r e t u r n   {  
+             ' i d ' :   i d ,  
+             ' n a m e ' :   n a m e ,  
+             ' i c o n ' :   i c o n ,  
+             ' c o n v e r s a t i o n I d s ' :   c o n v e r s a t i o n I d s ,  
+             ' o r d e r ' :   o r d e r ,  
+         } ;  
+     }  
+  
+     C h a t F o l d e r   c o p y W i t h ( {  
+         S t r i n g ?   i d ,  
+         S t r i n g ?   n a m e ,  
+         S t r i n g ?   i c o n ,  
+         L i s t < S t r i n g > ?   c o n v e r s a t i o n I d s ,  
+         i n t ?   o r d e r ,  
+     } )   {  
+         r e t u r n   C h a t F o l d e r (  
+             i d :   i d   ? ?   t h i s . i d ,  
+             n a m e :   n a m e   ? ?   t h i s . n a m e ,  
+             i c o n :   i c o n   ? ?   t h i s . i c o n ,  
+             c o n v e r s a t i o n I d s :   c o n v e r s a t i o n I d s   ? ?   t h i s . c o n v e r s a t i o n I d s ,  
+             o r d e r :   o r d e r   ? ?   t h i s . o r d e r ,  
+         ) ;  
+     }  
+ }  
+ 
