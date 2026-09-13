@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
@@ -1421,18 +1422,30 @@ class ConversationMessagesController
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
   }) async {
-    final trimmed = content.trim();
-    if (trimmed.isEmpty) {
-      return;
-    }
+    return sendMessage(
+      content: content,
+      replyToMessageId: replyToMessageId,
+      metadata: metadata,
+      messageType: 'text',
+    );
+  }
 
+  Future<void> sendMessage({
+    required String content,
+    String? messageType,
+    String? fileUrl,
+    String? replyToMessageId,
+    Map<String, dynamic>? metadata,
+  }) async {
     _socketService?.markActivity();
     final result = await _guardAuth(
       () => _repository().sendTextMessage(
         conversationId: arg,
-        content: trimmed,
+        content: content,
         replyToMessageId: replyToMessageId,
         metadata: metadata,
+        messageType: messageType,
+        fileUrl: fileUrl,
       ),
     );
     final current =
@@ -1615,6 +1628,36 @@ class ConversationMessagesController
         );
       }
       rethrow;
+    }
+  }
+
+  Future<void> votePoll(String messageId, List<String> optionIds) async {
+    try {
+      final updatedMessage = await ref
+          .read(chatRepositoryProvider)
+          .votePoll(messageId, optionIds);
+      final st = state.valueOrNull;
+      if (st != null) {
+        state = AsyncData(
+          st.copyWith(messages: _upsertMessage(st.messages, updatedMessage)),
+        );
+      }
+    } catch (e, stack) {
+      state = AsyncError(e, stack);
+    }
+  }
+
+  Future<void> exportPoll(String messageId) async {
+    try {
+      final url = await ref.read(chatRepositoryProvider).exportPollUrl(messageId);
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        throw Exception('Could not launch URL');
+      }
+    } catch (e, stack) {
+      state = AsyncError(e, stack);
     }
   }
 

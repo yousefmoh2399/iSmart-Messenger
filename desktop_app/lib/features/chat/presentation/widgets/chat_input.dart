@@ -13,6 +13,8 @@ class ChatInput extends StatefulWidget {
     required this.onPickImage,
     required this.onSendScreenshot,
     required this.onOpenReactionPicker,
+    this.onSendPoll,
+    this.onSendGif,
     this.isEditing = false,
     this.isUploading = false,
     this.uploadProgress = 0,
@@ -28,6 +30,8 @@ class ChatInput extends StatefulWidget {
   final VoidCallback onPickImage;
   final VoidCallback onSendScreenshot;
   final VoidCallback onOpenReactionPicker;
+  final VoidCallback? onSendPoll;
+  final VoidCallback? onSendGif;
   final bool isEditing;
   final bool isUploading;
   final double uploadProgress;
@@ -201,6 +205,22 @@ class _ChatInputState extends State<ChatInput> {
                                 ? () => _runAction(widget.onOpenReactionPicker)
                                 : null,
                           ),
+                          if (widget.onSendPoll != null)
+                            _ActionChipButton(
+                              icon: Icons.poll_rounded,
+                              label: 'استطلاع رأي',
+                              onPressed: widget.enabled && !widget.isUploading
+                                  ? () => _runAction(widget.onSendPoll!)
+                                  : null,
+                            ),
+                          if (widget.onSendGif != null)
+                            _ActionChipButton(
+                              icon: Icons.gif_box_rounded,
+                              label: 'GIF',
+                              onPressed: widget.enabled && !widget.isUploading
+                                  ? () => _runAction(widget.onSendGif!)
+                                  : null,
+                            ),
                         ],
                       ),
                     )

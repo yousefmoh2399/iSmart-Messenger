@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:any_link_preview/any_link_preview.dart';
 
 final RegExp _linkPattern = RegExp(
   r'((?:https?:\/\/|www\.)[^\s<>()]+|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}(?:\/[^\s<>()]*)?)',
   caseSensitive: false,
 );
+
+final RegExp _mentionPattern = RegExp(r'@(?:all|[A-Za-z0-9_]+)');
 
 class ChatLinkText extends StatelessWidget {
   const ChatLinkText({
@@ -19,19 +22,49 @@ class ChatLinkText extends StatelessWidget {
   final TextStyle style;
   final TextAlign textAlign;
 
+  List<InlineSpan> _parseMentions(String text, TextStyle style) {
+    final spans = <InlineSpan>[];
+    final matches = _mentionPattern.allMatches(text).toList();
+    
+    if (matches.isEmpty) {
+      spans.add(TextSpan(text: text));
+      return spans;
+    }
+
+    final mentionStyle = style.copyWith(
+      color: const Color(0xFF2A8CFF),
+      fontWeight: FontWeight.bold,
+    );
+
+    var cursor = 0;
+    for (final match in matches) {
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, match.start)));
+      }
+      spans.add(TextSpan(text: match.group(0)!, style: mentionStyle));
+      cursor = match.end;
+    }
+
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor)));
+    }
+
+    return spans;
+  }
+
   @override
   Widget build(BuildContext context) {
     final maxWidth = MediaQuery.of(context).size.width * 0.75;
     final matches = _linkPattern.allMatches(text).toList();
     if (matches.isEmpty) {
-      return Text(text, style: style, textAlign: textAlign);
+      return Text.rich(TextSpan(children: _parseMentions(text, style)), textAlign: textAlign);
     }
 
     final spans = <InlineSpan>[];
     var cursor = 0;
     for (final match in matches) {
       if (match.start > cursor) {
-        spans.add(TextSpan(text: text.substring(cursor, match.start)));
+        spans.addAll(_parseMentions(text.substring(cursor, match.start), style));
       }
       final rawLink = _trimTrailingPunctuation(match.group(0)!);
       final trailing = text.substring(match.start + rawLink.length, match.end);
@@ -43,15 +76,49 @@ class ChatLinkText extends StatelessWidget {
         ),
       );
       if (trailing.isNotEmpty) {
-        spans.add(TextSpan(text: trailing));
+        spans.addAll(_parseMentions(trailing, style));
       }
       cursor = match.end;
     }
     if (cursor < text.length) {
-      spans.add(TextSpan(text: text.substring(cursor)));
+      spans.addAll(_parseMentions(text.substring(cursor), style));
     }
 
-    return Text.rich(TextSpan(children: spans), textAlign: textAlign);
+    final textWidget = Text.rich(TextSpan(children: spans), textAlign: textAlign);
+    final uniqueLinks = matches.map((m) => _trimTrailingPunctuation(m.group(0)!)).toSet().toList();
+    
+    return Column(
+      crossAxisAlignment: textAlign == TextAlign.end ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        textWidget,
+        if (uniqueLinks.isNotEmpty) const SizedBox(height: 8),
+        for (final link in uniqueLinks)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: AnyLinkPreview(
+                link: link.contains('://') ? link : 'https://$link',
+                displayDirection: UIDirection.uiDirectionHorizontal,
+                showMultimedia: true,
+                bodyMaxLines: 2,
+                bodyTextOverflow: TextOverflow.ellipsis,
+                titleStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+                bodyStyle: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+                errorWidget: const SizedBox.shrink(),
+                errorImage: "https://via.placeholder.com/150",
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 

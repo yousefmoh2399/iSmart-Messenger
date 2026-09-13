@@ -106,8 +106,15 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
             }
           }
 
-          if (message.sender?.id == authUser.id ||
-              targetConversation?.isMuted == true) {
+          final isMentioned =
+              message.metadata?['mentions'] is List &&
+              (message.metadata!['mentions'] as List).contains(authUser.id);
+
+          if (message.sender?.id == authUser.id) {
+            break;
+          }
+
+          if (targetConversation?.isMuted == true && !isMentioned) {
             break;
           }
 

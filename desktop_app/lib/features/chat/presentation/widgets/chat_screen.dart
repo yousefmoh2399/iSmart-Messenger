@@ -953,6 +953,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:swipe_to/swipe_to.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../admin/models/update_management_models.dart';
@@ -976,6 +977,9 @@ import 'chat_animated_reaction_picker.dart';
 import 'chat_input.dart';
 import 'chat_ui_helpers.dart';
 import 'message_bubble.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'poll_creator_dialog.dart';
+import 'gif_picker_panel.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
@@ -1015,6 +1019,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   final Map<String, Timer> _typingUserTimersById = <String, Timer>{};
   final Set<String> _selectedMessageIds = <String>{};
   final Map<String, GlobalKey> _messageKeys = <String, GlobalKey>{};
+  String? _mentionQuery;
+  List<ChatDirectoryUser> _mentionResults = [];
   late final ProviderContainer _container;
 
   ChatMessage? _replyingTo;
@@ -1073,6 +1079,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _messageController.addListener(_onMessageTextChanged);
     _container = ProviderScope.containerOf(context, listen: false);
     _scrollController.addListener(_onScroll);
     _searchController.addListener(() {
@@ -1148,6 +1155,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    _messageController.removeListener(_onMessageTextChanged);
     final disposedConversationId = _conversationId;
     Future<void>(() {
       final activeConversation = _container.read(activeConversationIdProvider);
@@ -1174,6 +1182,60 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _searchFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onMessageTextChanged() {
+    if (widget.conversation.type != 'group' && widget.conversation.type != 'department') return;
+    final text = _messageController.text;
+    final selection = _messageController.selection;
+    if (selection.baseOffset >= 0 && selection.baseOffset <= text.length) {
+      final textBeforeCursor = text.substring(0, selection.baseOffset);
+      final match = RegExp(r'@(\S*)$').firstMatch(textBeforeCursor);
+      if (match != null) {
+        final query = match.group(1)!;
+        _updateMentionQuery(query);
+      } else {
+        if (_mentionQuery != null) {
+          setState(() => _mentionQuery = null);
+        }
+      }
+    }
+  }
+
+  void _updateMentionQuery(String query) {
+    final lowerQuery = query.toLowerCase();
+    final allMembers = widget.conversation.members;
+    final filtered = allMembers.where((m) {
+      return m.displayName.toLowerCase().contains(lowerQuery) ||
+          m.username.toLowerCase().contains(lowerQuery);
+    }).toList();
+
+    setState(() {
+      _mentionQuery = query;
+      _mentionResults = filtered;
+    });
+  }
+
+  void _insertMention(ChatDirectoryUser user) {
+    final text = _messageController.text;
+    final selection = _messageController.selection;
+    final textBeforeCursor = text.substring(0, selection.baseOffset);
+    final textAfterCursor = text.substring(selection.baseOffset);
+
+    final match = RegExp(r'@(\S*)$').firstMatch(textBeforeCursor);
+    if (match != null) {
+      final replaceStart = textBeforeCursor.lastIndexOf('@');
+      final newTextBefore =
+          text.substring(0, replaceStart) + '@${user.username} ';
+
+      setState(() {
+        _messageController.text = newTextBefore + textAfterCursor;
+        _messageController.selection = TextSelection.collapsed(
+          offset: newTextBefore.length,
+        );
+        _mentionQuery = null;
+      });
+    }
   }
 
   // ── Socket ─────────────────────────────────────────────────────────────────
@@ -2129,6 +2191,27 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _stopTypingTimer = Timer(const Duration(seconds: 2), _stopTypingNow);
   }
 
+  List<String> _extractMentions(String text) {
+    if (widget.conversation.type != 'group' && widget.conversation.type != 'department') return const [];
+    final mentions = <String>[];
+    final regex = RegExp(r'@([A-Za-z0-9_]+)');
+    for (final match in regex.allMatches(text)) {
+      final username = match.group(1);
+      if (username == null) continue;
+      if (username.toLowerCase() == 'all') {
+        mentions.addAll(widget.conversation.members.map((m) => m.id));
+        continue;
+      }
+      try {
+        final user = widget.conversation.members.firstWhere(
+          (m) => m.username.toLowerCase() == username.toLowerCase(),
+        );
+        mentions.add(user.id);
+      } catch (_) {}
+    }
+    return mentions.toSet().toList(); // Ensure unique mentions
+  }
+
   // ── Send ───────────────────────────────────────────────────────────────────
   Future<void> _sendText() async {
     if (_isUploadingAttachment) {
@@ -2167,6 +2250,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     final payloadMetadata = <String, dynamic>{
       ...?_replyMetadata(_replyingTo),
       ...?broadcastMetadata,
+      if (_extractMentions(content).isNotEmpty)
+        'mentions': _extractMentions(content),
     };
 
     final notifier = ref.read(
@@ -2414,6 +2499,114 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _createPoll() async {
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    final conversation = overview?.conversations.where((c) => c.id == _conversationId).firstOrNull ?? widget.conversation;
+    if (_isReadOnlyConversation(conversation)) return;
+
+    final pollData = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const PollCreatorDialog(),
+    );
+
+    if (pollData == null || !mounted) return;
+
+    final metadata = {
+      'question': pollData['question'],
+      'isAnonymous': pollData['isAnonymous'],
+      'isMultipleChoice': pollData['isMultipleChoice'],
+      'options': pollData['options'],
+      'votes': <String, dynamic>{},
+    };
+
+    try {
+      await ref
+          .read(conversationMessagesControllerProvider(_conversationId).notifier)
+          .sendMessage(
+            content: '',
+            messageType: 'poll',
+            metadata: metadata,
+            replyToMessageId: _replyingTo?.id,
+          );
+      if (mounted) {
+        setState(() => _replyingTo = null);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create poll: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _openGifPicker() async {
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    final conversation = overview?.conversations.where((c) => c.id == _conversationId).firstOrNull ?? widget.conversation;
+    if (_isReadOnlyConversation(conversation)) return;
+
+    final gifUrl = await showDialog<String>(
+      context: context,
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: const SizedBox(
+          width: 500,
+          height: 600,
+          child: GifPickerPanel(),
+        ),
+      ),
+    );
+
+    if (gifUrl != null && mounted) {
+      await ref
+          .read(conversationMessagesControllerProvider(_conversationId).notifier)
+          .sendMessage(
+            content: '',
+            messageType: 'gif',
+            fileUrl: gifUrl,
+            replyToMessageId: _replyingTo?.id,
+          );
+      setState(() => _replyingTo = null);
+    }
+  }
+
+  Future<void> _votePoll(String messageId, List<String> optionIds) async {
+    try {
+      await ref.read(chatOverviewControllerProvider.notifier).votePoll(
+        messageId: messageId,
+        optionIds: optionIds,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to vote: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportPoll(String messageId) async {
+    try {
+      final exportUrl = ref.read(chatOverviewControllerProvider.notifier).exportPollUrl(messageId);
+      final uri = Uri.parse(exportUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open export URL')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _sendScreenshotFromOpenWindow() async {
@@ -2957,6 +3150,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     final metadata = <String, dynamic>{
       ...?_replyMetadata(_replyingTo),
       ...?broadcastMetadata,
+      if (_extractMentions(displayName).isNotEmpty)
+        'mentions': _extractMentions(displayName),
       'attachmentPolicy': {
         'allowDownload': !restrictForwardAndDownload,
         'allowForward': !restrictForwardAndDownload,
@@ -3307,9 +3502,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           children: [
             Center(
               child: InteractiveViewer(
-                child: AuthenticatedAttachmentImage(
-                  message: message,
-                  fit: BoxFit.contain,
+                child: Hero(
+                  tag: 'image_${message.id}',
+                  child: AuthenticatedAttachmentImage(
+                    message: message,
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
             ),
@@ -3897,13 +4095,19 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 appearance: appearance,
               ),
 
-              if (liveConversation.pinnedMessage?.content.trim().isNotEmpty == true)
+              if (liveConversation.pinnedMessage?.content.trim().isNotEmpty ==
+                  true)
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1A2735) : const Color(0xFFF4F8FC),
+                    color: isDark
+                        ? const Color(0xFF1A2735)
+                        : const Color(0xFFF4F8FC),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: const Color(0xFF3390EC).withValues(alpha: 0.35),
@@ -3914,7 +4118,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                     children: [
                       const Padding(
                         padding: EdgeInsets.only(top: 2),
-                        child: Icon(Icons.push_pin_rounded, size: 16, color: Color(0xFF3390EC)),
+                        child: Icon(
+                          Icons.push_pin_rounded,
+                          size: 16,
+                          color: Color(0xFF3390EC),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -4046,206 +4254,242 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                           child: SelectionArea(
                             child: ListView.builder(
                               controller: _scrollController,
-                              padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-                            itemCount:
-                                filteredMessages.length +
-                                (state.hasMore || state.isLoadingMore ? 1 : 0),
-                            itemBuilder: (context, index) {
-                              final prependLoader =
-                                  state.hasMore || state.isLoadingMore;
-                              if (prependLoader && index == 0) {
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                14,
+                                20,
+                                14,
+                              ),
+                              itemCount:
+                                  filteredMessages.length +
+                                  (state.hasMore || state.isLoadingMore
+                                      ? 1
+                                      : 0),
+                              itemBuilder: (context, index) {
+                                final prependLoader =
+                                    state.hasMore || state.isLoadingMore;
+                                if (prependLoader && index == 0) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: Center(
+                                      child: state.isLoadingMore
+                                          ? const SizedBox(
+                                              width: 20,
+                                              height: 20,
+                                              child: ButtonLoadingIndicator(),
+                                            )
+                                          : _TgOutlinedButton(
+                                              label: 'تحميل الرسائل القديمة',
+                                              isDark: isDark,
+                                              onPressed: () => ref
+                                                  .read(
+                                                    conversationMessagesControllerProvider(
+                                                      _conversationId,
+                                                    ).notifier,
+                                                  )
+                                                  .loadMore(),
+                                            ),
+                                    ),
+                                  );
+                                }
+
+                                final actualIndex =
+                                    index - (prependLoader ? 1 : 0);
+                                final message = filteredMessages[actualIndex];
+                                final previous = actualIndex > 0
+                                    ? filteredMessages[actualIndex - 1]
+                                    : null;
+                                final isMine =
+                                    message.sender?.id ==
+                                    widget.currentUser?.id;
+                                final shouldBreakGroup =
+                                    previous == null ||
+                                    previous.sender?.id != message.sender?.id ||
+                                    message.createdAt
+                                            .difference(previous.createdAt)
+                                            .inMinutes >
+                                        6;
+
+                                final next =
+                                    actualIndex < filteredMessages.length - 1
+                                    ? filteredMessages[actualIndex + 1]
+                                    : null;
+                                final isLastInGroup =
+                                    next == null ||
+                                    next.sender?.id != message.sender?.id ||
+                                    next.createdAt
+                                            .difference(message.createdAt)
+                                            .inMinutes >
+                                        6;
+
+                                final senderName =
+                                    message.sender?.displayName.isNotEmpty ==
+                                        true
+                                    ? message.sender!.displayName
+                                    : (isMine ? 'أنت' : 'عضو');
+                                final senderId =
+                                    message.sender?.id ?? message.senderId;
+                                final canEdit =
+                                    senderId == widget.currentUser?.id &&
+                                    !isReadOnly &&
+                                    !message.hasAttachment &&
+                                    !message.isDeleted;
+                                final canDelete =
+                                    !isReadOnly &&
+                                    (senderId == widget.currentUser?.id ||
+                                        widget.currentUser?.can(
+                                              'canDeleteMessages',
+                                            ) ==
+                                            true);
+
                                 return Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Center(
-                                    child: state.isLoadingMore
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: ButtonLoadingIndicator(),
-                                          )
-                                        : _TgOutlinedButton(
-                                            label: 'تحميل الرسائل القديمة',
-                                            isDark: isDark,
-                                            onPressed: () => ref
+                                  key: _messageKeys.putIfAbsent(
+                                    message.id,
+                                    GlobalKey.new,
+                                  ),
+                                  padding: EdgeInsets.only(
+                                    bottom: isLastInGroup ? 10 : 2,
+                                  ),
+                                  child: SwipeTo(
+                                    onRightSwipe: (details) {
+                                      if (_selectionMode) return;
+                                      if (isReadOnly) return;
+                                      setState(() {
+                                        _replyingTo = message;
+                                        _editingMessage = null;
+                                      });
+                                    },
+                                    onLeftSwipe: (details) {
+                                      if (_selectionMode) return;
+                                      if (isReadOnly) return;
+                                      setState(() {
+                                        _replyingTo = message;
+                                        _editingMessage = null;
+                                      });
+                                    },
+                                    child: MessageBubble(
+                                      message: message,
+                                      isMine: isMine,
+                                      showAvatar: !isMine && isLastInGroup,
+                                      showSenderName:
+                                          liveConversation.type != 'direct' &&
+                                          !isMine &&
+                                          shouldBreakGroup,
+                                      senderName: senderName,
+                                      currentUserId:
+                                          widget.currentUser?.id ?? '',
+                                      avatarUrl: message.sender?.avatarUrl,
+                                      token: widget.token,
+                                      replyPreview: _replyPreviewFor(
+                                        message,
+                                        messageById,
+                                      ),
+                                      replyPreviewSender:
+                                          _replyPreviewSenderFor(
+                                            message,
+                                            messageById,
+                                          ),
+                                      forwardedFrom: message.forwardedFromName,
+                                      highlightQuery:
+                                          _searchController.text.trim().isEmpty
+                                          ? null
+                                          : _searchController.text.trim(),
+                                      selected: _selectedMessageIds.contains(
+                                        message.id,
+                                      ),
+                                      selectionMode: _selectionMode,
+                                      isActiveSearchMatch:
+                                          activeSearchMessageId == message.id,
+                                      chatPreferences: chatPreferences,
+                                      onTap: _selectionMode
+                                          ? () => _toggleMessageSelection(
+                                              message.id,
+                                            )
+                                          : null,
+                                      onLongPress: () =>
+                                          _toggleMessageSelection(message.id),
+                                      onReply: () {
+                                        if (_selectionMode) return;
+                                        if (isReadOnly) return;
+                                        setState(() {
+                                          _replyingTo = message;
+                                          _editingMessage = null;
+                                        });
+                                      },
+                                      onCopy: () {
+                                        if (!mounted) return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('تم نسخ الرسالة'),
+                                          ),
+                                        );
+                                      },
+                                      onEdit: canEdit
+                                          ? () => setState(() {
+                                              _editingMessage = message;
+                                              _replyingTo = null;
+                                              _messageController.text =
+                                                  message.content;
+                                            })
+                                          : null,
+                                      onDelete: canDelete && !message.isDeleted
+                                          ? () => ref
                                                 .read(
                                                   conversationMessagesControllerProvider(
                                                     _conversationId,
                                                   ).notifier,
                                                 )
-                                                .loadMore(),
+                                                .deleteMessage(message.id)
+                                          : null,
+                                      onOpenAttachment: () =>
+                                          _openAttachment(message),
+                                      onToggleFavorite: () => ref
+                                          .read(
+                                            conversationMessagesControllerProvider(
+                                              _conversationId,
+                                            ).notifier,
+                                          )
+                                          .toggleFavoriteMessage(
+                                            messageId: message.id,
                                           ),
-                                  ),
-                                );
-                              }
-
-                              final actualIndex =
-                                  index - (prependLoader ? 1 : 0);
-                              final message = filteredMessages[actualIndex];
-                              final previous = actualIndex > 0
-                                  ? filteredMessages[actualIndex - 1]
-                                  : null;
-                              final isMine =
-                                  message.sender?.id == widget.currentUser?.id;
-                              final shouldBreakGroup =
-                                  previous == null ||
-                                  previous.sender?.id != message.sender?.id ||
-                                  message.createdAt
-                                          .difference(previous.createdAt)
-                                          .inMinutes >
-                                      6;
-
-                              final next =
-                                  actualIndex < filteredMessages.length - 1
-                                  ? filteredMessages[actualIndex + 1]
-                                  : null;
-                              final isLastInGroup =
-                                  next == null ||
-                                  next.sender?.id != message.sender?.id ||
-                                  next.createdAt
-                                          .difference(message.createdAt)
-                                          .inMinutes >
-                                      6;
-
-                              final senderName =
-                                  message.sender?.displayName.isNotEmpty == true
-                                  ? message.sender!.displayName
-                                  : (isMine ? 'أنت' : 'عضو');
-                              final senderId =
-                                  message.sender?.id ?? message.senderId;
-                              final canEdit =
-                                  senderId == widget.currentUser?.id &&
-                                  !isReadOnly &&
-                                  !message.hasAttachment &&
-                                  !message.isDeleted;
-                              final canDelete =
-                                  !isReadOnly &&
-                                  (senderId == widget.currentUser?.id ||
-                                      widget.currentUser?.can(
-                                            'canDeleteMessages',
-                                          ) ==
-                                          true);
-
-                              return Padding(
-                                key: _messageKeys.putIfAbsent(
-                                  message.id,
-                                  GlobalKey.new,
-                                ),
-                                padding: EdgeInsets.only(
-                                  bottom: isLastInGroup ? 10 : 2,
-                                ),
-                                child: MessageBubble(
-                                  message: message,
-                                  isMine: isMine,
-                                  showAvatar: !isMine && isLastInGroup,
-                                  showSenderName:
-                                      liveConversation.type != 'direct' &&
-                                      !isMine &&
-                                      shouldBreakGroup,
-                                  senderName: senderName,
-                                  currentUserId: widget.currentUser?.id ?? '',
-                                  avatarUrl: message.sender?.avatarUrl,
-                                  token: widget.token,
-                                  replyPreview: _replyPreviewFor(
-                                    message,
-                                    messageById,
-                                  ),
-                                  replyPreviewSender: _replyPreviewSenderFor(
-                                    message,
-                                    messageById,
-                                  ),
-                                  forwardedFrom: message.forwardedFromName,
-                                  highlightQuery:
-                                      _searchController.text.trim().isEmpty
-                                      ? null
-                                      : _searchController.text.trim(),
-                                  selected: _selectedMessageIds.contains(
-                                    message.id,
-                                  ),
-                                  selectionMode: _selectionMode,
-                                  isActiveSearchMatch:
-                                      activeSearchMessageId == message.id,
-                                  chatPreferences: chatPreferences,
-                                  onTap: _selectionMode
-                                      ? () =>
-                                            _toggleMessageSelection(message.id)
-                                      : null,
-                                  onLongPress: () =>
-                                      _toggleMessageSelection(message.id),
-                                  onReply: () {
-                                    if (_selectionMode) return;
-                                    if (isReadOnly) return;
-                                    setState(() {
-                                      _replyingTo = message;
-                                      _editingMessage = null;
-                                    });
-                                  },
-                                  onCopy: () {
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('تم نسخ الرسالة'),
-                                      ),
-                                    );
-                                  },
-                                  onEdit: canEdit
-                                      ? () => setState(() {
-                                          _editingMessage = message;
-                                          _replyingTo = null;
-                                          _messageController.text =
-                                              message.content;
-                                        })
-                                      : null,
-                                  onDelete: canDelete && !message.isDeleted
-                                      ? () => ref
+                                      onVotePoll: (options) =>
+                                          _votePoll(message.id, options),
+                                      onExportPoll: () =>
+                                          _exportPoll(message.id),
+                                      onSaveAttachment:
+                                          message.hasAttachment &&
+                                              message.attachmentDownloadAllowed
+                                          ? () => _downloadAttachment(
+                                              message,
+                                              forceSaveAs: true,
+                                            )
+                                          : null,
+                                      onPrintAttachment:
+                                          message.isPrintableAttachment
+                                          ? () => _printAttachment(message)
+                                          : null,
+                                      onReact: (emoji) {
+                                        if (isReadOnly) {
+                                          return Future.value();
+                                        }
+                                        return ref
                                             .read(
                                               conversationMessagesControllerProvider(
                                                 _conversationId,
                                               ).notifier,
                                             )
-                                            .deleteMessage(message.id)
-                                      : null,
-                                  onOpenAttachment: () =>
-                                      _openAttachment(message),
-                                  onToggleFavorite: () => ref
-                                      .read(
-                                        conversationMessagesControllerProvider(
-                                          _conversationId,
-                                        ).notifier,
-                                      )
-                                      .toggleFavoriteMessage(
-                                        messageId: message.id,
-                                      ),
-                                  onSaveAttachment:
-                                      message.hasAttachment &&
-                                          message.attachmentDownloadAllowed
-                                      ? () => _downloadAttachment(
-                                          message,
-                                          forceSaveAs: true,
-                                        )
-                                      : null,
-                                  onPrintAttachment:
-                                      message.isPrintableAttachment
-                                      ? () => _printAttachment(message)
-                                      : null,
-                                  onReact: (emoji) {
-                                    if (isReadOnly) {
-                                      return Future.value();
-                                    }
-                                    return ref
-                                        .read(
-                                          conversationMessagesControllerProvider(
-                                            _conversationId,
-                                          ).notifier,
-                                        )
-                                        .toggleReaction(
-                                          messageId: message.id,
-                                          emoji: emoji,
-                                        );
-                                  },
-                                ),
-                              );
-                            },
-                          ),
+                                            .toggleReaction(
+                                              messageId: message.id,
+                                              emoji: emoji,
+                                            );
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                         ),
                         Positioned(
@@ -4401,6 +4645,65 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                   isDark: isDark,
                 ),
 
+              if (_mentionQuery != null && _mentionResults.isNotEmpty)
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ListView.builder(
+                    padding: EdgeInsets.zero,
+                    shrinkWrap: true,
+                    itemCount: _mentionResults.length,
+                    itemBuilder: (context, index) {
+                      final user = _mentionResults[index];
+                      return ListTile(
+                        dense: true,
+                        leading: SafeNetworkAvatar(
+                          imageUrl: user.avatarUrl,
+                          fallbackText: user.displayName.isNotEmpty
+                              ? user.displayName[0].toUpperCase()
+                              : '?',
+                          radius: 14,
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer,
+                        ),
+                        title: Text(
+                          user.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '@${user.username}',
+                          maxLines: 1,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        onTap: () => _insertMention(user),
+                      );
+                    },
+                  ),
+                ),
+
               // ── Input ────────────────────────────────────────────────────
               ChatInput(
                 controller: _messageController,
@@ -4415,6 +4718,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 onPickImage: _sendImage,
                 onSendScreenshot: _sendScreenshotFromOpenWindow,
                 onOpenReactionPicker: _showComposerReactionPicker,
+                onSendPoll: _createPoll,
+                onSendGif: _openGifPicker,
                 enabled: !isReadOnly,
               ),
             ],

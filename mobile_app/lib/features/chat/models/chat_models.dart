@@ -539,6 +539,8 @@ class ChatMessage {
   bool get isImageMessage =>
       messageType == 'image' ||
       (mimeType?.toLowerCase().startsWith('image/') ?? false);
+  bool get isGifMessage => messageType == 'gif';
+  bool get isPollMessage => messageType == 'poll';
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';
   bool get hasAttachment => fileUrl != null && fileUrl!.isNotEmpty;

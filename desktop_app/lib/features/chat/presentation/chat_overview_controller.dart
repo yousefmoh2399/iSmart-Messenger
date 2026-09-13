@@ -853,6 +853,19 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     await refresh();
   }
 
+  Future<void> votePoll({
+    required String messageId,
+    required List<String> optionIds,
+  }) async {
+    await _guardAuth(
+      () => _repository().votePoll(messageId: messageId, optionIds: optionIds),
+    );
+  }
+
+  String exportPollUrl(String messageId) {
+    return _repository().exportPollUrl(messageId);
+  }
+
   Future<void> deleteConversation(
     String conversationId, {
     bool deleteForEveryone = false,
@@ -1486,18 +1499,30 @@ class ConversationMessagesController
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
   }) async {
-    final trimmed = content.trim();
-    if (trimmed.isEmpty) {
-      return;
-    }
+    return sendMessage(
+      content: content,
+      replyToMessageId: replyToMessageId,
+      metadata: metadata,
+      messageType: 'text',
+    );
+  }
 
+  Future<void> sendMessage({
+    required String content,
+    String? messageType,
+    String? fileUrl,
+    String? replyToMessageId,
+    Map<String, dynamic>? metadata,
+  }) async {
     _socketService?.markActivity();
     final result = await _guardAuth(
       () => _repository().sendTextMessage(
         conversationId: arg,
-        content: trimmed,
+        content: content,
         replyToMessageId: replyToMessageId,
         metadata: metadata,
+        messageType: messageType,
+        fileUrl: fileUrl,
       ),
     );
     final current =

@@ -320,16 +320,18 @@ class ChatRepository {
     required String content,
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
+    String? messageType,
+    String? fileUrl,
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages',
       data: {
         'conversationId': conversationId,
         'content': content,
-        'messageType': 'text',
-        if (replyToMessageId != null && replyToMessageId.isNotEmpty)
-          'replyToMessageId': replyToMessageId,
+        if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
         if (metadata != null) 'metadata': metadata,
+        if (messageType != null) 'messageType': messageType,
+        if (fileUrl != null) 'fileUrl': fileUrl,
       },
     );
     return ChatPostResult(
@@ -472,6 +474,21 @@ class ChatRepository {
 
   Future<void> deleteMessage(String messageId) async {
     await _apiClient.dio.delete<void>('/api/chat/messages/$messageId');
+  }
+
+  Future<void> votePoll({
+    required String messageId,
+    required List<String> optionIds,
+  }) async {
+    await _apiClient.dio.post<void>(
+      '/api/chat/messages/$messageId/poll/vote',
+      data: {'optionIds': optionIds},
+    );
+  }
+
+  String exportPollUrl(String messageId) {
+    final token = _authRepository.currentToken;
+    return '\${_apiClient.dio.options.baseUrl}/api/chat/messages/$messageId/poll/export?token=$token';
   }
 
   Future<void> markConversationSeen(String conversationId) async {

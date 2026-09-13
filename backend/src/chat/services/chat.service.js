@@ -8,6 +8,7 @@ const ConversationMemberState = require("../models/conversation-member-state.mod
 const User = require("../../models/user.model");
 const ApiError = require("../../utils/api-error");
 const { deleteFileIfExists } = require("../../utils/file.util");
+const exceljs = require("exceljs");
 const {
   ensureDirectory,
   fileExists,
@@ -62,6 +63,8 @@ const allowedMessageTypes = new Set([
   "pdf",
   "audio",
   "system",
+  "poll",
+  "gif",
 ]);
 
 function sanitizeMessageType(value, fallback = "text") {
@@ -2650,7 +2653,150 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   return serializeMessage(populated, populated.senderId);
 }
 
+async function votePollMessage(currentUser, messageId, optionIds) {
+  const message = await Message.findById(messageId);
+  if (!message || message.isDeleted || message.messageType !== "poll") {
+    throw new ApiError(404, "الاستطلاع غير موجود أو محذوف.");
+  }
+  const conversation = await getConversationById(message.conversationId);
+  await assertConversationAccess(currentUser, conversation);
+
+  let metadata = message.metadata || {};
+  if (metadata.isClosed) {
+    throw new ApiError(400, "التصويت مغلق في هذا الاستطلاع.");
+  }
+  if (!metadata.options || !Array.isArray(metadata.options)) {
+    throw new ApiError(400, "بيانات الاستطلاع تالفة.");
+  }
+  if (!metadata.isMultipleChoice && optionIds.length > 1) {
+    throw new ApiError(400, "هذا الاستطلاع لا يسمح باختيارات متعددة.");
+  }
+
+  // Remove the user from all previous votes
+  if (!metadata.votes) metadata.votes = {};
+  for (const key of Object.keys(metadata.votes)) {
+    metadata.votes[key] = (metadata.votes[key] || []).filter(
+      (id) => id !== currentUser.id
+    );
+  }
+
+  // Add the user to the selected options
+  for (const optId of optionIds) {
+    const optionExists = metadata.options.find((o) => String(o.id) === String(optId));
+    if (optionExists) {
+      if (!metadata.votes[String(optId)]) metadata.votes[String(optId)] = [];
+      metadata.votes[String(optId)].push(currentUser.id);
+    }
+  }
+
+  message.metadata = metadata;
+  message.markModified("metadata");
+  await message.save();
+
+  const populated = await Message.findById(message._id)
+    .populate(
+      "senderId",
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+    )
+    .exec();
+
+  let audienceUserIds;
+  if (conversation.type === "broadcast") {
+    const publisherIds = extractIdArray(conversation.broadcastPublisherIds);
+    audienceUserIds = Array.from(
+      new Set([...extractIdArray(conversation.members), ...publisherIds])
+    );
+  } else {
+    audienceUserIds = extractIdArray(conversation.members);
+  }
+
+  return {
+    audienceUserIds,
+    message: serializeMessage(populated, populated.senderId),
+  };
+}
+
+async function exportPollToExcel(currentUser, messageId) {
+  const message = await Message.findById(messageId).populate("senderId");
+  if (!message || message.isDeleted || message.messageType !== "poll") {
+    throw new ApiError(404, "الاستطلاع غير موجود أو محذوف.");
+  }
+  const conversation = await getConversationById(message.conversationId);
+  await assertConversationAccess(currentUser, conversation);
+
+  const isAdmin = currentUser.role === "admin" || currentUser.role === "superadmin";
+  const isCreator = String(message.senderId._id) === currentUser.id;
+  if (!isAdmin && !isCreator) {
+    throw new ApiError(403, "ليس لديك صلاحية لتصدير نتائج هذا الاستطلاع.");
+  }
+
+  const metadata = message.metadata || {};
+  const question = metadata.question || "استطلاع رأي";
+  const options = metadata.options || [];
+  const votes = metadata.votes || {};
+  const isAnonymous = metadata.isAnonymous === true;
+
+  const workbook = new exceljs.Workbook();
+  const sheet = workbook.addWorksheet("نتائج الاستطلاع");
+
+  sheet.addRow(["السؤال:", question]);
+  sheet.addRow(["مجهول:", isAnonymous ? "نعم" : "لا"]);
+  sheet.addRow([]);
+
+  // Header row
+  if (isAnonymous) {
+    sheet.addRow(["الخيار", "عدد الأصوات", "النسبة"]);
+  } else {
+    sheet.addRow(["الخيار", "عدد الأصوات", "النسبة", "المصوتون"]);
+  }
+  
+  // formatting header
+  const headerRow = sheet.lastRow;
+  headerRow.font = { bold: true };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFD3D3D3" },
+  };
+
+  let totalVotes = 0;
+  for (const opt of options) {
+    totalVotes += (votes[String(opt.id)] || []).length;
+  }
+
+  // Populate data
+  for (const opt of options) {
+    const voterIds = votes[String(opt.id)] || [];
+    const count = voterIds.length;
+    const percentage = totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) + "%" : "0%";
+    
+    if (isAnonymous) {
+      sheet.addRow([opt.text, count, percentage]);
+    } else {
+      // Need to fetch user names
+      const users = await User.find({ _id: { $in: voterIds } }).select("fullName username").lean();
+      const userNames = users.map(u => u.fullName || u.username).join(", ");
+      sheet.addRow([opt.text, count, percentage, userNames]);
+    }
+  }
+
+  sheet.columns.forEach((column) => {
+    column.width = 30;
+    column.alignment = { wrapText: true, vertical: "top", horizontal: "right" };
+  });
+
+  sheet.views = [{ rightToLeft: true }];
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return {
+    buffer,
+    filename: `Poll_${Date.now()}.xlsx`,
+  };
+}
+
 module.exports = {
+  votePollMessage,
+  exportPollToExcel,
   serializeUserLite,
   serializeConversation,
   serializeMessage,

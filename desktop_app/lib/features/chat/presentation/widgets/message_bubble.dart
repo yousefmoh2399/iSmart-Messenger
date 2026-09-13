@@ -5,16 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/utils/formatters.dart';
-import '../../../../shared/models/app_user.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
 import '../chat_appearance.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_animated_reaction_picker.dart';
 import 'chat_audio_attachment_player.dart';
+import 'chat_poll_bubble.dart';
 import 'chat_text_parser.dart';
-import 'package:lottie/lottie.dart';
-import '../../../../core/constants/available_emojis.dart';
+import '../../../../shared/models/app_user.dart';
 
 const List<String> _kReactionEmojiFontFallbacks = <String>[
   'Apple Color Emoji',
@@ -39,6 +38,8 @@ class MessageBubble extends StatefulWidget {
     required this.onReact,
     this.onTap,
     this.onLongPress,
+    this.onVotePoll,
+    this.onExportPoll,
     this.avatarUrl,
     this.replyPreview,
     this.replyPreviewSender,
@@ -72,6 +73,8 @@ class MessageBubble extends StatefulWidget {
   final Future<void> Function(String emoji) onReact;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final ValueChanged<List<String>>? onVotePoll;
+  final VoidCallback? onExportPoll;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final String? token;
@@ -453,27 +456,41 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 () {
                                   final text = widget.message.content.trim();
                                   final emojiRegex = RegExp(r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$');
-                                  final isSingle = emojiRegex.hasMatch(text);
-                                  final hex = isSingle ? text.runes.map((r) => r.toRadixString(16).toLowerCase()).join('_') : null;
-                                  
-                                  if (isSingle && hex != null && availableLottieEmojis.contains(hex) && !widget.chatPreferences.disableAnimatedEmojis) {
-                                    return RepaintBoundary(
-                                      child: _ReplayableLottie(
-                                        assetPath: 'assets/animated_emoji_lottie/emoji_u$hex.json',
-                                      ),
-                                    );
-                                  }
+                                  final isSingle = text.runes.length == 1 && emojiRegex.hasMatch(text);
                                   
                                   return ChatRichText(
                                     text: widget.message.content,
                                     style: TextStyle(
                                       color: textColor,
                                       height: 1.4,
-                                      fontSize: 14.2,
+                                      fontSize: isSingle ? 48.0 : 14.2,
                                     ),
                                   );
                                 }(),
-                              if (widget.message.hasAttachment)
+                              if (widget.message.isPollMessage)
+                                Padding(
+                                  padding: EdgeInsets.only(top: widget.message.content.isEmpty ? 0 : 8.0),
+                                  child: ChatPollBubble(
+                                    message: widget.message,
+                                    isMine: widget.isMine,
+                                    onVote: widget.onVotePoll ?? (_) {},
+                                    onExport: widget.onExportPoll ?? () {},
+                                  ),
+                                ),
+                              if (widget.message.isGifMessage && widget.message.fileUrl != null)
+                                Padding(
+                                  padding: EdgeInsets.only(top: widget.message.content.isEmpty ? 0 : 8.0),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Image.network(
+                                      widget.message.fileUrl!,
+                                      fit: BoxFit.cover,
+                                      width: 260,
+                                      height: 190,
+                                    ),
+                                  ),
+                                ),
+                              if (widget.message.hasAttachment && !widget.message.isGifMessage)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8),
                                   child: _AttachmentPreview(
@@ -736,16 +753,19 @@ class _AttachmentPreview extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: AuthenticatedAttachmentImage(
-            message: message,
-            fit: BoxFit.cover,
-            height: 190,
-            width: 260,
-            errorFallback: Container(
-              height: 120,
-              alignment: Alignment.center,
-              color: const Color(0xFFF0F4F9),
-              child: const Icon(Icons.broken_image_outlined),
+          child: Hero(
+            tag: 'image_${message.id}',
+            child: AuthenticatedAttachmentImage(
+              message: message,
+              fit: BoxFit.cover,
+              height: 190,
+              width: 260,
+              errorFallback: Container(
+                height: 120,
+                alignment: Alignment.center,
+                color: const Color(0xFFF0F4F9),
+                child: const Icon(Icons.broken_image_outlined),
+              ),
             ),
           ),
         ),
@@ -885,52 +905,6 @@ class _PopupActionRow extends StatelessWidget {
   }
 }
 
-class _ReplayableLottie extends StatefulWidget {
-  const _ReplayableLottie({required this.assetPath});
-  final String assetPath;
-
-  @override
-  State<_ReplayableLottie> createState() => _ReplayableLottieState();
-}
-
-class _ReplayableLottieState extends State<_ReplayableLottie> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        _controller.forward(from: 0.0);
-      },
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: Lottie.asset(
-          widget.assetPath,
-          width: 96,
-          height: 96,
-          repeat: false,
-          controller: _controller,
-          onLoaded: (composition) {
-            _controller.duration = composition.duration;
-            _controller.forward(from: 0.0);
-          },
-        ),
-      ),
-    );
-  }
-}
 
 class _AnimatedReactionChip extends StatefulWidget {
   const _AnimatedReactionChip({

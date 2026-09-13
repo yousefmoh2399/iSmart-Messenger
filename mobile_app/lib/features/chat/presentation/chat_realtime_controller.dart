@@ -102,11 +102,18 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               }
             }
           }
+          final isMentioned =
+              message.metadata?['mentions'] is List &&
+              (message.metadata!['mentions'] as List).contains(authUser?.id);
+
           if (authUser == null ||
               message.sender?.id == authUser.id ||
               (message.conversationId == activeConversationId &&
-                  isAppVisible) ||
-              targetConversation?.isMuted == true) {
+                  isAppVisible)) {
+            break;
+          }
+
+          if (targetConversation?.isMuted == true && !isMentioned) {
             break;
           }
 
@@ -276,5 +283,3 @@ String _ticketNotificationFallbackBody(Object? ticket) {
   final prefix = number.trim().isEmpty ? 'Ticket' : number;
   return title.trim().isEmpty ? '$prefix: يوجد تحديث جديد' : '$prefix: $title';
 }
-
-

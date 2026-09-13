@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:any_link_preview/any_link_preview.dart';
 
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 
@@ -153,9 +154,44 @@ class _ChatLinkTextState extends State<ChatLinkText> {
       spans.add(TextSpan(text: widget.text.substring(cursor)));
     }
 
-    return Text.rich(
+    final textWidget = Text.rich(
       TextSpan(style: widget.style, children: spans),
       textAlign: widget.textAlign,
+    );
+
+    final uniqueLinks = matches.map((m) => _trimTrailingPunctuation(m.group(0)!)).toSet().toList();
+
+    return Column(
+      crossAxisAlignment: widget.textAlign == TextAlign.end ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        textWidget,
+        if (uniqueLinks.isNotEmpty) const SizedBox(height: 8),
+        for (final link in uniqueLinks)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: AnyLinkPreview(
+                link: link.contains('://') ? link : 'https://$link',
+                displayDirection: UIDirection.uiDirectionHorizontal,
+                showMultimedia: true,
+                bodyMaxLines: 2,
+                bodyTextOverflow: TextOverflow.ellipsis,
+                titleStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+                bodyStyle: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+                errorWidget: const SizedBox.shrink(),
+                errorImage: "https://via.placeholder.com/150",
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

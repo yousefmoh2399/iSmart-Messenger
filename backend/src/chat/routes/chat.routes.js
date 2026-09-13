@@ -39,6 +39,8 @@ const {
   downloadAttachment,
   requestAttachmentRestore,
   restoreAttachment,
+  votePoll,
+  exportPoll,
   postChatTransfer,
   downloadChatTransfer,
   getAuditLogs,
@@ -255,7 +257,7 @@ router.post(
     body("content").optional().isString(),
     body("messageType")
       .optional()
-      .isIn(["text", "file", "image", "pdf", "audio", "system"])
+      .isIn(["text", "file", "image", "pdf", "audio", "system", "poll", "gif"])
       .withMessage("نوع الرسالة غير صالح."),
     body("forwardFromMessageId").optional({ nullable: true }).isMongoId(),
     body("replyToMessageId").optional({ nullable: true }).isMongoId(),
@@ -287,8 +289,6 @@ router.patch(
 
 router.patch(
   "/messages/:id/favorite",
-  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
-  validateRequest,
   toggleFavoriteChatMessage
 );
 
@@ -297,6 +297,23 @@ router.patch(
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
   markSingleMessageSeen
+);
+
+router.post(
+  "/messages/:id/poll/vote",
+  [
+    param("id").isMongoId().withMessage("معرّف الرسالة غير صالح."),
+    body("optionIds").isArray().withMessage("يجب إرسال مصفوفة بالخيارات."),
+  ],
+  validateRequest,
+  votePoll
+);
+
+router.get(
+  "/messages/:id/poll/export",
+  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
+  validateRequest,
+  exportPoll
 );
 
 router.delete(

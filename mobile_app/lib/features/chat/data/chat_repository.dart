@@ -310,16 +310,19 @@ class ChatRepository {
     required String content,
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
+    String? messageType,
+    String? fileUrl,
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages',
       data: {
         'conversationId': conversationId,
         'content': content,
-        'messageType': 'text',
+        'messageType': messageType ?? 'text',
         if (replyToMessageId != null && replyToMessageId.isNotEmpty)
           'replyToMessageId': replyToMessageId,
         if (metadata != null) 'metadata': metadata,
+        if (fileUrl != null) 'fileUrl': fileUrl,
       },
     );
     return ChatPostResult(
@@ -436,6 +439,22 @@ class ChatRepository {
     return ChatMessage.fromJson(
       response.data?['message'] as Map<String, dynamic>,
     );
+  }
+
+  Future<ChatMessage> votePoll(String messageId, List<String> optionIds) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/poll/vote',
+      data: {'optionIds': optionIds},
+    );
+    return ChatMessage.fromJson(
+      (response.data?['data']?['message'] as Map<String, dynamic>?) ?? 
+      (response.data?['message'] as Map<String, dynamic>),
+    );
+  }
+
+  Future<String> exportPollUrl(String messageId, {String? token}) async {
+    final url = '/api/chat/messages/$messageId/poll/export';
+    return '\${_apiClient.dio.options.baseUrl}$url?token=\${token ?? ''}';
   }
 
   Future<ChatMessage> toggleFavoriteMessage({required String messageId}) async {

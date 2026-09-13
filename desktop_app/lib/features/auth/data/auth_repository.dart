@@ -34,6 +34,8 @@ class AuthRepository {
   static const _deviceUidKey = 'desktop_update_device_uid';
   static const _cachedUserKey = 'desktop_cached_authenticated_user';
 
+  String? get currentToken => _sessionManager.accessToken;
+
   Future<void> _clearSession({bool notifySessionCleared = true}) async {
     await _sessionManager.clearSessionOnce(reason: 'auth_repository_clear');
     await _clearCachedUser();

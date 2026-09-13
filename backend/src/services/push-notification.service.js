@@ -1,5 +1,6 @@
 const fs = require("fs");
 const logger = require("../utils/logger");
+const ConversationMemberState = require("../chat/models/conversation-member-state.model");
 
 let firebaseAdmin = null;
 try {
@@ -192,10 +193,37 @@ async function sendChatPushNotifications({
     return { enabled: true, sentCount: 0, skippedCount: 0 };
   }
 
-  const allowedUserIds =
+  let allowedUserIds =
     typeof shouldNotifyUser === "function"
       ? userIds.filter((userId) => shouldNotifyUser(userId) === true)
       : userIds;
+
+  if (allowedUserIds.length > 0 && conversation && message) {
+    const mentions = message.metadata?.mentions || [];
+    const memberStates = await ConversationMemberState.find(
+      {
+        conversationId: conversation._id || conversation.id,
+        userId: { $in: allowedUserIds },
+        isMuted: true,
+      },
+      "userId"
+    ).lean();
+
+    const mutedUserIds = new Set(
+      memberStates.map((doc) => doc.userId.toString())
+    );
+
+    allowedUserIds = allowedUserIds.filter((userId) => {
+      if (!mutedUserIds.has(userId)) {
+        return true;
+      }
+      if (mentions.includes(userId)) {
+        return true;
+      }
+      return false;
+    });
+  }
+
   if (allowedUserIds.length === 0) {
     return { enabled: true, sentCount: 0, skippedCount: userIds.length };
   }

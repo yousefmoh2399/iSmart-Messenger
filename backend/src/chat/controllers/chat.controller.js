@@ -41,6 +41,8 @@ const {
   getMessageAttachment,
   requestAttachmentRehydrate,
   restoreAttachmentFromSender,
+  votePollMessage,
+  exportPollToExcel,
 } = require("../services/chat.service");
 const { listAuditLogs } = require("../services/audit.service");
 const { listSystemErrors } = require("../services/system-error.service");
@@ -815,7 +817,48 @@ const getSystemErrors = asyncHandler(async (req, res) => {
   });
 });
 
+const votePoll = asyncHandler(async (req, res) => {
+  const result = await votePollMessage(
+    req.user,
+    req.params.id,
+    req.body.optionIds
+  );
+
+  const io = req.app.get("io");
+  if (io && result.audienceUserIds && result.audienceUserIds.length > 0) {
+    result.audienceUserIds.forEach((userId) => {
+      io.to(`user:${userId}`).emit("chat_message_updated", {
+        conversationId: result.message.conversationId,
+        message: result.message,
+      });
+    });
+  }
+
+  sendChatResponse(res, {
+    message: "ØªÙ… ØªØ³Ø¬ÙŠÙ„ Ø§Ù„ØªØµÙˆÙŠØª.",
+    data: { message: result.message },
+    legacy: { message: result.message },
+  });
+});
+
+const exportPoll = asyncHandler(async (req, res) => {
+  const { buffer, filename } = await exportPollToExcel(req.user, req.params.id);
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${encodeURIComponent(filename)}"`
+  );
+
+  res.send(buffer);
+});
+
 module.exports = {
+  votePoll,
+  exportPoll,
   getChatDirectoryUsers,
   getChatRoles,
   getConversations,

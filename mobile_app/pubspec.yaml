@@ -49,6 +49,10 @@ dependencies:
   url_launcher: ^6.3.2
   animations: ^3.0.0
   flutter_animate: ^4.5.2
+  swipe_to: ^1.0.6
+  shimmer: ^4.0.0
+  any_link_preview: ^3.0.3
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
@@ -58,26 +62,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/animated_emoji_lottie/angry.json
-    - assets/animated_emoji_lottie/checkMark.json
-    - assets/animated_emoji_lottie/clap.json
-    - assets/animated_emoji_lottie/eyes.json
-    - assets/animated_emoji_lottie/fire.json
-    - assets/animated_emoji_lottie/foldedHands.json
-    - assets/animated_emoji_lottie/grin.json
-    - assets/animated_emoji_lottie/handshake.json
-    - assets/animated_emoji_lottie/heartEyes.json
-    - assets/animated_emoji_lottie/joy.json
-    - assets/animated_emoji_lottie/loudlyCrying.json
-    - assets/animated_emoji_lottie/ok.json
-    - assets/animated_emoji_lottie/oneHundred.json
-    - assets/animated_emoji_lottie/partyingFace.json
-    - assets/animated_emoji_lottie/partyPopper.json
-    - assets/animated_emoji_lottie/redHeart.json
-    - assets/animated_emoji_lottie/sad.json
-    - assets/animated_emoji_lottie/sunglassesFace.json
-    - assets/animated_emoji_lottie/thinkingFace.json
-    - assets/animated_emoji_lottie/thumbsUp.json
     - assets/notification_sounds/default_tone.wav
     - assets/notification_sounds/chime_tone.wav
     - assets/notification_sounds/alert_tone.wav

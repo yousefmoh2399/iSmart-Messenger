@@ -37,6 +37,10 @@ dependencies:
   timezone: ^0.10.1
   url_launcher: ^6.3.2
   emoji_picker_flutter: ^4.5.4
+  swipe_to: ^1.0.6
+  shimmer: ^4.0.0
+  any_link_preview: ^3.0.3
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
@@ -46,7 +50,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/animated_emoji_lottie/
     - assets/images/
     - assets/json/
     - assets/notification_sounds/default_tone.wav

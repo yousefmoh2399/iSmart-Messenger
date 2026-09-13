@@ -1,8 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
-
 import 'package:animated_emoji/animated_emoji.dart';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
 
 import '../../utils/chat_reaction_emoji_stats.dart';
 
@@ -175,31 +174,12 @@ class ChatOfflineLottieEmoji extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fallback = Center(
+    return Center(
       child: Text(
         data.toUnicodeEmoji(),
         textAlign: TextAlign.center,
         style: TextStyle(fontSize: size * 0.62, height: 1.0),
       ),
-    );
-
-    if (!isBundledAnimatedReaction(data)) {
-      return fallback;
-    }
-
-    return Lottie.asset(
-      'assets/animated_emoji_lottie/${data.name}.json',
-      width: size,
-      height: size,
-      repeat: repeat,
-      animate: animate,
-      frameBuilder: (context, child, composition) {
-        if (composition == null) {
-          return fallback;
-        }
-        return child;
-      },
-      errorBuilder: (_, __, ___) => fallback,
     );
   }
 }

@@ -101,6 +101,41 @@ class _ChatRichTextState extends State<ChatRichText> {
         .join('_');
   }
 
+final RegExp _mentionRegex = RegExp(r'@(?:all|[A-Za-z0-9_]+)');
+
+  List<InlineSpan> _parseEmojisAndMentions(String text, TextStyle style) {
+    final spans = <InlineSpan>[];
+    
+    // First, split by mentions, then within each segment, parse emojis
+    final mentionMatches = _mentionRegex.allMatches(text).toList();
+    if (mentionMatches.isEmpty) {
+      return _parseEmojis(text, style);
+    }
+
+    final mentionStyle = style.copyWith(
+      color: const Color(0xFF2A8CFF),
+      fontWeight: FontWeight.bold,
+    );
+
+    var cursor = 0;
+    for (final match in mentionMatches) {
+      if (match.start > cursor) {
+        spans.addAll(_parseEmojis(text.substring(cursor, match.start), style));
+      }
+
+      final mentionStr = match.group(0)!;
+      spans.add(TextSpan(text: mentionStr, style: mentionStyle));
+
+      cursor = match.end;
+    }
+
+    if (cursor < text.length) {
+      spans.addAll(_parseEmojis(text.substring(cursor), style));
+    }
+
+    return spans;
+  }
+
   List<InlineSpan> _parseEmojis(String text, TextStyle style) {
     final spans = <InlineSpan>[];
     final matches = _emojiRegex.allMatches(text).toList();
@@ -157,7 +192,7 @@ class _ChatRichTextState extends State<ChatRichText> {
       return Text.rich(
         TextSpan(
           style: widget.style,
-          children: _parseEmojis(widget.text, widget.style),
+          children: _parseEmojisAndMentions(widget.text, widget.style),
         ),
         textAlign: widget.textAlign,
       );
@@ -176,7 +211,7 @@ class _ChatRichTextState extends State<ChatRichText> {
     for (final match in matches) {
       if (match.start > cursor) {
         spans.addAll(
-          _parseEmojis(
+          _parseEmojisAndMentions(
             widget.text.substring(cursor, match.start),
             widget.style,
           ),
@@ -207,12 +242,12 @@ class _ChatRichTextState extends State<ChatRichText> {
         ),
       );
       if (trailing.isNotEmpty) {
-        spans.addAll(_parseEmojis(trailing, widget.style));
+        spans.addAll(_parseEmojisAndMentions(trailing, widget.style));
       }
       cursor = match.end;
     }
     if (cursor < widget.text.length) {
-      spans.addAll(_parseEmojis(widget.text.substring(cursor), widget.style));
+      spans.addAll(_parseEmojisAndMentions(widget.text.substring(cursor), widget.style));
     }
 
     return Text.rich(
