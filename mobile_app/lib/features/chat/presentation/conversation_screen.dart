@@ -13,21 +13,19 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:gal/gal.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:open_filex/open_filex.dart';
-import 'widgets/attachment_bottom_sheet.dart';
-import 'widgets/scheduled_messages_list.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:uuid/uuid.dart';
 import 'package:swipe_to/swipe_to.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/network/media_url_resolver.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/services/permission_request_coordinator.dart';
-import '../../../shared/widgets/app_loading_placeholders.dart';
 import '../../../shared/services/remote_print_service.dart';
+import '../../../shared/widgets/app_loading_placeholders.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../data/chat_socket_service.dart';
@@ -37,14 +35,16 @@ import 'attachment_send_dialogs.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
 import 'group_management_screen.dart';
+import 'widgets/attachment_bottom_sheet.dart';
 import 'widgets/chat_animated_reaction_picker.dart';
 import 'widgets/chat_audio_attachment_player.dart';
 import 'widgets/chat_avatar.dart';
 import 'widgets/chat_link_text.dart';
-import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/chat_poll_bubble.dart';
-import 'widgets/poll_creator_dialog.dart';
+import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/gif_picker_panel.dart';
+import 'widgets/poll_creator_dialog.dart';
+import 'widgets/scheduled_messages_list.dart';
 
 /// خطوط احتياطية لعرض الإيموجي ملوّنًا (مهم على سطح المكتب/لينكس).
 const List<String> _kChatReactionEmojiFontFallbacks = <String>[

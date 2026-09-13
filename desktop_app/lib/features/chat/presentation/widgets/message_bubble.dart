@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/utils/formatters.dart';
+import '../../../../shared/models/app_user.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
 import '../chat_appearance.dart';
@@ -13,7 +14,6 @@ import 'chat_animated_reaction_picker.dart';
 import 'chat_audio_attachment_player.dart';
 import 'chat_poll_bubble.dart';
 import 'chat_text_parser.dart';
-import '../../../../shared/models/app_user.dart';
 
 const List<String> _kReactionEmojiFontFallbacks = <String>[
   'Apple Color Emoji',
