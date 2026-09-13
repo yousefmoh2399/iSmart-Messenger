@@ -154,9 +154,7 @@ class _GroupManagementScreenState extends ConsumerState<GroupManagementScreen> {
           user.username.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
 
-    final blockedUsers = allUsers
-        .where((user) => blockedIds.contains(user.id))
-        .toList();
+    final blockedUsers = _conversation.blockedMembers;
 
     return DefaultTabController(
       length: 3,

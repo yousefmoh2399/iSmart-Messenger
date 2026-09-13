@@ -26,7 +26,6 @@ class ChatPermissionSet {
     required this.canManagePrinters,
     required this.canSyncPrinters,
     required this.canExportPrinterReports,
-    required this.canViewSnipeit,
   });
 
   final bool canCreateUsers;
@@ -49,7 +48,6 @@ class ChatPermissionSet {
   final bool canManagePrinters;
   final bool canSyncPrinters;
   final bool canExportPrinterReports;
-  final bool canViewSnipeit;
 
   factory ChatPermissionSet.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
@@ -74,7 +72,6 @@ class ChatPermissionSet {
       canManagePrinters: map['canManagePrinters'] == true,
       canSyncPrinters: map['canSyncPrinters'] == true,
       canExportPrinterReports: map['canExportPrinterReports'] == true,
-      canViewSnipeit: map['canViewSnipeit'] == true,
     );
   }
 
@@ -100,7 +97,6 @@ class ChatPermissionSet {
       'canManagePrinters': canManagePrinters,
       'canSyncPrinters': canSyncPrinters,
       'canExportPrinterReports': canExportPrinterReports,
-      'canViewSnipeit': canViewSnipeit,
     };
   }
 }
@@ -112,7 +108,6 @@ class ChatDirectoryUser {
     required this.fullName,
     required this.role,
     required this.departmentId,
-    this.departmentIds = const [],
     required this.branchId,
     required this.branchCode,
     required this.isOnline,
@@ -128,7 +123,6 @@ class ChatDirectoryUser {
   final String fullName;
   final String role;
   final String? departmentId;
-  final List<String> departmentIds;
   final String? branchId;
   final String branchCode;
   final bool isOnline;
@@ -148,15 +142,12 @@ class ChatDirectoryUser {
       fullName: json['fullName'] as String? ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
-      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
-          .map((entry) => entry.toString())
-          .toList(),
       branchId: json['branchId'] as String?,
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       presenceStatus: json['presenceStatus'] as String? ?? 'offline',
       isActive: json['isActive'] as bool? ?? true,
-      avatarUrl: _rawMediaUrl(json['avatarUrl']),
+      avatarUrl: resolveMediaUrl(json['avatarUrl'] as String?),
       lastSeen: json['lastSeen'] is String
           ? DateTime.tryParse(json['lastSeen'] as String)
           : null,
@@ -335,6 +326,7 @@ class ChatConversation {
     required this.admins,
     required this.broadcastPublisherIds,
     required this.blockedMemberIds,
+    this.blockedMembers = const [],
     required this.pinnedMessage,
     required this.lastMessage,
     required this.unreadCount,
@@ -357,6 +349,7 @@ class ChatConversation {
   final List<ChatDirectoryUser> admins;
   final List<String> broadcastPublisherIds;
   final List<String> blockedMemberIds;
+  final List<ChatDirectoryUser> blockedMembers;
   final ChatPinnedMessage? pinnedMessage;
   final ChatLastMessage? lastMessage;
   final int unreadCount;
@@ -390,6 +383,7 @@ class ChatConversation {
     List<ChatDirectoryUser>? admins,
     List<String>? broadcastPublisherIds,
     List<String>? blockedMemberIds,
+    List<ChatDirectoryUser>? blockedMembers,
     ChatPinnedMessage? pinnedMessage,
     ChatLastMessage? lastMessage,
     int? unreadCount,
@@ -416,6 +410,7 @@ class ChatConversation {
       blockedMemberIds: _normalizeStringList(
         blockedMemberIds ?? this.blockedMemberIds,
       ),
+      blockedMembers: blockedMembers ?? this.blockedMembers,
       pinnedMessage: pinnedMessage ?? this.pinnedMessage,
       lastMessage: lastMessage ?? this.lastMessage,
       unreadCount: unreadCount ?? this.unreadCount,
@@ -455,6 +450,10 @@ class ChatConversation {
             ?.map((entry) => entry.toString())
             .toList(),
       ),
+      blockedMembers: (json['blockedMembers'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ChatDirectoryUser.fromJson)
+          .toList(),
       pinnedMessage: json['pinnedMessage'] is Map<String, dynamic>
           ? ChatPinnedMessage.fromJson(
               json['pinnedMessage'] as Map<String, dynamic>,
@@ -729,7 +728,7 @@ class ChatMessage {
           : null,
       content: json['content'] as String? ?? '',
       messageType: json['messageType'] as String? ?? 'text',
-      fileUrl: _rawMediaUrl(json['fileUrl']),
+      fileUrl: resolveMediaUrl(json['fileUrl'] as String?),
       fileName: json['fileName'] as String?,
       fileSize: json['fileSize'] as int?,
       mimeType: json['mimeType'] as String?,
@@ -754,10 +753,6 @@ class ChatMessage {
           .toList(),
     );
   }
-}
-
-String? _rawMediaUrl(Object? value) {
-  return resolveMediaUrl(value?.toString());
 }
 
 class ChatOverviewData {

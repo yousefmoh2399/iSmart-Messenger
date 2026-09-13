@@ -326,6 +326,7 @@ class ChatConversation {
     required this.admins,
     required this.broadcastPublisherIds,
     required this.blockedMemberIds,
+    this.blockedMembers = const [],
     required this.pinnedMessage,
     required this.lastMessage,
     required this.unreadCount,
@@ -348,6 +349,7 @@ class ChatConversation {
   final List<ChatDirectoryUser> admins;
   final List<String> broadcastPublisherIds;
   final List<String> blockedMemberIds;
+  final List<ChatDirectoryUser> blockedMembers;
   final ChatPinnedMessage? pinnedMessage;
   final ChatLastMessage? lastMessage;
   final int unreadCount;
@@ -381,6 +383,7 @@ class ChatConversation {
     List<ChatDirectoryUser>? admins,
     List<String>? broadcastPublisherIds,
     List<String>? blockedMemberIds,
+    List<ChatDirectoryUser>? blockedMembers,
     ChatPinnedMessage? pinnedMessage,
     ChatLastMessage? lastMessage,
     int? unreadCount,
@@ -407,6 +410,7 @@ class ChatConversation {
       blockedMemberIds: _normalizeStringList(
         blockedMemberIds ?? this.blockedMemberIds,
       ),
+      blockedMembers: blockedMembers ?? this.blockedMembers,
       pinnedMessage: pinnedMessage ?? this.pinnedMessage,
       lastMessage: lastMessage ?? this.lastMessage,
       unreadCount: unreadCount ?? this.unreadCount,
@@ -446,6 +450,10 @@ class ChatConversation {
             ?.map((entry) => entry.toString())
             .toList(),
       ),
+      blockedMembers: (json['blockedMembers'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ChatDirectoryUser.fromJson)
+          .toList(),
       pinnedMessage: json['pinnedMessage'] is Map<String, dynamic>
           ? ChatPinnedMessage.fromJson(
               json['pinnedMessage'] as Map<String, dynamic>,

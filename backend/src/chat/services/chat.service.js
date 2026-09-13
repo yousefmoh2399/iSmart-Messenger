@@ -380,6 +380,9 @@ async function serializeConversation(conversation, currentUserId) {
     blockedMemberIds: (conversation.blockedMembers || []).map((entry) =>
       entry._id ? entry._id.toString() : entry.toString()
     ),
+    blockedMembers: (conversation.blockedMembers || []).map((entry) =>
+      entry._id ? serializeUserLite(entry) : { id: entry.toString() }
+    ),
     pinnedMessage: conversation.pinnedMessage
       ? {
           content: conversation.pinnedMessage.content || "",
@@ -579,6 +582,10 @@ async function getConversationById(conversationId) {
     )
     .populate(
       "admins",
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+    )
+    .populate(
+      "blockedMembers",
       "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
     )
     .populate("departmentId", "name code defaultConversationId")
@@ -2110,9 +2117,7 @@ async function removeConversationMember(currentUser, conversationId, userId) {
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== String(userId)
   );
-  const blockedIds = new Set((conversation.blockedMembers || []).map((entry) => entry.toString()));
-  blockedIds.add(String(userId));
-  conversation.blockedMembers = [...blockedIds];
+  conversation.blockedMembers.addToSet(userId);
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
@@ -2233,9 +2238,7 @@ async function blockConversationMember(currentUser, conversationId, userId) {
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== String(userId)
   );
-  const blockedIds = new Set((conversation.blockedMembers || []).map((entry) => entry.toString()));
-  blockedIds.add(String(userId));
-  conversation.blockedMembers = [...blockedIds];
+  conversation.blockedMembers.addToSet(userId);
   await conversation.save();
   await removeConversationMemberState(conversation._id, userId);
   await logAuditEvent({
@@ -2256,9 +2259,7 @@ async function unblockConversationMember(currentUser, conversationId, userId) {
   }).exec();
   assertGroupOwnerAccess(currentUser, conversation);
 
-  conversation.blockedMembers = (conversation.blockedMembers || []).filter(
-    (entry) => entry.toString() !== String(userId)
-  );
+  conversation.blockedMembers.pull(userId);
   await conversation.save();
   await logAuditEvent({
     actorId: currentUser.id,

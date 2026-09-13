@@ -146,9 +146,7 @@ class _GroupManagementDialogState extends ConsumerState<GroupManagementDialog> {
           user.username.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
 
-    final blockedUsers = allUsers
-        .where((user) => blockedIds.contains(user.id))
-        .toList();
+    final blockedUsers = _conversation.blockedMembers;
 
     return DefaultTabController(
       length: 3,
