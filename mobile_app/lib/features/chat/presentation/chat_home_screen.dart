@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
@@ -2045,7 +2045,40 @@ class _ConversationCard extends StatelessWidget {
     );
     final isTypingPreview = typingPreviewText != null;
 
-    return OpenContainer(
+    return LongPressDraggable<ChatConversation>(
+      data: conversation,
+      feedback: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 300,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: accent.withValues(alpha: 0.2),
+                child: Icon(Icons.forum, color: accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.4,
+        child: OpenContainer(
       transitionType: ContainerTransitionType.fade,
       transitionDuration: const Duration(milliseconds: 280),
       closedColor: Colors.transparent,
@@ -2323,6 +2356,261 @@ class _ConversationCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+        ),
+      ),
+      child: OpenContainer(
+        transitionType: ContainerTransitionType.fade,
+        transitionDuration: const Duration(milliseconds: 280),
+        closedColor: Colors.transparent,
+        openColor: colorScheme.surface,
+        closedElevation: 0,
+        openElevation: 0,
+        openBuilder: (context, _) =>
+            ConversationScreen(conversation: conversation),
+        closedBuilder: (context, openContainer) => Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: openContainer,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      Stack(
+                        children: [
+                          ChatAvatar(
+                            radius: 28,
+                            backgroundColor: accent.withValues(alpha: 0.14),
+                            avatarUrl: peer?.avatarUrl,
+                            fallback: Text(
+                              peer != null
+                                  ? _avatarLabel(peer.displayName)
+                                  : _avatarLabel(title),
+                              style: TextStyle(
+                                color: accent,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (peer != null)
+                            PositionedDirectional(
+                              end: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: _presenceColor(peer.presenceStatus),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: colorScheme.surface,
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                                if (conversation.isPinned)
+                                  Padding(
+                                    padding: const EdgeInsetsDirectional.only(
+                                      start: 6,
+                                    ),
+                                    child: Icon(
+                                      Icons.push_pin_rounded,
+                                      size: 14,
+                                      color: accent,
+                                    ),
+                                  ),
+                                if (conversation.isFavorite)
+                                  const Padding(
+                                    padding: EdgeInsetsDirectional.only(start: 6),
+                                    child: Icon(
+                                      Icons.star_rounded,
+                                      size: 14,
+                                      color: Color(0xFFFFB020),
+                                    ),
+                                  ),
+                                if (conversation.isMuted)
+                                  const Padding(
+                                    padding: EdgeInsetsDirectional.only(start: 6),
+                                    child: Icon(
+                                      Icons.volume_off_rounded,
+                                      size: 14,
+                                      color: Color(0xFF708499),
+                                    ),
+                                  ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  conversation.lastMessage?.createdAt != null
+                                      ? formatEgyptTime(
+                                          conversation.lastMessage!.createdAt!,
+                                        )
+                                      : DateFormat('dd/MM').format(
+                                          conversation.updatedAt.toLocal(),
+                                        ),
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: isTypingPreview
+                                        ? appearance.accent
+                                        : colorScheme.onSurfaceVariant,
+                                    fontWeight: isTypingPreview
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                  ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                if (!conversation.isActive)
+                                  const _MetaPill(
+                                    icon: Icons.block_outlined,
+                                    label: 'معطلة',
+                                  ),
+                                if (!conversation.isActive)
+                                  const SizedBox(width: 8),
+                                if (isBlockedForCurrentUser)
+                                  const _MetaPill(
+                                    icon: Icons.lock_outline_rounded,
+                                    label: 'قراءة فقط',
+                                  ),
+                                if (isBlockedForCurrentUser)
+                                  const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 9,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: accent.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    _conversationTypeLabel(conversation.type),
+                                    style: TextStyle(
+                                      color: accent,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                if (showPresence) ...[
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _presenceText(peer),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          PopupMenuButton<String>(
+                            tooltip: 'خيارات المحادثة',
+                            onSelected: (value) {
+                              switch (value) {
+                                case 'pin':
+                                  onTogglePin();
+                                  break;
+                                case 'mute':
+                                  onToggleMute();
+                                  break;
+                                case 'favorite':
+                                  onToggleFavorite();
+                                  break;
+                                case 'delete':
+                                  onDeleteConversation();
+                                  break;
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              PopupMenuItem(
+                                value: 'pin',
+                                child: Text(
+                                  conversation.isPinned
+                                      ? 'إلغاء التثبيت'
+                                      : 'تثبيت',
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'mute',
+                                child: Text(
+                                  conversation.isMuted
+                                      ? 'إلغاء كتم الإشعارات'
+                                      : 'كتم الإشعارات',
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'favorite',
+                                child: Text(
+                                  conversation.isFavorite
+                                      ? 'إلغاء من المفضلة'
+                                      : 'إضافة للمفضلة',
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text(
+                                  'حذف المحادثة',
+                                  style: TextStyle(color: colorScheme.error),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

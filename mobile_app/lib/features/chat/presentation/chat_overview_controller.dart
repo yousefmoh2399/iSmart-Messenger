@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
+
 import 'package:open_filex/open_filex.dart';
 
 import '../../../core/network/api_exception.dart';

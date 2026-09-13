@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 class ChatPollBubble extends StatefulWidget {
   final Map<String, dynamic> poll;
@@ -71,11 +71,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: widget.isMine ? colorScheme.primary : colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
-      ),
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -231,4 +227,5 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
     );
   }
 }
+
 

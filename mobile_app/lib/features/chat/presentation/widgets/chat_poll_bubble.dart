@@ -73,8 +73,8 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: widget.isMine ? colorScheme.primary : colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
+        color: widget.isMine ? colorScheme.primary.withValues(alpha: 0.15) : colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -185,7 +185,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
                             if (showResults && !isChecklist) ...[
                               const SizedBox(width: 12),
                               Text(
-                                '\%',
+                                '%',
                                 style: TextStyle(
                                   color: textColor,
                                   fontWeight: FontWeight.bold,
@@ -201,7 +201,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
                 ),
               ),
             );
-          }),
+          }).toList(),
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -231,4 +231,5 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
     );
   }
 }
+
 
