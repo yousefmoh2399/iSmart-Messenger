@@ -17,10 +17,10 @@ import '../../tickets/presentation/tickets_screen.dart';
 import '../../updates/presentation/update_center_screen.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
+import '../providers/chat_folders_provider.dart';
 import 'chat_admin_management_screen.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
-
 import 'contacts_screen.dart';
 import 'conversation_screen.dart';
 import 'departments_screen.dart';
@@ -28,7 +28,6 @@ import 'favorite_messages_screen.dart';
 import 'rooms_screen.dart';
 import 'widgets/chat_avatar.dart';
 import 'widgets/chat_folder_inline_item.dart';
-import '../providers/chat_folders_provider.dart';
 
 class ChatHomeScreen extends ConsumerStatefulWidget {
   const ChatHomeScreen({super.key});
@@ -720,6 +719,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       case 'chat':
         Navigator.of(context).popUntil((route) => route.isFirst);
         break;
+      case 'chatFolders':
+        _showCreateFolderDialog();
+        break;
       case 'files':
         Navigator.of(
           context,
@@ -782,6 +784,15 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         _confirmLogout();
         break;
     }
+  }
+
+  Future<void> _showCreateFolderDialog() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const _CreateFolderDialog(),
+    );
+    if (!mounted || name == null || name.isEmpty) return;
+    await ref.read(chatFoldersProvider.notifier).createFolder(name);
   }
 
   Future<void> _confirmLogout() async {
@@ -959,7 +970,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
             error: (error, _) => Center(child: Text(error.toString())),
             data: (overview) {
               final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
-              final folderConversationIds = folders.expand((f) => f.conversationIds).toSet();
+              final folderConversationIds = folders
+                  .expand((f) => f.conversationIds)
+                  .toSet();
               final currentUserId = authUser?.id ?? '';
               final searchQuery = _searchController.text.trim().toLowerCase();
               final totalUnread = overview.totalUnread;
@@ -1247,13 +1260,93 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                     child: TabBarView(
                       children: [
                         RefreshIndicator(
-                          onRefresh: () => ref
-                              .read(chatOverviewControllerProvider.notifier)
-                              .refresh(),
+                          onRefresh: () async {
+                            await ref
+                                .read(chatOverviewControllerProvider.notifier)
+                                .refresh();
+                            await ref
+                                .read(chatFoldersProvider.notifier)
+                                .refresh();
+                          },
                           child: ListView(
                             padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
                             children: [
-                              if (folders.isNotEmpty) ...folders.map((folder) => Padding(padding: const EdgeInsets.only(bottom: 2), child: ChatFolderInlineItem(folder: folder, currentUserId: currentUserId, conversations: folder.conversationIds.map((id) => overview.directConversations.firstWhere((c) => c.id == id, orElse: () => ChatConversation(id: id, type: 'unknown', name: '', description: '', departmentId: null, createdBy: null, members: [], admins: [], broadcastPublisherIds: [], blockedMemberIds: [], pinnedMessage: null, lastMessage: null, unreadCount: 0, isArchived: false, isMuted: false, isPinned: false, isFavorite: false, isActive: false, createdAt: DateTime.now(), updatedAt: DateTime.now()))).where((c) => c.type != 'unknown').toList(), buildConversation: (c) => Padding(padding: EdgeInsets.zero, child: _ConversationCard(conversation: c, currentUserId: currentUserId, typingPreviewText: _typingPreviewText(c), appearance: appearance, isDark: isDark, onTap: () => _openConversation(c), onTogglePin: () => _updateConversationPreferences(c, isPinned: !c.isPinned), onToggleMute: () => _updateConversationPreferences(c, isMuted: !c.isMuted), onToggleFavorite: () => _updateConversationPreferences(c, isFavorite: !c.isFavorite), onDeleteConversation: () => _deleteConversation(c)))))),
+                              if (folders.isNotEmpty)
+                                ...folders.map(
+                                  (folder) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 2),
+                                    child: ChatFolderInlineItem(
+                                      folder: folder,
+                                      currentUserId: currentUserId,
+                                      conversations: folder.conversationIds
+                                          .map(
+                                            (id) => overview.directConversations
+                                                .firstWhere(
+                                                  (c) => c.id == id,
+                                                  orElse: () =>
+                                                      ChatConversation(
+                                                        id: id,
+                                                        type: 'unknown',
+                                                        name: '',
+                                                        description: '',
+                                                        departmentId: null,
+                                                        createdBy: null,
+                                                        members: [],
+                                                        admins: [],
+                                                        broadcastPublisherIds:
+                                                            [],
+                                                        blockedMemberIds: [],
+                                                        pinnedMessage: null,
+                                                        lastMessage: null,
+                                                        unreadCount: 0,
+                                                        isArchived: false,
+                                                        isMuted: false,
+                                                        isPinned: false,
+                                                        isFavorite: false,
+                                                        isActive: false,
+                                                        createdAt:
+                                                            DateTime.now(),
+                                                        updatedAt:
+                                                            DateTime.now(),
+                                                      ),
+                                                ),
+                                          )
+                                          .where((c) => c.type != 'unknown')
+                                          .toList(),
+                                      buildConversation: (c) => Padding(
+                                        padding: EdgeInsets.zero,
+                                        child: _ConversationCard(
+                                          conversation: c,
+                                          currentUserId: currentUserId,
+                                          typingPreviewText: _typingPreviewText(
+                                            c,
+                                          ),
+                                          appearance: appearance,
+                                          isDark: isDark,
+                                          onTap: () => _openConversation(c),
+                                          onTogglePin: () =>
+                                              _updateConversationPreferences(
+                                                c,
+                                                isPinned: !c.isPinned,
+                                              ),
+                                          onToggleMute: () =>
+                                              _updateConversationPreferences(
+                                                c,
+                                                isMuted: !c.isMuted,
+                                              ),
+                                          onToggleFavorite: () =>
+                                              _updateConversationPreferences(
+                                                c,
+                                                isFavorite: !c.isFavorite,
+                                              ),
+                                          onDeleteConversation: () =>
+                                              _deleteConversation(c),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              const ChatFolderDropZone(),
                               if (conversations.isNotEmpty) ...[
                                 _HomeSectionHeader(
                                   title: 'أحدث المحادثات',
@@ -1675,6 +1768,47 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   }
 }
 
+class _CreateFolderDialog extends StatefulWidget {
+  const _CreateFolderDialog();
+
+  @override
+  State<_CreateFolderDialog> createState() => _CreateFolderDialogState();
+}
+
+class _CreateFolderDialogState extends State<_CreateFolderDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('مجلد جديد'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: 'اسم المجلد'),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('إنشاء')),
+      ],
+    );
+  }
+}
+
 class _HomeSectionHeader extends StatelessWidget {
   const _HomeSectionHeader({
     required this.title,
@@ -2067,7 +2201,10 @@ class _ConversationCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2079,286 +2216,302 @@ class _ConversationCard extends StatelessWidget {
       childWhenDragging: Opacity(
         opacity: 0.4,
         child: OpenContainer(
-      transitionType: ContainerTransitionType.fade,
-      transitionDuration: const Duration(milliseconds: 280),
-      closedColor: Colors.transparent,
-      openColor: colorScheme.surface,
-      closedElevation: 0,
-      openElevation: 0,
-      openBuilder: (context, _) =>
-          ConversationScreen(conversation: conversation),
-      closedBuilder: (context, openContainer) => Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: openContainer,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    Stack(
-                      children: [
-                        ChatAvatar(
-                          radius: 28,
-                          backgroundColor: accent.withValues(alpha: 0.14),
-                          avatarUrl: peer?.avatarUrl,
-                          fallback: Text(
-                            peer != null
-                                ? _avatarLabel(peer.displayName)
-                                : _avatarLabel(title),
-                            style: TextStyle(
-                              color: accent,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (peer != null)
-                          PositionedDirectional(
-                            end: 0,
-                            bottom: 0,
-                            child: Container(
-                              width: 14,
-                              height: 14,
-                              decoration: BoxDecoration(
-                                color: _presenceColor(peer.presenceStatus),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: colorScheme.surface,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+          transitionType: ContainerTransitionType.fade,
+          transitionDuration: const Duration(milliseconds: 280),
+          closedColor: Colors.transparent,
+          openColor: colorScheme.surface,
+          closedElevation: 0,
+          openElevation: 0,
+          openBuilder: (context, _) =>
+              ConversationScreen(conversation: conversation),
+          closedBuilder: (context, openContainer) => Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: openContainer,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w800),
+                    child: Row(
+                      children: [
+                        Stack(
+                          children: [
+                            ChatAvatar(
+                              radius: 28,
+                              backgroundColor: accent.withValues(alpha: 0.14),
+                              avatarUrl: peer?.avatarUrl,
+                              fallback: Text(
+                                peer != null
+                                    ? _avatarLabel(peer.displayName)
+                                    : _avatarLabel(title),
+                                style: TextStyle(
+                                  color: accent,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              if (conversation.isPinned)
-                                Padding(
-                                  padding: const EdgeInsetsDirectional.only(
-                                    start: 6,
-                                  ),
-                                  child: Icon(
-                                    Icons.push_pin_rounded,
-                                    size: 14,
-                                    color: accent,
-                                  ),
-                                ),
-                              if (conversation.isFavorite)
-                                const Padding(
-                                  padding: EdgeInsetsDirectional.only(start: 6),
-                                  child: Icon(
-                                    Icons.star_rounded,
-                                    size: 14,
-                                    color: Color(0xFFFFB020),
+                            ),
+                            if (peer != null)
+                              PositionedDirectional(
+                                end: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 14,
+                                  height: 14,
+                                  decoration: BoxDecoration(
+                                    color: _presenceColor(peer.presenceStatus),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: colorScheme.surface,
+                                      width: 2,
+                                    ),
                                   ),
                                 ),
-                              if (conversation.isMuted)
-                                const Padding(
-                                  padding: EdgeInsetsDirectional.only(start: 6),
-                                  child: Icon(
-                                    Icons.volume_off_rounded,
-                                    size: 14,
-                                    color: Color(0xFF708499),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                    ),
                                   ),
-                                ),
-                              const SizedBox(width: 8),
-                              Text(
-                                conversation.lastMessage?.createdAt != null
-                                    ? formatEgyptTime(
-                                        conversation.lastMessage!.createdAt!,
-                                      )
-                                    : DateFormat('dd/MM').format(
-                                        conversation.updatedAt.toLocal(),
+                                  if (conversation.isPinned)
+                                    Padding(
+                                      padding: const EdgeInsetsDirectional.only(
+                                        start: 6,
                                       ),
-                                style: Theme.of(context).textTheme.labelSmall,
+                                      child: Icon(
+                                        Icons.push_pin_rounded,
+                                        size: 14,
+                                        color: accent,
+                                      ),
+                                    ),
+                                  if (conversation.isFavorite)
+                                    const Padding(
+                                      padding: EdgeInsetsDirectional.only(
+                                        start: 6,
+                                      ),
+                                      child: Icon(
+                                        Icons.star_rounded,
+                                        size: 14,
+                                        color: Color(0xFFFFB020),
+                                      ),
+                                    ),
+                                  if (conversation.isMuted)
+                                    const Padding(
+                                      padding: EdgeInsetsDirectional.only(
+                                        start: 6,
+                                      ),
+                                      child: Icon(
+                                        Icons.volume_off_rounded,
+                                        size: 14,
+                                        color: Color(0xFF708499),
+                                      ),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    conversation.lastMessage?.createdAt != null
+                                        ? formatEgyptTime(
+                                            conversation
+                                                .lastMessage!
+                                                .createdAt!,
+                                          )
+                                        : DateFormat('dd/MM').format(
+                                            conversation.updatedAt.toLocal(),
+                                          ),
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.labelSmall,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                preview,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: isTypingPreview
+                                          ? appearance.accent
+                                          : colorScheme.onSurfaceVariant,
+                                      fontWeight: isTypingPreview
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  if (!conversation.isActive)
+                                    const _MetaPill(
+                                      icon: Icons.block_outlined,
+                                      label: 'معطلة',
+                                    ),
+                                  if (!conversation.isActive)
+                                    const SizedBox(width: 8),
+                                  if (isBlockedForCurrentUser)
+                                    const _MetaPill(
+                                      icon: Icons.lock_outline_rounded,
+                                      label: 'قراءة فقط',
+                                    ),
+                                  if (isBlockedForCurrentUser)
+                                    const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: accent.withValues(alpha: 0.10),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      _conversationTypeLabel(conversation.type),
+                                      style: TextStyle(
+                                        color: accent,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  if (showPresence) ...[
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _presenceText(peer),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ],
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            preview,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: isTypingPreview
-                                      ? appearance.accent
-                                      : colorScheme.onSurfaceVariant,
-                                  fontWeight: isTypingPreview
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            PopupMenuButton<String>(
+                              tooltip: 'خيارات المحادثة',
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'pin':
+                                    onTogglePin();
+                                    break;
+                                  case 'mute':
+                                    onToggleMute();
+                                    break;
+                                  case 'favorite':
+                                    onToggleFavorite();
+                                    break;
+                                  case 'delete':
+                                    onDeleteConversation();
+                                    break;
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'pin',
+                                  child: Text(
+                                    conversation.isPinned
+                                        ? 'إزالة التثبيت'
+                                        : 'تثبيت المحادثة',
+                                  ),
                                 ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              if (!conversation.isActive)
-                                const _MetaPill(
-                                  icon: Icons.block_outlined,
-                                  label: 'معطلة',
+                                PopupMenuItem(
+                                  value: 'mute',
+                                  child: Text(
+                                    conversation.isMuted
+                                        ? 'إلغاء الكتم'
+                                        : 'كتم المحادثة',
+                                  ),
                                 ),
-                              if (!conversation.isActive)
-                                const SizedBox(width: 8),
-                              if (isBlockedForCurrentUser)
-                                const _MetaPill(
-                                  icon: Icons.lock_outline_rounded,
-                                  label: 'قراءة فقط',
+                                PopupMenuItem(
+                                  value: 'favorite',
+                                  child: Text(
+                                    conversation.isFavorite
+                                        ? 'إزالة من المفضلة'
+                                        : 'إضافة إلى المفضلة',
+                                  ),
                                 ),
-                              if (isBlockedForCurrentUser)
-                                const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 9,
-                                  vertical: 4,
+                                const PopupMenuDivider(),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('مسح/مغادرة/حذف'),
                                 ),
-                                decoration: BoxDecoration(
-                                  color: accent.withValues(alpha: 0.10),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
+                              ],
+                              child: Icon(
+                                Icons.more_vert_rounded,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            if (conversation.unreadCount > 0) ...[
+                              const SizedBox(height: 6),
+                              CircleAvatar(
+                                radius: 13,
+                                backgroundColor: appearance.accent,
                                 child: Text(
-                                  _conversationTypeLabel(conversation.type),
-                                  style: TextStyle(
-                                    color: accent,
+                                  '${conversation.unreadCount}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ),
-                              if (showPresence) ...[
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _presenceText(peer),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelSmall
-                                        ?.copyWith(
-                                          color: colorScheme.onSurfaceVariant,
-                                        ),
-                                  ),
-                                ),
-                              ],
                             ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        PopupMenuButton<String>(
-                          tooltip: 'خيارات المحادثة',
-                          onSelected: (value) {
-                            switch (value) {
-                              case 'pin':
-                                onTogglePin();
-                                break;
-                              case 'mute':
-                                onToggleMute();
-                                break;
-                              case 'favorite':
-                                onToggleFavorite();
-                                break;
-                              case 'delete':
-                                onDeleteConversation();
-                                break;
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: 'pin',
-                              child: Text(
-                                conversation.isPinned
-                                    ? 'إزالة التثبيت'
-                                    : 'تثبيت المحادثة',
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'mute',
-                              child: Text(
-                                conversation.isMuted
-                                    ? 'إلغاء الكتم'
-                                    : 'كتم المحادثة',
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'favorite',
-                              child: Text(
-                                conversation.isFavorite
-                                    ? 'إزالة من المفضلة'
-                                    : 'إضافة إلى المفضلة',
-                              ),
-                            ),
-                            const PopupMenuDivider(),
-                            const PopupMenuItem(
-                              value: 'delete',
-                              child: Text('مسح/مغادرة/حذف'),
-                            ),
                           ],
-                          child: Icon(
-                            Icons.more_vert_rounded,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
                         ),
-                        if (conversation.unreadCount > 0) ...[
-                          const SizedBox(height: 6),
-                          CircleAvatar(
-                            radius: 13,
-                            backgroundColor: appearance.accent,
-                            child: Text(
-                              '${conversation.unreadCount}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 80,
+                      end: 16,
+                    ),
+                    child: Divider(
+                      height: 0.5,
+                      thickness: 0.5,
+                      color: isDark
+                          ? const Color(0xFF38383A)
+                          : const Color(0xFFC6C6C8),
+                    ),
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsetsDirectional.only(start: 80, end: 16),
-                child: Divider(
-                  height: 0.5,
-                  thickness: 0.5,
-                  color: isDark
-                      ? const Color(0xFF38383A)
-                      : const Color(0xFFC6C6C8),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
         ),
       ),
       child: OpenContainer(
@@ -2431,7 +2584,9 @@ class _ConversationCard extends StatelessWidget {
                                     title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.titleSmall
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
                                         ?.copyWith(fontWeight: FontWeight.w800),
                                   ),
                                 ),
@@ -2448,7 +2603,9 @@ class _ConversationCard extends StatelessWidget {
                                   ),
                                 if (conversation.isFavorite)
                                   const Padding(
-                                    padding: EdgeInsetsDirectional.only(start: 6),
+                                    padding: EdgeInsetsDirectional.only(
+                                      start: 6,
+                                    ),
                                     child: Icon(
                                       Icons.star_rounded,
                                       size: 14,
@@ -2457,7 +2614,9 @@ class _ConversationCard extends StatelessWidget {
                                   ),
                                 if (conversation.isMuted)
                                   const Padding(
-                                    padding: EdgeInsetsDirectional.only(start: 6),
+                                    padding: EdgeInsetsDirectional.only(
+                                      start: 6,
+                                    ),
                                     child: Icon(
                                       Icons.volume_off_rounded,
                                       size: 14,
@@ -3258,6 +3417,3 @@ String _avatarLabel(String value) {
   }
   return trimmed.substring(0, 1).toUpperCase();
 }
-
-
-

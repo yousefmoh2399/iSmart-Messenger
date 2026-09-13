@@ -1100,8 +1100,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _applyConversationUpdate(conversation);
     return conversation;
   }
-
-
 }
 
 class ConversationMessagesController
@@ -1538,7 +1536,7 @@ class ConversationMessagesController
         scheduledFor: scheduledFor,
       ),
     );
-    
+
     if (scheduledFor != null) {
       // Do not add scheduled messages to the main chat list
       return;
@@ -1728,6 +1726,18 @@ class ConversationMessagesController
         );
       }
       rethrow;
+    }
+  }
+
+  Future<void> votePoll(String messageId, List<String> optionIds) async {
+    final updated = await _guardAuth(
+      () => _repository().votePoll(messageId: messageId, optionIds: optionIds),
+    );
+    final latest = state.valueOrNull;
+    if (latest != null) {
+      state = AsyncData(
+        latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
+      );
     }
   }
 

@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../shared/providers/providers.dart';
 import '../models/chat_models.dart';
 
@@ -10,7 +12,18 @@ class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {
     return repository.getFolders();
   }
 
-  Future<void> createFolder(String name, {String? icon, List<String> conversationIds = const []}) async {
+  Future<void> refresh() async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(
+      () => ref.read(chatRepositoryProvider).getFolders(),
+    );
+  }
+
+  Future<void> createFolder(
+    String name, {
+    String? icon,
+    List<String> conversationIds = const [],
+  }) async {
     final repository = ref.read(chatRepositoryProvider);
     final folder = await repository.createFolder(
       name: name,
@@ -20,7 +33,12 @@ class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {
     state = AsyncData([...state.valueOrNull ?? [], folder]);
   }
 
-  Future<void> updateFolder(String folderId, {String? name, String? icon, List<String>? conversationIds}) async {
+  Future<void> updateFolder(
+    String folderId, {
+    String? name,
+    String? icon,
+    List<String>? conversationIds,
+  }) async {
     final repository = ref.read(chatRepositoryProvider);
     final updated = await repository.updateFolder(
       folderId: folderId,
@@ -31,8 +49,22 @@ class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {
     final current = state.valueOrNull ?? [];
     state = AsyncData([
       for (final f in current)
-        if (f.id == folderId) updated else f
+        if (f.id == folderId) updated else f,
     ]);
+  }
+
+  Future<void> removeConversationFromAllFolders(String conversationId) async {
+    final folders = state.valueOrNull ?? [];
+    for (final folder in folders) {
+      if (folder.conversationIds.contains(conversationId)) {
+        await updateFolder(
+          folder.id,
+          conversationIds: folder.conversationIds
+              .where((id) => id != conversationId)
+              .toList(),
+        );
+      }
+    }
   }
 
   Future<void> deleteFolder(String folderId) async {
@@ -49,6 +81,7 @@ class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {
   }
 }
 
-final chatFoldersProvider = AsyncNotifierProvider<ChatFoldersController, List<ChatFolder>>(() {
-  return ChatFoldersController();
-});
+final chatFoldersProvider =
+    AsyncNotifierProvider<ChatFoldersController, List<ChatFolder>>(() {
+      return ChatFoldersController();
+    });

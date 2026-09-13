@@ -832,6 +832,7 @@ import '../../tickets/presentation/tickets_screen.dart';
 import '../../updates/presentation/update_center_screen.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
+import '../providers/chat_folders_provider.dart';
 import 'chat_admin_panel.dart';
 import 'chat_appearance.dart';
 import 'favorite_messages_screen.dart';
@@ -839,8 +840,8 @@ import 'group_management_dialog.dart';
 import 'widgets/chat_screen.dart';
 import 'widgets/chat_sidebar.dart';
 import 'widgets/chat_ui_helpers.dart';
-import 'widgets/right_panel.dart';
 import 'widgets/new_conversation_dialog.dart' as widgets;
+import 'widgets/right_panel.dart';
 
 // ─── Telegram-style colour tokens ────────────────────────────────────────────
 class _TgColors {
@@ -1625,9 +1626,12 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                       overview: overview,
                     );
                   },
-                  onRefresh: () => ref
-                      .read(chatOverviewControllerProvider.notifier)
-                      .refresh(),
+                  onRefresh: () async {
+                    await ref
+                        .read(chatOverviewControllerProvider.notifier)
+                        .refresh();
+                    await ref.read(chatFoldersProvider.notifier).refresh();
+                  },
                   onOpenAdmin: () {
                     setState(() {
                       _showAdminPanel = true;
@@ -1793,7 +1797,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                             onToggleRightPanel: () => setState(
                               () => _showRightPanel = !_showRightPanel,
                             ),
-                            onCloseConversation: () => _selectConversation(null),
+                            onCloseConversation: () =>
+                                _selectConversation(null),
                             onConversationDeleted: () {
                               if (_selectedConversationId ==
                                   selectedConversation.id) {

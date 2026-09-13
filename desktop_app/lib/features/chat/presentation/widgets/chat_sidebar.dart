@@ -799,6 +799,7 @@ class ChatSidebar extends ConsumerWidget {
                                   ),
                                 ),
                               )),
+                        const ChatFolderDropZone(),
                         if (recentConversations.isNotEmpty) ...[
                           _SidebarSectionHeader(
                             title: currentFilter == ChatSidebarFilter.direct

@@ -953,20 +953,20 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:swipe_to/swipe_to.dart';
 import 'package:path/path.dart' as p;
+import 'package:swipe_to/swipe_to.dart';
 
-import '../../../admin/models/update_management_models.dart';
 import '../../../../core/network/ip_address_utils.dart';
 import '../../../../core/network/media_url_resolver.dart';
 import '../../../../shared/models/app_user.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../../shared/widgets/app_loading_placeholders.dart';
-import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../../../shared/widgets/button_loading_indicator.dart';
 import '../../../../shared/widgets/loading_indicator.dart';
+import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../../../shared/widgets/shimmer_skeleton.dart';
+import '../../../admin/models/update_management_models.dart';
 import '../../data/chat_socket_service.dart';
 import '../../models/chat_models.dart';
 import '../../utils/chat_attachment_policy.dart';
@@ -975,15 +975,11 @@ import 'attachment_send_dialogs.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_animated_reaction_picker.dart';
 import 'chat_input.dart';
-
-
-import 'chat_sidebar.dart';
 import 'chat_ui_helpers.dart';
-import 'message_bubble.dart';
-import 'scheduled_messages_list.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'poll_creator_dialog.dart';
 import 'gif_picker_panel.dart';
+import 'message_bubble.dart';
+import 'poll_creator_dialog.dart';
+import 'scheduled_messages_list.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
@@ -1189,7 +1185,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _onMessageTextChanged() {
-    if (widget.conversation.type != 'group' && widget.conversation.type != 'department') return;
+    if (widget.conversation.type != 'group' &&
+        widget.conversation.type != 'department')
+      return;
     final text = _messageController.text;
     final selection = _messageController.selection;
     if (selection.baseOffset >= 0 && selection.baseOffset <= text.length) {
@@ -2196,7 +2194,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   List<String> _extractMentions(String text) {
-    if (widget.conversation.type != 'group' && widget.conversation.type != 'department') return const [];
+    if (widget.conversation.type != 'group' &&
+        widget.conversation.type != 'department')
+      return const [];
     final mentions = <String>[];
     final regex = RegExp(r'@([A-Za-z0-9_]+)');
     for (final match in regex.allMatches(text)) {
@@ -2217,7 +2217,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  Future<void> _sendText({bool isSilent = false, DateTime? scheduledFor}) async {
+  Future<void> _sendText({
+    bool isSilent = false,
+    DateTime? scheduledFor,
+  }) async {
     if (_isUploadingAttachment) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2291,12 +2294,17 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('من شاهد الرسالة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        title: const Text(
+          'من شاهد الرسالة',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
         content: SizedBox(
           width: 400,
           height: 400,
           child: FutureBuilder<Map<String, dynamic>>(
-            future: ref.read(chatRepositoryProvider).getReadReceipts(message.id),
+            future: ref
+                .read(chatRepositoryProvider)
+                .getReadReceipts(message.id),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -2316,14 +2324,21 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                     leading: SafeNetworkAvatar(
                       imageUrl: user['avatarUrl']?.toString() ?? '',
                       radius: 18,
-                      fallbackText: user['displayName']?.toString().isNotEmpty == true 
-                          ? user['displayName'].toString()[0].toUpperCase() 
+                      fallbackText:
+                          user['displayName']?.toString().isNotEmpty == true
+                          ? user['displayName'].toString()[0].toUpperCase()
                           : '?',
-                      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer,
                     ),
                     title: Text(user['displayName']?.toString() ?? 'مستخدم'),
-                    subtitle: user['seenAt'] != null 
-                        ? Text(DateTime.parse(user['seenAt'].toString()).toLocal().toString()) 
+                    subtitle: user['seenAt'] != null
+                        ? Text(
+                            DateTime.parse(
+                              user['seenAt'].toString(),
+                            ).toLocal().toString(),
+                          )
                         : null,
                   );
                 },
@@ -2347,7 +2362,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       builder: (context) {
         return Dialog(
           backgroundColor: Theme.of(context).colorScheme.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: SizedBox(
             width: 400,
             height: 600,
@@ -2360,7 +2377,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                     children: [
                       const Text(
                         'الرسائل المجدولة',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.close_rounded),
@@ -2371,7 +2391,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
                 const Divider(height: 1),
                 Expanded(
-                  child: ScheduledMessagesList(conversationId: widget.conversation.id),
+                  child: ScheduledMessagesList(
+                    conversationId: widget.conversation.id,
+                  ),
                 ),
               ],
             ),
@@ -2429,7 +2451,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                         _sendText(scheduledFor: scheduledFor);
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('يجب أن يكون الوقت في المستقبل.')),
+                          const SnackBar(
+                            content: Text('يجب أن يكون الوقت في المستقبل.'),
+                          ),
                         );
                       }
                     }
@@ -2665,7 +2689,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _createPoll() async {
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-    final conversation = overview?.conversations.where((c) => c.id == _conversationId).firstOrNull ?? widget.conversation;
+    final conversation =
+        overview?.conversations
+            .where((c) => c.id == _conversationId)
+            .firstOrNull ??
+        widget.conversation;
     if (_isReadOnlyConversation(conversation)) return;
 
     final pollData = await showDialog<Map<String, dynamic>>(
@@ -2685,7 +2713,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
     try {
       await ref
-          .read(conversationMessagesControllerProvider(_conversationId).notifier)
+          .read(
+            conversationMessagesControllerProvider(_conversationId).notifier,
+          )
           .sendMessage(
             content: '',
             messageType: 'poll',
@@ -2697,16 +2727,20 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create poll: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create poll: $e')));
       }
     }
   }
 
   Future<void> _createChecklist() async {
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-    final conversation = overview?.conversations.where((c) => c.id == _conversationId).firstOrNull ?? widget.conversation;
+    final conversation =
+        overview?.conversations
+            .where((c) => c.id == _conversationId)
+            .firstOrNull ??
+        widget.conversation;
     if (_isReadOnlyConversation(conversation)) return;
 
     final pollData = await showDialog<Map<String, dynamic>>(
@@ -2727,7 +2761,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
     try {
       await ref
-          .read(conversationMessagesControllerProvider(_conversationId).notifier)
+          .read(
+            conversationMessagesControllerProvider(_conversationId).notifier,
+          )
           .sendMessage(
             content: '',
             messageType: 'poll',
@@ -2748,24 +2784,26 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _openGifPicker() async {
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-    final conversation = overview?.conversations.where((c) => c.id == _conversationId).firstOrNull ?? widget.conversation;
+    final conversation =
+        overview?.conversations
+            .where((c) => c.id == _conversationId)
+            .firstOrNull ??
+        widget.conversation;
     if (_isReadOnlyConversation(conversation)) return;
 
     final gifUrl = await showDialog<String>(
       context: context,
       builder: (_) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: const SizedBox(
-          width: 500,
-          height: 600,
-          child: GifPickerPanel(),
-        ),
+        child: const SizedBox(width: 500, height: 600, child: GifPickerPanel()),
       ),
     );
 
     if (gifUrl != null && mounted) {
       await ref
-          .read(conversationMessagesControllerProvider(_conversationId).notifier)
+          .read(
+            conversationMessagesControllerProvider(_conversationId).notifier,
+          )
           .sendMessage(
             content: '',
             messageType: 'gif',
@@ -2778,22 +2816,25 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _votePoll(String messageId, List<String> optionIds) async {
     try {
-      await ref.read(chatOverviewControllerProvider.notifier).votePoll(
-        messageId: messageId,
-        optionIds: optionIds,
-      );
+      await ref
+          .read(
+            conversationMessagesControllerProvider(_conversationId).notifier,
+          )
+          .votePoll(messageId, optionIds);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to vote: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to vote: $e')));
       }
     }
   }
 
   Future<void> _exportPoll(String messageId) async {
     try {
-      final file = await ref.read(chatRepositoryProvider).downloadPollExport(messageId);
+      final file = await ref
+          .read(chatRepositoryProvider)
+          .downloadPollExport(messageId);
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done) {
         if (mounted) {
@@ -2804,9 +2845,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to export: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to export: $e')));
       }
     }
   }
@@ -4303,7 +4344,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 GestureDetector(
                   onTap: () {
                     if (liveConversation.pinnedMessage!.messageId != null) {
-                      _scrollToMessageById(liveConversation.pinnedMessage!.messageId!);
+                      _scrollToMessageById(
+                        liveConversation.pinnedMessage!.messageId!,
+                      );
                     }
                   },
                   child: Container(
@@ -4611,7 +4654,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       isActiveSearchMatch:
                                           activeSearchMessageId == message.id,
                                       chatPreferences: chatPreferences,
-                                      onShowDetails: liveConversation.type != 'direct' && isMine 
+                                      onShowDetails:
+                                          liveConversation.type != 'direct' &&
+                                              isMine
                                           ? () => _showMessageDetails(message)
                                           : null,
                                       onTap: _selectionMode
@@ -4669,16 +4714,20 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                           ),
                                       onPin: canManagePinnedMessage
                                           ? () => ref
-                                              .read(
-                                                chatOverviewControllerProvider.notifier,
-                                              )
-                                              .setGroupPinnedMessage(
-                                                conversationId: _conversationId,
-                                                content: message.content.isNotEmpty
-                                                    ? message.content
-                                                    : (message.fileName ?? 'Ù…Ø±Ù Ù‚'),
-                                                messageId: message.id,
-                                              )
+                                                .read(
+                                                  chatOverviewControllerProvider
+                                                      .notifier,
+                                                )
+                                                .setGroupPinnedMessage(
+                                                  conversationId:
+                                                      _conversationId,
+                                                  content:
+                                                      message.content.isNotEmpty
+                                                      ? message.content
+                                                      : (message.fileName ??
+                                                            'Ù…Ø±Ù Ù‚'),
+                                                  messageId: message.id,
+                                                )
                                           : null,
                                       onVotePoll: (options) =>
                                           _votePoll(message.id, options),

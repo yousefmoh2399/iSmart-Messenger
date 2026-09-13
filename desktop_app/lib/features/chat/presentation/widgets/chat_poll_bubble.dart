@@ -20,26 +20,49 @@ class ChatPollBubble extends StatefulWidget {
   State<ChatPollBubble> createState() => _ChatPollBubbleState();
 }
 
-class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProviderStateMixin {
+class _ChatPollBubbleState extends State<ChatPollBubble>
+    with SingleTickerProviderStateMixin {
   late Map<String, dynamic> pollData;
+  Set<String> _selectedOptionIds = <String>{};
+  bool _hasPendingVote = false;
 
   @override
   void initState() {
     super.initState();
     pollData = widget.poll;
+    _selectedOptionIds = _selectedOptionsFrom(widget.poll);
   }
 
   @override
   void didUpdateWidget(ChatPollBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
     pollData = widget.poll;
+    final serverSelection = _selectedOptionsFrom(widget.poll);
+    if (!_hasPendingVote ||
+        serverSelection.containsAll(_selectedOptionIds) &&
+            _selectedOptionIds.containsAll(serverSelection)) {
+      _selectedOptionIds = serverSelection;
+      _hasPendingVote = false;
+    }
+  }
+
+  Set<String> _selectedOptionsFrom(Map<String, dynamic> data) {
+    final votes = data['votes'] as Map<String, dynamic>? ?? {};
+    final selected = <String>{};
+    votes.forEach((optionId, voterList) {
+      if (voterList is List &&
+          voterList.any((voter) => voter.toString() == widget.currentUserId)) {
+        selected.add(optionId);
+      }
+    });
+    return selected;
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    
+
     final question = pollData['question']?.toString() ?? 'استبيان';
     final options = pollData['options'] as List<dynamic>? ?? [];
     final votes = pollData['votes'] as Map<String, dynamic>? ?? {};
@@ -47,27 +70,27 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
     final isClosed = pollData['isClosed'] == true;
     final isChecklist = pollData['isChecklist'] == true;
 
-    final myVotedOptionIds = <String>[];
     final uniqueVoters = <String>{};
-    
+
     votes.forEach((optId, voterList) {
       if (voterList is List) {
         for (var v in voterList) {
           final vid = v.toString();
           uniqueVoters.add(vid);
-          if (vid == widget.currentUserId) {
-            myVotedOptionIds.add(optId);
-          }
         }
       }
     });
 
     final totalVotes = uniqueVoters.length;
-    final hasVoted = myVotedOptionIds.isNotEmpty;
+    final hasVoted = _selectedOptionIds.isNotEmpty;
     final showResults = (hasVoted || isClosed) && !isChecklist;
 
-    final textColor = widget.isMine ? colorScheme.onPrimary : colorScheme.onSurface;
-    final subTextColor = widget.isMine ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant;
+    final textColor = widget.isMine
+        ? colorScheme.onPrimary
+        : colorScheme.onSurface;
+    final subTextColor = widget.isMine
+        ? colorScheme.onPrimary.withValues(alpha: 0.7)
+        : colorScheme.onSurfaceVariant;
 
     return Container(
       width: double.infinity,
@@ -77,7 +100,11 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
         children: [
           Row(
             children: [
-              Icon(isChecklist ? Icons.checklist_rounded : Icons.poll_rounded, color: textColor, size: 20),
+              Icon(
+                isChecklist ? Icons.checklist_rounded : Icons.poll_rounded,
+                color: textColor,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -95,27 +122,39 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
           ...options.map((opt) {
             final optId = opt['id'].toString();
             final optText = opt['text'].toString();
-            final voterIds = (votes[optId] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+            final voterIds = (votes[optId] as List<dynamic>? ?? [])
+                .map((e) => e.toString())
+                .toList();
             final count = voterIds.length;
             final percentage = totalVotes > 0 ? count / totalVotes : 0.0;
-            final isMyVote = myVotedOptionIds.contains(optId);
+            final isMyVote = _selectedOptionIds.contains(optId);
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: InkWell(
-                onTap: (isClosed || (hasVoted && !isMultipleChoice && !isChecklist)) ? null : () {
-                  if (isMultipleChoice || isChecklist) {
-                    final newVotes = Set<String>.from(myVotedOptionIds);
-                    if (isMyVote) {
-                      newVotes.remove(optId);
-                    } else {
-                      newVotes.add(optId);
-                    }
-                    widget.onVote(newVotes.toList());
-                  } else {
-                    widget.onVote([optId]);
-                  }
-                },
+                onTap:
+                    (isClosed ||
+                        (hasVoted && !isMultipleChoice && !isChecklist))
+                    ? null
+                    : () {
+                        final newVotes = Set<String>.from(_selectedOptionIds);
+                        if (isMultipleChoice || isChecklist) {
+                          if (isMyVote) {
+                            newVotes.remove(optId);
+                          } else {
+                            newVotes.add(optId);
+                          }
+                        } else {
+                          newVotes
+                            ..clear()
+                            ..add(optId);
+                        }
+                        setState(() {
+                          _selectedOptionIds = newVotes;
+                          _hasPendingVote = true;
+                        });
+                        widget.onVote(newVotes.toList());
+                      },
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   clipBehavior: Clip.hardEdge,
@@ -137,9 +176,13 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
                                 widthFactor: value,
                                 child: Container(
                                   decoration: BoxDecoration(
-                                    color: widget.isMine 
-                                      ? colorScheme.onPrimary.withValues(alpha: 0.15) 
-                                      : colorScheme.primary.withValues(alpha: 0.15),
+                                    color: widget.isMine
+                                        ? colorScheme.onPrimary.withValues(
+                                            alpha: 0.15,
+                                          )
+                                        : colorScheme.primary.withValues(
+                                            alpha: 0.15,
+                                          ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                 ),
@@ -148,21 +191,33 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
                           ),
                         ),
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         child: Row(
                           children: [
                             if (!showResults || isChecklist) ...[
                               AnimatedSwitcher(
                                 duration: const Duration(milliseconds: 300),
-                                transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
+                                transitionBuilder: (child, anim) =>
+                                    ScaleTransition(scale: anim, child: child),
                                 child: Icon(
                                   isMyVote
-                                      ? (isChecklist ? Icons.check_box_rounded : Icons.check_circle_rounded)
-                                      : (isChecklist ? Icons.check_box_outline_blank_rounded : Icons.radio_button_unchecked_rounded),
+                                      ? (isChecklist
+                                            ? Icons.check_box_rounded
+                                            : Icons.check_circle_rounded)
+                                      : (isChecklist
+                                            ? Icons
+                                                  .check_box_outline_blank_rounded
+                                            : Icons
+                                                  .radio_button_unchecked_rounded),
                                   key: ValueKey(isMyVote),
                                   size: 20,
-                                  color: isMyVote 
-                                      ? (widget.isMine ? colorScheme.onPrimary : colorScheme.primary) 
+                                  color: isMyVote
+                                      ? (widget.isMine
+                                            ? colorScheme.onPrimary
+                                            : colorScheme.primary)
                                       : subTextColor,
                                 ),
                               ),
@@ -174,7 +229,9 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
                                 style: TextStyle(
                                   color: textColor,
                                   fontSize: 14,
-                                  fontWeight: isMyVote ? FontWeight.bold : FontWeight.normal,
+                                  fontWeight: isMyVote
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
                                 ),
                               ),
                             ),
@@ -209,13 +266,27 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
               if (widget.isMine && totalVotes > 0)
                 TextButton.icon(
                   onPressed: widget.onExport,
-                  icon: Icon(Icons.download_rounded, size: 16, color: widget.isMine ? colorScheme.onPrimary : colorScheme.primary),
+                  icon: Icon(
+                    Icons.download_rounded,
+                    size: 16,
+                    color: widget.isMine
+                        ? colorScheme.onPrimary
+                        : colorScheme.primary,
+                  ),
                   label: Text(
                     'تصدير',
-                    style: TextStyle(color: widget.isMine ? colorScheme.onPrimary : colorScheme.primary, fontSize: 12),
+                    style: TextStyle(
+                      color: widget.isMine
+                          ? colorScheme.onPrimary
+                          : colorScheme.primary,
+                      fontSize: 12,
+                    ),
                   ),
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 0,
+                    ),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -227,5 +298,3 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
     );
   }
 }
-
-
