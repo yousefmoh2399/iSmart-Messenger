@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/chat_repository_provider.dart';
+import '../../../shared/providers/providers.dart';
 import '../models/chat_models.dart';
 
 class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {

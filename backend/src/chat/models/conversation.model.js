@@ -7,7 +7,7 @@ const lastMessageSchema = new mongoose.Schema(
     senderName: { type: String, default: "" },
     messageType: {
       type: String,
-      enum: ["text", "file", "image", "pdf", "audio", "system"],
+      enum: ["text", "file", "image", "pdf", "audio", "system", "poll", "gif"],
       default: "text",
     },
     createdAt: { type: Date, default: null },

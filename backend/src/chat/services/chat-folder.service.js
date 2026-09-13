@@ -1,5 +1,5 @@
 const ChatFolder = require("../models/chat-folder.model");
-const ApiError = require("../../utils/ApiError");
+const ApiError = require("../../utils/api-error");
 
 async function getUserFolders(userId) {
   return await ChatFolder.find({ userId }).sort({ order: 1 }).lean();

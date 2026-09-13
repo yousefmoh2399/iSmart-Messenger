@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../models/printer_models.dart';
 
@@ -11,27 +12,38 @@ class PrinterRepository {
 
   final ApiClient _apiClient;
 
+  // In‑memory cache for overview and dashboard data
+  PrinterOverviewData? _cachedOverview;
+  PrinterDashboardData? _cachedDashboard;
+
   Future<PrinterOverviewData> fetchOverview() async {
-    final responses = await Future.wait([
-      _apiClient.dio.get<Map<String, dynamic>>('/api/printers/dashboard'),
-      _apiClient.dio.get<Map<String, dynamic>>('/api/printers/branches'),
-      _apiClient.dio.get<Map<String, dynamic>>('/api/printers/printers'),
-      _apiClient.dio.get<Map<String, dynamic>>('/api/printers/sync/logs'),
-    ]);
-    final dashboard = PrinterDashboardData.fromJson(_body(responses[0].data));
-    final branches = _list(
-      _body(responses[1].data)['branches'],
-    ).map((entry) => PrinterBranchItem.fromJson(_map(entry))).toList();
-    final printers = _list(
-      _body(responses[2].data)['printers'],
-    ).map((entry) => PrinterItem.fromJson(_map(entry))).toList();
-    final logs = _list(_body(responses[3].data)['logs']).map(_map).toList();
-    return PrinterOverviewData(
-      dashboard: dashboard,
-      branches: branches,
-      printers: printers,
-      logs: logs,
-    );
+    try {
+      final responses = await Future.wait([
+        _apiClient.dio.get<Map<String, dynamic>>('/api/printers/dashboard'),
+        _apiClient.dio.get<Map<String, dynamic>>('/api/printers/branches'),
+        _apiClient.dio.get<Map<String, dynamic>>('/api/printers/printers'),
+        _apiClient.dio.get<Map<String, dynamic>>('/api/printers/sync/logs'),
+      ]);
+      final dashboard = PrinterDashboardData.fromJson(_body(responses[0].data));
+      final branches = _list(
+        _body(responses[1].data)['branches'],
+      ).map((entry) => PrinterBranchItem.fromJson(_map(entry))).toList();
+      final printers = _list(
+        _body(responses[2].data)['printers'],
+      ).map((entry) => PrinterItem.fromJson(_map(entry))).toList();
+      final logs = _list(_body(responses[3].data)['logs']).map(_map).toList();
+      final overview = PrinterOverviewData(
+        dashboard: dashboard,
+        branches: branches,
+        printers: printers,
+        logs: logs,
+      );
+      _cachedOverview = overview;
+      return overview;
+    } on ApiException catch (_) {
+      if (_cachedOverview != null) return _cachedOverview!;
+      rethrow;
+    }
   }
 
   Future<PrinterDashboardData> fetchDashboard({String? branchId}) async {

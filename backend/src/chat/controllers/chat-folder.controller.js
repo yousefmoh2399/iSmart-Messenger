@@ -1,4 +1,4 @@
-const asyncHandler = require("../../middleware/async-handler");
+const asyncHandler = require("../../utils/async-handler");
 const {
   getUserFolders,
   createFolder,
