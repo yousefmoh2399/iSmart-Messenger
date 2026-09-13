@@ -4703,13 +4703,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                         children: [
                                                                           if (message.isPollMessage)
                                                                             ChatPollBubble(
-                                                                              poll: message.metadata?['poll'] ?? {},
+                                                                              poll: message.metadata?['poll'] is Map<String, dynamic>
+                                                                                  ? message.metadata!['poll'] as Map<String, dynamic>
+                                                                                  : message.metadata ?? {},
                                                                               currentUserId: ref.watch(authControllerProvider).valueOrNull?.id ?? '',
                                                                               isMine: isMine,
-                                                                              onVote: (optionIds) {
-                                                                                // We'll call the API directly here for now to save time, or use a provider if available
-                                                                              },
-                                                                              onExport: () {},
+                                                                              onVote: (optionIds) => ref
+                                                                                  .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
+                                                                                  .votePoll(message.id, optionIds),
+                                                                              onExport: () => ref
+                                                                                  .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
+                                                                                  .exportPoll(message.id),
                                                                             )
                                                                           else if (message.isGifMessage)
                                                                             ClipRRect(

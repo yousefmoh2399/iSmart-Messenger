@@ -462,7 +462,7 @@ class ChatRepository {
 
   Future<String> exportPollUrl(String messageId, {String? token}) async {
     final url = '/api/chat/messages/$messageId/poll/export';
-    return '\${_apiClient.dio.options.baseUrl}$url?token=\${token ?? ''}';
+    return '${_apiClient.dio.options.baseUrl}$url?token=${token ?? ''}';
   }
 
   Future<ChatMessage> toggleFavoriteMessage({required String messageId}) async {

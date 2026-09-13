@@ -487,7 +487,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 Padding(
                                   padding: EdgeInsets.only(top: widget.message.content.isEmpty ? 0 : 8.0),
                                   child: ChatPollBubble(
-                                    poll: widget.message.metadata?['poll'] ?? {},
+                                    poll: widget.message.metadata?['poll'] is Map<String, dynamic>
+                                        ? widget.message.metadata!['poll'] as Map<String, dynamic>
+                                        : widget.message.metadata ?? {},
                                     currentUserId: widget.currentUserId,
                                     isMine: widget.isMine,
                                     onVote: widget.onVotePoll ?? (_) {},

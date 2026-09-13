@@ -57,7 +57,7 @@ class _PollCreatorDialogState extends State<PollCreatorDialog> {
       'isAnonymous': _isAnonymous,
       'isMultipleChoice': _isMultipleChoice,
       'options': options.asMap().entries.map((e) => {
-        'id': 'opt_\${e.key}_\${DateTime.now().millisecondsSinceEpoch}',
+        'id': 'opt_${e.key}_${DateTime.now().microsecondsSinceEpoch}',
         'text': e.value,
       }).toList(),
     };
@@ -120,7 +120,7 @@ class _PollCreatorDialogState extends State<PollCreatorDialog> {
                             child: TextField(
                               controller: _optionControllers[index],
                               decoration: InputDecoration(
-                                hintText: 'خيار \${index + 1}',
+                                hintText: 'خيار ${index + 1}',
                                 border: const OutlineInputBorder(),
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               ),

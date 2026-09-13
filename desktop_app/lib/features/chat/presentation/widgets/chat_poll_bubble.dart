@@ -181,7 +181,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
                             if (showResults && !isChecklist) ...[
                               const SizedBox(width: 12),
                               Text(
-                                '\%',
+                                '${(percentage * 100).toStringAsFixed(0)}%',
                                 style: TextStyle(
                                   color: textColor,
                                   fontWeight: FontWeight.bold,
@@ -203,7 +203,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProvid
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'خطأ: ',
+                '$totalVotes تصويت',
                 style: TextStyle(color: subTextColor, fontSize: 12),
               ),
               if (widget.isMine && totalVotes > 0)
