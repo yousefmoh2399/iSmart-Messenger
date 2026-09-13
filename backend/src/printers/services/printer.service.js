@@ -760,16 +760,16 @@ async function discoverBranchPrinters(actor, branchId, options = {}) {
     const discovered = await discoverPrinters(branch.networkRange, {
       skipWebDetails,
       snmpTimeoutMs: fastDiscovery
-        ? Number(process.env.PRINTER_DISCOVERY_TIMEOUT_MS || 1200)
+        ? Number(process.env.PRINTER_DISCOVERY_TIMEOUT_MS || 800)
         : undefined,
       snmpRetries: fastDiscovery
         ? Number(process.env.PRINTER_DISCOVERY_RETRIES || 0)
         : undefined,
       snmpOperationTimeoutMs: fastDiscovery
-        ? Number(process.env.PRINTER_DISCOVERY_OPERATION_TIMEOUT_MS || 1500)
+        ? Number(process.env.PRINTER_DISCOVERY_OPERATION_TIMEOUT_MS || 1200)
         : undefined,
       hostTimeoutMs: fastDiscovery
-        ? Number(process.env.PRINTER_DISCOVERY_HOST_TIMEOUT_MS || 12000)
+        ? Number(process.env.PRINTER_DISCOVERY_HOST_TIMEOUT_MS || 4000)
         : undefined,
     });
     logPrinterSync("branch_sync.discovered", {

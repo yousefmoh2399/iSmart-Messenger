@@ -171,7 +171,6 @@ class _ChatInputState extends State<ChatInput> {
                   ],
                 ),
               ),
-              ),
             Row(
               children: [
                 PopupMenuButton<VoidCallback>(

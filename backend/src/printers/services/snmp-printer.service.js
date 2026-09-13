@@ -848,8 +848,8 @@ async function discoverPrinters(networkRange, options = {}) {
     throw new ApiError(400, "Invalid printer network range. Use CIDR like 192.168.10.0/24, a gateway like 192.168.10.1, a single printer IP, or a range like 192.168.10.20-80.");
   }
   const discovered = [];
-  const concurrency = Number(process.env.PRINTER_DISCOVERY_CONCURRENCY || 24);
-  const workerCount = Number.isFinite(concurrency) && concurrency > 0 ? concurrency : 24;
+  const concurrency = Number(process.env.PRINTER_DISCOVERY_CONCURRENCY || 256);
+  const workerCount = Number.isFinite(concurrency) && concurrency > 0 ? concurrency : 256;
   logPrinterSync("discovery.start", {
     networkRange,
     hostCount: hosts.length,
