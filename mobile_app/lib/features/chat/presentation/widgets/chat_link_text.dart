@@ -96,8 +96,8 @@ class ChatLinkText extends StatelessWidget {
         for (final link in uniqueLinks)
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxWidth),
+            child: SizedBox(
+              width: maxWidth,
               child: AnyLinkPreview(
                 link: link.contains('://') ? link : 'https://$link',
                 displayDirection: UIDirection.uiDirectionHorizontal,

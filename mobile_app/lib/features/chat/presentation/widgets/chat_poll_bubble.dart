@@ -1,64 +1,79 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../models/chat_models.dart';
-import '../../../../shared/providers/providers.dart';
 
-class ChatPollBubble extends ConsumerStatefulWidget {
+class ChatPollBubble extends StatefulWidget {
+  final Map<String, dynamic> poll;
+  final bool isMine;
+  final String currentUserId;
+  final Function(List<String>) onVote;
+  final VoidCallback onExport;
+
   const ChatPollBubble({
     super.key,
-    required this.message,
+    required this.poll,
     required this.isMine,
+    required this.currentUserId,
     required this.onVote,
     required this.onExport,
   });
 
-  final ChatMessage message;
-  final bool isMine;
-  final void Function(List<String> optionIds) onVote;
-  final VoidCallback onExport;
-
   @override
-  ConsumerState<ChatPollBubble> createState() => _ChatPollBubbleState();
+  State<ChatPollBubble> createState() => _ChatPollBubbleState();
 }
 
-class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
-  bool _isExporting = false;
+class _ChatPollBubbleState extends State<ChatPollBubble> with SingleTickerProviderStateMixin {
+  late Map<String, dynamic> pollData;
+
+  @override
+  void initState() {
+    super.initState();
+    pollData = widget.poll;
+  }
+
+  @override
+  void didUpdateWidget(ChatPollBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    pollData = widget.poll;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final metadata = widget.message.metadata ?? {};
-    final question = metadata['question'] as String? ?? 'استبيان غير معروف';
-    final options = (metadata['options'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList();
-    final votes = metadata['votes'] as Map<String, dynamic>? ?? {};
-    final isMultipleChoice = metadata['isMultipleChoice'] == true;
-    final isAnonymous = metadata['isAnonymous'] == true;
-    final isClosed = metadata['isClosed'] == true;
-
-    final authUser = ref.watch(authControllerProvider).user;
-    final myId = authUser?.id.toString();
-
-    // Calculate totals
-    int totalVotes = 0;
-    final myVotedOptionIds = <String>{};
-    for (final entry in votes.entries) {
-      final voterIds = (entry.value as List<dynamic>? ?? []).map((e) => e.toString()).toList();
-      totalVotes += voterIds.length;
-      if (myId != null && voterIds.contains(myId)) {
-        myVotedOptionIds.add(entry.key);
-      }
-    }
-
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final textColor = widget.isMine ? colorScheme.onPrimary : colorScheme.onSurface;
-    final subTextColor = widget.isMine ? colorScheme.onPrimary.withValues(alpha: 0.8) : colorScheme.onSurfaceVariant;
+    
+    final question = pollData['question']?.toString() ?? 'استبيان';
+    final options = pollData['options'] as List<dynamic>? ?? [];
+    final votes = pollData['votes'] as Map<String, dynamic>? ?? {};
+    final isMultipleChoice = pollData['isMultipleChoice'] == true;
+    final isClosed = pollData['isClosed'] == true;
+    final isChecklist = pollData['isChecklist'] == true;
 
-    final isChecklist = metadata['isChecklist'] == true;
+    final myVotedOptionIds = <String>[];
+    final uniqueVoters = <String>{};
+    
+    votes.forEach((optId, voterList) {
+      if (voterList is List) {
+        for (var v in voterList) {
+          final vid = v.toString();
+          uniqueVoters.add(vid);
+          if (vid == widget.currentUserId) {
+            myVotedOptionIds.add(optId);
+          }
+        }
+      }
+    });
+
+    final totalVotes = uniqueVoters.length;
+    final hasVoted = myVotedOptionIds.isNotEmpty;
+    final showResults = (hasVoted || isClosed) && !isChecklist;
+
+    final textColor = widget.isMine ? colorScheme.onPrimary : colorScheme.onSurface;
+    final subTextColor = widget.isMine ? colorScheme.onPrimary.withValues(alpha: 0.7) : colorScheme.onSurfaceVariant;
 
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: widget.isMine ? Colors.transparent : colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        color: widget.isMine ? colorScheme.primary : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -88,14 +103,12 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
             final count = voterIds.length;
             final percentage = totalVotes > 0 ? count / totalVotes : 0.0;
             final isMyVote = myVotedOptionIds.contains(optId);
-            final hasVoted = myVotedOptionIds.isNotEmpty;
-            final showResults = (hasVoted || isClosed) && !isChecklist;
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: InkWell(
-                onTap: (isClosed || hasVoted && !isMultipleChoice) ? null : () {
-                  if (isMultipleChoice) {
+                onTap: (isClosed || (hasVoted && !isMultipleChoice && !isChecklist)) ? null : () {
+                  if (isMultipleChoice || isChecklist) {
                     final newVotes = Set<String>.from(myVotedOptionIds);
                     if (isMyVote) {
                       newVotes.remove(optId);
@@ -120,7 +133,7 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
                         Positioned.fill(
                           child: TweenAnimationBuilder<double>(
                             tween: Tween<double>(begin: 0, end: percentage),
-                            duration: const Duration(milliseconds: 500),
+                            duration: const Duration(milliseconds: 600),
                             curve: Curves.easeOutCubic,
                             builder: (context, value, child) {
                               return FractionallySizedBox(
@@ -142,38 +155,44 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         child: Row(
                           children: [
-                            if (!showResults)
-                              if (isMultipleChoice)
-                                Icon(
-                                  isMyVote ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                            if (!showResults || isChecklist) ...[
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 300),
+                                transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
+                                child: Icon(
+                                  isMyVote
+                                      ? (isChecklist ? Icons.check_box_rounded : Icons.check_circle_rounded)
+                                      : (isChecklist ? Icons.check_box_outline_blank_rounded : Icons.radio_button_unchecked_rounded),
+                                  key: ValueKey(isMyVote),
                                   size: 20,
-                                  color: isMyVote ? (widget.isMine ? colorScheme.onPrimary : colorScheme.primary) : subTextColor,
-                                )
-                              else
-                                Icon(
-                                  isMyVote ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                                  size: 20,
-                                  color: isMyVote ? (widget.isMine ? colorScheme.onPrimary : colorScheme.primary) : subTextColor,
+                                  color: isMyVote 
+                                      ? (widget.isMine ? colorScheme.onPrimary : colorScheme.primary) 
+                                      : subTextColor,
                                 ),
-                            if (!showResults) const SizedBox(width: 12),
+                              ),
+                              const SizedBox(width: 12),
+                            ],
                             Expanded(
                               child: Text(
                                 optText,
                                 style: TextStyle(
                                   color: textColor,
+                                  fontSize: 14,
                                   fontWeight: isMyVote ? FontWeight.bold : FontWeight.normal,
                                 ),
                               ),
                             ),
-                            if (showResults)
+                            if (showResults && !isChecklist) ...[
+                              const SizedBox(width: 12),
                               Text(
-                                '${(percentage * 100).toStringAsFixed(0)}%',
+                                '\%',
                                 style: TextStyle(
-                                  color: widget.isMine ? colorScheme.onPrimary : colorScheme.primary,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
+                                  color: textColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
                                 ),
                               ),
+                            ],
                           ],
                         ),
                       ),
@@ -188,30 +207,18 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                isChecklist ? 'قائمة مهام' : '$totalVotes صوت • ${isAnonymous ? 'مجهول' : 'علني'}',
-                style: TextStyle(
-                  color: subTextColor,
-                  fontSize: 12,
-                ),
+                'خطأ: ',
+                style: TextStyle(color: subTextColor, fontSize: 12),
               ),
-              if (widget.isMine || authUser?.role == 'admin')
+              if (widget.isMine && totalVotes > 0)
                 TextButton.icon(
-                  onPressed: _isExporting ? null : () async {
-                    setState(() => _isExporting = true);
-                    try {
-                      widget.onExport();
-                    } finally {
-                      if (mounted) {
-                        setState(() => _isExporting = false);
-                      }
-                    }
-                  },
-                  icon: _isExporting 
-                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.download_rounded, size: 14),
-                  label: const Text('تصدير', style: TextStyle(fontSize: 12)),
+                  onPressed: widget.onExport,
+                  icon: Icon(Icons.download_rounded, size: 16, color: widget.isMine ? colorScheme.onPrimary : colorScheme.primary),
+                  label: Text(
+                    'تصدير',
+                    style: TextStyle(color: widget.isMine ? colorScheme.onPrimary : colorScheme.primary, fontSize: 12),
+                  ),
                   style: TextButton.styleFrom(
-                    foregroundColor: widget.isMine ? colorScheme.onPrimary : colorScheme.primary,
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -224,3 +231,4 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
     );
   }
 }
+

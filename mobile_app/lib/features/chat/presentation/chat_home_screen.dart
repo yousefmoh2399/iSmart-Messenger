@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
@@ -20,13 +20,15 @@ import '../models/chat_models.dart';
 import 'chat_admin_management_screen.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
-import 'chat_folders_screen.dart';
+
 import 'contacts_screen.dart';
 import 'conversation_screen.dart';
 import 'departments_screen.dart';
 import 'favorite_messages_screen.dart';
 import 'rooms_screen.dart';
 import 'widgets/chat_avatar.dart';
+import 'widgets/chat_folder_inline_item.dart';
+import '../providers/chat_folders_provider.dart';
 
 class ChatHomeScreen extends ConsumerStatefulWidget {
   const ChatHomeScreen({super.key});
@@ -756,11 +758,6 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           MaterialPageRoute(builder: (_) => const FavoriteMessagesScreen()),
         );
         break;
-      case 'chatFolders':
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const ChatFoldersScreen()),
-        );
-        break;
       case 'theme':
         ref.read(themeModeControllerProvider.notifier).cycleThemeMode();
         break;
@@ -961,6 +958,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
             ),
             error: (error, _) => Center(child: Text(error.toString())),
             data: (overview) {
+              final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
+              final folderConversationIds = folders.expand((f) => f.conversationIds).toSet();
               final currentUserId = authUser?.id ?? '';
               final searchQuery = _searchController.text.trim().toLowerCase();
               final totalUnread = overview.totalUnread;
@@ -1254,6 +1253,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                           child: ListView(
                             padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
                             children: [
+                              if (folders.isNotEmpty) ...folders.map((folder) => Padding(padding: const EdgeInsets.only(bottom: 2), child: ChatFolderInlineItem(folder: folder, currentUserId: currentUserId, conversations: folder.conversationIds.map((id) => overview.directConversations.firstWhere((c) => c.id == id, orElse: () => ChatConversation(id: id, type: 'unknown', name: '', description: '', departmentId: null, createdBy: null, members: [], admins: [], broadcastPublisherIds: [], blockedMemberIds: [], pinnedMessage: null, lastMessage: null, unreadCount: 0, isArchived: false, isMuted: false, isPinned: false, isFavorite: false, isActive: false, createdAt: DateTime.now(), updatedAt: DateTime.now()))).where((c) => c.type != 'unknown').toList(), buildConversation: (c) => Padding(padding: EdgeInsets.zero, child: _ConversationCard(conversation: c, currentUserId: currentUserId, typingPreviewText: _typingPreviewText(c), appearance: appearance, isDark: isDark, onTap: () => _openConversation(c), onTogglePin: () => _updateConversationPreferences(c, isPinned: !c.isPinned), onToggleMute: () => _updateConversationPreferences(c, isMuted: !c.isMuted), onToggleFavorite: () => _updateConversationPreferences(c, isFavorite: !c.isFavorite), onDeleteConversation: () => _deleteConversation(c)))))),
                               if (conversations.isNotEmpty) ...[
                                 _HomeSectionHeader(
                                   title: 'أحدث المحادثات',
@@ -2970,3 +2970,6 @@ String _avatarLabel(String value) {
   }
   return trimmed.substring(0, 1).toUpperCase();
 }
+
+
+

@@ -1217,7 +1217,7 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
 async function listMessagesForConversation(
   currentUser,
   conversationId,
-  { cursor = null, limit = 50 } = {}
+  { cursor = null, limit = 50, isScheduled = false } = {}
 ) {
   const conversation = await getConversationById(conversationId);
   await assertConversationAccess(currentUser, conversation);
@@ -1230,6 +1230,7 @@ async function listMessagesForConversation(
   const query = {
     conversationId,
     isDeleted: { $ne: true },
+    isScheduled: isScheduled ? true : { $ne: true },
   };
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
   if (
@@ -2338,6 +2339,7 @@ async function searchMessages(
 
   const baseQuery = {
     isDeleted: { $ne: true },
+    isScheduled: { $ne: true },
     content: {
       $regex: sanitized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
       $options: "i",
@@ -2848,4 +2850,24 @@ module.exports = {
   restoreAttachmentFromSender,
   assertConversationAccess,
   assertConversationManagementAccess,
+  getMessageReadReceipts,
 };
+
+async function getMessageReadReceipts(currentUser, messageId) {
+  const message = await Message.findById(messageId)
+    .populate("seenBy.userId", "username fullName avatarUrl")
+    .populate("deliveredTo.userId", "username fullName avatarUrl")
+    .exec();
+
+  if (!message || message.isDeleted) {
+    throw new ApiError(404, "Message not found.");
+  }
+  
+  const conversation = await getConversationById(message.conversationId);
+  await assertConversationAccess(currentUser, conversation);
+
+  return {
+    seenBy: message.seenBy,
+    deliveredTo: message.deliveredTo,
+  };
+}

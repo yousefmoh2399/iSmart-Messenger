@@ -144,7 +144,7 @@
 //   }
 // }
 
-// class _SidebarHeader extends StatelessWidget {
+// class _SidebarHeader extends ConsumerWidget {
 //   const _SidebarHeader({
 //     required this.userLabel,
 //     required this.unreadTotal,
@@ -304,8 +304,11 @@ import '../../models/chat_models.dart';
 import '../chat_appearance.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/chat_folders_provider.dart';
+import 'chat_folder_inline_item.dart';
 
-class ChatSidebar extends StatelessWidget {
+class ChatSidebar extends ConsumerWidget {
   const ChatSidebar({
     super.key,
     required this.currentUser,
@@ -366,7 +369,9 @@ class ChatSidebar extends StatelessWidget {
   final ValueChanged<ChatConversation> onDeleteConversation;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
+    final folderConversationIds = folders.expand((f) => f.conversationIds).toSet();
     final baseTheme = Theme.of(context);
     final colorScheme = baseTheme.colorScheme;
     final isDark = baseTheme.brightness == Brightness.dark;
@@ -417,17 +422,23 @@ class ChatSidebar extends StatelessWidget {
     final branchById = {
       for (final branch in overview.branches) branch.id: branch,
     };
-    final recentConversations = currentFilter == ChatSidebarFilter.rooms
-        ? const <ChatConversation>[]
-        : currentFilter == ChatSidebarFilter.favorites
-        ? const <ChatConversation>[]
-        : currentFilter == ChatSidebarFilter.archived
-        ? conversations
-        : currentFilter == ChatSidebarFilter.branches
-        ? const <ChatConversation>[]
-        : currentFilter == ChatSidebarFilter.direct
-        ? conversations
-        : conversations.take(6).toList();
+    final recentConversations = (currentFilter == ChatSidebarFilter.rooms
+            ? const <ChatConversation>[]
+            : currentFilter == ChatSidebarFilter.favorites
+                ? const <ChatConversation>[]
+                : currentFilter == ChatSidebarFilter.archived
+                    ? conversations
+                        .where((c) => c.type == 'direct' && c.isArchived)
+                        .toList()
+                    : currentFilter == ChatSidebarFilter.branches
+                        ? const <ChatConversation>[]
+                        : currentFilter == ChatSidebarFilter.direct
+                            ? conversations
+                                .where((c) => c.type == 'direct' && !c.isArchived)
+                                .toList()
+                            : conversations.take(6).toList())
+        .where((c) => !folderConversationIds.contains(c.id))
+        .toList();
     final groupedSpaces = switch (currentFilter) {
       ChatSidebarFilter.all => conversations.where(
         (conversation) => conversation.type != 'direct',
@@ -738,6 +749,56 @@ class ChatSidebar extends StatelessWidget {
                       primary: true,
                       padding: const EdgeInsets.fromLTRB(8, 8, 8, 18),
                       children: [
+                        if (folders.isNotEmpty)
+                          ...folders.map((folder) => Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: ChatFolderInlineItem(
+                                  folder: folder,
+                                  currentUserId: currentUserId,
+                                  conversations: folder.conversationIds
+                                      .map((id) => conversations.firstWhere(
+                                            (c) => c.id == id,
+                                            orElse: () => ChatConversation(
+                                              id: id,
+                                              type: 'unknown',
+                                              name: '',
+                                              description: '',
+                                              departmentId: null,
+                                              createdBy: null,
+                                              members: [],
+                                              admins: [],
+                                              broadcastPublisherIds: [],
+                                              blockedMemberIds: [],
+                                              pinnedMessage: null,
+                                              lastMessage: null,
+                                              unreadCount: 0,
+                                              isArchived: false,
+                                              isMuted: false,
+                                              isPinned: false,
+                                              isFavorite: false,
+                                              isActive: false,
+                                              createdAt: DateTime.now(),
+                                              updatedAt: DateTime.now(),
+                                            ),
+                                          ))
+                                      .where((c) => c.type != 'unknown')
+                                      .toList(),
+                                  buildConversation: (c) => ChatListItem(
+                                    conversation: c,
+                                    currentUserId: currentUserId,
+                                    typingPreviewText:
+                                        typingPreviewByConversationId[c.id],
+                                    selected: selectedConversationId == c.id,
+                                    onTap: () => onConversationSelected(c),
+                                    onTogglePin: () => onTogglePin(c),
+                                    onToggleMute: () => onToggleMute(c),
+                                    onToggleArchive: () => onToggleArchive(c),
+                                    onToggleFavorite: () => onToggleFavorite(c),
+                                    onDeleteConversation: () =>
+                                        onDeleteConversation(c),
+                                  ),
+                                ),
+                              )),
                         if (recentConversations.isNotEmpty) ...[
                           _SidebarSectionHeader(
                             title: currentFilter == ChatSidebarFilter.direct
@@ -1306,7 +1367,7 @@ class _CompactConversationAvatar extends StatelessWidget {
 }
 
 // ── Sidebar Header ─────────────────────────────────────────────────────────────
-class _SidebarHeader extends StatelessWidget {
+class _SidebarHeader extends ConsumerWidget {
   const _SidebarHeader({
     required this.userLabel,
     required this.unreadTotal,
@@ -1342,7 +1403,7 @@ class _SidebarHeader extends StatelessWidget {
   final VoidCallback onToggleTheme;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < (canOpenAdmin ? 332 : 304);
@@ -1446,6 +1507,47 @@ class _SidebarHeader extends StatelessWidget {
                 accentColor: appearance.accent,
                 onPressed: onCreateConversation,
                 accent: true,
+                dense: true,
+              ),
+              const SizedBox(width: 6),
+              _TgIconButton(
+                tooltip: 'إنشاء مجلد',
+                icon: Icons.create_new_folder_rounded,
+                isDark: isDark,
+                accentColor: appearance.accent,
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) {
+                      final controller = TextEditingController();
+                      return AlertDialog(
+                        title: const Text('مجلد جديد'),
+                        content: TextField(
+                          controller: controller,
+                          decoration:
+                              const InputDecoration(hintText: 'اسم المجلد'),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('إلغاء'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              if (controller.text.isNotEmpty) {
+                                ref
+                                    .read(chatFoldersProvider.notifier)
+                                    .createFolder(controller.text.trim());
+                              }
+                              Navigator.pop(context);
+                            },
+                            child: const Text('إنشاء'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
                 dense: true,
               ),
               const SizedBox(width: 6),
@@ -2046,3 +2148,6 @@ Color _branchAccent(BranchSummary? branch) {
   );
   return palette[hash % palette.length];
 }
+
+
+

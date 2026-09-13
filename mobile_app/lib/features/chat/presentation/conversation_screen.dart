@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -14,6 +14,7 @@ import 'package:gal/gal.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:open_filex/open_filex.dart';
 import 'widgets/attachment_bottom_sheet.dart';
+import 'widgets/scheduled_messages_list.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -2762,6 +2763,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         .toggleFavoriteMessage(messageId: message.id);
                   },
                 ),
+                if (widget.conversation.type != 'direct' && isMine)
+                  _TelegramActionTile(
+                    icon: Icons.info_outline_rounded,
+                    label: 'تفاصيل الرسالة',
+                    color: const Color(0xFF3390EC),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showMessageDetails(message);
+                    },
+                  ),
                 if (canEdit)
                   _TelegramActionTile(
                     icon: Icons.edit_outlined,
@@ -3087,6 +3098,117 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(error.toString())));
     }
+  }
+
+  void _showMessageDetails(ChatMessage message) async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'من شاهد الرسالة',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Divider(),
+              Expanded(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: ref.read(chatRepositoryProvider).getReadReceipts(message.id),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(child: Text('خطأ: ${snapshot.error}'));
+                    }
+                    final seenBy = snapshot.data?['seenBy'] as List<dynamic>? ?? [];
+                    if (seenBy.isEmpty) {
+                      return const Center(child: Text('لم يشاهدها أحد بعد.'));
+                    }
+                    return ListView.builder(
+                      controller: scrollController,
+                      itemCount: seenBy.length,
+                      itemBuilder: (context, index) {
+                        final user = seenBy[index] as Map<String, dynamic>;
+                        return ListTile(
+                          leading: ChatAvatar(
+                            avatarUrl: user['avatarUrl']?.toString() ?? '',
+                            radius: 20,
+                            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                            fallback: Text(
+                              user['displayName']?.toString().isNotEmpty == true 
+                                  ? user['displayName'].toString()[0].toUpperCase() 
+                                  : '?',
+                            ),
+                          ),
+                          title: Text(user['displayName']?.toString() ?? 'مستخدم'),
+                          subtitle: user['seenAt'] != null 
+                              ? Text(DateTime.parse(user['seenAt'].toString()).toLocal().toString()) 
+                              : null,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showScheduledMessagesSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        maxChildSize: 0.9,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              AppBar(
+                title: const Text('الرسائل المجدولة'),
+                leading: const CloseButton(),
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+              ),
+              Expanded(
+                child: ScheduledMessagesList(conversationId: widget.conversation.id),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showSearchSheet() async {
@@ -3732,6 +3854,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 tooltip: 'إلغاء التحديد',
               ),
             ] else ...[
+              IconButton(
+                onPressed: () => _showScheduledMessagesSheet(),
+                icon: const Icon(Icons.schedule_rounded),
+                tooltip: 'الرسائل المجدولة',
+              ),
               IconButton(
                 onPressed: () => _showSearchSheet(),
                 icon: const Icon(Icons.search_rounded),
@@ -4576,7 +4703,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                         children: [
                                                                           if (message.isPollMessage)
                                                                             ChatPollBubble(
-                                                                              message: message,
+                                                                              poll: message.metadata?['poll'] ?? {},
+                                                                              currentUserId: ref.watch(authControllerProvider).valueOrNull?.id ?? '',
                                                                               isMine: isMine,
                                                                               onVote: (optionIds) {
                                                                                 // We'll call the API directly here for now to save time, or use a provider if available
@@ -6635,3 +6763,5 @@ bool _reactionHasUser(List<String> userIds, String? currentUserId) {
   }
   return userIds.contains(currentUserId);
 }
+
+

@@ -36,6 +36,7 @@ class MessageBubble extends StatefulWidget {
     this.onSaveAttachment,
     this.onPrintAttachment,
     required this.onReact,
+    this.onShowDetails,
     this.onTap,
     this.onLongPress,
     this.onVotePoll,
@@ -72,6 +73,7 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onSaveAttachment;
   final VoidCallback? onPrintAttachment;
   final Future<void> Function(String emoji) onReact;
+  final VoidCallback? onShowDetails;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final ValueChanged<List<String>>? onVotePoll;
@@ -485,7 +487,8 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 Padding(
                                   padding: EdgeInsets.only(top: widget.message.content.isEmpty ? 0 : 8.0),
                                   child: ChatPollBubble(
-                                    message: widget.message,
+                                    poll: widget.message.metadata?['poll'] ?? {},
+                                    currentUserId: widget.currentUserId,
                                     isMine: widget.isMine,
                                     onVote: widget.onVotePoll ?? (_) {},
                                     onExport: widget.onExportPoll ?? () {},
@@ -1105,3 +1108,5 @@ List<MapEntry<String, List<String>>> _sortedReactionEntries(
   });
   return entries;
 }
+
+

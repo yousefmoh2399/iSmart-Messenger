@@ -41,6 +41,7 @@ const {
   getMessageAttachment,
   requestAttachmentRehydrate,
   restoreAttachmentFromSender,
+  getMessageReadReceipts,
   votePollMessage,
   exportPollToExcel,
 } = require("../services/chat.service");
@@ -495,6 +496,7 @@ const getConversationMessages = asyncHandler(async (req, res) => {
   const result = await listMessagesForConversation(req.user, req.params.id, {
     cursor: req.query.cursor || null,
     limit: req.query.limit || 50,
+    isScheduled: req.query.isScheduled === "true",
   });
   sendChatResponse(res, {
     data: { messages: result.messages },
@@ -854,6 +856,11 @@ const exportPoll = asyncHandler(async (req, res) => {
   res.send(buffer);
 });
 
+const getMessageReadReceiptsHandler = asyncHandler(async (req, res) => {
+  const result = await getMessageReadReceipts(req.user, req.params.id);
+  sendChatResponse(res, { data: result });
+});
+
 module.exports = {
   votePoll,
   exportPoll,
@@ -896,4 +903,7 @@ module.exports = {
   downloadChatTransfer,
   getAuditLogs,
   getSystemErrors,
+  getMessageReadReceiptsHandler,
 };
+
+

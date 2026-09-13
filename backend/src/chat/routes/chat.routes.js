@@ -25,6 +25,7 @@ const {
   blockMember,
   unblockMember,
   getConversationMessages,
+  getMessageReadReceiptsHandler,
   postChatMessage,
   patchChatMessage,
   reactToChatMessage,
@@ -244,6 +245,13 @@ router.get(
   ],
   validateRequest,
   getConversationMessages
+);
+
+router.get(
+  "/messages/:id/read-receipts",
+  [param("id").isMongoId().withMessage("معرف الرسالة غير صالح.")],
+  validateRequest,
+  getMessageReadReceiptsHandler
 );
 
 router.post(

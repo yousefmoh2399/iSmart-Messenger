@@ -235,12 +235,14 @@ class ChatRepository {
     String conversationId, {
     String? cursor,
     int limit = 40,
+    bool isScheduled = false,
   }) async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/conversations/$conversationId/messages',
       queryParameters: {
         if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
         'limit': limit,
+        if (isScheduled) 'isScheduled': 'true',
       },
     );
     final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
@@ -1142,5 +1144,32 @@ class ChatRepository {
     final data = response.data?['data'] as List?;
     if (data == null) return [];
     return data.map((json) => ChatFolder.fromJson(json as Map<String, dynamic>)).toList();
+  }
+
+  Future<Map<String, dynamic>> getReadReceipts(String messageId) async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      "/api/chat/messages/$messageId/read-receipts",
+    );
+    return response.data?["data"] as Map<String, dynamic>? ?? {};
+  }
+
+  Future<File> downloadPollExport(String messageId) async {
+    final response = await _apiClient.dio.get<List<int>>(
+      "/api/chat/messages/$messageId/poll/export",
+      options: Options(responseType: ResponseType.bytes),
+    );
+    final bytes = response.data;
+    if (bytes == null) throw Exception("Failed to download export");
+    final directory = await _localStorage.chatDirectory(
+      preferredPath: _preferences.localStorageDirectoryPath,
+    );
+    final disposition = response.headers.value("content-disposition") ?? "";
+    String filename = "poll_export_$messageId.xlsx";
+    if (disposition.contains("filename=")) {
+      filename = disposition.split("filename=").last.replaceAll("\"", "").trim();
+    }
+    final file = File(p.join(directory.path, filename));
+    await file.writeAsBytes(bytes);
+    return file;
   }
 }

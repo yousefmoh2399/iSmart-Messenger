@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
@@ -1459,6 +1460,12 @@ class ConversationMessagesController
         scheduledFor: scheduledFor,
       ),
     );
+    
+    if (scheduledFor != null) {
+      // Do not add scheduled messages to the main chat list
+      return;
+    }
+
     final current =
         state.valueOrNull ??
         const ConversationMessagesState(
@@ -1660,12 +1667,10 @@ class ConversationMessagesController
 
   Future<void> exportPoll(String messageId) async {
     try {
-      final url = await ref.read(chatRepositoryProvider).exportPollUrl(messageId);
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        throw Exception('Could not launch URL');
+      final file = await ref.read(chatRepositoryProvider).downloadPollExport(messageId);
+      final result = await OpenFilex.open(file.path);
+      if (result.type != ResultType.done) {
+        throw Exception('Could not open file: ${result.message}');
       }
     } catch (e, stack) {
       state = AsyncError(e, stack);

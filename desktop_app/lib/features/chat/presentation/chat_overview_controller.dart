@@ -1538,6 +1538,12 @@ class ConversationMessagesController
         scheduledFor: scheduledFor,
       ),
     );
+    
+    if (scheduledFor != null) {
+      // Do not add scheduled messages to the main chat list
+      return;
+    }
+
     final current =
         state.valueOrNull ??
         const ConversationMessagesState(

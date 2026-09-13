@@ -975,8 +975,12 @@ import 'attachment_send_dialogs.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_animated_reaction_picker.dart';
 import 'chat_input.dart';
+import 'chat_list_item.dart';
+import 'chat_poll_bubble.dart';
+import 'chat_sidebar.dart';
 import 'chat_ui_helpers.dart';
 import 'message_bubble.dart';
+import 'scheduled_messages_list.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'poll_creator_dialog.dart';
 import 'gif_picker_panel.dart';
@@ -2283,6 +2287,100 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _scrollToBottom();
   }
 
+  void _showMessageDetails(ChatMessage message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('من شاهد الرسالة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: SizedBox(
+          width: 400,
+          height: 400,
+          child: FutureBuilder<Map<String, dynamic>>(
+            future: ref.read(chatRepositoryProvider).getReadReceipts(message.id),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('خطأ: ${snapshot.error}'));
+              }
+              final seenBy = snapshot.data?['seenBy'] as List<dynamic>? ?? [];
+              if (seenBy.isEmpty) {
+                return const Center(child: Text('لم يشاهدها أحد بعد.'));
+              }
+              return ListView.builder(
+                itemCount: seenBy.length,
+                itemBuilder: (context, index) {
+                  final user = seenBy[index] as Map<String, dynamic>;
+                  return ListTile(
+                    leading: SafeNetworkAvatar(
+                      imageUrl: user['avatarUrl']?.toString() ?? '',
+                      radius: 18,
+                      fallbackText: user['displayName']?.toString().isNotEmpty == true 
+                          ? user['displayName'].toString()[0].toUpperCase() 
+                          : '?',
+                      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                    ),
+                    title: Text(user['displayName']?.toString() ?? 'مستخدم'),
+                    subtitle: user['seenAt'] != null 
+                        ? Text(DateTime.parse(user['seenAt'].toString()).toLocal().toString()) 
+                        : null,
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إغلاق'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showScheduledMessages() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: SizedBox(
+            width: 400,
+            height: 600,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'الرسائل المجدولة',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ScheduledMessagesList(conversationId: widget.conversation.id),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _showSendOptions() {
     // In desktop app, we can use showMenu
     // Need to find the button's position. For simplicity, we could just show a dialog,
@@ -2695,14 +2793,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _exportPoll(String messageId) async {
     try {
-      final exportUrl = ref.read(chatOverviewControllerProvider.notifier).exportPollUrl(messageId);
-      final uri = Uri.parse(exportUrl);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
+      final file = await ref.read(chatRepositoryProvider).downloadPollExport(messageId);
+      final result = await OpenFilex.open(file.path);
+      if (result.type != ResultType.done) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open export URL')),
+            SnackBar(content: Text('Could not open file: ${result.message}')),
           );
         }
       }
@@ -4186,6 +4282,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 onCloseConversation: widget.onCloseConversation,
                 rightPanelVisible: widget.rightPanelVisible,
                 onOpenSearch: _openSearch,
+                onShowScheduled: _showScheduledMessages,
                 onOpenGallery: () => _showConversationGallery(messages),
                 onOpenRemoteSearch: _showRemoteSearchDialog,
                 onOpenRemoteDesktop: _openRemoteDesktopForPeer,
@@ -4514,6 +4611,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       isActiveSearchMatch:
                                           activeSearchMessageId == message.id,
                                       chatPreferences: chatPreferences,
+                                      onShowDetails: liveConversation.type != 'direct' && isMine 
+                                          ? () => _showMessageDetails(message)
+                                          : null,
                                       onTap: _selectionMode
                                           ? () => _toggleMessageSelection(
                                               message.id,
@@ -4919,6 +5019,7 @@ class _ChatHeader extends StatelessWidget {
     required this.selectionMode,
     required this.onClearSelection,
     required this.onForwardSelected,
+    required this.onShowScheduled,
     required this.isDark,
     required this.appearance,
   });
@@ -4940,6 +5041,7 @@ class _ChatHeader extends StatelessWidget {
   final bool selectionMode;
   final VoidCallback onClearSelection;
   final VoidCallback onForwardSelected;
+  final VoidCallback onShowScheduled;
   final bool isDark;
   final ChatResolvedAppearance appearance;
 
@@ -5064,6 +5166,13 @@ class _ChatHeader extends StatelessWidget {
                 );
               },
               color: iconColor,
+            ),
+          if (!selectionMode)
+            _TgHeaderIcon(
+              icon: Icons.schedule_rounded,
+              tooltip: 'الرسائل المجدولة',
+              color: iconColor,
+              onPressed: onShowScheduled,
             ),
           _TgHeaderIcon(
             icon: selectionMode

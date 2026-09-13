@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
@@ -361,3 +361,4 @@ String _previewText(ChatConversation conversation) {
 
   return '${lastMessage.senderName}: $body';
 }
+
