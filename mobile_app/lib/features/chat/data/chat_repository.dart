@@ -472,9 +472,13 @@ class ChatRepository {
     );
   }
 
-  Future<void> deleteMessage(String messageId) async {
-    await _apiClient.dio.delete<void>('/api/chat/messages/$messageId');
+  Future<void> removeMessage(String messageId) async {
+    await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId',
+    );
   }
+
+
 
   Future<void> markConversationSeen(String conversationId) async {
     await _apiClient.dio.post<void>(

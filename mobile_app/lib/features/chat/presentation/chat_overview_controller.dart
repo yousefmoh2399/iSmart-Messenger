@@ -1524,7 +1524,7 @@ class ConversationMessagesController
   }
 
   Future<void> deleteMessage(String messageId) async {
-    await _guardAuth(() => _repository().deleteMessage(messageId));
+    await _guardAuth(() => _repository().removeMessage(messageId));
     final current = state.valueOrNull;
     if (current == null) {
       return;

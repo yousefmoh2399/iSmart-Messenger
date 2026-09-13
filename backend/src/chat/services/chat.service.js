@@ -2681,9 +2681,10 @@ async function votePollMessage(currentUser, messageId, optionIds) {
 
   // Remove the user from all previous votes
   if (!metadata.votes) metadata.votes = {};
+  const currentUserIdStr = String(currentUser.id || currentUser._id);
   for (const key of Object.keys(metadata.votes)) {
     metadata.votes[key] = (metadata.votes[key] || []).filter(
-      (id) => id !== currentUser.id
+      (id) => String(id) !== currentUserIdStr
     );
   }
 
@@ -2692,7 +2693,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
     const optionExists = metadata.options.find((o) => String(o.id) === String(optId));
     if (optionExists) {
       if (!metadata.votes[String(optId)]) metadata.votes[String(optId)] = [];
-      metadata.votes[String(optId)].push(currentUser.id);
+      metadata.votes[String(optId)].push(currentUserIdStr);
     }
   }
 

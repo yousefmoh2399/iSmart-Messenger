@@ -143,7 +143,7 @@ async function emitConversationToUsers(io, conversationId, userIds = []) {
 
 async function emitConversationToMembers(io, conversationId, extraUserIds = []) {
   const audienceUserIds = await resolveConversationAudienceUserIds(conversationId);
-  await emitConversationToUsers(io, conversationId, [
+  emitConversationToUsers(io, conversationId, [
     ...audienceUserIds,
     ...(extraUserIds || []),
   ]);
@@ -248,7 +248,7 @@ const updateChatConversation = asyncHandler(async (req, res) => {
     for (const userId of audienceUserIds) {
       io.to(`user:${userId}`).emit("conversation_state_changed", payload);
     }
-    await emitConversationToMembers(io, conversation.id);
+    emitConversationToMembers(io, conversation.id);
   }
   sendChatResponse(res, {
     data: { conversation },
@@ -280,7 +280,7 @@ const setGroupPinnedMessage = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(io, result.conversation.id);
+    emitConversationToMembers(io, result.conversation.id);
     if (result.systemMessage) {
       emitMessageToRecipients(io, result.systemMessage);
     }
@@ -295,7 +295,7 @@ const clearGroupPinnedMessage = asyncHandler(async (req, res) => {
   const result = await clearConversationPinnedMessage(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(io, result.conversation.id);
+    emitConversationToMembers(io, result.conversation.id);
     if (result.systemMessage) {
       emitMessageToRecipients(io, result.systemMessage);
     }
@@ -375,7 +375,7 @@ const addMembers = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(
+    emitConversationToMembers(
       io,
       result.conversation.id,
       result.addedUserIds
@@ -398,7 +398,7 @@ const removeMember = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(
+    emitConversationToMembers(
       io,
       result.conversation.id,
       result.affectedUserIds
@@ -421,7 +421,7 @@ const promoteMemberAdmin = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(
+    emitConversationToMembers(
       io,
       result.conversation.id,
       result.affectedUserIds
@@ -444,7 +444,7 @@ const demoteMemberAdmin = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(
+    emitConversationToMembers(
       io,
       result.conversation.id,
       result.affectedUserIds
@@ -467,7 +467,7 @@ const blockMember = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(io, conversation.id);
+    emitConversationToMembers(io, conversation.id);
   }
   sendChatResponse(res, {
     data: { conversation },
@@ -483,7 +483,7 @@ const unblockMember = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    await emitConversationToMembers(io, conversation.id);
+    emitConversationToMembers(io, conversation.id);
   }
   sendChatResponse(res, {
     data: { conversation },
@@ -539,13 +539,13 @@ const postChatMessage = asyncHandler(async (req, res) => {
       ...new Set((result.audienceUserIds || []).map((entry) => String(entry))),
     ];
     if (audienceIds.length > 0) {
-      await emitConversationToUsers(
+      emitConversationToUsers(
         io,
         result.message.conversationId,
         audienceIds
       );
     } else {
-      await emitConversationToMembers(io, result.message.conversationId);
+      emitConversationToMembers(io, result.message.conversationId);
     }
 
     sendChatPushNotifications({
@@ -575,7 +575,7 @@ const patchChatMessage = asyncHandler(async (req, res) => {
   const io = req.app.get("io");
   if (io) {
     io.to(`conversation:${message.conversationId}`).emit("message_updated", message);
-    await emitConversationToMembers(io, message.conversationId);
+    emitConversationToMembers(io, message.conversationId);
   }
   sendChatResponse(res, {
     data: { message },
@@ -673,7 +673,7 @@ const removeMessage = asyncHandler(async (req, res) => {
       messageId: message.id,
       conversationId: message.conversationId,
     });
-    await emitConversationToMembers(io, message.conversationId);
+    emitConversationToMembers(io, message.conversationId);
   }
   sendChatResponse(res, {
     data: { message },
@@ -828,13 +828,8 @@ const votePoll = asyncHandler(async (req, res) => {
   );
 
   const io = req.app.get("io");
-  if (io && result.audienceUserIds && result.audienceUserIds.length > 0) {
-    result.audienceUserIds.forEach((userId) => {
-      io.to(`user:${userId}`).emit("chat_message_updated", {
-        conversationId: result.message.conversationId,
-        message: result.message,
-      });
-    });
+  if (io) {
+    io.to(`conversation:${result.message.conversationId}`).emit("message_updated", result.message);
   }
 
   sendChatResponse(res, {

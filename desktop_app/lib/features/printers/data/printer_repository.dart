@@ -46,14 +46,24 @@ class PrinterRepository {
     }
   }
 
+  final Map<String, PrinterDashboardData> _cachedDashboards = {};
+
   Future<PrinterDashboardData> fetchDashboard({String? branchId}) async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/printers/dashboard',
-      queryParameters: {
-        if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
-      },
-    );
-    return PrinterDashboardData.fromJson(_body(response.data));
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/printers/dashboard',
+        queryParameters: {
+          if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
+        },
+      );
+      final dashboard = PrinterDashboardData.fromJson(_body(response.data));
+      _cachedDashboards[branchId ?? 'global'] = dashboard;
+      return dashboard;
+    } on ApiException catch (_) {
+      final cached = _cachedDashboards[branchId ?? 'global'];
+      if (cached != null) return cached;
+      rethrow;
+    }
   }
 
   Future<PrinterDetailsData> fetchPrinterDetails(String printerId) async {

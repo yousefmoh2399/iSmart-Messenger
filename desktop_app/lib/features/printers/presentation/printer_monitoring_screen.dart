@@ -690,6 +690,42 @@ class _PrinterContent extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
         child: Column(
           children: [
+            if (data.isOffline)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: colors.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: colors.error.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.wifi_off_rounded, color: colors.onErrorContainer),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'الخادم غير متاح حالياً. يتم عرض بيانات مخزنة وقد لا تكون الأحدث.',
+                        style: TextStyle(color: colors.onErrorContainer, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Consumer(
+                      builder: (context, ref, child) {
+                        return FilledButton.icon(
+                          onPressed: () => ref.read(printerControllerProvider.notifier).refresh(),
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text('إعادة المحاولة'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: colors.error,
+                            foregroundColor: colors.onError,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        );
+                      }
+                    ),
+                  ],
+                ),
+              ),
             Wrap(
               alignment: WrapAlignment.spaceBetween,
               crossAxisAlignment: WrapCrossAlignment.center,

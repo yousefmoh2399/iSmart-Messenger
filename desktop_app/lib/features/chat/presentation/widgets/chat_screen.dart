@@ -2289,7 +2289,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     // or standard dialog if we don't have position. Let's use a dialog to be safe.
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           title: const Text('خيارات الإرسال'),
           content: Column(
@@ -2299,7 +2299,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 leading: const Icon(Icons.notifications_off_rounded),
                 title: const Text('إرسال بدون صوت'),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
                   _sendText(isSilent: true);
                 },
               ),
@@ -2307,7 +2307,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 leading: const Icon(Icons.schedule_rounded),
                 title: const Text('جدولة الرسالة'),
                 onTap: () async {
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
                   final selectedDate = await showDatePicker(
                     context: context,
                     initialDate: DateTime.now(),
@@ -2319,7 +2319,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                       context: context,
                       initialTime: TimeOfDay.now(),
                     );
-                    if (selectedTime != null) {
+                    if (selectedTime != null && mounted) {
                       final scheduledFor = DateTime(
                         selectedDate.year,
                         selectedDate.month,
@@ -2601,6 +2601,48 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to create poll: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _createChecklist() async {
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    final conversation = overview?.conversations.where((c) => c.id == _conversationId).firstOrNull ?? widget.conversation;
+    if (_isReadOnlyConversation(conversation)) return;
+
+    final pollData = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const PollCreatorDialog(isChecklistMode: true),
+    );
+
+    if (pollData == null || !mounted) return;
+
+    final metadata = {
+      'question': pollData['question'],
+      'isAnonymous': false,
+      'isMultipleChoice': true,
+      'isChecklist': true,
+      'options': pollData['options'],
+      'votes': <String, dynamic>{},
+    };
+
+    try {
+      await ref
+          .read(conversationMessagesControllerProvider(_conversationId).notifier)
+          .sendMessage(
+            content: '',
+            messageType: 'poll',
+            metadata: metadata,
+            replyToMessageId: _replyingTo?.id,
+          );
+      if (mounted) {
+        setState(() => _replyingTo = null);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create checklist: $e')),
         );
       }
     }
@@ -4804,6 +4846,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 onSendScreenshot: _sendScreenshotFromOpenWindow,
                 onOpenReactionPicker: _showComposerReactionPicker,
                 onSendPoll: _createPoll,
+                onSendChecklist: _createChecklist,
                 onSendGif: _openGifPicker,
                 enabled: !isReadOnly,
               ),

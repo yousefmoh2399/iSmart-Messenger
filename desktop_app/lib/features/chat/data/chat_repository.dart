@@ -478,8 +478,10 @@ class ChatRepository {
     );
   }
 
-  Future<void> deleteMessage(String messageId) async {
-    await _apiClient.dio.delete<void>('/api/chat/messages/$messageId');
+  Future<void> removeMessage(String messageId) async {
+    await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId',
+    );
   }
 
   Future<void> votePoll({
@@ -494,7 +496,8 @@ class ChatRepository {
 
   String exportPollUrl(String messageId) {
     final token = _authRepository.currentToken;
-    return '\${_apiClient.dio.options.baseUrl}/api/chat/messages/$messageId/poll/export?token=$token';
+    final path = '/api/chat/messages/$messageId/poll/export?token=$token';
+    return resolveApiUrl(path);
   }
 
   Future<void> markConversationSeen(String conversationId) async {

@@ -15,6 +15,7 @@ class ChatInput extends StatefulWidget {
     required this.onSendScreenshot,
     required this.onOpenReactionPicker,
     this.onSendPoll,
+    this.onSendChecklist,
     this.onSendGif,
     this.isEditing = false,
     this.isUploading = false,
@@ -33,6 +34,7 @@ class ChatInput extends StatefulWidget {
   final VoidCallback onSendScreenshot;
   final VoidCallback onOpenReactionPicker;
   final VoidCallback? onSendPoll;
+  final VoidCallback? onSendChecklist;
   final VoidCallback? onSendGif;
   final bool isEditing;
   final bool isUploading;
@@ -169,78 +171,69 @@ class _ChatInputState extends State<ChatInput> {
                   ],
                 ),
               ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: _actionsExpanded
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _ActionChipButton(
-                            icon: Icons.image_rounded,
-                            label: 'صور',
-                            onPressed: widget.enabled && !widget.isUploading
-                                ? () => _runAction(widget.onPickImage)
-                                : null,
-                          ),
-                          _ActionChipButton(
-                            icon: Icons.insert_drive_file_rounded,
-                            label: 'ملفات',
-                            onPressed: widget.enabled && !widget.isUploading
-                                ? () => _runAction(widget.onAttachFile)
-                                : null,
-                          ),
-                          _ActionChipButton(
-                            icon: Icons.screenshot_monitor_rounded,
-                            label: 'لقطة شاشة',
-                            onPressed: widget.enabled && !widget.isUploading
-                                ? () => _runAction(widget.onSendScreenshot)
-                                : null,
-                          ),
-                          _ActionChipButton(
-                            icon: Icons.add_reaction_rounded,
-                            label: 'رياكت',
-                            onPressed: widget.enabled && !widget.isUploading
-                                ? () => _runAction(widget.onOpenReactionPicker)
-                                : null,
-                          ),
-                          if (widget.onSendPoll != null)
-                            _ActionChipButton(
-                              icon: Icons.poll_rounded,
-                              label: 'استطلاع رأي',
-                              onPressed: widget.enabled && !widget.isUploading
-                                  ? () => _runAction(widget.onSendPoll!)
-                                  : null,
-                            ),
-                          if (widget.onSendGif != null)
-                            _ActionChipButton(
-                              icon: Icons.gif_box_rounded,
-                              label: 'GIF',
-                              onPressed: widget.enabled && !widget.isUploading
-                                  ? () => _runAction(widget.onSendGif!)
-                                  : null,
-                            ),
-                        ],
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
+              ),
             Row(
               children: [
-                IconButton.filledTonal(
+                PopupMenuButton<VoidCallback>(
                   tooltip: 'إجراءات الشات',
-                  onPressed: widget.enabled && !widget.isUploading
-                      ? _toggleActions
-                      : null,
-                  icon: AnimatedRotation(
-                    turns: _actionsExpanded ? 0.125 : 0,
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    child: const Icon(Icons.add_rounded),
+                  enabled: widget.enabled && !widget.isUploading,
+                  onSelected: (action) => action(),
+                  icon: const Icon(Icons.attach_file_rounded),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
                   ),
+                  offset: const Offset(0, -250),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: widget.onPickImage,
+                      child: const Row(
+                        children: [Icon(Icons.image_rounded), SizedBox(width: 12), Text('صور')],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: widget.onAttachFile,
+                      child: const Row(
+                        children: [Icon(Icons.insert_drive_file_rounded), SizedBox(width: 12), Text('ملفات')],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: widget.onSendScreenshot,
+                      child: const Row(
+                        children: [Icon(Icons.screenshot_monitor_rounded), SizedBox(width: 12), Text('لقطة شاشة')],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: widget.onOpenReactionPicker,
+                      child: const Row(
+                        children: [Icon(Icons.add_reaction_rounded), SizedBox(width: 12), Text('رياكت')],
+                      ),
+                    ),
+                    if (widget.onSendPoll != null)
+                      PopupMenuItem(
+                        value: widget.onSendPoll,
+                        child: const Row(
+                          children: [Icon(Icons.poll_rounded), SizedBox(width: 12), Text('استطلاع رأي')],
+                        ),
+                      ),
+                    if (widget.onSendChecklist != null)
+                      PopupMenuItem(
+                        value: widget.onSendChecklist,
+                        child: const Row(
+                          children: [Icon(Icons.checklist_rounded), SizedBox(width: 12), Text('قائمة مهام')],
+                        ),
+                      ),
+                    if (widget.onSendGif != null)
+                      PopupMenuItem(
+                        value: widget.onSendGif,
+                        child: const Row(
+                          children: [Icon(Icons.gif_box_rounded), SizedBox(width: 12), Text('GIF')],
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: 2),
                 IconButton.filledTonal(

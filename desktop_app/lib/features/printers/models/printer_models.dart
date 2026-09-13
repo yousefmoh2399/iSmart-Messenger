@@ -136,18 +136,37 @@ class PrinterOverviewData {
     required this.branches,
     required this.printers,
     required this.logs,
+    this.isOffline = false,
   });
 
   final PrinterDashboardData dashboard;
   final List<PrinterBranchItem> branches;
   final List<PrinterItem> printers;
   final List<Map<String, dynamic>> logs;
+  final bool isOffline;
+
+  PrinterOverviewData copyWith({
+    PrinterDashboardData? dashboard,
+    List<PrinterBranchItem>? branches,
+    List<PrinterItem>? printers,
+    List<Map<String, dynamic>>? logs,
+    bool? isOffline,
+  }) {
+    return PrinterOverviewData(
+      dashboard: dashboard ?? this.dashboard,
+      branches: branches ?? this.branches,
+      printers: printers ?? this.printers,
+      logs: logs ?? this.logs,
+      isOffline: isOffline ?? this.isOffline,
+    );
+  }
 
   static const empty = PrinterOverviewData(
     dashboard: PrinterDashboardData.empty,
     branches: <PrinterBranchItem>[],
     printers: <PrinterItem>[],
     logs: <Map<String, dynamic>>[],
+    isOffline: false,
   );
 }
 

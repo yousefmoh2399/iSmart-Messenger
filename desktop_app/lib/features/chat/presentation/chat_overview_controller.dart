@@ -1100,6 +1100,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _applyConversationUpdate(conversation);
     return conversation;
   }
+
+
 }
 
 class ConversationMessagesController
@@ -1605,7 +1607,7 @@ class ConversationMessagesController
   }
 
   Future<void> deleteMessage(String messageId) async {
-    await _guardAuth(() => _repository().deleteMessage(messageId));
+    await _guardAuth(() => _repository().removeMessage(messageId));
     final current = state.valueOrNull;
     if (current == null) {
       return;

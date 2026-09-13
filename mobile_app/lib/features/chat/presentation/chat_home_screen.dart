@@ -20,6 +20,7 @@ import '../models/chat_models.dart';
 import 'chat_admin_management_screen.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
+import 'chat_folders_screen.dart';
 import 'contacts_screen.dart';
 import 'conversation_screen.dart';
 import 'departments_screen.dart';
@@ -753,6 +754,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       case 'favoriteMessages':
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const FavoriteMessagesScreen()),
+        );
+        break;
+      case 'chatFolders':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ChatFoldersScreen()),
         );
         break;
       case 'theme':
@@ -2616,6 +2622,12 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                         label: 'الرسائل المفضلة',
                         onTap: () => onSelected('favoriteMessages'),
                         iconColor: const Color(0xFFFFCC00), // Yellow
+                      ),
+                      _MenuItem(
+                        icon: Icons.create_new_folder_outlined,
+                        label: 'مجلدات المحادثات',
+                        onTap: () => onSelected('chatFolders'),
+                        iconColor: const Color(0xFF007AFF), // Blue
                       ),
                       _MenuItem(
                         icon: Icons.support_agent_rounded,

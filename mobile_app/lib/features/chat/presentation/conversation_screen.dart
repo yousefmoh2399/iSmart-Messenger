@@ -13,6 +13,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:gal/gal.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:open_filex/open_filex.dart';
+import 'widgets/attachment_bottom_sheet.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -551,30 +552,46 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     });
   }
 
+  Future<void> _sendSpecificFile(String path) async {
+    final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
+    if (_isReadOnlyFor(authUserId)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_readOnlyTextFor(authUserId))));
+      return;
+    }
+    final sendDraft = await showAttachmentSendDialog(context, path);
+    if (sendDraft == null) return;
+    await _sendPreparedFile(
+      sendPath: sendDraft.filePath,
+      displayName: sendDraft.displayName,
+      restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+    );
+  }
+
   void _showSendOptions() {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
                 leading: const Icon(Icons.notifications_off_rounded),
-                title: const Text('Ø¥Ø±Ø³Ø§Ù„ Ø¨Ø¯ÙˆÙ† ØµÙˆØª'),
+                title: const Text('إرسال بدون صوت'),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   _sendText(isSilent: true);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.schedule_rounded),
-                title: const Text('Ø¬Ø¯ÙˆÙ„Ø© Ø§Ù„Ø±Ø³Ø§Ù„Ø©'),
+                title: const Text('جدولة الرسالة'),
                 onTap: () async {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   final selectedDate = await showDatePicker(
                     context: context,
                     initialDate: DateTime.now(),
@@ -586,7 +603,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       context: context,
                       initialTime: TimeOfDay.now(),
                     );
-                    if (selectedTime != null) {
+                    if (selectedTime != null && mounted) {
                       final scheduledFor = DateTime(
                         selectedDate.year,
                         selectedDate.month,
@@ -599,7 +616,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         _sendText(scheduledFor: scheduledFor);
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø§Ù„ÙˆÙ‚Øª Ù ÙŠ Ø§Ù„Ù…Ø³ØªÙ‚Ø¨Ù„.')),
+                          const SnackBar(content: Text('يجب أن يكون الوقت في المستقبل.')),
                         );
                       }
                     }
@@ -975,6 +992,47 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to create poll: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _createChecklist() async {
+    final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
+    if (_isReadOnlyFor(authUserId)) return;
+
+    final pollData = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => const PollCreatorDialog(isChecklistMode: true),
+    );
+
+    if (pollData == null || !mounted) return;
+
+    final metadata = {
+      'question': pollData['question'],
+      'isAnonymous': false,
+      'isMultipleChoice': true,
+      'isChecklist': true,
+      'options': pollData['options'],
+      'votes': <String, dynamic>{},
+    };
+
+    try {
+      await ref
+          .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
+          .sendMessage(
+            content: '',
+            messageType: 'poll', // Use poll but with checklist metadata so we reuse UI logic mostly
+            metadata: metadata,
+            replyToMessageId: _replyingTo?.id,
+          );
+      if (mounted) {
+        setState(() => _replyingTo = null);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create checklist: $e')),
         );
       }
     }
@@ -5005,9 +5063,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     enterSendsMessage: enterSendsMessage,
                     onAttach: _sendFile,
                     onPickImage: _sendImages,
+                    onSendSpecificFile: _sendSpecificFile,
                     onSendScreenshot: _sendScreenshotFromDevice,
                     onOpenReactionPicker: _showComposerReactionPicker,
                     onSendPoll: _createPoll,
+                    onSendChecklist: _createChecklist,
                     onSendGif: _openGifPicker,
                     onPauseVoiceNote: _pauseVoiceRecording,
                     onResumeVoiceNote: _resumeVoiceRecording,
@@ -5911,9 +5971,11 @@ class _MessageComposer extends StatefulWidget {
     required this.enterSendsMessage,
     required this.onAttach,
     required this.onPickImage,
+    this.onSendSpecificFile,
     required this.onSendScreenshot,
     required this.onOpenReactionPicker,
     required this.onSendPoll,
+    required this.onSendChecklist,
     required this.onSendGif,
     required this.onPauseVoiceNote,
     required this.onResumeVoiceNote,
@@ -5946,9 +6008,11 @@ class _MessageComposer extends StatefulWidget {
   final bool enterSendsMessage;
   final VoidCallback onAttach;
   final VoidCallback onPickImage;
+  final ValueChanged<String>? onSendSpecificFile;
   final VoidCallback onSendScreenshot;
   final VoidCallback onOpenReactionPicker;
   final VoidCallback onSendPoll;
+  final VoidCallback onSendChecklist;
   final VoidCallback onSendGif;
   final VoidCallback onPauseVoiceNote;
   final VoidCallback onResumeVoiceNote;
@@ -6064,9 +6128,11 @@ class _MessageComposerState extends State<_MessageComposer> {
                     colorScheme: colorScheme,
                     onAttach: onAttach,
                     onPickImage: onPickImage,
+                    onSendSpecificFile: widget.onSendSpecificFile,
                     onSendScreenshot: onSendScreenshot,
                     onOpenReactionPicker: onOpenReactionPicker,
                     onSendPoll: widget.onSendPoll,
+                    onSendChecklist: widget.onSendChecklist,
                     onSendGif: widget.onSendGif,
                   ),
                 ],
@@ -6390,9 +6456,11 @@ class _ComposerActionsFab extends StatefulWidget {
     required this.colorScheme,
     required this.onAttach,
     required this.onPickImage,
+    this.onSendSpecificFile,
     required this.onSendScreenshot,
     required this.onOpenReactionPicker,
     this.onSendPoll,
+    this.onSendChecklist,
     this.onSendGif,
   });
 
@@ -6400,9 +6468,11 @@ class _ComposerActionsFab extends StatefulWidget {
   final ColorScheme colorScheme;
   final VoidCallback onAttach;
   final VoidCallback onPickImage;
+  final ValueChanged<String>? onSendSpecificFile;
   final VoidCallback onSendScreenshot;
   final VoidCallback onOpenReactionPicker;
   final VoidCallback? onSendPoll;
+  final VoidCallback? onSendChecklist;
   final VoidCallback? onSendGif;
 
   @override
@@ -6422,94 +6492,43 @@ class _ComposerActionsFabState extends State<_ComposerActionsFab> {
       return;
     }
 
-    final renderBox = anchorContext.findRenderObject() as RenderBox?;
-    final overlay =
-        Overlay.of(anchorContext).context.findRenderObject() as RenderBox?;
-    if (renderBox == null || overlay == null) {
-      return;
-    }
-
-    final target = renderBox.localToGlobal(Offset.zero, ancestor: overlay);
-    final top = (target.dy - 240).clamp(16.0, overlay.size.height - 16.0);
-    final selected = await showMenu<_ComposerActionType>(
+    final selected = await showModalBottomSheet<dynamic>(
       context: anchorContext,
-      position: RelativeRect.fromLTRB(
-        target.dx,
-        top,
-        overlay.size.width - target.dx - renderBox.size.width,
-        overlay.size.height - target.dy,
-      ),
-      elevation: 12,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      color: widget.colorScheme.surface,
-      items: const [
-        PopupMenuItem<_ComposerActionType>(
-          value: _ComposerActionType.image,
-          child: _ComposerMenuItem(
-            icon: Icons.image_rounded,
-            label: 'إرسال صورة',
-          ),
-        ),
-        PopupMenuItem<_ComposerActionType>(
-          value: _ComposerActionType.file,
-          child: _ComposerMenuItem(
-            icon: Icons.insert_drive_file_rounded,
-            label: 'إرفاق ملف',
-          ),
-        ),
-        PopupMenuItem<_ComposerActionType>(
-          value: _ComposerActionType.screenshot,
-          child: _ComposerMenuItem(
-            icon: Icons.screenshot_monitor_rounded,
-            label: 'إرسال لقطة شاشة',
-          ),
-        ),
-        PopupMenuItem<_ComposerActionType>(
-          value: _ComposerActionType.reaction,
-          child: _ComposerMenuItem(
-            icon: Icons.add_reaction_rounded,
-            label: 'إضافة تفاعل',
-          ),
-        ),
-        PopupMenuItem<_ComposerActionType>(
-          value: _ComposerActionType.poll,
-          child: _ComposerMenuItem(
-            icon: Icons.poll_rounded,
-            label: 'استطلاع رأي',
-          ),
-        ),
-        PopupMenuItem<_ComposerActionType>(
-          value: _ComposerActionType.gif,
-          child: _ComposerMenuItem(
-            icon: Icons.gif_box_rounded,
-            label: 'إرسال GIF',
-          ),
-        ),
-      ],
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const AttachmentBottomSheet(),
     );
 
-    switch (selected) {
-      case _ComposerActionType.image:
-        widget.onPickImage();
-        break;
-      case _ComposerActionType.file:
-        widget.onAttach();
-        break;
-      case _ComposerActionType.screenshot:
-        widget.onSendScreenshot();
-        break;
-      case _ComposerActionType.poll:
-        widget.onSendPoll?.call();
-        break;
-      case _ComposerActionType.gif:
-        widget.onSendGif?.call();
-        break;
-      case _ComposerActionType.reaction:
-        widget.onOpenReactionPicker();
-        break;
-      case null:
-        break;
+    if (selected is String) {
+      widget.onSendSpecificFile?.call(selected);
     }
+
+    if (selected is AttachmentBottomSheetResult) {
+      switch (selected) {
+        case AttachmentBottomSheetResult.image:
+          widget.onPickImage();
+          break;
+        case AttachmentBottomSheetResult.file:
+          widget.onAttach();
+          break;
+        case AttachmentBottomSheetResult.screenshot:
+          widget.onSendScreenshot();
+          break;
+        case AttachmentBottomSheetResult.reaction:
+          widget.onOpenReactionPicker();
+          break;
+        case AttachmentBottomSheetResult.poll:
+          widget.onSendPoll?.call();
+          break;
+        case AttachmentBottomSheetResult.gif:
+          widget.onSendGif?.call();
+          break;
+        case AttachmentBottomSheetResult.checklist:
+          widget.onSendChecklist?.call();
+          break;
+      }
+    }
+
   }
 
   @override
@@ -6525,40 +6544,6 @@ class _ComposerActionsFabState extends State<_ComposerActionsFab> {
         ),
         icon: const Icon(Icons.add_rounded),
       ),
-    );
-  }
-}
-
-enum _ComposerActionType { image, file, screenshot, reaction, poll, gif }
-
-class _ComposerMenuItem extends StatelessWidget {
-  const _ComposerMenuItem({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, size: 18, color: const Color(0xFF3390EC)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ),
-      ],
     );
   }
 }

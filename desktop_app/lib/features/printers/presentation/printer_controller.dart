@@ -31,7 +31,7 @@ class PrinterController extends AsyncNotifier<PrinterOverviewData> {
     final previous = state.valueOrNull;
     final next = await AsyncValue.guard(_repository.fetchOverview);
     if (next.hasError && previous != null) {
-      state = AsyncData(previous);
+      state = AsyncData(previous.copyWith(isOffline: true));
       return;
     }
     state = next;

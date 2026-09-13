@@ -1,4 +1,5 @@
 const net = require("net");
+const ApiError = require("../../utils/api-error");
 const { collectPrinterWebDetails, mergeExtendedDetails } = require("./printer-web-detail.service");
 const { logPrinterSync } = require("../../utils/printer-sync-file-logger");
 
@@ -835,7 +836,7 @@ function withTimeout(promise, timeoutMs, fallbackValue, onTimeout = null) {
 
 async function discoverPrinters(networkRange, options = {}) {
   if (!snmp) {
-    throw new Error("SNMP package is not available. Run npm install in backend and restart the server.");
+    throw new ApiError(500, "SNMP package is not available. Run npm install in backend and restart the server.");
   }
   const hosts = expandNetworkRange(networkRange);
   logPrinterSync("discovery.hosts.expanded", {
@@ -844,9 +845,7 @@ async function discoverPrinters(networkRange, options = {}) {
     skipWebDetails: Boolean(options.skipWebDetails),
   });
   if (hosts.length === 0) {
-    throw new Error(
-      "Invalid printer network range. Use CIDR like 192.168.10.0/24, a gateway like 192.168.10.1, a single printer IP, or a range like 192.168.10.20-80.",
-    );
+    throw new ApiError(400, "Invalid printer network range. Use CIDR like 192.168.10.0/24, a gateway like 192.168.10.1, a single printer IP, or a range like 192.168.10.20-80.");
   }
   const discovered = [];
   const concurrency = Number(process.env.PRINTER_DISCOVERY_CONCURRENCY || 24);

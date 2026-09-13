@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 class PollCreatorDialog extends StatefulWidget {
-  const PollCreatorDialog({super.key});
+  const PollCreatorDialog({super.key, this.isChecklistMode = false});
+
+  final bool isChecklistMode;
 
   @override
   State<PollCreatorDialog> createState() => _PollCreatorDialogState();
@@ -13,8 +15,15 @@ class _PollCreatorDialogState extends State<PollCreatorDialog> {
     TextEditingController(),
     TextEditingController(),
   ];
-  bool _isAnonymous = true;
-  bool _isMultipleChoice = false;
+  late bool _isAnonymous;
+  late bool _isMultipleChoice;
+
+  @override
+  void initState() {
+    super.initState();
+    _isAnonymous = !widget.isChecklistMode;
+    _isMultipleChoice = widget.isChecklistMode;
+  }
 
   void _addOption() {
     if (_optionControllers.length < 10) {
@@ -78,7 +87,7 @@ class _PollCreatorDialogState extends State<PollCreatorDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'إنشاء استطلاع رأي',
+                widget.isChecklistMode ? 'إنشاء قائمة مهام' : 'إنشاء استطلاع رأي',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -134,21 +143,23 @@ class _PollCreatorDialogState extends State<PollCreatorDialog> {
                   icon: const Icon(Icons.add),
                   label: const Text('إضافة خيار'),
                 ),
-              const Divider(height: 24),
-              SwitchListTile(
-                title: const Text('تصويت مجهول'),
-                value: _isAnonymous,
-                onChanged: (val) => setState(() => _isAnonymous = val),
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-              ),
-              SwitchListTile(
-                title: const Text('إجابات متعددة'),
-                value: _isMultipleChoice,
-                onChanged: (val) => setState(() => _isMultipleChoice = val),
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-              ),
+              if (!widget.isChecklistMode) const Divider(height: 24),
+              if (!widget.isChecklistMode)
+                SwitchListTile(
+                  title: const Text('تصويت مجهول'),
+                  value: _isAnonymous,
+                  onChanged: (val) => setState(() => _isAnonymous = val),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
+              if (!widget.isChecklistMode)
+                SwitchListTile(
+                  title: const Text('إجابات متعددة'),
+                  value: _isMultipleChoice,
+                  onChanged: (val) => setState(() => _isMultipleChoice = val),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,

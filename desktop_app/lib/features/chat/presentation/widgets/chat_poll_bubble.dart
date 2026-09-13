@@ -27,7 +27,7 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
   @override
   Widget build(BuildContext context) {
     final metadata = widget.message.metadata ?? {};
-    final question = metadata['question'] as String? ?? '??????? ???';
+    final question = metadata['question'] as String? ?? 'استبيان غير معروف';
     final options = (metadata['options'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList();
     final votes = metadata['votes'] as Map<String, dynamic>? ?? {};
     final isMultipleChoice = metadata['isMultipleChoice'] == true;
@@ -53,6 +53,8 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
     final textColor = widget.isMine ? colorScheme.onPrimary : colorScheme.onSurface;
     final subTextColor = widget.isMine ? colorScheme.onPrimary.withValues(alpha: 0.8) : colorScheme.onSurfaceVariant;
 
+    final isChecklist = metadata['isChecklist'] == true;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -64,7 +66,7 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
         children: [
           Row(
             children: [
-              Icon(Icons.poll_rounded, color: textColor, size: 20),
+              Icon(isChecklist ? Icons.checklist_rounded : Icons.poll_rounded, color: textColor, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -86,11 +88,13 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
             final count = voterIds.length;
             final percentage = totalVotes > 0 ? count / totalVotes : 0.0;
             final isMyVote = myVotedOptionIds.contains(optId);
+            final hasVoted = myVotedOptionIds.isNotEmpty;
+            final showResults = (hasVoted || isClosed) && !isChecklist;
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: InkWell(
-                onTap: isClosed ? null : () {
+                onTap: (isClosed || hasVoted && !isMultipleChoice) ? null : () {
                   if (isMultipleChoice) {
                     final newVotes = Set<String>.from(myVotedOptionIds);
                     if (isMyVote) {
@@ -108,39 +112,50 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
                   clipBehavior: Clip.hardEdge,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isMyVote ? colorScheme.primary : (widget.isMine ? colorScheme.onPrimary.withValues(alpha: 0.3) : colorScheme.outlineVariant),
-                      width: isMyVote ? 2 : 1,
-                    ),
+                    color: Colors.transparent,
                   ),
                   child: Stack(
                     children: [
-                      Positioned.fill(
-                        child: FractionallySizedBox(
-                          alignment: AlignmentDirectional.centerStart,
-                          widthFactor: percentage,
-                          child: Container(
-                            color: widget.isMine ? colorScheme.onPrimary.withValues(alpha: 0.15) : colorScheme.primary.withValues(alpha: 0.15),
+                      if (showResults)
+                        Positioned.fill(
+                          child: TweenAnimationBuilder<double>(
+                            tween: Tween<double>(begin: 0, end: percentage),
+                            duration: const Duration(milliseconds: 500),
+                            curve: Curves.easeOutCubic,
+                            builder: (context, value, child) {
+                              return FractionallySizedBox(
+                                alignment: AlignmentDirectional.centerStart,
+                                widthFactor: value,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: widget.isMine 
+                                      ? colorScheme.onPrimary.withValues(alpha: 0.15) 
+                                      : colorScheme.primary.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
-                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         child: Row(
                           children: [
-                            if (isMultipleChoice)
-                              Icon(
-                                isMyVote ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
-                                size: 18,
-                                color: isMyVote ? colorScheme.primary : subTextColor,
-                              )
-                            else
-                              Icon(
-                                isMyVote ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                                size: 18,
-                                color: isMyVote ? colorScheme.primary : subTextColor,
-                              ),
-                            const SizedBox(width: 8),
+                            if (!showResults)
+                              if (isMultipleChoice)
+                                Icon(
+                                  isMyVote ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                                  size: 20,
+                                  color: isMyVote ? (widget.isMine ? colorScheme.onPrimary : colorScheme.primary) : subTextColor,
+                                )
+                              else
+                                Icon(
+                                  isMyVote ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                                  size: 20,
+                                  color: isMyVote ? (widget.isMine ? colorScheme.onPrimary : colorScheme.primary) : subTextColor,
+                                ),
+                            if (!showResults) const SizedBox(width: 12),
                             Expanded(
                               child: Text(
                                 optText,
@@ -150,12 +165,12 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
                                 ),
                               ),
                             ),
-                            if (totalVotes > 0)
+                            if (showResults)
                               Text(
                                 '${(percentage * 100).toStringAsFixed(0)}%',
                                 style: TextStyle(
-                                  color: subTextColor,
-                                  fontSize: 12,
+                                  color: widget.isMine ? colorScheme.onPrimary : colorScheme.primary,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -173,7 +188,7 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '$totalVotes ??? • ${isAnonymous ? '?????' : '????'}',
+                isChecklist ? 'قائمة مهام' : '$totalVotes صوت • ${isAnonymous ? 'مجهول' : 'علني'}',
                 style: TextStyle(
                   color: subTextColor,
                   fontSize: 12,
@@ -194,7 +209,7 @@ class _ChatPollBubbleState extends ConsumerState<ChatPollBubble> {
                   icon: _isExporting 
                     ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.download_rounded, size: 14),
-                  label: const Text('?????', style: TextStyle(fontSize: 12)),
+                  label: const Text('تصدير', style: TextStyle(fontSize: 12)),
                   style: TextButton.styleFrom(
                     foregroundColor: widget.isMine ? colorScheme.onPrimary : colorScheme.primary,
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),

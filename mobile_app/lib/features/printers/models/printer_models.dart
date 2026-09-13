@@ -4,18 +4,37 @@ class MobilePrinterOverview {
     required this.branches,
     required this.printers,
     required this.notifications,
+    this.isOffline = false,
   });
 
   final Map<String, num> totals;
   final List<Map<String, dynamic>> branches;
   final List<Map<String, dynamic>> printers;
   final List<Map<String, dynamic>> notifications;
+  final bool isOffline;
+
+  MobilePrinterOverview copyWith({
+    Map<String, num>? totals,
+    List<Map<String, dynamic>>? branches,
+    List<Map<String, dynamic>>? printers,
+    List<Map<String, dynamic>>? notifications,
+    bool? isOffline,
+  }) {
+    return MobilePrinterOverview(
+      totals: totals ?? this.totals,
+      branches: branches ?? this.branches,
+      printers: printers ?? this.printers,
+      notifications: notifications ?? this.notifications,
+      isOffline: isOffline ?? this.isOffline,
+    );
+  }
 
   static const empty = MobilePrinterOverview(
     totals: <String, num>{},
     branches: <Map<String, dynamic>>[],
     printers: <Map<String, dynamic>>[],
     notifications: <Map<String, dynamic>>[],
+    isOffline: false,
   );
 
   factory MobilePrinterOverview.fromJson(Map<String, dynamic> json) {
