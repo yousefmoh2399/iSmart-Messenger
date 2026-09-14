@@ -30,6 +30,7 @@ const updateClientLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: buildStore("rl:update_client:"),
+  passOnStoreError: true,
   keyGenerator: (req) => {
     const deviceUid = String(req.body?.deviceUid || "")
       .trim()
@@ -47,6 +48,7 @@ const updateProgressLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: buildStore("rl:update_progress:"),
+  passOnStoreError: true,
   keyGenerator: (req) => {
     const deviceUid = String(req.body?.deviceUid || "")
       .trim()

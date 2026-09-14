@@ -261,9 +261,23 @@ router.post(
   [
     body("conversationId").isMongoId().withMessage("معرّف المحادثة مطلوب."),
     body("content").optional().isString(),
+    body("clientMessageId")
+      .optional()
+      .isString()
+      .isLength({ min: 1, max: 100 }),
     body("messageType")
       .optional()
-      .isIn(["text", "file", "image", "pdf", "audio", "system", "poll", "gif"])
+      .isIn([
+        "text",
+        "file",
+        "image",
+        "pdf",
+        "audio",
+        "system",
+        "poll",
+        "checklist",
+        "gif",
+      ])
       .withMessage("نوع الرسالة غير صالح."),
     body("forwardFromMessageId").optional({ nullable: true }).isMongoId(),
     body("replyToMessageId").optional({ nullable: true }).isMongoId(),

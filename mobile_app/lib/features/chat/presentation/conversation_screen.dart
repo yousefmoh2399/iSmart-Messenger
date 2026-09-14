@@ -28,6 +28,7 @@ import '../../../shared/services/remote_print_service.dart';
 import '../../../shared/widgets/app_loading_placeholders.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
+import '../data/chat_draft_store.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
 import '../utils/chat_attachment_policy.dart';
@@ -75,7 +76,11 @@ class _PrinterSelectionResult {
 
 class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  static const _draftStore = ChatDraftStore();
+  bool _restoringDraft = false;
+  final ScrollController _scrollController = ScrollController(
+    keepScrollOffset: false,
+  );
   final Set<String> _selectedMessageIds = <String>{};
   final Set<String> _printingItemIds = <String>{};
   final Map<String, String> _itemIdToClientRequestId = <String, String>{};
@@ -275,6 +280,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     });
 
     _scrollController.addListener(_onScroll);
+    _messageController.addListener(_onMessageDraftChanged);
+    unawaited(_restoreDraft());
 
     _subscription = ref.read(chatSocketServiceProvider).events.listen((event) {
       if (!mounted) {
@@ -512,6 +519,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   @override
   void dispose() {
     _messageController.removeListener(_onMessageTextChanged);
+    _messageController.removeListener(_onMessageDraftChanged);
     _scrollController.removeListener(_onScroll);
     _recordingTicker?.cancel();
     _audioRecorder.dispose();
@@ -519,6 +527,24 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _restoreDraft() async {
+    final draft = await _draftStore.load(widget.conversation.id);
+    if (!mounted || draft == null || draft.isEmpty) return;
+    _restoringDraft = true;
+    _messageController.value = TextEditingValue(
+      text: draft,
+      selection: TextSelection.collapsed(offset: draft.length),
+    );
+    _restoringDraft = false;
+  }
+
+  void _onMessageDraftChanged() {
+    if (_restoringDraft) return;
+    unawaited(
+      _draftStore.save(widget.conversation.id, _messageController.text),
+    );
   }
 
   void _onMessageTextChanged() {
@@ -557,7 +583,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_readOnlyTextFor(authUserId))));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_readOnlyTextFor(authUserId))));
       return;
     }
     final sendDraft = await showAttachmentSendDialog(context, path);
@@ -617,7 +645,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         _sendText(scheduledFor: scheduledFor);
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('يجب أن يكون الوقت في المستقبل.')),
+                          const SnackBar(
+                            content: Text('يجب أن يكون الوقت في المستقبل.'),
+                          ),
                         );
                       }
                     }
@@ -709,7 +739,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     return mentions.toSet().toList(); // Ensure unique mentions
   }
 
-  Future<void> _sendText({bool isSilent = false, DateTime? scheduledFor}) async {
+  Future<void> _sendText({
+    bool isSilent = false,
+    DateTime? scheduledFor,
+  }) async {
     if (_isUploadingAttachment) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -760,6 +793,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
 
     _messageController.clear();
+    unawaited(_draftStore.clear(widget.conversation.id));
 
     setState(() {
       _replyingTo = null;
@@ -964,7 +998,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     final pollData = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => const PollCreatorDialog(), // Will fix the import using prefix or direct
+      builder: (_) =>
+          const PollCreatorDialog(), // Will fix the import using prefix or direct
     );
 
     if (pollData == null || !mounted) return;
@@ -979,7 +1014,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     try {
       await ref
-          .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
           .sendMessage(
             content: '',
             messageType: 'poll',
@@ -991,9 +1030,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create poll: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create poll: $e')));
       }
     }
   }
@@ -1020,10 +1059,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     try {
       await ref
-          .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
           .sendMessage(
             content: '',
-            messageType: 'poll', // Use poll but with checklist metadata so we reuse UI logic mostly
+            messageType: 'checklist',
             metadata: metadata,
             replyToMessageId: _replyingTo?.id,
           );
@@ -1042,7 +1085,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   Future<void> _openGifPicker() async {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) return;
-    
+
     // For now we'll just show a simple snackbar or implement tenor API if requested.
     // Given the prompt "GIFs: دمج أداة بحث سريعة لإرسال الـ GIFs (عبر Giphy)", we should build a simple GifPicker.
     // Let's call a widget:
@@ -1055,7 +1098,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     if (gifUrl != null && mounted) {
       await ref
-          .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
           .sendMessage(
             content: '',
             messageType: 'gif',
@@ -3135,7 +3182,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               const Divider(),
               Expanded(
                 child: FutureBuilder<Map<String, dynamic>>(
-                  future: ref.read(chatRepositoryProvider).getReadReceipts(message.id),
+                  future: ref
+                      .read(chatRepositoryProvider)
+                      .getReadReceipts(message.id),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
@@ -3143,7 +3192,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     if (snapshot.hasError) {
                       return Center(child: Text('خطأ: ${snapshot.error}'));
                     }
-                    final seenBy = snapshot.data?['seenBy'] as List<dynamic>? ?? [];
+                    final seenBy =
+                        snapshot.data?['seenBy'] as List<dynamic>? ?? [];
                     if (seenBy.isEmpty) {
                       return const Center(child: Text('لم يشاهدها أحد بعد.'));
                     }
@@ -3156,16 +3206,26 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           leading: ChatAvatar(
                             avatarUrl: user['avatarUrl']?.toString() ?? '',
                             radius: 20,
-                            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primaryContainer,
                             fallback: Text(
-                              user['displayName']?.toString().isNotEmpty == true 
-                                  ? user['displayName'].toString()[0].toUpperCase() 
+                              user['displayName']?.toString().isNotEmpty == true
+                                  ? user['displayName']
+                                        .toString()[0]
+                                        .toUpperCase()
                                   : '?',
                             ),
                           ),
-                          title: Text(user['displayName']?.toString() ?? 'مستخدم'),
-                          subtitle: user['seenAt'] != null 
-                              ? Text(DateTime.parse(user['seenAt'].toString()).toLocal().toString()) 
+                          title: Text(
+                            user['displayName']?.toString() ?? 'مستخدم',
+                          ),
+                          subtitle: user['seenAt'] != null
+                              ? Text(
+                                  DateTime.parse(
+                                    user['seenAt'].toString(),
+                                  ).toLocal().toString(),
+                                )
                               : null,
                         );
                       },
@@ -3202,7 +3262,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 elevation: 0,
               ),
               Expanded(
-                child: ScheduledMessagesList(conversationId: widget.conversation.id),
+                child: ScheduledMessagesList(
+                  conversationId: widget.conversation.id,
+                ),
               ),
             ],
           ),
@@ -4147,6 +4209,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       if (!_didAutoScrollOnEnter) {
                         _didAutoScrollOnEnter = true;
                         WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted || !_scrollController.hasClients) {
+                            return;
+                          }
+                          _scrollController.jumpTo(
+                            _scrollController.position.maxScrollExtent,
+                          );
                           _scrollToBottom();
                         });
                       }
@@ -4701,25 +4769,63 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                         mainAxisSize:
                                                                             MainAxisSize.min,
                                                                         children: [
-                                                                          if (message.isPollMessage)
+                                                                          if (message
+                                                                              .isPollMessage)
                                                                             ChatPollBubble(
-                                                                              poll: message.metadata?['poll'] is Map<String, dynamic>
-                                                                                  ? message.metadata!['poll'] as Map<String, dynamic>
-                                                                                  : message.metadata ?? {},
-                                                                              currentUserId: ref.watch(authControllerProvider).valueOrNull?.id ?? '',
+                                                                              poll:
+                                                                                  message.metadata?['poll']
+                                                                                      is Map<
+                                                                                        String,
+                                                                                        dynamic
+                                                                                      >
+                                                                                  ? message.metadata!['poll']
+                                                                                        as Map<
+                                                                                          String,
+                                                                                          dynamic
+                                                                                        >
+                                                                                  : message.metadata ??
+                                                                                        {},
+                                                                              currentUserId:
+                                                                                  ref
+                                                                                      .watch(
+                                                                                        authControllerProvider,
+                                                                                      )
+                                                                                      .valueOrNull
+                                                                                      ?.id ??
+                                                                                  '',
                                                                               isMine: isMine,
-                                                                              onVote: (optionIds) => ref
-                                                                                  .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
-                                                                                  .votePoll(message.id, optionIds),
+                                                                              onVote:
+                                                                                  (
+                                                                                    optionIds,
+                                                                                  ) => ref
+                                                                                      .read(
+                                                                                        conversationMessagesControllerProvider(
+                                                                                          widget.conversation.id,
+                                                                                        ).notifier,
+                                                                                      )
+                                                                                      .votePoll(
+                                                                                        message.id,
+                                                                                        optionIds,
+                                                                                      ),
                                                                               onExport: () => ref
-                                                                                  .read(conversationMessagesControllerProvider(widget.conversation.id).notifier)
-                                                                                  .exportPoll(message.id),
+                                                                                  .read(
+                                                                                    conversationMessagesControllerProvider(
+                                                                                      widget.conversation.id,
+                                                                                    ).notifier,
+                                                                                  )
+                                                                                  .exportPoll(
+                                                                                    message.id,
+                                                                                  ),
                                                                             )
-                                                                          else if (message.isGifMessage)
+                                                                          else if (message
+                                                                              .isGifMessage)
                                                                             ClipRRect(
-                                                                              borderRadius: BorderRadius.circular(14),
+                                                                              borderRadius: BorderRadius.circular(
+                                                                                14,
+                                                                              ),
                                                                               child: Image.network(
-                                                                                message.fileUrl ?? '',
+                                                                                message.fileUrl ??
+                                                                                    '',
                                                                                 fit: BoxFit.cover,
                                                                               ),
                                                                             )
@@ -5153,11 +5259,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           leading: ChatAvatar(
                             avatarUrl: user.avatarUrl,
                             radius: 16,
-                            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primaryContainer,
                             fallback: Text(
-                              user.displayName.isNotEmpty ? user.displayName[0].toUpperCase() : '?',
+                              user.displayName.isNotEmpty
+                                  ? user.displayName[0].toUpperCase()
+                                  : '?',
                               style: TextStyle(
-                                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onPrimaryContainer,
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -6399,7 +6511,8 @@ class _MessageComposerState extends State<_MessageComposer> {
                                     onTapDown: (_) => _scaleSendButton(true),
                                     onTapUp: (_) => _scaleSendButton(false),
                                     onTapCancel: () => _scaleSendButton(false),
-                                    onLongPress: enabled && !isUploading && !isEditing
+                                    onLongPress:
+                                        enabled && !isUploading && !isEditing
                                         ? widget.onSendOptions
                                         : null,
                                     child: AnimatedScale(
@@ -6660,7 +6773,6 @@ class _ComposerActionsFabState extends State<_ComposerActionsFab> {
           break;
       }
     }
-
   }
 
   @override
@@ -6767,5 +6879,3 @@ bool _reactionHasUser(List<String> userIds, String? currentUserId) {
   }
   return userIds.contains(currentUserId);
 }
-
-

@@ -967,6 +967,7 @@ import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../../../shared/widgets/shimmer_skeleton.dart';
 import '../../../admin/models/update_management_models.dart';
+import '../../data/chat_draft_store.dart';
 import '../../data/chat_socket_service.dart';
 import '../../models/chat_models.dart';
 import '../../utils/chat_attachment_policy.dart';
@@ -1011,6 +1012,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   static const MethodChannel _windowChannel = MethodChannel('dbacd_hub/window');
 
   final TextEditingController _messageController = TextEditingController();
+  static const _draftStore = ChatDraftStore();
+  bool _restoringDraft = false;
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _searchFocusNode = FocusNode();
@@ -1080,6 +1083,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
     _messageController.addListener(_onMessageTextChanged);
+    _messageController.addListener(_onMessageDraftChanged);
     _container = ProviderScope.containerOf(context, listen: false);
     _scrollController.addListener(_onScroll);
     _searchController.addListener(() {
@@ -1092,6 +1096,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     });
     _listenToSocket();
     unawaited(_refreshRemotePeerDevice());
+    unawaited(_restoreDraft());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(activeConversationIdProvider.notifier).state = _conversationId;
@@ -1128,6 +1133,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       _selectedMessageIds.clear();
       _searchController.clear();
       _messageController.clear();
+      unawaited(_restoreDraft());
       _lastMessageCount = 0;
       _activeSearchMatchIndex = 0;
       _focusedMessageId = null;
@@ -1156,6 +1162,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void dispose() {
     _messageController.removeListener(_onMessageTextChanged);
+    _messageController.removeListener(_onMessageDraftChanged);
     final disposedConversationId = _conversationId;
     Future<void>(() {
       final activeConversation = _container.read(activeConversationIdProvider);
@@ -1182,6 +1189,22 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _searchFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _restoreDraft() async {
+    final draft = await _draftStore.load(_conversationId);
+    if (!mounted || draft == null || draft.isEmpty) return;
+    _restoringDraft = true;
+    _messageController.value = TextEditingValue(
+      text: draft,
+      selection: TextSelection.collapsed(offset: draft.length),
+    );
+    _restoringDraft = false;
+  }
+
+  void _onMessageDraftChanged() {
+    if (_restoringDraft) return;
+    unawaited(_draftStore.save(_conversationId, _messageController.text));
   }
 
   void _onMessageTextChanged() {
@@ -2282,6 +2305,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
     if (!mounted) return;
     _messageController.clear();
+    unawaited(_draftStore.clear(_conversationId));
     _stopTypingNow();
     setState(() {
       _replyingTo = null;
@@ -2718,7 +2742,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           )
           .sendMessage(
             content: '',
-            messageType: 'poll',
+            messageType: 'checklist',
             metadata: metadata,
             replyToMessageId: _replyingTo?.id,
           );

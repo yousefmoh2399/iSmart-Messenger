@@ -1521,12 +1521,17 @@ class ConversationMessagesController
     Map<String, dynamic>? metadata,
     bool isSilent = false,
     DateTime? scheduledFor,
+    String? clientMessageId,
   }) async {
     _socketService?.markActivity();
+    final stableClientMessageId =
+        clientMessageId ??
+        '${DateTime.now().microsecondsSinceEpoch}_${arg.hashCode}';
     final result = await _guardAuth(
       () => _repository().sendTextMessage(
         conversationId: arg,
         content: content,
+        clientMessageId: stableClientMessageId,
         replyToMessageId: replyToMessageId,
         metadata: metadata,
         messageType: messageType,

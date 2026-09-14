@@ -18,8 +18,13 @@ const {
   getUserPresence,
 } = require("../services/chat.service");
 const { getEffectivePermissionsForUser } = require("../services/role.service");
-const { getUnreadCountsForUser } = require("../services/chat-member-state.service");
-const { setUserPresence, touchUserActivity } = require("../../services/user.service");
+const {
+  getUnreadCountsForUser,
+} = require("../services/chat-member-state.service");
+const {
+  setUserPresence,
+  touchUserActivity,
+} = require("../../services/user.service");
 const { getChatTransferForUser } = require("../services/chat-transfer.service");
 const {
   sendChatPushNotifications,
@@ -45,7 +50,11 @@ function normalizeClientType(value) {
   const normalized = String(value || "")
     .trim()
     .toLowerCase();
-  if (normalized === "desktop" || normalized === "mobile" || normalized === "web") {
+  if (
+    normalized === "desktop" ||
+    normalized === "mobile" ||
+    normalized === "web"
+  ) {
     return normalized;
   }
   return "unknown";
@@ -122,9 +131,11 @@ function getDesktopSocketIds(io, userId) {
   const desktopSockets = [...sockets].filter(
     (socketId) =>
       socketClientType.get(socketId) === "desktop" &&
-      (socketPresence.get(socketId) || "online") !== "offline"
+      (socketPresence.get(socketId) || "online") !== "offline",
   );
-  return desktopSockets.length ? [desktopSockets[desktopSockets.length - 1]] : [];
+  return desktopSockets.length
+    ? [desktopSockets[desktopSockets.length - 1]]
+    : [];
 }
 
 function getMobileSocketIds(io, userId) {
@@ -132,7 +143,7 @@ function getMobileSocketIds(io, userId) {
   return [...sockets].filter(
     (socketId) =>
       socketClientType.get(socketId) === "mobile" &&
-      (socketPresence.get(socketId) || "online") !== "offline"
+      (socketPresence.get(socketId) || "online") !== "offline",
   );
 }
 
@@ -146,7 +157,11 @@ async function buildInlineTransferPayload(transferMeta, role) {
   }
   const allowedBytes = maxTransferBytesForRole(role);
   const declaredSize = Number(transferMeta.fileSize || 0);
-  if (!Number.isFinite(declaredSize) || declaredSize <= 0 || declaredSize > allowedBytes) {
+  if (
+    !Number.isFinite(declaredSize) ||
+    declaredSize <= 0 ||
+    declaredSize > allowedBytes
+  ) {
     return null;
   }
   const resolvedPath = resolveStoredUploadPath(transferMeta.storedFilePath);
@@ -168,6 +183,7 @@ function getUserDeliveryContext(io, userId) {
   const sockets = pruneUserSockets(io, userId);
   let hasDesktop = false;
   let hasMobile = false;
+  let hasWeb = false;
   for (const socketId of sockets) {
     if ((socketPresence.get(socketId) || "online") === "offline") {
       continue;
@@ -179,10 +195,14 @@ function getUserDeliveryContext(io, userId) {
     if (clientType === "mobile") {
       hasMobile = true;
     }
+    if (clientType === "web") {
+      hasWeb = true;
+    }
   }
   return {
     hasDesktop,
     hasMobile,
+    hasWeb,
   };
 }
 
@@ -315,7 +335,7 @@ function emitMessageToRecipients(io, message) {
   const recipients = new Set(
     (message.deliveredTo || [])
       .map((entry) => entry.userId?.toString?.() || entry.userId)
-      .filter(Boolean)
+      .filter(Boolean),
   );
 
   if (message.senderId) {
@@ -333,13 +353,15 @@ function emitMessageToRecipients(io, message) {
 }
 
 async function emitConversationToUsers(io, conversationId, userIds = []) {
-  const uniqueUserIds = [...new Set((userIds || []).map(String).filter(Boolean))];
+  const uniqueUserIds = [
+    ...new Set((userIds || []).map(String).filter(Boolean)),
+  ];
   await Promise.all(
     uniqueUserIds.map(async (userId) => {
       try {
         const conversation = await getConversationSnapshotForUserId(
           conversationId,
-          userId
+          userId,
         );
         if (conversation) {
           io.to(`user:${userId}`).emit("conversation_updated", conversation);
@@ -352,7 +374,7 @@ async function emitConversationToUsers(io, conversationId, userIds = []) {
           errorMessage: error?.message,
         });
       }
-    })
+    }),
   );
 }
 
@@ -448,7 +470,7 @@ function initializeChatSocketServer(httpServer) {
         presenceStatus: "offline",
         lastSeen: new Date(),
       },
-    }
+    },
   ).catch(() => {});
 
   const sweepInterval = setInterval(() => {
@@ -482,7 +504,7 @@ function initializeChatSocketServer(httpServer) {
             presenceStatus: "offline",
             lastSeen: new Date(),
           },
-        }
+        },
       );
       for (const userId of staleIds) {
         emitPresence(io, userId, false, "offline", {
@@ -522,9 +544,10 @@ function initializeChatSocketServer(httpServer) {
       });
       const pendingDeliveries = await markPendingDeliveriesForUser(currentUser);
       for (const entry of pendingDeliveries) {
-        io
-          .to(getConversationRoom(entry.conversationId))
-          .emit("message_delivered", entry);
+        io.to(getConversationRoom(entry.conversationId)).emit(
+          "message_delivered",
+          entry,
+        );
       }
     } catch (error) {
       socket.emit("socket_error", {
@@ -560,14 +583,17 @@ function initializeChatSocketServer(httpServer) {
         socket.join(getConversationRoom(payload.conversationId));
         const deliveredMessageIds = await markConversationDelivered(
           currentUser,
-          payload.conversationId
+          payload.conversationId,
         );
         if (deliveredMessageIds.length) {
-          io.to(getConversationRoom(payload.conversationId)).emit("message_delivered", {
-            conversationId: payload.conversationId,
-            userId: currentUser.id,
-            messageIds: deliveredMessageIds,
-          });
+          io.to(getConversationRoom(payload.conversationId)).emit(
+            "message_delivered",
+            {
+              conversationId: payload.conversationId,
+              userId: currentUser.id,
+              messageIds: deliveredMessageIds,
+            },
+          );
         }
         socketAck(ack, {
           ok: true,
@@ -585,10 +611,12 @@ function initializeChatSocketServer(httpServer) {
     socket.on("leave_conversation", async (payload = {}, ack) => {
       socket.leave(getConversationRoom(payload.conversationId));
       clearTyping(payload.conversationId, currentUser.id);
-      socket.to(getConversationRoom(payload.conversationId)).emit("stop_typing", {
-        conversationId: payload.conversationId,
-        userId: currentUser.id,
-      });
+      socket
+        .to(getConversationRoom(payload.conversationId))
+        .emit("stop_typing", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+        });
       socketAck(ack, {
         ok: true,
         success: true,
@@ -599,20 +627,35 @@ function initializeChatSocketServer(httpServer) {
     socket.on("send_message", async (payload = {}, ack) => {
       try {
         clearTyping(payload.conversationId, currentUser.id);
-        socket.to(getConversationRoom(payload.conversationId)).emit("stop_typing", {
-          conversationId: payload.conversationId,
-          userId: currentUser.id,
-        });
+        socket
+          .to(getConversationRoom(payload.conversationId))
+          .emit("stop_typing", {
+            conversationId: payload.conversationId,
+            userId: currentUser.id,
+          });
         const result = await createMessage(currentUser, payload, null);
+        if (result.alreadyExists) {
+          socketAck(ack, {
+            ok: true,
+            success: true,
+            data: {
+              message: result.message,
+              conversation: result.conversation,
+            },
+          });
+          return;
+        }
         emitMessageToRecipients(io, result.message);
         const audienceIds = [
-          ...new Set((result.audienceUserIds || []).map((entry) => String(entry))),
+          ...new Set(
+            (result.audienceUserIds || []).map((entry) => String(entry)),
+          ),
         ];
         if (audienceIds.length > 0) {
           await emitConversationToUsers(
             io,
             result.message.conversationId,
-            audienceIds
+            audienceIds,
           );
         }
 
@@ -620,21 +663,23 @@ function initializeChatSocketServer(httpServer) {
           ...new Set(
             (result.message.deliveredTo || [])
               .map((entry) => entry.userId?.toString?.() || entry.userId)
-              .filter(Boolean)
+              .filter(Boolean),
           ),
         ];
         await Promise.all(
           deliveredUsers.map((userId) =>
-            emitUnreadCount(io, userId, result.message.conversationId)
-          )
+            emitUnreadCount(io, userId, result.message.conversationId),
+          ),
         );
 
         sendChatPushNotifications({
           recipientUserIds: result.recipientUserIds || [],
           conversation: result.conversation,
           message: result.message,
-          senderName: currentUser.fullName || currentUser.username || "New message",
-          shouldNotifyUser: (userId) => !getUserDeliveryContext(io, userId).hasMobile,
+          senderName:
+            currentUser.fullName || currentUser.username || "New message",
+          shouldNotifyUser: (userId) =>
+            !getUserDeliveryContext(io, userId).hasMobile,
         }).catch((error) => {
           logger.error("chat.push.send_failed", {
             conversationId: String(result.message.conversationId),
@@ -672,10 +717,12 @@ function initializeChatSocketServer(httpServer) {
 
     socket.on("stop_typing", async (payload = {}, ack) => {
       clearTyping(payload.conversationId, currentUser.id);
-      socket.to(getConversationRoom(payload.conversationId)).emit("stop_typing", {
-        conversationId: payload.conversationId,
-        userId: currentUser.id,
-      });
+      socket
+        .to(getConversationRoom(payload.conversationId))
+        .emit("stop_typing", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+        });
       socketAck(ack, { ok: true, success: true });
     });
 
@@ -683,13 +730,16 @@ function initializeChatSocketServer(httpServer) {
       try {
         const messageIds = await markConversationSeen(
           currentUser,
-          payload.conversationId
+          payload.conversationId,
         );
-        io.to(getConversationRoom(payload.conversationId)).emit("message_seen", {
-          conversationId: payload.conversationId,
-          userId: currentUser.id,
-          messageIds,
-        });
+        io.to(getConversationRoom(payload.conversationId)).emit(
+          "message_seen",
+          {
+            conversationId: payload.conversationId,
+            userId: currentUser.id,
+            messageIds,
+          },
+        );
         await emitUnreadCount(io, currentUser.id, payload.conversationId);
         socketAck(ack, {
           ok: true,
@@ -715,12 +765,12 @@ function initializeChatSocketServer(httpServer) {
         payload.status === "idle"
           ? "idle"
           : payload.status === "meeting"
-          ? "meeting"
-          : payload.status === "lunch"
-          ? "lunch"
-          : payload.status === "offline"
-          ? "offline"
-          : "online";
+            ? "meeting"
+            : payload.status === "lunch"
+              ? "lunch"
+              : payload.status === "offline"
+                ? "offline"
+                : "online";
 
       if (requestedStatus === "offline") {
         socketPresence.set(socket.id, "offline");
@@ -751,11 +801,16 @@ function initializeChatSocketServer(httpServer) {
         return;
       }
 
-      const rawPrinters = Array.isArray(payload.printers) ? payload.printers : [];
-      const printers = [...new Set(rawPrinters.map((entry) => String(entry || "").trim()))]
+      const rawPrinters = Array.isArray(payload.printers)
+        ? payload.printers
+        : [];
+      const printers = [
+        ...new Set(rawPrinters.map((entry) => String(entry || "").trim())),
+      ]
         .filter(Boolean)
         .slice(0, 50);
-      const defaultPrinter = String(payload.defaultPrinter || "").trim() || null;
+      const defaultPrinter =
+        String(payload.defaultPrinter || "").trim() || null;
       const catalog = {
         printers,
         defaultPrinter,
@@ -825,10 +880,12 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("print_request", (payload = {}, ack) => {
-      const allDesktopSocketIds = [...pruneUserSockets(io, currentUser.id)].filter(
+      const allDesktopSocketIds = [
+        ...pruneUserSockets(io, currentUser.id),
+      ].filter(
         (socketId) =>
           socketClientType.get(socketId) === "desktop" &&
-          (socketPresence.get(socketId) || "online") !== "offline"
+          (socketPresence.get(socketId) || "online") !== "offline",
       );
 
       if (!allDesktopSocketIds.length) {
@@ -852,10 +909,18 @@ function initializeChatSocketServer(httpServer) {
         return;
       }
 
-      const fileName = String(payload.fileName || "").trim().slice(0, 255) || "print_file";
-      const mimeType = String(payload.mimeType || "").trim().slice(0, 120) || null;
+      const fileName =
+        String(payload.fileName || "")
+          .trim()
+          .slice(0, 255) || "print_file";
+      const mimeType =
+        String(payload.mimeType || "")
+          .trim()
+          .slice(0, 120) || null;
       const preferredPrinterName =
-        String(payload.preferredPrinterName || "").trim().slice(0, 120) || null;
+        String(payload.preferredPrinterName || "")
+          .trim()
+          .slice(0, 120) || null;
       const source = String(payload.source || "unknown")
         .trim()
         .slice(0, 40);
@@ -873,24 +938,31 @@ function initializeChatSocketServer(httpServer) {
       }
 
       // Backward compatibility fallback for clientRequestId
-      const effectiveClientRequestId = clientRequestId || `fallback-req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const effectiveClientRequestId =
+        clientRequestId ||
+        `fallback-req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       if (existingJob) {
         // If job is already forwarded, processing or submitted, do NOT reprint
-        if (["forwarded", "processing", "submitted"].includes(existingJob.state)) {
+        if (
+          ["forwarded", "processing", "submitted"].includes(existingJob.state)
+        ) {
           logger.info("event=print_job_duplicate_ignored", {
             jobId,
             clientRequestId: effectiveClientRequestId,
-            reason: `already_${existingJob.state}`
+            reason: `already_${existingJob.state}`,
           });
           socketAck(ack, {
             ok: true,
             success: true,
             data: {
               jobId,
-              status: existingJob.state === "submitted" ? "completed" : existingJob.state,
-              executionState: existingJob.state
-            }
+              status:
+                existingJob.state === "submitted"
+                  ? "completed"
+                  : existingJob.state,
+              executionState: existingJob.state,
+            },
           });
           return;
         }
@@ -914,7 +986,8 @@ function initializeChatSocketServer(httpServer) {
           jobId,
           clientRequestId: effectiveClientRequestId,
           requestedByUserId: currentUser.id,
-          requestedByName: currentUser.fullName || currentUser.username || "User",
+          requestedByName:
+            currentUser.fullName || currentUser.username || "User",
           fileName,
           mimeType,
           downloadUrl: downloadUrl || null,
@@ -939,11 +1012,15 @@ function initializeChatSocketServer(httpServer) {
 
       // Explicit target check
       let targetDesktopSocketId = null;
-      const explicitTarget = payload.targetDesktopId || payload.deviceId || payload.targetDesktopSocketId;
+      const explicitTarget =
+        payload.targetDesktopId ||
+        payload.deviceId ||
+        payload.targetDesktopSocketId;
       if (explicitTarget && allDesktopSocketIds.includes(explicitTarget)) {
         targetDesktopSocketId = explicitTarget;
       } else {
-        targetDesktopSocketId = allDesktopSocketIds[allDesktopSocketIds.length - 1]; // last connected
+        targetDesktopSocketId =
+          allDesktopSocketIds[allDesktopSocketIds.length - 1]; // last connected
       }
 
       logger.info("event=print_job_received", {
@@ -951,7 +1028,7 @@ function initializeChatSocketServer(httpServer) {
         clientRequestId: effectiveClientRequestId,
         socketInstanceId: socket.id,
         targetDesktopSocketId,
-        availableDesktopSocketCount: allDesktopSocketIds.length
+        availableDesktopSocketCount: allDesktopSocketIds.length,
       });
 
       printJobOwnerById.set(jobId, currentUser.id);
@@ -976,11 +1053,14 @@ function initializeChatSocketServer(httpServer) {
         try {
           printJobStore.validateAndTransition(jobId, status);
         } catch (err) {
-          logger.warn("chat.socket.print_job_status_update.invalid_transition", {
-            jobId,
-            status,
-            error: err.message
-          });
+          logger.warn(
+            "chat.socket.print_job_status_update.invalid_transition",
+            {
+              jobId,
+              status,
+              error: err.message,
+            },
+          );
           socketAck(ack, { ok: false, success: false, error: err.message });
           return;
         }
@@ -1007,7 +1087,9 @@ function initializeChatSocketServer(httpServer) {
       const status = success ? "submitted" : "failed";
       const printExecutionId = String(payload.printExecutionId || "").trim();
       const errorCode = String(payload.errorCode || "").trim();
-      const errorMessage = String(payload.errorMessage || payload.message || "").trim();
+      const errorMessage = String(
+        payload.errorMessage || payload.message || "",
+      ).trim();
 
       const jobRecord = printJobStore.getJob(jobId);
       if (jobRecord) {
@@ -1017,7 +1099,7 @@ function initializeChatSocketServer(httpServer) {
           logger.warn("chat.socket.print_job_result.invalid_transition", {
             jobId,
             status,
-            error: err.message
+            error: err.message,
           });
           socketAck(ack, { ok: false, success: false, error: err.message });
           return;
@@ -1053,13 +1135,17 @@ function initializeChatSocketServer(httpServer) {
       if (targetUserId !== currentUser.id) {
         const targetUser = await User.findById(
           targetUserId,
-          "branchCode role isActive"
+          "branchCode role isActive",
         ).lean();
         const sameBranch =
           targetUser &&
           targetUser.isActive !== false &&
-          String(targetUser.branchCode || "").trim().toLowerCase() ===
-            String(currentUser.branchCode || "").trim().toLowerCase();
+          String(targetUser.branchCode || "")
+            .trim()
+            .toLowerCase() ===
+            String(currentUser.branchCode || "")
+              .trim()
+              .toLowerCase();
         if (!sameBranch && currentUser.role !== "admin") {
           socketAck(ack, {
             ok: false,
@@ -1083,8 +1169,14 @@ function initializeChatSocketServer(httpServer) {
       const transferId = String(payload.transferId || "").trim();
       let inlineFileBase64 = String(payload.inlineFileBase64 || "").trim();
       let downloadUrl = String(payload.downloadUrl || "").trim();
-      let fileName = String(payload.fileName || "").trim().slice(0, 255) || "file";
-      let mimeType = String(payload.mimeType || "").trim().slice(0, 120) || null;
+      let fileName =
+        String(payload.fileName || "")
+          .trim()
+          .slice(0, 255) || "file";
+      let mimeType =
+        String(payload.mimeType || "")
+          .trim()
+          .slice(0, 120) || null;
       let fileSize = Number(payload.fileSize || 0);
       let transferMeta = null;
 
@@ -1186,8 +1278,14 @@ function initializeChatSocketServer(httpServer) {
       const transferId = String(payload.transferId || "").trim();
       const inlineFileBase64 = String(payload.inlineFileBase64 || "").trim();
       let downloadUrl = String(payload.downloadUrl || "").trim();
-      let fileName = String(payload.fileName || "").trim().slice(0, 255) || "file";
-      let mimeType = String(payload.mimeType || "").trim().slice(0, 120) || null;
+      let fileName =
+        String(payload.fileName || "")
+          .trim()
+          .slice(0, 255) || "file";
+      let mimeType =
+        String(payload.mimeType || "")
+          .trim()
+          .slice(0, 120) || null;
       let fileSize = Number(payload.fileSize || 0);
       let transferMeta = null;
 
@@ -1326,7 +1424,9 @@ function initializeChatSocketServer(httpServer) {
         success: payload.success === true,
         message:
           String(payload.message || "").trim() ||
-          (payload.success === true ? "File saved on mobile." : "Mobile save failed."),
+          (payload.success === true
+            ? "File saved on mobile."
+            : "Mobile save failed."),
         savedPath: String(payload.savedPath || "").trim() || null,
         byClientType: socketClientType.get(socket.id) || "unknown",
         at: new Date().toISOString(),

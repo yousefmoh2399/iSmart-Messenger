@@ -12,7 +12,7 @@ const receiptSchema = new mongoose.Schema(
       default: Date.now,
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const messageSchema = new mongoose.Schema(
@@ -29,6 +29,12 @@ const messageSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    clientMessageId: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 100,
+    },
     content: {
       type: String,
       default: "",
@@ -37,7 +43,17 @@ const messageSchema = new mongoose.Schema(
     },
     messageType: {
       type: String,
-      enum: ["text", "file", "image", "pdf", "audio", "system", "poll", "gif", "checklist"],
+      enum: [
+        "text",
+        "file",
+        "image",
+        "pdf",
+        "audio",
+        "system",
+        "poll",
+        "gif",
+        "checklist",
+      ],
       default: "text",
       index: true,
     },
@@ -102,9 +118,16 @@ const messageSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index(
+  { senderId: 1, clientMessageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { clientMessageId: { $type: "string" } },
+  },
+);
 
 module.exports = mongoose.model("Message", messageSchema);

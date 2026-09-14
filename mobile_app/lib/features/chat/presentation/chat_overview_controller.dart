@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
@@ -1448,12 +1449,15 @@ class ConversationMessagesController
     Map<String, dynamic>? metadata,
     bool isSilent = false,
     DateTime? scheduledFor,
+    String? clientMessageId,
   }) async {
     _socketService?.markActivity();
+    final stableClientMessageId = clientMessageId ?? const Uuid().v4();
     final result = await _guardAuth(
       () => _repository().sendTextMessage(
         conversationId: arg,
         content: content,
+        clientMessageId: stableClientMessageId,
         replyToMessageId: replyToMessageId,
         metadata: metadata,
         messageType: messageType,

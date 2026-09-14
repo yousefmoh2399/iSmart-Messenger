@@ -2,7 +2,12 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 const { body } = require("express-validator");
-const { login, me, refresh, logout } = require("../controllers/auth.controller");
+const {
+  login,
+  me,
+  refresh,
+  logout,
+} = require("../controllers/auth.controller");
 const validateRequest = require("../middleware/validate.middleware");
 const { requireAuth } = require("../middleware/auth.middleware");
 const { getRedisClient } = require("../config/redis");
@@ -25,6 +30,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: buildStore("rl:auth_login:"),
+  passOnStoreError: true,
   keyGenerator: (req) => {
     const username = String(req.body?.username || "")
       .trim()
@@ -44,6 +50,7 @@ const refreshLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: buildStore("rl:auth_refresh:"),
+  passOnStoreError: true,
   keyGenerator: (req) => {
     // We can't reliably bucket by user without verifying the refresh token here,
     // so use the requester IP.

@@ -30,10 +30,14 @@ function getRedisClient() {
   }
 
   client = new Redis(redisUrl, {
-    maxRetriesPerRequest: 2,
+    // Redis is an optional acceleration/rate-limit store. Do not keep API
+    // requests queued while the local Redis service is unavailable.
+    maxRetriesPerRequest: 0,
+    enableOfflineQueue: false,
     enableReadyCheck: true,
     lazyConnect: true,
     connectTimeout: 1500,
+    retryStrategy: (attempt) => Math.min(attempt * 500, 5000),
   });
 
   // Best-effort connection; if Redis is down, we still want the app to run.
@@ -76,4 +80,3 @@ module.exports = {
   getRedisStatus,
   closeRedisClient,
 };
-

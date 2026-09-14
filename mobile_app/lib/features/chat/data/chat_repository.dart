@@ -310,6 +310,7 @@ class ChatRepository {
   Future<ChatPostResult> sendTextMessage({
     required String conversationId,
     required String content,
+    String? clientMessageId,
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
     String? messageType,
@@ -324,13 +325,15 @@ class ChatRepository {
         'conversationId': conversationId,
         'content': content,
         'messageType': messageType ?? 'text',
+        if (clientMessageId != null) 'clientMessageId': clientMessageId,
         if (replyToMessageId != null && replyToMessageId.isNotEmpty)
           'replyToMessageId': replyToMessageId,
         if (metadata != null) 'metadata': metadata,
         if (fileUrl != null) 'fileUrl': fileUrl,
         if (isSilent) 'isSilent': isSilent,
         if (isScheduled) 'isScheduled': isScheduled,
-        if (scheduledFor != null) 'scheduledFor': scheduledFor.toIso8601String(),
+        if (scheduledFor != null)
+          'scheduledFor': scheduledFor.toIso8601String(),
       },
     );
     return ChatPostResult(
@@ -390,11 +393,13 @@ class ChatRepository {
         response.data?['message'] as Map<String, dynamic>,
       ),
     );
-    await _archiveSentAttachment(
-      message: result.message,
-      sha256Hex: fileSha256,
-      filePath: filePath,
-      fileName: fileName,
+    unawaited(
+      _archiveSentAttachment(
+        message: result.message,
+        sha256Hex: fileSha256,
+        filePath: filePath,
+        fileName: fileName,
+      ),
     );
     return result;
   }
@@ -455,8 +460,8 @@ class ChatRepository {
       data: {'optionIds': optionIds},
     );
     return ChatMessage.fromJson(
-      (response.data?['data']?['message'] as Map<String, dynamic>?) ?? 
-      (response.data?['message'] as Map<String, dynamic>),
+      (response.data?['data']?['message'] as Map<String, dynamic>?) ??
+          (response.data?['message'] as Map<String, dynamic>),
     );
   }
 
@@ -479,8 +484,6 @@ class ChatRepository {
       '/api/chat/messages/$messageId',
     );
   }
-
-
 
   Future<void> markConversationSeen(String conversationId) async {
     await _apiClient.dio.post<void>(
@@ -1093,10 +1096,14 @@ class ChatRepository {
 
   // --- Chat Folders ---
   Future<List<ChatFolder>> getFolders() async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>('/api/chat/folders');
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      '/api/chat/folders',
+    );
     final data = response.data?['data'] as List?;
     if (data == null) return [];
-    return data.map((json) => ChatFolder.fromJson(json as Map<String, dynamic>)).toList();
+    return data
+        .map((json) => ChatFolder.fromJson(json as Map<String, dynamic>))
+        .toList();
   }
 
   Future<ChatFolder> createFolder({
@@ -1158,7 +1165,9 @@ class ChatRepository {
     );
     final data = response.data?['data'] as List?;
     if (data == null) return [];
-    return data.map((json) => ChatFolder.fromJson(json as Map<String, dynamic>)).toList();
+    return data
+        .map((json) => ChatFolder.fromJson(json as Map<String, dynamic>))
+        .toList();
   }
 
   Future<Map<String, dynamic>> getReadReceipts(String messageId) async {
@@ -1181,7 +1190,11 @@ class ChatRepository {
     final disposition = response.headers.value("content-disposition") ?? "";
     String filename = "poll_export_$messageId.xlsx";
     if (disposition.contains("filename=")) {
-      filename = disposition.split("filename=").last.replaceAll("\"", "").trim();
+      filename = disposition
+          .split("filename=")
+          .last
+          .replaceAll("\"", "")
+          .trim();
     }
     final file = File(p.join(directory.path, filename));
     await file.writeAsBytes(bytes);

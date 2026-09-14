@@ -46,7 +46,9 @@ function sanitizeMessageContent(value) {
 }
 
 function sanitizeText(value, maxLength = 500) {
-  return String(value || "").trim().slice(0, maxLength);
+  return String(value || "")
+    .trim()
+    .slice(0, maxLength);
 }
 
 function sanitizePinnedMessageContent(value) {
@@ -83,7 +85,7 @@ function isMongoIdLike(value) {
 
 function normalizeIdList(values) {
   return Array.from(
-    new Set((values || []).filter((entry) => isMongoIdLike(entry)).map(String))
+    new Set((values || []).filter((entry) => isMongoIdLike(entry)).map(String)),
   );
 }
 
@@ -126,7 +128,9 @@ function normalizeMessageMetadata(metadata) {
 
 function normalizeAttachmentArchiveMetadata(metadata) {
   const source =
-    metadata && typeof metadata === "object" ? metadata.attachmentArchive : null;
+    metadata && typeof metadata === "object"
+      ? metadata.attachmentArchive
+      : null;
   if (!source || typeof source !== "object") {
     return null;
   }
@@ -167,9 +171,13 @@ function normalizeDepartmentCodeList(rawDepartmentCodes) {
   return Array.from(
     new Set(
       (rawDepartmentCodes || [])
-        .map((entry) => String(entry || "").trim().toUpperCase())
-        .filter(Boolean)
-    )
+        .map((entry) =>
+          String(entry || "")
+            .trim()
+            .toUpperCase(),
+        )
+        .filter(Boolean),
+    ),
   );
 }
 
@@ -177,9 +185,13 @@ function normalizeDepartmentNameList(rawDepartmentNames) {
   return Array.from(
     new Set(
       (rawDepartmentNames || [])
-        .map((entry) => String(entry || "").trim().toLowerCase())
-        .filter(Boolean)
-    )
+        .map((entry) =>
+          String(entry || "")
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    ),
   );
 }
 
@@ -187,7 +199,9 @@ async function resolveBroadcastTargetDepartmentIds(rawTargets) {
   const targets =
     rawTargets && typeof rawTargets === "object" ? rawTargets : {};
 
-  const idMatches = normalizeBroadcastTargetDepartmentIds(targets.departmentIds);
+  const idMatches = normalizeBroadcastTargetDepartmentIds(
+    targets.departmentIds,
+  );
   const codeMatches = normalizeDepartmentCodeList(targets.departmentCodes);
   const nameMatches = normalizeDepartmentNameList(targets.departmentNames);
 
@@ -203,7 +217,7 @@ async function resolveBroadcastTargetDepartmentIds(rawTargets) {
     query.$or.push({
       name: {
         $in: nameMatches.map(
-          (entry) => new RegExp(`^${escapeRegExp(entry)}$`, "i")
+          (entry) => new RegExp(`^${escapeRegExp(entry)}$`, "i"),
         ),
       },
     });
@@ -246,7 +260,9 @@ function canUserViewAllBroadcastMessages(currentUser, conversation) {
     return true;
   }
 
-  const publisherIds = new Set(extractIdArray(conversation?.broadcastPublisherIds));
+  const publisherIds = new Set(
+    extractIdArray(conversation?.broadcastPublisherIds),
+  );
   return publisherIds.has(currentUserId);
 }
 
@@ -283,7 +299,11 @@ function buildLastMessagePayload(message) {
 }
 
 function isAdminRole(role) {
-  return String(role || "").trim().toLowerCase() === "admin";
+  return (
+    String(role || "")
+      .trim()
+      .toLowerCase() === "admin"
+  );
 }
 
 function serializeUserLite(user) {
@@ -299,9 +319,12 @@ function serializeUserLite(user) {
         ? [user.departmentId.toString()]
         : [],
     branchId: user.branchId ? user.branchId.toString() : null,
-    branchCode: String(user.branchCode || "main").trim().toUpperCase(),
+    branchCode: String(user.branchCode || "main")
+      .trim()
+      .toUpperCase(),
     isOnline: Boolean(user.isOnline),
-    presenceStatus: user.presenceStatus || (user.isOnline ? "online" : "offline"),
+    presenceStatus:
+      user.presenceStatus || (user.isOnline ? "online" : "offline"),
     isActive: user.isActive !== false,
     avatarUrl: normalizeMediaUrl(user.avatarUrl),
     lastSeen: user.lastSeen || null,
@@ -330,10 +353,10 @@ function serializeReceipt(entry) {
 
 async function serializeConversation(conversation, currentUserId) {
   const members = (conversation.members || []).map((member) =>
-    member._id ? serializeUserLite(member) : { id: member.toString() }
+    member._id ? serializeUserLite(member) : { id: member.toString() },
   );
   const admins = (conversation.admins || []).map((admin) =>
-    admin._id ? serializeUserLite(admin) : { id: admin.toString() }
+    admin._id ? serializeUserLite(admin) : { id: admin.toString() },
   );
 
   const memberState = await ConversationMemberState.findOne({
@@ -362,7 +385,7 @@ async function serializeConversation(conversation, currentUserId) {
         messageType: null,
         createdAt: null,
       }
-    : (conversation.lastMessage || null);
+    : conversation.lastMessage || null;
 
   return {
     id: conversation._id.toString(),
@@ -377,14 +400,14 @@ async function serializeConversation(conversation, currentUserId) {
     createdBy: conversation.createdBy?.toString?.() || conversation.createdBy,
     members,
     admins,
-    broadcastPublisherIds: (conversation.broadcastPublisherIds || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString()
+    broadcastPublisherIds: (conversation.broadcastPublisherIds || []).map(
+      (entry) => (entry._id ? entry._id.toString() : entry.toString()),
     ),
     blockedMemberIds: (conversation.blockedMembers || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString()
+      entry._id ? entry._id.toString() : entry.toString(),
     ),
     blockedMembers: (conversation.blockedMembers || []).map((entry) =>
-      entry._id ? serializeUserLite(entry) : { id: entry.toString() }
+      entry._id ? serializeUserLite(entry) : { id: entry.toString() },
     ),
     pinnedMessage: conversation.pinnedMessage
       ? {
@@ -431,7 +454,9 @@ function serializeMessage(message, sender = null) {
 }
 
 async function getOnlineActiveUserIds(userIds) {
-  const uniqueIds = Array.from(new Set((userIds || []).filter(Boolean).map(String)));
+  const uniqueIds = Array.from(
+    new Set((userIds || []).filter(Boolean).map(String)),
+  );
   if (uniqueIds.length === 0) {
     return [];
   }
@@ -442,7 +467,7 @@ async function getOnlineActiveUserIds(userIds) {
       isActive: true,
       isOnline: true,
     },
-    "_id"
+    "_id",
   ).lean();
 
   return users.map((entry) => entry._id.toString());
@@ -484,7 +509,7 @@ async function createSystemConversationMessage(conversation, actor, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -499,7 +524,7 @@ async function refreshConversationLastMessage(conversationId) {
     .sort({ createdAt: -1, _id: -1 })
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -509,7 +534,8 @@ async function refreshConversationLastMessage(conversationId) {
           latestMessage.content ||
           latestMessage.fileName ||
           (latestMessage.messageType === "system" ? "System" : ""),
-        senderId: latestMessage.senderId?._id?.toString?.() ||
+        senderId:
+          latestMessage.senderId?._id?.toString?.() ||
           latestMessage.senderId?.toString?.() ||
           null,
         senderName:
@@ -533,7 +559,7 @@ async function refreshConversationLastMessage(conversationId) {
       $set: {
         lastMessage: nextLastMessage,
       },
-    }
+    },
   );
 }
 
@@ -546,15 +572,23 @@ function isDepartmentDefaultConversation(conversation) {
     return false;
   }
 
-  const conversationId = getObjectIdString(conversation?._id || conversation?.id);
-  const defaultConversationId = getObjectIdString(
-    conversation?.departmentId?.defaultConversationId
+  const conversationId = getObjectIdString(
+    conversation?._id || conversation?.id,
   );
-  if (conversationId && defaultConversationId && conversationId === defaultConversationId) {
+  const defaultConversationId = getObjectIdString(
+    conversation?.departmentId?.defaultConversationId,
+  );
+  if (
+    conversationId &&
+    defaultConversationId &&
+    conversationId === defaultConversationId
+  ) {
     return true;
   }
 
-  const name = String(conversation?.name || "").trim().toLowerCase();
+  const name = String(conversation?.name || "")
+    .trim()
+    .toLowerCase();
   return (
     name.includes("department room") ||
     name.includes("غرفة القسم") ||
@@ -581,15 +615,15 @@ async function getConversationById(conversationId) {
   })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "blockedMembers",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .exec();
@@ -597,7 +631,8 @@ async function getConversationById(conversationId) {
 
 async function getVisibleUsersForChat(currentUser, options = {}) {
   const search = sanitizeText(options.search || options.q || "", 120);
-  const shouldPaginate = options.page !== undefined || options.limit !== undefined;
+  const shouldPaginate =
+    options.page !== undefined || options.limit !== undefined;
   const page = Math.max(1, Math.min(Number(options.page || 1), 100000));
   const limit = Math.max(1, Math.min(Number(options.limit || 50), 100));
   const skip = (page - 1) * limit;
@@ -611,7 +646,11 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
 
   if (search) {
     const regex = new RegExp(escapeRegExp(search), "i");
-    query.$or = [{ username: regex }, { fullName: regex }, { branchCode: regex }];
+    query.$or = [
+      { username: regex },
+      { fullName: regex },
+      { branchCode: regex },
+    ];
   }
   if (options.departmentId) {
     const departmentMatch = [
@@ -629,7 +668,11 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
     query.branchId = options.branchId;
   }
 
-  const usersQuery = User.find(query).sort({ fullName: 1, username: 1, _id: 1 });
+  const usersQuery = User.find(query).sort({
+    fullName: 1,
+    username: 1,
+    _id: 1,
+  });
   if (shouldPaginate) {
     usersQuery.skip(skip).limit(limit);
   }
@@ -657,7 +700,7 @@ async function assertConversationAccess(currentUser, conversation) {
 
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
   const memberIds = (conversation.members || []).map((entry) =>
-    entry._id ? entry._id.toString() : entry.toString()
+    entry._id ? entry._id.toString() : entry.toString(),
   );
 
   if (conversation.type === "department") {
@@ -714,7 +757,7 @@ async function assertConversationManagementAccess(currentUser, conversation) {
 
   if (conversation.type === "direct") {
     const memberIds = (conversation.members || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString()
+      entry._id ? entry._id.toString() : entry.toString(),
     );
     const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
     if (currentUserId && memberIds.includes(currentUserId)) {
@@ -723,7 +766,7 @@ async function assertConversationManagementAccess(currentUser, conversation) {
   }
 
   const adminIds = (conversation.admins || []).map((entry) =>
-    entry._id ? entry._id.toString() : entry.toString()
+    entry._id ? entry._id.toString() : entry.toString(),
   );
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
   if (currentUserId && adminIds.includes(currentUserId)) {
@@ -738,7 +781,7 @@ async function assertConversationManagementAccess(currentUser, conversation) {
   ) {
     const canModerateDepartment = await userHasPermission(
       currentUser,
-      "canModerateDepartment"
+      "canModerateDepartment",
     );
     if (canModerateDepartment) {
       return;
@@ -754,7 +797,10 @@ function assertGroupOwnerAccess(currentUser, conversation) {
   }
 
   if (conversation.type !== "group") {
-    throw new ApiError(400, "This action is available for group conversations only.");
+    throw new ApiError(
+      400,
+      "This action is available for group conversations only.",
+    );
   }
 
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
@@ -780,11 +826,11 @@ async function listConversationsForUser(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -799,7 +845,10 @@ async function listConversationsForUser(currentUser) {
       if (isDepartmentDefaultConversation(conversation)) {
         continue;
       }
-      const serialized = await serializeConversation(conversation, currentUser.id);
+      const serialized = await serializeConversation(
+        conversation,
+        currentUser.id,
+      );
       if (
         conversation.type === "broadcast" &&
         !canUserViewAllBroadcastMessages(currentUser, conversation)
@@ -816,7 +865,8 @@ async function listConversationsForUser(currentUser) {
       }
       visible.push({
         ...serialized,
-        unreadCount: unreadByConversation[serialized.id] || serialized.unreadCount || 0,
+        unreadCount:
+          unreadByConversation[serialized.id] || serialized.unreadCount || 0,
       });
     } catch (_) {
       // Skip unauthorized conversation
@@ -845,11 +895,11 @@ async function listManageableConversations(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -881,7 +931,7 @@ async function getConversationSnapshotForUserId(conversationId, userId) {
 async function createConversation(currentUser, payload) {
   const type = String(payload.type || "").trim();
   const memberIds = Array.from(
-    new Set([...(payload.memberIds || [])].filter(Boolean).map(String))
+    new Set([...(payload.memberIds || [])].filter(Boolean).map(String)),
   );
   const description = sanitizeText(payload.description, 500);
   const name = sanitizeText(payload.name, 200);
@@ -892,7 +942,10 @@ async function createConversation(currentUser, payload) {
 
   if (type === "direct") {
     if (memberIds.length !== 1) {
-      throw new ApiError(400, "Direct conversation requires exactly one target user.");
+      throw new ApiError(
+        400,
+        "Direct conversation requires exactly one target user.",
+      );
     }
 
     const targetUser = await User.findById(memberIds[0]).lean();
@@ -910,8 +963,14 @@ async function createConversation(currentUser, payload) {
       deletedAt: null,
       isActive: true,
     })
-      .populate("members", "username fullName role departmentId isOnline isActive lastSeen")
-      .populate("admins", "username fullName role departmentId isOnline isActive lastSeen")
+      .populate(
+        "members",
+        "username fullName role departmentId isOnline isActive lastSeen",
+      )
+      .populate(
+        "admins",
+        "username fullName role departmentId isOnline isActive lastSeen",
+      )
       .exec();
 
     if (existing) {
@@ -974,35 +1033,43 @@ async function createConversation(currentUser, payload) {
       departmentId: department._id,
       createdBy: currentUser.id,
       members: memberIds,
-      admins: [currentUser.id, ...new Set((payload.adminIds || []).map(String))],
+      admins: [
+        currentUser.id,
+        ...new Set((payload.adminIds || []).map(String)),
+      ],
     });
     await ensureConversationMemberStates(conversation._id, memberIds);
     return getConversationDetailsForUser(currentUser, conversation._id);
   }
 
-  const canSendBroadcast = await userHasPermission(currentUser, "canSendBroadcast");
+  const canSendBroadcast = await userHasPermission(
+    currentUser,
+    "canSendBroadcast",
+  );
   if (!canSendBroadcast && currentUser.role !== "admin") {
     throw new ApiError(403, "Permission denied.");
   }
 
   const requestedPublisherIds = normalizeIdList(payload.memberIds);
   const publisherCandidates = Array.from(
-    new Set([currentUser.id, ...requestedPublisherIds])
+    new Set([currentUser.id, ...requestedPublisherIds]),
   );
   const existingPublisherUsers = await User.find(
     { _id: { $in: publisherCandidates }, isActive: true },
-    "_id"
+    "_id",
   ).lean();
   const broadcastPublisherIds = Array.from(
-    new Set(existingPublisherUsers.map((entry) => entry._id.toString()))
+    new Set(existingPublisherUsers.map((entry) => entry._id.toString())),
   );
 
   const requestedAdminIds = normalizeIdList(payload.adminIds);
   const publisherSet = new Set(broadcastPublisherIds);
   const adminIds = Array.from(
     new Set(
-      [currentUser.id, ...requestedAdminIds].filter((id) => publisherSet.has(id))
-    )
+      [currentUser.id, ...requestedAdminIds].filter((id) =>
+        publisherSet.has(id),
+      ),
+    ),
   );
 
   const members = [...broadcastPublisherIds];
@@ -1046,17 +1113,23 @@ async function updateConversation(currentUser, conversationId, payload) {
   if (conversation.type === "group") {
     if (payload.memberIds != null) {
       const nextMembers = Array.from(
-        new Set((payload.memberIds || []).filter(Boolean).map(String))
+        new Set((payload.memberIds || []).filter(Boolean).map(String)),
       );
       conversation.members = nextMembers.includes(currentUser.id)
         ? nextMembers
         : [currentUser.id, ...nextMembers];
-      await syncConversationMemberStates(conversation._id, conversation.members);
+      await syncConversationMemberStates(
+        conversation._id,
+        conversation.members,
+      );
     }
 
     if (payload.adminIds != null) {
       conversation.admins = Array.from(
-        new Set([currentUser.id, ...(payload.adminIds || []).filter(Boolean).map(String)])
+        new Set([
+          currentUser.id,
+          ...(payload.adminIds || []).filter(Boolean).map(String),
+        ]),
       );
     }
   }
@@ -1064,21 +1137,29 @@ async function updateConversation(currentUser, conversationId, payload) {
     if (payload.memberIds != null) {
       const requestedPublisherIds = normalizeIdList(payload.memberIds);
       const publisherCandidates = Array.from(
-        new Set([conversation.createdBy?.toString?.() || currentUser.id, ...requestedPublisherIds])
+        new Set([
+          conversation.createdBy?.toString?.() || currentUser.id,
+          ...requestedPublisherIds,
+        ]),
       );
       const existingPublisherUsers = await User.find(
         { _id: { $in: publisherCandidates }, isActive: true },
-        "_id"
+        "_id",
       ).lean();
       const broadcastPublisherIds = Array.from(
-        new Set(existingPublisherUsers.map((entry) => entry._id.toString()))
+        new Set(existingPublisherUsers.map((entry) => entry._id.toString())),
       );
       if (broadcastPublisherIds.length === 0) {
-        throw new ApiError(400, "Broadcast must include at least one publisher.");
+        throw new ApiError(
+          400,
+          "Broadcast must include at least one publisher.",
+        );
       }
       conversation.broadcastPublisherIds = broadcastPublisherIds;
 
-      const conversationMemberIds = new Set(extractIdArray(conversation.members));
+      const conversationMemberIds = new Set(
+        extractIdArray(conversation.members),
+      );
       let hasMemberChanges = false;
       for (const publisherId of broadcastPublisherIds) {
         if (!conversationMemberIds.has(publisherId)) {
@@ -1088,23 +1169,32 @@ async function updateConversation(currentUser, conversationId, payload) {
       }
       if (hasMemberChanges) {
         conversation.members = [...conversationMemberIds];
-        await syncConversationMemberStates(conversation._id, conversation.members);
+        await syncConversationMemberStates(
+          conversation._id,
+          conversation.members,
+        );
       }
     }
 
     if (payload.adminIds != null) {
       const configuredPublisherIds = new Set(
-        (conversation.broadcastPublisherIds || []).map((entry) => entry.toString())
+        (conversation.broadcastPublisherIds || []).map((entry) =>
+          entry.toString(),
+        ),
       );
       const publisherIds =
         configuredPublisherIds.size > 0
           ? configuredPublisherIds
-          : new Set((conversation.members || []).map((entry) => entry.toString()));
+          : new Set(
+              (conversation.members || []).map((entry) => entry.toString()),
+            );
       const requestedAdminIds = normalizeIdList(payload.adminIds);
       const nextAdmins = Array.from(
         new Set(
-          [currentUser.id, ...requestedAdminIds].filter((id) => publisherIds.has(id))
-        )
+          [currentUser.id, ...requestedAdminIds].filter((id) =>
+            publisherIds.has(id),
+          ),
+        ),
       );
       if (nextAdmins.length === 0) {
         throw new ApiError(400, "Broadcast must include at least one admin.");
@@ -1128,7 +1218,11 @@ async function updateConversation(currentUser, conversationId, payload) {
   return getConversationDetailsForUser(currentUser, conversation._id);
 }
 
-async function deleteConversation(currentUser, conversationId, { scope = "self" } = {}) {
+async function deleteConversation(
+  currentUser,
+  conversationId,
+  { scope = "self" } = {},
+) {
   const normalizedScope = String(scope || "self").toLowerCase();
   const conversation = await Conversation.findOne({
     _id: conversationId,
@@ -1137,10 +1231,14 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
 
   if (normalizedScope !== "global") {
     await assertConversationAccess(currentUser, conversation);
-    await clearConversationHistoryForUser(conversation._id, currentUser.id, new Date());
+    await clearConversationHistoryForUser(
+      conversation._id,
+      currentUser.id,
+      new Date(),
+    );
     const nextConversation = await getConversationDetailsForUser(
       currentUser,
-      conversation._id
+      conversation._id,
     );
     await logAuditEvent({
       actorId: currentUser.id,
@@ -1159,12 +1257,15 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
 
   await assertConversationManagementAccess(currentUser, conversation);
   if (conversation.type === "department") {
-    throw new ApiError(400, "Department conversations are managed through departments.");
+    throw new ApiError(
+      400,
+      "Department conversations are managed through departments.",
+    );
   }
 
   const messages = await Message.find(
     { conversationId: conversation._id, isDeleted: { $ne: true } },
-    "storedFilePath"
+    "storedFilePath",
   ).lean();
 
   for (const message of messages) {
@@ -1180,7 +1281,7 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
         isDeleted: true,
         deletedAt: new Date(),
       },
-    }
+    },
   );
   await Conversation.updateOne(
     { _id: conversation._id },
@@ -1189,9 +1290,11 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
         deletedAt: new Date(),
         isActive: false,
       },
-    }
+    },
   );
-  await ConversationMemberState.deleteMany({ conversationId: conversation._id });
+  await ConversationMemberState.deleteMany({
+    conversationId: conversation._id,
+  });
   await logAuditEvent({
     actorId: currentUser.id,
     action: "conversation.deleted",
@@ -1201,7 +1304,11 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
   });
 
   const memberIds = Array.from(
-    new Set((conversation.members || []).map((entry) => getObjectIdString(entry)).filter(Boolean))
+    new Set(
+      (conversation.members || [])
+        .map((entry) => getObjectIdString(entry))
+        .filter(Boolean),
+    ),
   );
   if (!memberIds.includes(currentUser.id)) {
     memberIds.push(currentUser.id);
@@ -1217,11 +1324,14 @@ async function deleteConversation(currentUser, conversationId, { scope = "self" 
 async function listMessagesForConversation(
   currentUser,
   conversationId,
-  { cursor = null, limit = 50, isScheduled = false } = {}
+  { cursor = null, limit = 50, isScheduled = false } = {},
 ) {
   const conversation = await getConversationById(conversationId);
   await assertConversationAccess(currentUser, conversation);
-  const memberState = await getConversationState(currentUser.id, conversationId);
+  const memberState = await getConversationState(
+    currentUser.id,
+    conversationId,
+  );
   const clearHistoryAt = memberState?.clearHistoryAt
     ? new Date(memberState.clearHistoryAt)
     : null;
@@ -1251,7 +1361,7 @@ async function listMessagesForConversation(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1261,7 +1371,9 @@ async function listMessagesForConversation(
   const ordered = sliced.reverse();
 
   return {
-    messages: ordered.map((message) => serializeMessage(message, message.senderId)),
+    messages: ordered.map((message) =>
+      serializeMessage(message, message.senderId),
+    ),
     meta: {
       nextCursor,
       hasMore,
@@ -1273,10 +1385,34 @@ async function listMessagesForConversation(
 async function createMessage(currentUser, payload, file) {
   const conversation = await getConversationById(payload.conversationId);
   await assertConversationAccess(currentUser, conversation);
+  const clientMessageId = String(payload.clientMessageId || "")
+    .trim()
+    .slice(0, 100);
+  if (clientMessageId) {
+    const existing = await Message.findOne({
+      senderId: currentUser.id,
+      clientMessageId,
+    })
+      .populate(
+        "senderId",
+        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      )
+      .exec();
+    if (existing) {
+      if (file?.path) await deleteFileIfExists(file.path);
+      return {
+        audienceUserIds: [],
+        recipientUserIds: [],
+        alreadyExists: true,
+        conversation: await serializeConversation(conversation, currentUser.id),
+        message: serializeMessage(existing, existing.senderId),
+      };
+    }
+  }
   const blockedIds = new Set(
     (conversation.blockedMembers || []).map((entry) =>
-      entry?._id ? entry._id.toString() : entry.toString()
-    )
+      entry?._id ? entry._id.toString() : entry.toString(),
+    ),
   );
   if (blockedIds.has(currentUser.id)) {
     if (file?.path) {
@@ -1284,7 +1420,7 @@ async function createMessage(currentUser, payload, file) {
     }
     throw new ApiError(
       403,
-      "You can read this conversation but cannot send messages in it."
+      "You can read this conversation but cannot send messages in it.",
     );
   }
   if (conversation.isActive === false) {
@@ -1293,7 +1429,7 @@ async function createMessage(currentUser, payload, file) {
     }
     throw new ApiError(
       403,
-      "This room is disabled by admin. Messaging is currently read-only."
+      "This room is disabled by admin. Messaging is currently read-only.",
     );
   }
 
@@ -1308,7 +1444,7 @@ async function createMessage(currentUser, payload, file) {
       isDeleted: { $ne: true },
     })
       .select(
-        "conversationId content messageType fileUrl fileName fileSize mimeType storedFilePath metadata"
+        "conversationId content messageType fileUrl fileName fileSize mimeType storedFilePath metadata",
       )
       .lean();
 
@@ -1317,7 +1453,7 @@ async function createMessage(currentUser, payload, file) {
     }
 
     const sourceConversation = await getConversationById(
-      forwardedMessage.conversationId
+      forwardedMessage.conversationId,
     );
     await assertConversationAccess(currentUser, sourceConversation);
 
@@ -1336,13 +1472,13 @@ async function createMessage(currentUser, payload, file) {
     ) {
       throw new ApiError(
         403,
-        "This attachment cannot be forwarded by sender policy."
+        "This attachment cannot be forwarded by sender policy.",
       );
     }
   }
 
   const forwardingAttachment = Boolean(
-    forwardedMessage?.storedFilePath && forwardedMessage?.fileUrl
+    forwardedMessage?.storedFilePath && forwardedMessage?.fileUrl,
   );
   if (file || forwardingAttachment) {
     const canUpload = await userHasPermission(currentUser, "canUploadFiles");
@@ -1357,13 +1493,19 @@ async function createMessage(currentUser, payload, file) {
   let recipientIds = [];
   if (conversation.type === "broadcast") {
     const configuredPublisherIds = new Set(
-      (conversation.broadcastPublisherIds || []).map((entry) => entry.toString())
+      (conversation.broadcastPublisherIds || []).map((entry) =>
+        entry.toString(),
+      ),
     );
     const publisherIds =
       configuredPublisherIds.size > 0
         ? configuredPublisherIds
-        : new Set((conversation.members || []).map((entry) => entry.toString()));
-    const adminIds = new Set((conversation.admins || []).map((entry) => entry.toString()));
+        : new Set(
+            (conversation.members || []).map((entry) => entry.toString()),
+          );
+    const adminIds = new Set(
+      (conversation.admins || []).map((entry) => entry.toString()),
+    );
     if (
       currentUser.role !== "admin" &&
       !publisherIds.has(currentUser.id) &&
@@ -1372,7 +1514,10 @@ async function createMessage(currentUser, payload, file) {
       if (file?.path) {
         await deleteFileIfExists(file.path);
       }
-      throw new ApiError(403, "You are not allowed to publish in this broadcast.");
+      throw new ApiError(
+        403,
+        "You are not allowed to publish in this broadcast.",
+      );
     }
 
     const rawTargets =
@@ -1401,9 +1546,8 @@ async function createMessage(currentUser, payload, file) {
       (mergedRawTargets.departmentIds || []).length +
       (mergedRawTargets.departmentCodes || []).length +
       (mergedRawTargets.departmentNames || []).length;
-    const targetDepartmentIds = await resolveBroadcastTargetDepartmentIds(
-      mergedRawTargets
-    );
+    const targetDepartmentIds =
+      await resolveBroadcastTargetDepartmentIds(mergedRawTargets);
     if (requestedTargetCount > 0 && targetDepartmentIds.length === 0) {
       throw new ApiError(400, "No valid target departments selected.");
     }
@@ -1417,7 +1561,7 @@ async function createMessage(currentUser, payload, file) {
     recipientIds = targetUsers.map((entry) => entry._id.toString());
 
     const conversationMemberIds = new Set(
-      (conversation.members || []).map((entry) => entry.toString())
+      (conversation.members || []).map((entry) => entry.toString()),
     );
     for (const publisherId of publisherIds) {
       conversationMemberIds.add(publisherId);
@@ -1431,7 +1575,10 @@ async function createMessage(currentUser, payload, file) {
     }
     if (hasMemberChanges) {
       conversation.members = [...conversationMemberIds];
-      await syncConversationMemberStates(conversation._id, conversation.members);
+      await syncConversationMemberStates(
+        conversation._id,
+        conversation.members,
+      );
     }
 
     let targetDepartmentNames = [];
@@ -1439,7 +1586,7 @@ async function createMessage(currentUser, payload, file) {
     if (targetDepartmentIds.length > 0) {
       const departments = await Department.find(
         { _id: { $in: targetDepartmentIds }, deletedAt: null },
-        "name code"
+        "name code",
       ).lean();
       const departmentNameById = new Map();
       const departmentCodeById = new Map();
@@ -1464,12 +1611,12 @@ async function createMessage(currentUser, payload, file) {
   } else if (conversation.type === "department" && currentUser.departmentId) {
     const departmentUsers = await User.find(
       { departmentId: currentUser.departmentId, isActive: true },
-      "_id"
+      "_id",
     ).lean();
     recipientIds = departmentUsers.map((entry) => entry._id.toString());
   } else {
     recipientIds = (conversation.members || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString()
+      entry._id ? entry._id.toString() : entry.toString(),
     );
   }
 
@@ -1506,13 +1653,16 @@ async function createMessage(currentUser, payload, file) {
       finalFileName =
         sanitizeAttachmentFileName(
           payload.fileName,
-          forwardedMessage.fileName || attachment.fileName
+          forwardedMessage.fileName || attachment.fileName,
         ) ||
         sanitizeAttachmentFileName(
           forwardedMessage.fileName,
-          attachment.fileName
+          attachment.fileName,
         );
-      const sourceType = sanitizeMessageType(forwardedMessage.messageType, "file");
+      const sourceType = sanitizeMessageType(
+        forwardedMessage.messageType,
+        "file",
+      );
       messageTypeFallback = sourceType === "system" ? "text" : sourceType;
 
       const sourcePolicy =
@@ -1530,10 +1680,10 @@ async function createMessage(currentUser, payload, file) {
       if (sourcePolicy || Object.keys(requestedPolicy).length > 0) {
         normalizedMetadata.attachmentPolicy = {
           allowDownload:
-            (sourcePolicy?.allowDownload !== false) &&
+            sourcePolicy?.allowDownload !== false &&
             requestedPolicy.allowDownload !== false,
           allowForward:
-            (sourcePolicy?.allowForward !== false) &&
+            sourcePolicy?.allowForward !== false &&
             requestedPolicy.allowForward !== false,
         };
       }
@@ -1546,9 +1696,8 @@ async function createMessage(currentUser, payload, file) {
   }
 
   if (storedFilePath) {
-    const archiveMetadata = normalizeAttachmentArchiveMetadata(
-      normalizedMetadata
-    );
+    const archiveMetadata =
+      normalizeAttachmentArchiveMetadata(normalizedMetadata);
     if (archiveMetadata) {
       normalizedMetadata.attachmentArchive = archiveMetadata;
     } else {
@@ -1558,7 +1707,11 @@ async function createMessage(currentUser, payload, file) {
     delete normalizedMetadata.attachmentArchive;
   }
 
-  if (!content && !storedFilePath && payload.messageType !== "poll") {
+  if (
+    !content &&
+    !storedFilePath &&
+    !["poll", "checklist"].includes(payload.messageType)
+  ) {
     throw new ApiError(400, "Message content or attachment is required.");
   }
 
@@ -1566,11 +1719,14 @@ async function createMessage(currentUser, payload, file) {
     normalizedMetadata.silent = true;
   }
 
-  const targetRecipientIds = recipientIds.filter((userId) => userId !== currentUser.id);
+  const targetRecipientIds = recipientIds.filter(
+    (userId) => userId !== currentUser.id,
+  );
 
   const message = await Message.create({
     conversationId: conversation._id,
     senderId: currentUser.id,
+    clientMessageId: clientMessageId || null,
     content,
     messageType: sanitizeMessageType(payload.messageType, messageTypeFallback),
     fileUrl: attachment.fileUrl,
@@ -1581,7 +1737,8 @@ async function createMessage(currentUser, payload, file) {
     replyToMessageId: payload.replyToMessageId || null,
     seenBy: [{ userId: currentUser.id, at: new Date() }],
     deliveredTo: await buildDeliveryReceipts(targetRecipientIds),
-    metadata: Object.keys(normalizedMetadata).length > 0 ? normalizedMetadata : null,
+    metadata:
+      Object.keys(normalizedMetadata).length > 0 ? normalizedMetadata : null,
     isScheduled: payload.isScheduled || false,
     scheduledFor: payload.scheduledFor ? new Date(payload.scheduledFor) : null,
   });
@@ -1595,24 +1752,28 @@ async function createMessage(currentUser, payload, file) {
   };
   await conversation.save();
 
-  await incrementUnreadCounts(conversation._id, targetRecipientIds, currentUser.id);
+  await incrementUnreadCounts(
+    conversation._id,
+    targetRecipientIds,
+    currentUser.id,
+  );
 
   let audienceUserIds;
   if (conversation.type === "broadcast") {
     const publisherIds = extractIdArray(conversation.broadcastPublisherIds);
     audienceUserIds = Array.from(
-      new Set([currentUser.id, ...targetRecipientIds, ...publisherIds])
+      new Set([currentUser.id, ...targetRecipientIds, ...publisherIds]),
     );
   } else {
     audienceUserIds = Array.from(
-      new Set([currentUser.id, ...extractIdArray(conversation.members)])
+      new Set([currentUser.id, ...extractIdArray(conversation.members)]),
     );
   }
 
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1678,6 +1839,19 @@ async function markConversationDelivered(currentUser, conversationId) {
   return undeliveredMessages.map((message) => message._id.toString());
 }
 
+async function markMessageDeliveredForUser(messageId, userId) {
+  const receipt = { userId, at: new Date() };
+  return Message.findOneAndUpdate(
+    {
+      _id: messageId,
+      senderId: { $ne: userId },
+      "deliveredTo.userId": { $ne: userId },
+    },
+    { $push: { deliveredTo: receipt } },
+    { new: true },
+  ).lean();
+}
+
 async function markPendingDeliveriesForUser(currentUser) {
   const conversationQuery = {
     deletedAt: null,
@@ -1691,7 +1865,10 @@ async function markPendingDeliveriesForUser(currentUser) {
     });
   }
 
-  const conversations = await Conversation.find(conversationQuery, "_id").lean();
+  const conversations = await Conversation.find(
+    conversationQuery,
+    "_id",
+  ).lean();
   const conversationIds = conversations.map((entry) => entry._id);
   if (conversationIds.length === 0) {
     return [];
@@ -1732,7 +1909,7 @@ async function markMessageSeen(currentUser, messageId) {
   await assertConversationAccess(currentUser, conversation);
 
   const seen = (message.seenBy || []).some(
-    (entry) => entry.userId.toString() === currentUser.id
+    (entry) => entry.userId.toString() === currentUser.id,
   );
   if (!seen) {
     message.seenBy.push({ userId: currentUser.id, at: new Date() });
@@ -1757,7 +1934,10 @@ async function deleteMessage(currentUser, messageId) {
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 
-  const canDeleteAnyMessage = await userHasPermission(currentUser, "canDeleteMessages");
+  const canDeleteAnyMessage = await userHasPermission(
+    currentUser,
+    "canDeleteMessages",
+  );
   const isOwnMessage = message.senderId.toString() === currentUser.id;
   if (!isOwnMessage && !canDeleteAnyMessage) {
     throw new ApiError(403, "Permission denied.");
@@ -1801,7 +1981,10 @@ async function updateMessage(currentUser, messageId, payload) {
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 
-  const canDeleteAnyMessage = await userHasPermission(currentUser, "canDeleteMessages");
+  const canDeleteAnyMessage = await userHasPermission(
+    currentUser,
+    "canDeleteMessages",
+  );
   const isOwnMessage = message.senderId.toString() === currentUser.id;
   if (!isOwnMessage && !canDeleteAnyMessage) {
     throw new ApiError(403, "Permission denied.");
@@ -1828,7 +2011,7 @@ async function updateMessage(currentUser, messageId, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1844,7 +2027,9 @@ async function updateMessage(currentUser, messageId, payload) {
 }
 
 async function toggleMessageReaction(currentUser, messageId, emoji) {
-  const normalizedEmoji = String(emoji || "").trim().slice(0, 8);
+  const normalizedEmoji = String(emoji || "")
+    .trim()
+    .slice(0, 8);
   if (!normalizedEmoji) {
     throw new ApiError(400, "Reaction is required.");
   }
@@ -1858,7 +2043,11 @@ async function toggleMessageReaction(currentUser, messageId, emoji) {
   await assertConversationAccess(currentUser, conversation);
 
   const metadata = { ...(message.metadata || {}) };
-  const reactions = { ...((metadata.reactions && typeof metadata.reactions === "object") ? metadata.reactions : {}) };
+  const reactions = {
+    ...(metadata.reactions && typeof metadata.reactions === "object"
+      ? metadata.reactions
+      : {}),
+  };
   const existing = Array.isArray(reactions[normalizedEmoji])
     ? reactions[normalizedEmoji].map(String)
     : [];
@@ -1887,7 +2076,7 @@ async function toggleMessageReaction(currentUser, messageId, emoji) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1927,14 +2116,18 @@ async function toggleMessageFavorite(currentUser, messageId) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
   return serializeMessage(populated, populated.senderId);
 }
 
-async function updateConversationPreferences(currentUser, conversationId, payload) {
+async function updateConversationPreferences(
+  currentUser,
+  conversationId,
+  payload,
+) {
   const conversation = await getConversationById(conversationId);
   await assertConversationAccess(currentUser, conversation);
 
@@ -1942,7 +2135,11 @@ async function updateConversationPreferences(currentUser, conversationId, payloa
   return getConversationDetailsForUser(currentUser, conversationId);
 }
 
-async function setConversationPinnedMessage(currentUser, conversationId, payload) {
+async function setConversationPinnedMessage(
+  currentUser,
+  conversationId,
+  payload,
+) {
   const conversation = await Conversation.findOne({
     _id: conversationId,
     deletedAt: null,
@@ -1966,15 +2163,22 @@ async function setConversationPinnedMessage(currentUser, conversationId, payload
   };
   await conversation.save();
 
-  const systemMessage = await createSystemConversationMessage(conversation, currentUser, {
-    content: `${currentUser.fullName || currentUser.username} updated the pinned message`,
-    metadata: {
-      eventType: "group.pinned_message.updated",
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${currentUser.fullName || currentUser.username} updated the pinned message`,
+      metadata: {
+        eventType: "group.pinned_message.updated",
+      },
     },
-  });
+  );
 
   return {
-    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
     systemMessage,
   };
 }
@@ -1990,15 +2194,22 @@ async function clearConversationPinnedMessage(currentUser, conversationId) {
   conversation.pinnedMessage = null;
   await conversation.save();
 
-  const systemMessage = await createSystemConversationMessage(conversation, currentUser, {
-    content: `${currentUser.fullName || currentUser.username} removed the pinned message`,
-    metadata: {
-      eventType: "group.pinned_message.cleared",
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${currentUser.fullName || currentUser.username} removed the pinned message`,
+      metadata: {
+        eventType: "group.pinned_message.cleared",
+      },
     },
-  });
+  );
 
   return {
-    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
     systemMessage,
   };
 }
@@ -2022,7 +2233,9 @@ async function joinConversation(currentUser, conversationId) {
     throw new ApiError(403, "Permission denied.");
   }
 
-  const memberIds = new Set((conversation.members || []).map((entry) => entry.toString()));
+  const memberIds = new Set(
+    (conversation.members || []).map((entry) => entry.toString()),
+  );
   memberIds.add(currentUser.id);
   conversation.members = [...memberIds];
   await conversation.save();
@@ -2043,10 +2256,10 @@ async function leaveConversation(currentUser, conversationId) {
   }
 
   conversation.members = (conversation.members || []).filter(
-    (entry) => entry.toString() !== currentUser.id
+    (entry) => entry.toString() !== currentUser.id,
   );
   conversation.admins = (conversation.admins || []).filter(
-    (entry) => entry.toString() !== currentUser.id
+    (entry) => entry.toString() !== currentUser.id,
   );
   await conversation.save();
   await removeConversationMemberState(conversation._id, currentUser.id);
@@ -2057,7 +2270,7 @@ async function listConversationMembers(currentUser, conversationId) {
   const conversation = await getConversationById(conversationId);
   await assertConversationAccess(currentUser, conversation);
   return (conversation.members || []).map((member) =>
-    member._id ? serializeUserLite(member) : { id: member.toString() }
+    member._id ? serializeUserLite(member) : { id: member.toString() },
   );
 }
 
@@ -2069,9 +2282,11 @@ async function addConversationMembers(currentUser, conversationId, userIds) {
   }).exec();
   assertGroupOwnerAccess(currentUser, conversation);
 
-  const blocked = new Set((conversation.blockedMembers || []).map((entry) => entry.toString()));
+  const blocked = new Set(
+    (conversation.blockedMembers || []).map((entry) => entry.toString()),
+  );
   const nextUserIds = Array.from(new Set((userIds || []).map(String))).filter(
-    (userId) => !blocked.has(userId)
+    (userId) => !blocked.has(userId),
   );
   if (nextUserIds.length === 0) {
     throw new ApiError(400, "No eligible users to add.");
@@ -2079,23 +2294,29 @@ async function addConversationMembers(currentUser, conversationId, userIds) {
 
   const addedUsers = await User.find(
     { _id: { $in: nextUserIds }, isActive: true },
-    "username fullName"
+    "username fullName",
   ).lean();
-  const addedNames = addedUsers.map((entry) => entry.fullName || entry.username);
+  const addedNames = addedUsers.map(
+    (entry) => entry.fullName || entry.username,
+  );
 
   const nextMembers = Array.from(
-    new Set([...(conversation.members || []).map(String), ...nextUserIds])
+    new Set([...(conversation.members || []).map(String), ...nextUserIds]),
   );
   conversation.members = nextMembers;
   await conversation.save();
   await syncConversationMemberStates(conversation._id, nextMembers);
-  const systemMessage = await createSystemConversationMessage(conversation, currentUser, {
-    content: `${currentUser.fullName || currentUser.username} أضاف ${addedNames.join("، ")} إلى المجموعة`,
-    metadata: {
-      eventType: "group.members.added",
-      userIds: nextUserIds,
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${currentUser.fullName || currentUser.username} أضاف ${addedNames.join("، ")} إلى المجموعة`,
+      metadata: {
+        eventType: "group.members.added",
+        userIds: nextUserIds,
+      },
     },
-  });
+  );
   await logAuditEvent({
     actorId: currentUser.id,
     action: "group.members.added",
@@ -2104,7 +2325,10 @@ async function addConversationMembers(currentUser, conversationId, userIds) {
     payload: { userIds: nextUserIds },
   });
   return {
-    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
     systemMessage,
     addedUserIds: nextUserIds,
   };
@@ -2121,24 +2345,30 @@ async function removeConversationMember(currentUser, conversationId, userId) {
     throw new ApiError(400, "Group creator cannot remove themselves.");
   }
 
-  const memberIds = new Set((conversation.members || []).map((entry) => entry.toString()));
+  const memberIds = new Set(
+    (conversation.members || []).map((entry) => entry.toString()),
+  );
   if (!memberIds.has(String(userId))) {
     throw new ApiError(400, "User is not a member of this group.");
   }
   conversation.admins = (conversation.admins || []).filter(
-    (entry) => entry.toString() !== String(userId)
+    (entry) => entry.toString() !== String(userId),
   );
   conversation.blockedMembers.addToSet(userId);
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
-  const systemMessage = await createSystemConversationMessage(conversation, currentUser, {
-    content: `${currentUser.fullName || currentUser.username} أزال ${targetLabel} من الإرسال داخل المجموعة`,
-    metadata: {
-      eventType: "group.member.removed",
-      userIds: [String(userId)],
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${currentUser.fullName || currentUser.username} أزال ${targetLabel} من الإرسال داخل المجموعة`,
+      metadata: {
+        eventType: "group.member.removed",
+        userIds: [String(userId)],
+      },
     },
-  });
+  );
   await logAuditEvent({
     actorId: currentUser.id,
     action: "group.member.removed",
@@ -2147,7 +2377,10 @@ async function removeConversationMember(currentUser, conversationId, userId) {
     payload: { userId: String(userId) },
   });
   return {
-    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
     systemMessage,
     affectedUserIds: [String(userId)],
   };
@@ -2161,25 +2394,33 @@ async function promoteConversationAdmin(currentUser, conversationId, userId) {
   }).exec();
   assertGroupOwnerAccess(currentUser, conversation);
 
-  const memberIds = new Set((conversation.members || []).map((entry) => entry.toString()));
+  const memberIds = new Set(
+    (conversation.members || []).map((entry) => entry.toString()),
+  );
   if (!memberIds.has(String(userId))) {
     throw new ApiError(400, "User must be a group member first.");
   }
 
-  const adminIds = new Set((conversation.admins || []).map((entry) => entry.toString()));
+  const adminIds = new Set(
+    (conversation.admins || []).map((entry) => entry.toString()),
+  );
   adminIds.add(String(userId));
   adminIds.add(currentUser.id);
   conversation.admins = [...adminIds];
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
-  const systemMessage = await createSystemConversationMessage(conversation, currentUser, {
-    content: `${targetLabel} أصبح أدمن في المجموعة`,
-    metadata: {
-      eventType: "group.admin.promoted",
-      userIds: [String(userId)],
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${targetLabel} أصبح أدمن في المجموعة`,
+      metadata: {
+        eventType: "group.admin.promoted",
+        userIds: [String(userId)],
+      },
     },
-  });
+  );
   await logAuditEvent({
     actorId: currentUser.id,
     action: "group.admin.promoted",
@@ -2188,7 +2429,10 @@ async function promoteConversationAdmin(currentUser, conversationId, userId) {
     payload: { userId: String(userId) },
   });
   return {
-    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
     systemMessage,
     affectedUserIds: [String(userId)],
   };
@@ -2206,18 +2450,22 @@ async function demoteConversationAdmin(currentUser, conversationId, userId) {
   }
 
   conversation.admins = (conversation.admins || []).filter(
-    (entry) => entry.toString() !== String(userId)
+    (entry) => entry.toString() !== String(userId),
   );
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
-  const systemMessage = await createSystemConversationMessage(conversation, currentUser, {
-    content: `تمت إزالة صلاحية الأدمن من ${targetLabel}`,
-    metadata: {
-      eventType: "group.admin.demoted",
-      userIds: [String(userId)],
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `تمت إزالة صلاحية الأدمن من ${targetLabel}`,
+      metadata: {
+        eventType: "group.admin.demoted",
+        userIds: [String(userId)],
+      },
     },
-  });
+  );
   await logAuditEvent({
     actorId: currentUser.id,
     action: "group.admin.demoted",
@@ -2226,7 +2474,10 @@ async function demoteConversationAdmin(currentUser, conversationId, userId) {
     payload: { userId: String(userId) },
   });
   return {
-    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
     systemMessage,
     affectedUserIds: [String(userId)],
   };
@@ -2244,10 +2495,10 @@ async function blockConversationMember(currentUser, conversationId, userId) {
   }
 
   conversation.members = (conversation.members || []).filter(
-    (entry) => entry.toString() !== String(userId)
+    (entry) => entry.toString() !== String(userId),
   );
   conversation.admins = (conversation.admins || []).filter(
-    (entry) => entry.toString() !== String(userId)
+    (entry) => entry.toString() !== String(userId),
   );
   conversation.blockedMembers.addToSet(userId);
   await conversation.save();
@@ -2284,7 +2535,7 @@ async function unblockConversationMember(currentUser, conversationId, userId) {
 
 async function searchMessages(
   currentUser,
-  { q = "", conversationId = null, cursor = null, limit = 30 } = {}
+  { q = "", conversationId = null, cursor = null, limit = 30 } = {},
 ) {
   const sanitized = sanitizeMessageContent(q);
   if (!sanitized) {
@@ -2301,7 +2552,10 @@ async function searchMessages(
   if (conversationId) {
     const conversation = await getConversationById(conversationId);
     await assertConversationAccess(currentUser, conversation);
-    const memberState = await getConversationState(currentUser.id, conversationId);
+    const memberState = await getConversationState(
+      currentUser.id,
+      conversationId,
+    );
     clearHistoryAt = memberState?.clearHistoryAt
       ? new Date(memberState.clearHistoryAt)
       : null;
@@ -2382,14 +2636,16 @@ async function searchMessages(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
   const hasMore = messages.length > pageSize;
   const sliced = hasMore ? messages.slice(0, pageSize) : messages;
   return {
-    messages: sliced.map((message) => serializeMessage(message, message.senderId)),
+    messages: sliced.map((message) =>
+      serializeMessage(message, message.senderId),
+    ),
     meta: {
       nextCursor: hasMore ? sliced[sliced.length - 1]._id.toString() : null,
       hasMore,
@@ -2400,11 +2656,11 @@ async function searchMessages(
 
 async function listFavoriteMessages(
   currentUser,
-  { cursor = null, limit = 30 } = {}
+  { cursor = null, limit = 30 } = {},
 ) {
   const conversations = await listConversationsForUser(currentUser);
   const conversationById = new Map(
-    conversations.map((conversation) => [conversation.id, conversation])
+    conversations.map((conversation) => [conversation.id, conversation]),
   );
   const conversationIds = [...conversationById.keys()];
 
@@ -2429,7 +2685,7 @@ async function listFavoriteMessages(
     }
     clearHistoryByConversationId.set(
       state.conversationId.toString(),
-      new Date(state.clearHistoryAt)
+      new Date(state.clearHistoryAt),
     );
   }
 
@@ -2458,7 +2714,7 @@ async function listFavoriteMessages(
       .limit(batchSize)
       .populate(
         "senderId",
-        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
 
@@ -2522,7 +2778,8 @@ async function getUserPresence(currentUser, userId) {
   return {
     userId: user._id.toString(),
     isOnline: Boolean(user.isOnline),
-    presenceStatus: user.presenceStatus || (user.isOnline ? "online" : "offline"),
+    presenceStatus:
+      user.presenceStatus || (user.isOnline ? "online" : "offline"),
     avatarUrl: normalizeMediaUrl(user.avatarUrl),
     lastSeen: user.lastSeen || null,
     lastActiveAt: user.lastActiveAt || null,
@@ -2533,7 +2790,7 @@ async function getMessageAttachment(
   currentUser,
   conversationId,
   storedName,
-  { requireDownload = false } = {}
+  { requireDownload = false } = {},
 ) {
   const conversation = await getConversationById(conversationId);
   await assertConversationAccess(currentUser, conversation);
@@ -2579,7 +2836,10 @@ async function requestAttachmentRehydrate(currentUser, messageId) {
 
   const archive = normalizeAttachmentArchiveMetadata(message.metadata);
   if (!archive) {
-    throw new ApiError(409, "This attachment cannot be restored automatically.");
+    throw new ApiError(
+      409,
+      "This attachment cannot be restored automatically.",
+    );
   }
 
   const storedPath = resolveStoredUploadPath(message.storedFilePath);
@@ -2617,7 +2877,10 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   const archive = normalizeAttachmentArchiveMetadata(message.metadata);
   if (!archive) {
     if (file?.path) await deleteFileIfExists(file.path);
-    throw new ApiError(409, "This attachment cannot be restored automatically.");
+    throw new ApiError(
+      409,
+      "This attachment cannot be restored automatically.",
+    );
   }
   if (!file?.path) {
     throw new ApiError(400, "A restore file is required.");
@@ -2656,7 +2919,7 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
   return serializeMessage(populated, populated.senderId);
@@ -2664,7 +2927,11 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
 
 async function votePollMessage(currentUser, messageId, optionIds) {
   const message = await Message.findById(messageId);
-  if (!message || message.isDeleted || message.messageType !== "poll") {
+  if (
+    !message ||
+    message.isDeleted ||
+    !["poll", "checklist"].includes(message.messageType)
+  ) {
     throw new ApiError(404, "الاستطلاع غير موجود أو محذوف.");
   }
   const conversation = await getConversationById(message.conversationId);
@@ -2686,13 +2953,15 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   const currentUserIdStr = String(currentUser.id || currentUser._id);
   for (const key of Object.keys(metadata.votes)) {
     metadata.votes[key] = (metadata.votes[key] || []).filter(
-      (id) => String(id) !== currentUserIdStr
+      (id) => String(id) !== currentUserIdStr,
     );
   }
 
   // Add the user to the selected options
   for (const optId of optionIds) {
-    const optionExists = metadata.options.find((o) => String(o.id) === String(optId));
+    const optionExists = metadata.options.find(
+      (o) => String(o.id) === String(optId),
+    );
     if (optionExists) {
       if (!metadata.votes[String(optId)]) metadata.votes[String(optId)] = [];
       metadata.votes[String(optId)].push(currentUserIdStr);
@@ -2706,7 +2975,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2714,7 +2983,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   if (conversation.type === "broadcast") {
     const publisherIds = extractIdArray(conversation.broadcastPublisherIds);
     audienceUserIds = Array.from(
-      new Set([...extractIdArray(conversation.members), ...publisherIds])
+      new Set([...extractIdArray(conversation.members), ...publisherIds]),
     );
   } else {
     audienceUserIds = extractIdArray(conversation.members);
@@ -2728,13 +2997,18 @@ async function votePollMessage(currentUser, messageId, optionIds) {
 
 async function exportPollToExcel(currentUser, messageId) {
   const message = await Message.findById(messageId).populate("senderId");
-  if (!message || message.isDeleted || message.messageType !== "poll") {
+  if (
+    !message ||
+    message.isDeleted ||
+    !["poll", "checklist"].includes(message.messageType)
+  ) {
     throw new ApiError(404, "الاستطلاع غير موجود أو محذوف.");
   }
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 
-  const isAdmin = currentUser.role === "admin" || currentUser.role === "superadmin";
+  const isAdmin =
+    currentUser.role === "admin" || currentUser.role === "superadmin";
   const isCreator = String(message.senderId._id) === currentUser.id;
   if (!isAdmin && !isCreator) {
     throw new ApiError(403, "ليس لديك صلاحية لتصدير نتائج هذا الاستطلاع.");
@@ -2759,7 +3033,7 @@ async function exportPollToExcel(currentUser, messageId) {
   } else {
     sheet.addRow(["الخيار", "عدد الأصوات", "النسبة", "المصوتون"]);
   }
-  
+
   // formatting header
   const headerRow = sheet.lastRow;
   headerRow.font = { bold: true };
@@ -2778,14 +3052,17 @@ async function exportPollToExcel(currentUser, messageId) {
   for (const opt of options) {
     const voterIds = votes[String(opt.id)] || [];
     const count = voterIds.length;
-    const percentage = totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) + "%" : "0%";
-    
+    const percentage =
+      totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) + "%" : "0%";
+
     if (isAnonymous) {
       sheet.addRow([opt.text, count, percentage]);
     } else {
       // Need to fetch user names
-      const users = await User.find({ _id: { $in: voterIds } }).select("fullName username").lean();
-      const userNames = users.map(u => u.fullName || u.username).join(", ");
+      const users = await User.find({ _id: { $in: voterIds } })
+        .select("fullName username")
+        .lean();
+      const userNames = users.map((u) => u.fullName || u.username).join(", ");
       sheet.addRow([opt.text, count, percentage, userNames]);
     }
   }
@@ -2826,6 +3103,7 @@ module.exports = {
   toggleMessageReaction,
   toggleMessageFavorite,
   markConversationDelivered,
+  markMessageDeliveredForUser,
   markPendingDeliveriesForUser,
   markConversationSeen,
   markMessageSeen,
@@ -2862,7 +3140,7 @@ async function getMessageReadReceipts(currentUser, messageId) {
   if (!message || message.isDeleted) {
     throw new ApiError(404, "Message not found.");
   }
-  
+
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 

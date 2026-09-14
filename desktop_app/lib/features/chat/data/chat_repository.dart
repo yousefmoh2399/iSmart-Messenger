@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -320,6 +321,7 @@ class ChatRepository {
   Future<ChatPostResult> sendTextMessage({
     required String conversationId,
     required String content,
+    String? clientMessageId,
     String? replyToMessageId,
     Map<String, dynamic>? metadata,
     String? messageType,
@@ -333,6 +335,7 @@ class ChatRepository {
       data: {
         'conversationId': conversationId,
         'content': content,
+        if (clientMessageId != null) 'clientMessageId': clientMessageId,
         if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
         if (metadata != null) 'metadata': metadata,
         if (messageType != null) 'messageType': messageType,
@@ -409,15 +412,17 @@ class ChatRepository {
         response.data?['message'] as Map<String, dynamic>,
       ),
     );
-    await _archiveSentAttachment(
-      message: result.message,
-      sha256Hex: fileSha256,
-      filePath: fileBytes == null ? filePath : null,
-      fileBytes: fileBytes,
-      fileName: resolvedFileName,
+    unawaited(
+      _archiveSentAttachment(
+        message: result.message,
+        sha256Hex: fileSha256,
+        filePath: fileBytes == null ? filePath : null,
+        fileBytes: fileBytes,
+        fileName: resolvedFileName,
+      ),
     );
     if (fileBytes != null && result.message.isImageMessage) {
-      await _cacheAttachmentPreviewBytes(result.message, fileBytes);
+      unawaited(_cacheAttachmentPreviewBytes(result.message, fileBytes));
     }
     return result;
   }
