@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
-import '../../../../core/constants/available_emojis.dart';
 
 final RegExp _linkPattern = RegExp(
   r'((?:https?:\/\/|www\.)[^\s<>()]+|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}(?:\/[^\s<>()]*)?)',
@@ -95,17 +94,11 @@ class _ChatRichTextState extends State<ChatRichText> {
     }
   }
 
-  String _getEmojiHex(String emojiStr) {
-    return emojiStr.runes
-        .map((r) => r.toRadixString(16).toLowerCase())
-        .join('_');
-  }
-
-final RegExp _mentionRegex = RegExp(r'@(?:all|[A-Za-z0-9_]+)');
+  final RegExp _mentionRegex = RegExp(r'@(?:all|[A-Za-z0-9_]+)');
 
   List<InlineSpan> _parseEmojisAndMentions(String text, TextStyle style) {
     final spans = <InlineSpan>[];
-    
+
     // First, split by mentions, then within each segment, parse emojis
     final mentionMatches = _mentionRegex.allMatches(text).toList();
     if (mentionMatches.isEmpty) {
@@ -151,24 +144,7 @@ final RegExp _mentionRegex = RegExp(r'@(?:all|[A-Za-z0-9_]+)');
       }
 
       final emojiStr = match.group(0)!;
-      final hex = _getEmojiHex(emojiStr);
-
-      if (availablePngEmojis.contains(hex)) {
-        final fontSize = style.fontSize ?? 14.0;
-        spans.add(
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: Image.asset(
-              'assets/noto_emojis_png/emoji_u$hex.png',
-              width: fontSize * 1.3,
-              height: fontSize * 1.3,
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-        );
-      } else {
-        spans.add(TextSpan(text: emojiStr));
-      }
+      spans.add(TextSpan(text: emojiStr));
 
       cursor = match.end;
     }
@@ -247,7 +223,9 @@ final RegExp _mentionRegex = RegExp(r'@(?:all|[A-Za-z0-9_]+)');
       cursor = match.end;
     }
     if (cursor < widget.text.length) {
-      spans.addAll(_parseEmojisAndMentions(widget.text.substring(cursor), widget.style));
+      spans.addAll(
+        _parseEmojisAndMentions(widget.text.substring(cursor), widget.style),
+      );
     }
 
     return Text.rich(
