@@ -52,7 +52,7 @@ async function buildCustomPdfReport(data, reportName, month, year, type) {
     doc.font("ArabicBold").fontSize(18);
     const line1 = processArabicText("جمعية رجال الأعمال والمستثمرين بالدقهلية");
     const line2 = processArabicText("مشروع تنمية المنشآت الصغيرة والحرفية");
-    const line3 = processArabicText("رقم الإشهار: ٧٧٧ لسنة١٩٩٥ - رقم الترخيص: ١٠٣١");
+    const line3 = processArabicText("رقم الإشهار: 777 لسنة 1995 - رقم الترخيص: 1031");
     
     doc.text(line1, 0, 40, { width: 841, align: "center" });
     doc.text(line2, 0, 65, { width: 841, align: "center" });
@@ -71,17 +71,17 @@ async function buildCustomPdfReport(data, reportName, month, year, type) {
       "عدد الصفحات\n(ملون)",
       "الورق\nالهالك",
       "الاسكان",
-      "إجمالي\nالورق\n(رزمة)",
-      "اجمالي\n(رزمة)"
+      "الإجمالي\nللورق",
+      "إجمالي\nالرزم"
     ];
 
-    const tableTop = 180; // Moved slightly up
+    const tableTop = 180;
     const colWidths = [40, 150, 90, 90, 70, 70, 90, 90]; 
-    const rowHeight = 55; // Increased to give text more breathing room so it doesn't touch the line
+    const rowHeight = 55;
     let currentY = tableTop;
 
     function drawRow(y, rowData, isHeader = false) {
-      doc.font(isHeader ? "ArabicBold" : "Arabic").fontSize(13); // increased font size slightly for readability
+      doc.font(isHeader ? "ArabicBold" : "Arabic").fontSize(13);
       let currentX = 841 - 30;
       
       for (let i = 0; i < rowData.length; i++) {
@@ -93,7 +93,7 @@ async function buildCustomPdfReport(data, reportName, month, year, type) {
         
         const lines = String(text).split("\n");
         const totalTextHeight = lines.length * 14;
-        let textY = y + (rowHeight - totalTextHeight) / 2 - 2; // -2 to center optically with Arial
+        let textY = y + (rowHeight - totalTextHeight) / 2 - 2;
         
         for (const line of lines) {
           doc.text(processArabicText(line), x, textY, { width: width, align: "center" });
@@ -123,7 +123,7 @@ async function buildCustomPdfReport(data, reportName, month, year, type) {
         item.colorPages,
         item.wastePages,
         item.scanPages,
-        item.totalReams,
+        item.totalPaper,
         item.overallTotalReams
       ];
       drawRow(currentY, row, false);
@@ -156,7 +156,7 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
     { key: "color", width: 20 },
     { key: "waste", width: 15 },
     { key: "scan", width: 15 },
-    { key: "totalReams", width: 25 },
+    { key: "totalPaper", width: 25 },
     { key: "overallTotal", width: 20 },
   ];
 
@@ -182,7 +182,7 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   line2Cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
   const line3Cell = sheet.getCell('C3');
-  line3Cell.value = "رقم الإشهار: ٧٧٧ لسنة١٩٩٥ - رقم الترخيص: ١٠٣١";
+  line3Cell.value = "رقم الإشهار: 777 لسنة 1995 - رقم الترخيص: 1031";
   line3Cell.font = { name: "Arial", bold: true, size: 12 };
   line3Cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
@@ -216,8 +216,8 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
     "عدد الصفحات (ملون)",
     "الورق الهالك",
     "الاسكان",
-    "إجمالي الورق (رزمة)",
-    "اجمالي(رزمة)"
+    "الإجمالي للورق",
+    "إجمالي الرزم"
   ];
   headerRow.font = { name: "Arial", bold: true, size: 12 };
   headerRow.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
@@ -239,7 +239,7 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
       item.colorPages,
       item.wastePages,
       item.scanPages,
-      item.totalReams,
+      item.totalPaper,
       item.overallTotalReams
     ];
     row.alignment = { vertical: "middle", horizontal: "center" };
@@ -283,8 +283,8 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
          }
       }
 
-      const totalReams = (c.totalPages / 500).toFixed(2);
-      const overallTotalReams = ((c.totalPages + wastePages) / 500).toFixed(2);
+      const totalPaper = (c.totalPages || 0) + wastePages;
+      const overallTotalReams = (totalPaper / 500).toFixed(2);
 
       return {
         branchName: c.branchName || "فرع غير معروف",
@@ -292,7 +292,7 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
         colorPages: c.colorPages || 0,
         wastePages: wastePages,
         scanPages: scanPages,
-        totalReams: totalReams,
+        totalPaper: totalPaper,
         overallTotalReams: overallTotalReams
       };
     });
@@ -303,8 +303,8 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
           const wastePages = printerWaste.reduce((sum, w) => sum + (w.estimatedWastePages || 0), 0);
           const scanPages = p.scanPages || 0;
           
-          const totalReams = (p.totalPages / 500).toFixed(2);
-          const overallTotalReams = ((p.totalPages + wastePages) / 500).toFixed(2);
+          const totalPaper = (p.totalPages || 0) + wastePages;
+          const overallTotalReams = (totalPaper / 500).toFixed(2);
 
           formattedData.push({
             branchName: c.branchName,
@@ -313,7 +313,7 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
             colorPages: p.colorPages || 0,
             wastePages: wastePages,
             scanPages: scanPages,
-            totalReams: totalReams,
+            totalPaper: totalPaper,
             overallTotalReams: overallTotalReams
           });
        }
