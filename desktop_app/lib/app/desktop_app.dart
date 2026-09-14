@@ -314,7 +314,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     try {
       result = await ref
           .read(serverConnectionControllerProvider.notifier)
-          .refresh();
+          .refresh(
+            preserveConnectedStateOnFailure: quiet || _isInWindowResumeGrace,
+          );
     } finally {
       _serverRefreshInFlight = false;
     }

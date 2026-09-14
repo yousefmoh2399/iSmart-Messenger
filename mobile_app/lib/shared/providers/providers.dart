@@ -87,18 +87,27 @@ class ServerConnectionController extends AsyncNotifier<ServerConnectionState> {
     return _check(baseUrl);
   }
 
-  Future<ServerConnectionState> refresh({String? baseUrl}) async {
+  Future<ServerConnectionState> refresh({
+    String? baseUrl,
+    bool preserveConnectedStateOnFailure = false,
+  }) async {
     final resolvedBaseUrl =
         baseUrl ??
         ref.read(apiBaseUrlControllerProvider).valueOrNull ??
         AppConfig.defaultApiBaseUrl;
     var result = await _check(resolvedBaseUrl);
-    if (!result.isConnected) {
-      // Wait 3 seconds and re-check to tolerate transient drops (e.g. camera resume or socket transition)
-      await Future<void>.delayed(const Duration(seconds: 3));
+    for (var attempt = 0; attempt < 2 && !result.isConnected; attempt++) {
+      await Future<void>.delayed(Duration(seconds: attempt + 1));
       result = await _check(resolvedBaseUrl);
     }
-    state = AsyncData(result);
+    final previous = state.valueOrNull;
+    if (!preserveConnectedStateOnFailure ||
+        result.isConnected ||
+        previous == null ||
+        !previous.isConnected ||
+        previous.baseUrl != result.baseUrl) {
+      state = AsyncData(result);
+    }
     return result;
   }
 
@@ -604,8 +613,7 @@ final announcementsControllerProvider =
 
 final adminAnnouncementsControllerProvider =
     AsyncNotifierProvider<AdminAnnouncementsController,
-      List<AdminAnnouncement>
-    >(AdminAnnouncementsController.new);
+        List<AdminAnnouncement>>(AdminAnnouncementsController.new);
 
 final scanSessionControllerProvider =
     AsyncNotifierProvider<ScanSessionController, ScanSession?>(
@@ -634,7 +642,6 @@ class SyncBannerState {
 final syncBannerStateProvider = StateProvider<SyncBannerState>(
   (ref) => SyncBannerState.hidden(),
 );
-
 
 
 
