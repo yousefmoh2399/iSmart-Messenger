@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -2197,11 +2197,31 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (replyTarget == null) {
       return null;
     }
+
+    // For poll/checklist messages, derive preview from question field in metadata
+    String previewContent = replyTarget.content;
+    if (previewContent.isEmpty) {
+      if (replyTarget.messageType == 'poll') {
+        final question = replyTarget.metadata?['question']?.toString();
+        previewContent = question != null && question.isNotEmpty
+            ? '📊 $question'
+            : '📊 استطلاع رأي';
+      } else if (replyTarget.messageType == 'checklist') {
+        final question = replyTarget.metadata?['question']?.toString();
+        previewContent = question != null && question.isNotEmpty
+            ? '✅ $question'
+            : '✅ قائمة مهام';
+      } else if (replyTarget.fileName != null &&
+          replyTarget.fileName!.isNotEmpty) {
+        previewContent = replyTarget.fileName!;
+      }
+    }
+
     return {
       'replyPreview': {
         'senderId': replyTarget.sender?.id ?? replyTarget.senderId,
         'senderName': replyTarget.sender?.displayName ?? 'عضو',
-        'content': replyTarget.content,
+        'content': previewContent,
         'fileName': replyTarget.fileName,
         'messageType': replyTarget.messageType,
       },

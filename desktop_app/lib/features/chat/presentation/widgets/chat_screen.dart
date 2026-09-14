@@ -1192,8 +1192,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _restoreDraft() async {
-    final draft = await _draftStore.load(_conversationId);
+    final targetConversationId = _conversationId;
+    final draft = await _draftStore.load(targetConversationId);
+    // After the async gap, verify widget is still mounted and still showing the same conversation
     if (!mounted || draft == null || draft.isEmpty) return;
+    if (_conversationId != targetConversationId) return;
     _restoringDraft = true;
     _messageController.value = TextEditingValue(
       text: draft,
@@ -1738,11 +1741,31 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (replyTarget == null) {
       return null;
     }
+
+    // For poll/checklist messages, derive preview from question field in metadata
+    String previewContent = replyTarget.content;
+    if (previewContent.isEmpty) {
+      if (replyTarget.messageType == 'poll') {
+        final question = replyTarget.metadata?['question']?.toString();
+        previewContent = question != null && question.isNotEmpty
+            ? '📊 $question'
+            : '📊 استطلاع رأي';
+      } else if (replyTarget.messageType == 'checklist') {
+        final question = replyTarget.metadata?['question']?.toString();
+        previewContent = question != null && question.isNotEmpty
+            ? '✅ $question'
+            : '✅ قائمة مهام';
+      } else if (replyTarget.fileName != null &&
+          replyTarget.fileName!.isNotEmpty) {
+        previewContent = replyTarget.fileName!;
+      }
+    }
+
     return {
       'replyPreview': {
         'senderId': replyTarget.sender?.id ?? replyTarget.senderId,
         'senderName': replyTarget.sender?.displayName ?? 'عضو',
-        'content': replyTarget.content,
+        'content': previewContent,
         'fileName': replyTarget.fileName,
         'messageType': replyTarget.messageType,
       },
@@ -2742,7 +2765,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           )
           .sendMessage(
             content: '',
-            messageType: 'checklist',
+            messageType: 'poll',
             metadata: metadata,
             replyToMessageId: _replyingTo?.id,
           );
@@ -2790,7 +2813,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           )
           .sendMessage(
             content: '',
-            messageType: 'poll',
+            messageType: 'checklist',
             metadata: metadata,
             replyToMessageId: _replyingTo?.id,
           );

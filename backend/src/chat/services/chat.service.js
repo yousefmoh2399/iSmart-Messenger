@@ -66,6 +66,7 @@ const allowedMessageTypes = new Set([
   "audio",
   "system",
   "poll",
+  "checklist",
   "gif",
 ]);
 
@@ -289,8 +290,20 @@ function buildLastMessagePayload(message) {
       ? message.senderId.fullName || message.senderId.username || ""
       : "";
 
+  let content = message.content || message.fileName || "";
+
+  // For poll/checklist messages with empty content, derive preview from question
+  if (!content) {
+    const meta = message.metadata || {};
+    if (message.messageType === "poll") {
+      content = meta.question ? `📊 ${meta.question}` : "📊 استطلاع رأي";
+    } else if (message.messageType === "checklist") {
+      content = meta.question ? `✅ ${meta.question}` : "✅ قائمة مهام";
+    }
+  }
+
   return {
-    content: message.content || message.fileName || "",
+    content,
     senderId,
     senderName,
     messageType: message.messageType || null,
@@ -528,30 +541,45 @@ async function refreshConversationLastMessage(conversationId) {
     )
     .exec();
 
-  const nextLastMessage = latestMessage
-    ? {
-        content:
-          latestMessage.content ||
-          latestMessage.fileName ||
-          (latestMessage.messageType === "system" ? "System" : ""),
-        senderId:
-          latestMessage.senderId?._id?.toString?.() ||
-          latestMessage.senderId?.toString?.() ||
-          null,
-        senderName:
-          latestMessage.senderId?.fullName ||
-          latestMessage.senderId?.username ||
-          "",
-        messageType: latestMessage.messageType,
-        createdAt: latestMessage.createdAt,
+  let nextLastMessage;
+  if (latestMessage) {
+    let content =
+      latestMessage.content ||
+      latestMessage.fileName ||
+      (latestMessage.messageType === "system" ? "رسالة النظام" : "");
+
+    // For poll/checklist messages with empty content, derive preview from question
+    if (!content) {
+      const meta = latestMessage.metadata || {};
+      if (latestMessage.messageType === "poll") {
+        content = meta.question ? `📊 ${meta.question}` : "📊 استطلاع رأي";
+      } else if (latestMessage.messageType === "checklist") {
+        content = meta.question ? `✅ ${meta.question}` : "✅ قائمة مهام";
       }
-    : {
-        content: "",
-        senderId: null,
-        senderName: "",
-        messageType: null,
-        createdAt: null,
-      };
+    }
+
+    nextLastMessage = {
+      content,
+      senderId:
+        latestMessage.senderId?._id?.toString?.() ||
+        latestMessage.senderId?.toString?.() ||
+        null,
+      senderName:
+        latestMessage.senderId?.fullName ||
+        latestMessage.senderId?.username ||
+        "",
+      messageType: latestMessage.messageType,
+      createdAt: latestMessage.createdAt,
+    };
+  } else {
+    nextLastMessage = {
+      content: "",
+      senderId: null,
+      senderName: "",
+      messageType: null,
+      createdAt: null,
+    };
+  }
 
   await Conversation.updateOne(
     { _id: conversationId },

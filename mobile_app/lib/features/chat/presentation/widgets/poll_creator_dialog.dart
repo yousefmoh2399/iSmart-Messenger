@@ -57,7 +57,7 @@ class _PollCreatorDialogState extends State<PollCreatorDialog> {
       'isAnonymous': _isAnonymous,
       'isMultipleChoice': _isMultipleChoice,
       'options': options.asMap().entries.map((e) => {
-        'id': 'opt_${e.key}_${DateTime.now().microsecondsSinceEpoch}',
+        'id': 'opt_${e.key}_${DateTime.now().millisecondsSinceEpoch + e.key}',
         'text': e.value,
       }).toList(),
     };

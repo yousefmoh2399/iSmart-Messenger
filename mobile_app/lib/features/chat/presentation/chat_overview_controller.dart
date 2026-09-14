@@ -314,10 +314,33 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   }
 
   ChatLastMessage _buildLastMessage(ChatMessage message) {
+    String content;
+    if (message.content.isNotEmpty) {
+      content = message.content;
+    } else if (message.messageType == 'poll') {
+      final question = message.metadata?['question']?.toString();
+      content = question != null && question.isNotEmpty
+          ? '📊 $question'
+          : '📊 استطلاع رأي';
+    } else if (message.messageType == 'checklist') {
+      final question = message.metadata?['question']?.toString();
+      content = question != null && question.isNotEmpty
+          ? '✅ $question'
+          : '✅ قائمة مهام';
+    } else if (message.fileName != null && message.fileName!.isNotEmpty) {
+      content = message.fileName!;
+    } else {
+      content = switch (message.messageType) {
+        'image' => '📷 صورة',
+        'pdf' => '📄 ملف PDF',
+        'audio' => '🎙 ملاحظة صوتية',
+        'file' => '📎 ملف مرفق',
+        'gif' => '🎞 GIF',
+        _ => 'رسالة',
+      };
+    }
     return ChatLastMessage(
-      content: message.content.isNotEmpty
-          ? message.content
-          : (message.fileName ?? 'مرفق'),
+      content: content,
       senderId: message.sender?.id ?? message.senderId,
       senderName: message.sender?.displayName ?? '',
       messageType: message.messageType,

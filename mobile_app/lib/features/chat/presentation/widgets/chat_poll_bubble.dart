@@ -296,7 +296,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '$totalVotes تصويت',
+                isClosed ? 'انتهى الاستبيان - $totalVotes تصويت' : '$totalVotes تصويت',
                 style: TextStyle(color: subTextColor, fontSize: 12),
               ),
               if (widget.isMine && totalVotes > 0)

@@ -396,10 +396,14 @@ String _previewText(ChatConversation conversation) {
   final body = lastMessage.content.isNotEmpty
       ? lastMessage.content
       : switch (lastMessage.messageType) {
-          'image' => 'صورة',
-          'pdf' => 'ملف PDF',
-          'audio' => 'ملاحظة صوتية',
-          'file' => 'ملف مرفق',
+          'poll' => '📊 استطلاع رأي',
+          'checklist' => '✅ قائمة مهام',
+          'image' => '📷 صورة',
+          'pdf' => '📄 ملف PDF',
+          'audio' => '🎙 ملاحظة صوتية',
+          'file' => '📎 ملف مرفق',
+          'gif' => '🎞 GIF',
+          'system' => 'رسالة النظام',
           _ => 'رسالة',
         };
 
