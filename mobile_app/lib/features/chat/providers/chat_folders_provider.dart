@@ -53,15 +53,31 @@ class ChatFoldersController extends AsyncNotifier<List<ChatFolder>> {
     ]);
   }
 
+  Future<void> updateFolderMembership({
+    required String folderId,
+    required String conversationId,
+    required bool add,
+  }) async {
+    final updated = await ref.read(chatRepositoryProvider).updateFolderMembership(
+      folderId: folderId,
+      conversationId: conversationId,
+      add: add,
+    );
+    final current = state.valueOrNull ?? [];
+    state = AsyncData([
+      for (final folder in current)
+        if (folder.id == folderId) updated else folder,
+    ]);
+  }
+
   Future<void> removeConversationFromAllFolders(String conversationId) async {
     final folders = state.valueOrNull ?? [];
     for (final folder in folders) {
       if (folder.conversationIds.contains(conversationId)) {
-        await updateFolder(
-          folder.id,
-          conversationIds: folder.conversationIds
-              .where((id) => id != conversationId)
-              .toList(),
+        await updateFolderMembership(
+          folderId: folder.id,
+          conversationId: conversationId,
+          add: false,
         );
       }
     }

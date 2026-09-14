@@ -1,8 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:open_filex/open_filex.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
@@ -12,7 +13,9 @@ import '../models/chat_models.dart';
 import '../utils/chat_reaction_emoji_stats.dart';
 
 class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
-  void resetState() { state = const AsyncLoading(); }
+  void resetState() {
+    state = const AsyncLoading();
+  }
 
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
   ChatRepository? _chatRepository;
@@ -1460,7 +1463,7 @@ class ConversationMessagesController
         scheduledFor: scheduledFor,
       ),
     );
-    
+
     if (scheduledFor != null) {
       // Do not add scheduled messages to the main chat list
       return;
@@ -1660,20 +1663,52 @@ class ConversationMessagesController
           st.copyWith(messages: _upsertMessage(st.messages, updatedMessage)),
         );
       }
-    } catch (e, stack) {
-      state = AsyncError(e, stack);
+    } catch (error, stack) {
+      state = AsyncError(error, stack);
     }
   }
 
   Future<void> exportPoll(String messageId) async {
     try {
-      final file = await ref.read(chatRepositoryProvider).downloadPollExport(messageId);
+      if (kIsWeb) {
+        final token = await ref.read(authTokenProvider.future);
+        final url = await ref
+            .read(chatRepositoryProvider)
+            .exportPollUrl(messageId, token: token);
+        final launched = await launchUrl(
+          Uri.parse(url),
+          mode: LaunchMode.externalApplication,
+        );
+        if (!launched) {
+          throw Exception('تعذر فتح ملف التصدير');
+        }
+        return;
+      }
+      final file = await ref
+          .read(chatRepositoryProvider)
+          .downloadPollExport(messageId);
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done) {
         throw Exception('Could not open file: ${result.message}');
       }
-    } catch (e, stack) {
-      state = AsyncError(e, stack);
+    } catch (error, stack) {
+      if (kIsWeb) {
+        state = AsyncError(error, stack);
+        return;
+      }
+      try {
+        final token = await ref.read(authTokenProvider.future);
+        final url = await ref
+            .read(chatRepositoryProvider)
+            .exportPollUrl(messageId, token: token);
+        if (await launchUrl(
+          Uri.parse(url),
+          mode: LaunchMode.externalApplication,
+        )) {
+          return;
+        }
+      } catch (_) {}
+      state = AsyncError(error, stack);
     }
   }
 
@@ -1701,8 +1736,3 @@ class ConversationMessagesController
 
   void stopTyping() => _socketService?.stopTyping(arg);
 }
-
-
-
-
-

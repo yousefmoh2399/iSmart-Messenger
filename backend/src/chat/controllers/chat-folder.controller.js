@@ -3,6 +3,7 @@ const {
   getUserFolders,
   createFolder,
   updateFolder,
+  updateFolderMembership,
   deleteFolder,
   reorderFolders,
 } = require("../services/chat-folder.service");
@@ -22,6 +23,17 @@ const putFolder = asyncHandler(async (req, res) => {
   res.status(200).json({ status: 200, data: folder });
 });
 
+const patchFolderMembership = asyncHandler(async (req, res) => {
+  const { conversationId, action = "add" } = req.body;
+  const folder = await updateFolderMembership(
+    req.user.id,
+    req.params.folderId,
+    conversationId,
+    action,
+  );
+  res.status(200).json({ status: 200, data: folder });
+});
+
 const removeFolder = asyncHandler(async (req, res) => {
   await deleteFolder(req.user.id, req.params.folderId);
   res.status(200).json({ status: 200, data: null });
@@ -37,6 +49,7 @@ module.exports = {
   getFolders,
   postFolder,
   putFolder,
+  patchFolderMembership,
   removeFolder,
   putFoldersReorder,
 };

@@ -1132,6 +1132,21 @@ class ChatRepository {
     return ChatFolder.fromJson(response.data?['data'] as Map<String, dynamic>);
   }
 
+  Future<ChatFolder> updateFolderMembership({
+    required String folderId,
+    required String conversationId,
+    required bool add,
+  }) async {
+    final response = await _apiClient.dio.patch<Map<String, dynamic>>(
+      '/api/chat/folders/$folderId/membership',
+      data: {
+        'conversationId': conversationId,
+        'action': add ? 'add' : 'remove',
+      },
+    );
+    return ChatFolder.fromJson(response.data?['data'] as Map<String, dynamic>);
+  }
+
   Future<void> deleteFolder(String folderId) async {
     await _apiClient.dio.delete<void>('/api/chat/folders/$folderId');
   }

@@ -73,7 +73,7 @@ router.get(
   "/transfers/:id/download",
   [param("id").isString().trim().isLength({ min: 8, max: 64 })],
   validateRequest,
-  downloadChatTransfer
+  downloadChatTransfer,
 );
 
 router.post(
@@ -89,14 +89,14 @@ router.post(
     body("departmentId").optional({ nullable: true }).isMongoId(),
   ],
   validateRequest,
-  createChatConversation
+  createChatConversation,
 );
 
 router.get(
   "/conversations/:id",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  getConversation
+  getConversation,
 );
 
 router.put(
@@ -111,7 +111,7 @@ router.put(
     body("isActive").optional().isBoolean(),
   ],
   validateRequest,
-  updateChatConversation
+  updateChatConversation,
 );
 
 router.patch(
@@ -124,7 +124,7 @@ router.patch(
     body("isFavorite").optional().isBoolean(),
   ],
   validateRequest,
-  updateChatConversationPreferences
+  updateChatConversationPreferences,
 );
 
 router.patch(
@@ -138,42 +138,42 @@ router.patch(
       .withMessage("محتوى الرسالة مطلوب."),
   ],
   validateRequest,
-  setGroupPinnedMessage
+  setGroupPinnedMessage,
 );
 
 router.delete(
   "/conversations/:id/pinned-message",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  clearGroupPinnedMessage
+  clearGroupPinnedMessage,
 );
 
 router.delete(
   "/conversations/:id",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  deleteChatConversation
+  deleteChatConversation,
 );
 
 router.post(
   "/conversations/:id/join",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  joinChatConversation
+  joinChatConversation,
 );
 
 router.post(
   "/conversations/:id/leave",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  leaveChatConversation
+  leaveChatConversation,
 );
 
 router.get(
   "/conversations/:id/members",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  getConversationMembers
+  getConversationMembers,
 );
 
 router.post(
@@ -183,7 +183,7 @@ router.post(
     body("userIds").isArray({ min: 1 }).withMessage("قائمة الأعضاء مطلوبة."),
   ],
   validateRequest,
-  addMembers
+  addMembers,
 );
 
 router.delete(
@@ -193,7 +193,7 @@ router.delete(
     param("userId").isMongoId().withMessage("معرّف المستخدم غير صالح."),
   ],
   validateRequest,
-  removeMember
+  removeMember,
 );
 
 router.post(
@@ -203,7 +203,7 @@ router.post(
     param("userId").isMongoId().withMessage("معرّف المستخدم غير صالح."),
   ],
   validateRequest,
-  promoteMemberAdmin
+  promoteMemberAdmin,
 );
 
 router.delete(
@@ -213,7 +213,7 @@ router.delete(
     param("userId").isMongoId().withMessage("معرّف المستخدم غير صالح."),
   ],
   validateRequest,
-  demoteMemberAdmin
+  demoteMemberAdmin,
 );
 
 router.post(
@@ -223,7 +223,7 @@ router.post(
     param("userId").isMongoId().withMessage("معرّف المستخدم غير صالح."),
   ],
   validateRequest,
-  blockMember
+  blockMember,
 );
 
 router.delete(
@@ -233,7 +233,7 @@ router.delete(
     param("userId").isMongoId().withMessage("معرّف المستخدم غير صالح."),
   ],
   validateRequest,
-  unblockMember
+  unblockMember,
 );
 
 router.get(
@@ -244,14 +244,14 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 100 }),
   ],
   validateRequest,
-  getConversationMessages
+  getConversationMessages,
 );
 
 router.get(
   "/messages/:id/read-receipts",
   [param("id").isMongoId().withMessage("معرف الرسالة غير صالح.")],
   validateRequest,
-  getMessageReadReceiptsHandler
+  getMessageReadReceiptsHandler,
 );
 
 router.post(
@@ -259,9 +259,7 @@ router.post(
   messageLimiter,
   chatUpload.single("file"),
   [
-    body("conversationId")
-      .isMongoId()
-      .withMessage("معرّف المحادثة مطلوب."),
+    body("conversationId").isMongoId().withMessage("معرّف المحادثة مطلوب."),
     body("content").optional().isString(),
     body("messageType")
       .optional()
@@ -275,7 +273,7 @@ router.post(
     body("isSilent").optional().isBoolean(),
   ],
   validateRequest,
-  postChatMessage
+  postChatMessage,
 );
 
 router.patch(
@@ -285,7 +283,7 @@ router.patch(
     body("content").isString().withMessage("محتوى الرسالة مطلوب."),
   ],
   validateRequest,
-  patchChatMessage
+  patchChatMessage,
 );
 
 router.patch(
@@ -295,19 +293,16 @@ router.patch(
     body("emoji").isString().notEmpty().withMessage("الإيموجي مطلوب."),
   ],
   validateRequest,
-  reactToChatMessage
+  reactToChatMessage,
 );
 
-router.patch(
-  "/messages/:id/favorite",
-  toggleFavoriteChatMessage
-);
+router.patch("/messages/:id/favorite", toggleFavoriteChatMessage);
 
 router.patch(
   "/messages/:id/seen",
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
-  markSingleMessageSeen
+  markSingleMessageSeen,
 );
 
 router.post(
@@ -317,28 +312,28 @@ router.post(
     body("optionIds").isArray().withMessage("يجب إرسال مصفوفة بالخيارات."),
   ],
   validateRequest,
-  votePoll
+  votePoll,
 );
 
 router.get(
   "/messages/:id/poll/export",
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
-  exportPoll
+  exportPoll,
 );
 
 router.delete(
   "/messages/:id",
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
-  removeMessage
+  removeMessage,
 );
 
 router.post(
   "/conversations/:id/seen",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  markSeen
+  markSeen,
 );
 
 router.get(
@@ -348,7 +343,7 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 200 }),
   ],
   validateRequest,
-  getAuditLogs
+  getAuditLogs,
 );
 
 router.get(
@@ -358,7 +353,7 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 200 }),
   ],
   validateRequest,
-  getSystemErrors
+  getSystemErrors,
 );
 
 router.get(
@@ -368,7 +363,7 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 100 }),
   ],
   validateRequest,
-  getFavoriteChatMessages
+  getFavoriteChatMessages,
 );
 
 router.get(
@@ -380,35 +375,35 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 100 }),
   ],
   validateRequest,
-  searchChatMessages
+  searchChatMessages,
 );
 
 router.get(
   "/presence/:userId",
   [param("userId").isMongoId().withMessage("معرّف المستخدم غير صالح.")],
   validateRequest,
-  getPresence
+  getPresence,
 );
 
 router.get(
   "/messages/:conversationId/:storedName/file",
   [param("conversationId").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  getAttachmentFile
+  getAttachmentFile,
 );
 
 router.get(
   "/messages/:conversationId/:storedName/download",
   [param("conversationId").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
-  downloadAttachment
+  downloadAttachment,
 );
 
 router.post(
   "/messages/:id/rehydrate/request",
   [param("id").isMongoId().withMessage("Invalid message id.")],
   validateRequest,
-  requestAttachmentRestore
+  requestAttachmentRestore,
 );
 
 router.post(
@@ -416,13 +411,14 @@ router.post(
   chatUpload.single("file"),
   [param("id").isMongoId().withMessage("Invalid message id.")],
   validateRequest,
-  restoreAttachment
+  restoreAttachment,
 );
 
 const {
   getFolders,
   postFolder,
   putFolder,
+  patchFolderMembership,
   removeFolder,
   putFoldersReorder,
 } = require("../controllers/chat-folder.controller");
@@ -432,20 +428,30 @@ router.post(
   "/folders",
   [body("name").isString().notEmpty()],
   validateRequest,
-  postFolder
+  postFolder,
 );
 router.put("/folders/reorder", putFoldersReorder);
 router.put(
   "/folders/:folderId",
   [param("folderId").isMongoId()],
   validateRequest,
-  putFolder
+  putFolder,
+);
+router.patch(
+  "/folders/:folderId/membership",
+  [
+    param("folderId").isMongoId(),
+    body("conversationId").isMongoId(),
+    body("action").optional().isIn(["add", "remove"]),
+  ],
+  validateRequest,
+  patchFolderMembership,
 );
 router.delete(
   "/folders/:folderId",
   [param("folderId").isMongoId()],
   validateRequest,
-  removeFolder
+  removeFolder,
 );
 
 module.exports = router;

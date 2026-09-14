@@ -4,7 +4,7 @@ class ChatPollBubble extends StatefulWidget {
   final Map<String, dynamic> poll;
   final bool isMine;
   final String currentUserId;
-  final Function(List<String>) onVote;
+  final Future<void> Function(List<String>) onVote;
   final VoidCallback onExport;
 
   const ChatPollBubble({
@@ -38,9 +38,11 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
     super.didUpdateWidget(oldWidget);
     pollData = widget.poll;
     final serverSelection = _selectedOptionsFrom(widget.poll);
-    if (!_hasPendingVote ||
-        serverSelection.containsAll(_selectedOptionIds) &&
-            _selectedOptionIds.containsAll(serverSelection)) {
+    final oldServerSelection = _selectedOptionsFrom(oldWidget.poll);
+    final serverChanged =
+        !serverSelection.containsAll(oldServerSelection) ||
+        !oldServerSelection.containsAll(serverSelection);
+    if (!_hasPendingVote || serverChanged) {
       _selectedOptionIds = serverSelection;
       _hasPendingVote = false;
     }
@@ -131,125 +133,153 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
 
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: InkWell(
-                onTap:
-                    (isClosed ||
-                        (hasVoted && !isMultipleChoice && !isChecklist))
-                    ? null
-                    : () {
-                        final newVotes = Set<String>.from(_selectedOptionIds);
-                        if (isMultipleChoice || isChecklist) {
-                          if (isMyVote) {
-                            newVotes.remove(optId);
-                          } else {
-                            newVotes.add(optId);
-                          }
-                        } else {
-                          newVotes
-                            ..clear()
-                            ..add(optId);
-                        }
-                        setState(() {
-                          _selectedOptionIds = newVotes;
-                          _hasPendingVote = true;
-                        });
-                        widget.onVote(newVotes.toList());
-                      },
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  clipBehavior: Clip.hardEdge,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.transparent,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                decoration: BoxDecoration(
+                  color: isMyVote
+                      ? colorScheme.primary.withValues(alpha: 0.10)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isMyVote
+                        ? colorScheme.primary.withValues(alpha: 0.35)
+                        : Colors.transparent,
                   ),
-                  child: Stack(
-                    children: [
-                      if (showResults)
-                        Positioned.fill(
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: 0, end: percentage),
-                            duration: const Duration(milliseconds: 600),
-                            curve: Curves.easeOutCubic,
-                            builder: (context, value, child) {
-                              return FractionallySizedBox(
-                                alignment: AlignmentDirectional.centerStart,
-                                widthFactor: value,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: widget.isMine
-                                        ? colorScheme.onPrimary.withValues(
-                                            alpha: 0.15,
-                                          )
-                                        : colorScheme.primary.withValues(
-                                            alpha: 0.15,
-                                          ),
-                                    borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap:
+                      (isClosed ||
+                          (hasVoted && !isMultipleChoice && !isChecklist))
+                      ? null
+                      : () {
+                          final newVotes = Set<String>.from(_selectedOptionIds);
+                          if (isMultipleChoice || isChecklist) {
+                            if (isMyVote) {
+                              newVotes.remove(optId);
+                            } else {
+                              newVotes.add(optId);
+                            }
+                          } else {
+                            newVotes
+                              ..clear()
+                              ..add(optId);
+                          }
+                          setState(() {
+                            _selectedOptionIds = newVotes;
+                            _hasPendingVote = true;
+                          });
+                          () async {
+                            try {
+                              await widget.onVote(newVotes.toList());
+                            } catch (_) {
+                              if (!mounted) return;
+                              setState(() {
+                                _selectedOptionIds = _selectedOptionsFrom(
+                                  pollData,
+                                );
+                                _hasPendingVote = false;
+                              });
+                            }
+                          }();
+                        },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    clipBehavior: Clip.hardEdge,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.transparent,
+                    ),
+                    child: Stack(
+                      children: [
+                        if (showResults)
+                          Positioned.fill(
+                            child: TweenAnimationBuilder<double>(
+                              tween: Tween<double>(begin: 0, end: percentage),
+                              duration: const Duration(milliseconds: 600),
+                              curve: Curves.easeOutCubic,
+                              builder: (context, value, child) {
+                                return FractionallySizedBox(
+                                  alignment: AlignmentDirectional.centerStart,
+                                  widthFactor: value,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: widget.isMine
+                                          ? colorScheme.onPrimary.withValues(
+                                              alpha: 0.15,
+                                            )
+                                          : colorScheme.primary.withValues(
+                                              alpha: 0.15,
+                                            ),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                   ),
-                                ),
-                              );
-                            },
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            if (!showResults || isChecklist) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            children: [
                               AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 300),
+                                duration: const Duration(milliseconds: 260),
                                 transitionBuilder: (child, anim) =>
                                     ScaleTransition(scale: anim, child: child),
-                                child: Icon(
-                                  isMyVote
-                                      ? (isChecklist
-                                            ? Icons.check_box_rounded
-                                            : Icons.check_circle_rounded)
-                                      : (isChecklist
-                                            ? Icons
-                                                  .check_box_outline_blank_rounded
-                                            : Icons
-                                                  .radio_button_unchecked_rounded),
+                                child: AnimatedScale(
                                   key: ValueKey(isMyVote),
-                                  size: 20,
-                                  color: isMyVote
-                                      ? (widget.isMine
-                                            ? colorScheme.onPrimary
-                                            : colorScheme.primary)
-                                      : subTextColor,
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: Curves.easeOutBack,
+                                  scale: isMyVote ? 1.12 : 1.0,
+                                  child: Icon(
+                                    isMyVote
+                                        ? (isChecklist
+                                              ? Icons.check_box_rounded
+                                              : Icons.check_circle_rounded)
+                                        : (isChecklist
+                                              ? Icons
+                                                    .check_box_outline_blank_rounded
+                                              : Icons
+                                                    .radio_button_unchecked_rounded),
+                                    size: 20,
+                                    color: isMyVote
+                                        ? colorScheme.primary
+                                        : subTextColor,
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 12),
-                            ],
-                            Expanded(
-                              child: Text(
-                                optText,
-                                style: TextStyle(
-                                  color: textColor,
-                                  fontSize: 14,
-                                  fontWeight: isMyVote
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
+                              Expanded(
+                                child: Text(
+                                  optText,
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 14,
+                                    fontWeight: isMyVote
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (showResults && !isChecklist) ...[
-                              const SizedBox(width: 12),
-                              Text(
-                                '${(percentage * 100).toStringAsFixed(0)}%',
-                                style: TextStyle(
-                                  color: textColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
+                              if (showResults && !isChecklist) ...[
+                                const SizedBox(width: 12),
+                                Text(
+                                  '${(percentage * 100).toStringAsFixed(0)}%',
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

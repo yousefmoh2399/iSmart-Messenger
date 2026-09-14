@@ -45,10 +45,13 @@ class ChatFolderInlineItem extends ConsumerWidget {
     return DragTarget<ChatConversation>(
       onAcceptWithDetails: (details) {
         if (!folder.conversationIds.contains(details.data.id)) {
-          final newIds = [...folder.conversationIds, details.data.id];
           ref
               .read(chatFoldersProvider.notifier)
-              .updateFolder(folder.id, conversationIds: newIds);
+              .updateFolderMembership(
+                folderId: folder.id,
+                conversationId: details.data.id,
+                add: true,
+              );
         }
       },
       builder: (context, candidateData, rejectedData) {

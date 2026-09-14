@@ -76,7 +76,7 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onShowDetails;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
-  final ValueChanged<List<String>>? onVotePoll;
+  final Future<void> Function(List<String>)? onVotePoll;
   final VoidCallback? onExportPoll;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
@@ -471,9 +471,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                               if (widget.message.content.isNotEmpty)
                                 () {
                                   final text = widget.message.content.trim();
-                                  final emojiRegex = RegExp(r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$');
-                                  final isSingle = text.runes.length == 1 && emojiRegex.hasMatch(text);
-                                  
+                                  final emojiRegex = RegExp(
+                                    r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
+                                  );
+                                  final isSingle =
+                                      text.runes.length == 1 &&
+                                      emojiRegex.hasMatch(text);
+
                                   return ChatRichText(
                                     text: widget.message.content,
                                     style: TextStyle(
@@ -485,20 +489,32 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 }(),
                               if (widget.message.isPollMessage)
                                 Padding(
-                                  padding: EdgeInsets.only(top: widget.message.content.isEmpty ? 0 : 8.0),
+                                  padding: EdgeInsets.only(
+                                    top: widget.message.content.isEmpty
+                                        ? 0
+                                        : 8.0,
+                                  ),
                                   child: ChatPollBubble(
-                                    poll: widget.message.metadata?['poll'] is Map<String, dynamic>
-                                        ? widget.message.metadata!['poll'] as Map<String, dynamic>
+                                    poll:
+                                        widget.message.metadata?['poll']
+                                            is Map<String, dynamic>
+                                        ? widget.message.metadata!['poll']
+                                              as Map<String, dynamic>
                                         : widget.message.metadata ?? {},
                                     currentUserId: widget.currentUserId,
                                     isMine: widget.isMine,
-                                    onVote: widget.onVotePoll ?? (_) {},
+                                    onVote: widget.onVotePoll ?? (_) async {},
                                     onExport: widget.onExportPoll ?? () {},
                                   ),
                                 ),
-                              if (widget.message.isGifMessage && widget.message.fileUrl != null)
+                              if (widget.message.isGifMessage &&
+                                  widget.message.fileUrl != null)
                                 Padding(
-                                  padding: EdgeInsets.only(top: widget.message.content.isEmpty ? 0 : 8.0),
+                                  padding: EdgeInsets.only(
+                                    top: widget.message.content.isEmpty
+                                        ? 0
+                                        : 8.0,
+                                  ),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
                                     child: Image.network(
@@ -509,7 +525,8 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     ),
                                   ),
                                 ),
-                              if (widget.message.hasAttachment && !widget.message.isGifMessage)
+                              if (widget.message.hasAttachment &&
+                                  !widget.message.isGifMessage)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8),
                                   child: _AttachmentPreview(
@@ -925,7 +942,6 @@ class _PopupActionRow extends StatelessWidget {
   }
 }
 
-
 class _AnimatedReactionChip extends StatefulWidget {
   const _AnimatedReactionChip({
     required this.emoji,
@@ -1110,5 +1126,3 @@ List<MapEntry<String, List<String>>> _sortedReactionEntries(
   });
   return entries;
 }
-
-

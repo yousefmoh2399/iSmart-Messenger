@@ -984,6 +984,12 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                 overview.conversations,
                 currentUserId,
               );
+              final ungroupedConversations = conversations
+                  .where(
+                    (conversation) =>
+                        !folderConversationIds.contains(conversation.id),
+                  )
+                  .toList();
               final favoriteConversations = conversations
                   .where((conversation) => conversation.isFavorite)
                   .toList();
@@ -1280,7 +1286,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                       currentUserId: currentUserId,
                                       conversations: folder.conversationIds
                                           .map(
-                                            (id) => overview.directConversations
+                                            (id) => overview.conversations
                                                 .firstWhere(
                                                   (c) => c.id == id,
                                                   orElse: () =>
@@ -1347,7 +1353,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                   ),
                                 ),
                               const ChatFolderDropZone(),
-                              if (conversations.isNotEmpty) ...[
+                              if (ungroupedConversations.isNotEmpty) ...[
                                 _HomeSectionHeader(
                                   title: 'أحدث المحادثات',
                                   subtitle:
@@ -1356,7 +1362,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                   isDark: isDark,
                                 ),
                                 const SizedBox(height: 8),
-                                ...conversations
+                                ...ungroupedConversations
                                     .take(6)
                                     .map(
                                       (conversation) => Padding(

@@ -295,18 +295,19 @@
 //   }
 // }
 import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
 
 import '../../../../shared/models/app_user.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
+import '../../providers/chat_folders_provider.dart';
 import '../chat_appearance.dart';
+import 'chat_folder_inline_item.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../providers/chat_folders_provider.dart';
-import 'chat_folder_inline_item.dart';
 
 class ChatSidebar extends ConsumerWidget {
   const ChatSidebar({

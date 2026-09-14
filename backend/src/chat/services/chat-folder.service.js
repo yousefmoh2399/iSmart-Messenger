@@ -12,7 +12,9 @@ async function createFolder(userId, payload) {
   }
 
   // Get current max order
-  const lastFolder = await ChatFolder.findOne({ userId }).sort({ order: -1 }).lean();
+  const lastFolder = await ChatFolder.findOne({ userId })
+    .sort({ order: -1 })
+    .lean();
   const nextOrder = lastFolder ? (lastFolder.order || 0) + 1 : 0;
 
   const folder = await ChatFolder.create({
@@ -31,13 +33,14 @@ async function updateFolder(userId, folderId, payload) {
   const updateData = {};
   if (name !== undefined) updateData.name = name.trim();
   if (icon !== undefined) updateData.icon = icon;
-  if (conversationIds !== undefined) updateData.conversationIds = conversationIds;
+  if (conversationIds !== undefined)
+    updateData.conversationIds = conversationIds;
   if (order !== undefined) updateData.order = order;
 
   const folder = await ChatFolder.findOneAndUpdate(
     { _id: folderId, userId },
     { $set: updateData },
-    { new: true }
+    { new: true },
   ).lean();
 
   if (!folder) {
@@ -47,8 +50,32 @@ async function updateFolder(userId, folderId, payload) {
   return folder;
 }
 
+async function updateFolderMembership(
+  userId,
+  folderId,
+  conversationId,
+  action,
+) {
+  const update =
+    action === "remove"
+      ? { $pull: { conversationIds: conversationId } }
+      : { $addToSet: { conversationIds: conversationId } };
+  const folder = await ChatFolder.findOneAndUpdate(
+    { _id: folderId, userId },
+    update,
+    { new: true },
+  ).lean();
+  if (!folder) {
+    throw new ApiError(404, "Chat folder not found");
+  }
+  return folder;
+}
+
 async function deleteFolder(userId, folderId) {
-  const folder = await ChatFolder.findOneAndDelete({ _id: folderId, userId }).lean();
+  const folder = await ChatFolder.findOneAndDelete({
+    _id: folderId,
+    userId,
+  }).lean();
   if (!folder) {
     throw new ApiError(404, "Chat folder not found");
   }
@@ -56,8 +83,8 @@ async function deleteFolder(userId, folderId) {
 }
 
 async function reorderFolders(userId, folderIds) {
-  const promises = folderIds.map((id, index) => 
-    ChatFolder.updateOne({ _id: id, userId }, { $set: { order: index } })
+  const promises = folderIds.map((id, index) =>
+    ChatFolder.updateOne({ _id: id, userId }, { $set: { order: index } }),
   );
   await Promise.all(promises);
   return await getUserFolders(userId);
@@ -67,6 +94,7 @@ module.exports = {
   getUserFolders,
   createFolder,
   updateFolder,
+  updateFolderMembership,
   deleteFolder,
   reorderFolders,
 };
