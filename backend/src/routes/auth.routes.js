@@ -1,6 +1,5 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
-const { RedisStore } = require("rate-limit-redis");
 const { body } = require("express-validator");
 const {
   login,
@@ -10,26 +9,16 @@ const {
 } = require("../controllers/auth.controller");
 const validateRequest = require("../middleware/validate.middleware");
 const { requireAuth } = require("../middleware/auth.middleware");
-const { getRedisClient } = require("../config/redis");
+const { createRateLimitStore } = require("../config/rate-limit-store");
 
 const router = express.Router();
-
-const redis = getRedisClient();
-function buildStore(prefix) {
-  if (!redis) return undefined;
-  return new RedisStore({
-    // rate-limit-redis expects a node-redis-like command interface.
-    sendCommand: (...args) => redis.call(...args),
-    prefix,
-  });
-}
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 25,
   standardHeaders: true,
   legacyHeaders: false,
-  store: buildStore("rl:auth_login:"),
+  store: createRateLimitStore("rl:auth_login:"),
   passOnStoreError: true,
   keyGenerator: (req) => {
     const username = String(req.body?.username || "")
@@ -49,7 +38,7 @@ const refreshLimiter = rateLimit({
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
-  store: buildStore("rl:auth_refresh:"),
+  store: createRateLimitStore("rl:auth_refresh:"),
   passOnStoreError: true,
   keyGenerator: (req) => {
     // We can't reliably bucket by user without verifying the refresh token here,

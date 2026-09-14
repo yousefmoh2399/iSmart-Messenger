@@ -1,10 +1,9 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
-const { RedisStore } = require("rate-limit-redis");
 const { body, param, query } = require("express-validator");
 const { requireAuth } = require("../../middleware/auth.middleware");
 const validateRequest = require("../../middleware/validate.middleware");
-const { getRedisClient } = require("../../config/redis");
+const { createRateLimitStore } = require("../../config/rate-limit-store");
 const {
   heartbeatDevice,
   reportTaskState,
@@ -15,21 +14,12 @@ const {
 
 const router = express.Router();
 
-const redis = getRedisClient();
-function buildStore(prefix) {
-  if (!redis) return undefined;
-  return new RedisStore({
-    sendCommand: (...args) => redis.call(...args),
-    prefix,
-  });
-}
-
 const updateClientLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
-  store: buildStore("rl:update_client:"),
+  store: createRateLimitStore("rl:update_client:"),
   passOnStoreError: true,
   keyGenerator: (req) => {
     const deviceUid = String(req.body?.deviceUid || "")
@@ -47,7 +37,7 @@ const updateProgressLimiter = rateLimit({
   max: 3000,
   standardHeaders: true,
   legacyHeaders: false,
-  store: buildStore("rl:update_progress:"),
+  store: createRateLimitStore("rl:update_progress:"),
   passOnStoreError: true,
   keyGenerator: (req) => {
     const deviceUid = String(req.body?.deviceUid || "")
