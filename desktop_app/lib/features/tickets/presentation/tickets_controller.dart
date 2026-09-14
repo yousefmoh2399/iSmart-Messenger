@@ -120,12 +120,14 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
     String? status,
     String? priority,
     String? q,
+    String format = 'xlsx',
   }) {
     return _repository().exportTicketsReport(
       ticketType: ticketType,
       status: status,
       priority: priority,
       q: q,
+      format: format,
     );
   }
 }

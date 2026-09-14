@@ -201,24 +201,30 @@ const getSupportUsers = asyncHandler(async (req, res) => {
 });
 
 const exportTicketsReport = asyncHandler(async (req, res) => {
-  const csv = await exportTicketReport(req.user, {
+  const format = req.query.format || "csv";
+  
+  const result = await exportTicketReport(req.user, {
     status: req.query.status,
     priority: req.query.priority,
     ticketType: req.query.ticketType,
     q: req.query.q,
-  });
+  }, format);
+
   const rawType = String(req.query.ticketType || "ticket").trim().toLowerCase();
-  const reportType = ["ticket", "complaint", "suggestion"].includes(rawType)
-    ? rawType
-    : "ticket";
+  const reportType = ["ticket", "complaint", "suggestion"].includes(rawType) ? rawType : "ticket";
   const prefix = reportType === "ticket" ? "tickets" : reportType === "complaint" ? "complaints" : "suggestions";
-  const fileName = `${prefix}-report-${new Date().toISOString().slice(0, 10)}.csv`;
-  res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${fileName}"`,
-  );
-  res.status(200).send(csv);
+  
+  if (format === "pdf" || format === "xlsx") {
+    const fileName = `${prefix}-report-${new Date().toISOString().slice(0, 10)}.${format}`;
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Type", format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/pdf");
+    return res.status(200).send(result);
+  } else {
+    const fileName = `${prefix}-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.status(200).send(result);
+  }
 });
 
 const getTicketDashboardStats = asyncHandler(async (req, res) => {

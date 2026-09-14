@@ -161,7 +161,7 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
     }
   }
 
-  Future<void> _exportTicketsReport() async {
+  Future<void> _exportTicketsReport({String format = 'xlsx'}) async {
     try {
       final status = switch (_activeFilter) {
         TicketFilter.resolved => 'resolved',
@@ -183,6 +183,7 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
             status: status,
             priority: priority,
             q: _searchController.text.trim(),
+            format: format,
           );
       if (!mounted) return;
       _showMessage('تم تصدير تقرير التذاكر.');
@@ -464,10 +465,35 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
               if (data.settings.canExportTicketReport ||
                   data.settings.canExportComplaintReport ||
                   data.settings.canExportSuggestionReport)
-                TextButton.icon(
-                  onPressed: _exportTicketsReport,
-                  icon: const Icon(Icons.file_download_outlined),
-                  label: const Text('تصدير'),
+                PopupMenuButton<String>(
+                  onSelected: (format) => _exportTicketsReport(format: format),
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'pdf',
+                      child: Row(
+                        children: [
+                          Icon(Icons.picture_as_pdf, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('تصدير كـ PDF'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'xlsx',
+                      child: Row(
+                        children: [
+                          Icon(Icons.table_chart, color: Colors.green),
+                          SizedBox(width: 8),
+                          Text('تصدير كـ Excel'),
+                        ],
+                      ),
+                    ),
+                  ],
+                  child: TextButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.file_download_outlined),
+                    label: const Text('تصدير'),
+                  ),
                 ),
             ],
           ),

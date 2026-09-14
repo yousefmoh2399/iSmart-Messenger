@@ -194,6 +194,7 @@ class TicketRepository {
     String? status,
     String? priority,
     String? q,
+    String format = 'xlsx',
   }) async {
     final response = await _apiClient.dio.get<Object>(
       '/api/tickets/reports/export',
@@ -203,6 +204,7 @@ class TicketRepository {
           'priority': priority.trim(),
         'ticketType': ticketType,
         if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
+        'format': format,
       },
       options: Options(responseType: ResponseType.bytes),
     );
@@ -212,15 +214,23 @@ class TicketRepository {
         : data is List<int>
         ? Uint8List.fromList(data)
         : Uint8List.fromList(const <int>[]);
+        
+    final prefix = ticketType == 'ticket'
+        ? 'tickets'
+        : ticketType == 'complaint'
+        ? 'complaints'
+        : 'suggestions';
+        
+    final mimeType = format == 'pdf'
+        ? 'application/pdf'
+        : format == 'xlsx'
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'text/csv;charset=utf-8';
+        
     await web_bridge.downloadBytes(
       bytes: bytes,
-      fileName:
-          '${ticketType == 'ticket'
-              ? 'tickets'
-              : ticketType == 'complaint'
-              ? 'complaints'
-              : 'suggestions'}-report.csv',
-      mimeType: 'text/csv;charset=utf-8',
+      fileName: '$prefix-report.$format',
+      mimeType: mimeType,
     );
   }
 

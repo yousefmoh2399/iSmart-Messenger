@@ -779,7 +779,7 @@ const PRIORITY_AR = {
   critical: "حرجة",
 };
 
-async function exportTicketReport(currentUser, filters = {}) {
+async function exportTicketReport(currentUser, filters = {}, format = "csv") {
   const settings = await getOrCreateSettings();
   const ticketType = normalizeTicketTypes([filters.ticketType])[0] || "ticket";
   if (!canExportType(currentUser, settings, ticketType)) {
@@ -893,9 +893,7 @@ async function exportTicketReport(currentUser, filters = {}) {
         STATUS_AR[ticket.status] || ticket.status,
         PRIORITY_AR[ticket.priority] || ticket.priority,
         ticket.createdBy?.fullName || ticket.createdBy?.username || "",
-        ticket.assignedTo?.fullName ||
-          ticket.assignedTo?.username ||
-          "غير مسند",
+        ticket.assignedTo?.fullName || ticket.assignedTo?.username || "غير مسند",
         resolvedBy,
         ticket.branchDepartmentId?.name || "",
         ticket.createdAt ? new Date(ticket.createdAt).toISOString() : "",
@@ -910,6 +908,45 @@ async function exportTicketReport(currentUser, filters = {}) {
       ];
     }),
   ];
+
+  if (format === "pdf" || format === "xlsx") {
+    const { buildCustomPdfReport, buildCustomExcelReport, formatDate } = require("./ticket-custom-reports.service");
+    
+    const reportData = tickets.map(ticket => {
+      const isResolved = ticket.status === "resolved" || ticket.status === "closed";
+      const resolvedBy = isResolved
+        ? resolvedByMap.get(ticket._id.toString()) || ticket.assignedTo?.fullName || ticket.assignedTo?.username || ""
+        : "";
+
+      return {
+        ticketNumber: ticket.ticketNumber || "",
+        title: ticket.title || "",
+        status: STATUS_AR[ticket.status] || ticket.status,
+        priority: PRIORITY_AR[ticket.priority] || ticket.priority,
+        department: ticket.branchDepartmentId?.name || "",
+        createdBy: ticket.createdBy?.fullName || ticket.createdBy?.username || "",
+        assignedTo: ticket.assignedTo?.fullName || ticket.assignedTo?.username || "غير مسند",
+        resolvedBy: resolvedBy,
+        createdAt: formatDate(ticket.createdAt),
+        dueDate: formatDate(ticket.dueDate),
+        lastUpdateAt: formatDate(ticket.lastUpdateAt),
+        resolvedAt: formatDate(ticket.resolvedAt),
+        closedAt: formatDate(ticket.closedAt),
+        minutesBetween: minutesBetween(ticket.createdAt, ticket.resolvedAt || ticket.closedAt),
+        updatesCount: countsByTicket.get(ticket._id.toString()) || 0,
+        rating: ticket.rating ? `${ticket.rating} نجوم` : "لم يقيم",
+        lastPublicMessage: ticket.lastPublicMessage || ""
+      };
+    });
+
+    const reportTitle = `تقرير ${ticketType === 'complaint' ? 'الشكاوي' : ticketType === 'suggestion' ? 'المقترحات' : 'التذاكر'}`;
+    
+    if (format === "pdf") {
+      return await buildCustomPdfReport(reportData, "tickets-report", reportTitle);
+    } else {
+      return await buildCustomExcelReport(reportData, "tickets-report", reportTitle);
+    }
+  }
 
   return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }
