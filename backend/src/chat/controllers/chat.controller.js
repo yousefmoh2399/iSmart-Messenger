@@ -521,10 +521,16 @@ const unblockMember = asyncHandler(async (req, res) => {
 });
 
 const getConversationMessages = asyncHandler(async (req, res) => {
+  const isScheduledFlag = 
+    req.query.isScheduled === "true" || 
+    req.query.isScheduled === true || 
+    req.query.isScheduled === "1" || 
+    req.query.isScheduled === 1;
+
   const result = await listMessagesForConversation(req.user, req.params.id, {
     cursor: req.query.cursor || null,
     limit: req.query.limit || 50,
-    isScheduled: req.query.isScheduled === "true",
+    isScheduled: isScheduledFlag,
   });
   sendChatResponse(res, {
     data: { messages: result.messages },

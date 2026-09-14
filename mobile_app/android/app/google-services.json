@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1039491251685",
+    "project_id": "ismart-messenger",
+    "storage_bucket": "ismart-messenger.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1039491251685:android:c2b94de86bd35164fec30c",
+        "android_client_info": {
+          "package_name": "com.example.mobile_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmxTyxp3Gpvr55_1AHWUKubnPrJmKbh9c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

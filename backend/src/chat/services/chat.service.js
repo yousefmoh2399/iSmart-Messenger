@@ -1771,20 +1771,27 @@ async function createMessage(currentUser, payload, file) {
     scheduledFor: payload.scheduledFor ? new Date(payload.scheduledFor) : null,
   });
 
-  conversation.lastMessage = {
-    content: content || finalFileName || "",
-    senderId: currentUser.id,
-    senderName: currentUser.fullName || currentUser.username,
-    messageType: message.messageType,
-    createdAt: message.createdAt,
-  };
-  await conversation.save();
+  const isScheduledFuture =
+    message.isScheduled &&
+    message.scheduledFor &&
+    new Date(message.scheduledFor) > new Date();
 
-  await incrementUnreadCounts(
-    conversation._id,
-    targetRecipientIds,
-    currentUser.id,
-  );
+  if (!isScheduledFuture) {
+    conversation.lastMessage = {
+      content: content || finalFileName || "",
+      senderId: currentUser.id,
+      senderName: currentUser.fullName || currentUser.username,
+      messageType: message.messageType,
+      createdAt: message.createdAt,
+    };
+    await conversation.save();
+
+    await incrementUnreadCounts(
+      conversation._id,
+      targetRecipientIds,
+      currentUser.id,
+    );
+  }
 
   let audienceUserIds;
   if (conversation.type === "broadcast") {
@@ -3172,8 +3179,21 @@ async function getMessageReadReceipts(currentUser, messageId) {
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 
+  const mapReceipt = (r) => {
+    if (!r.userId) return null;
+    return {
+      _id: r.userId._id,
+      username: r.userId.username,
+      fullName: r.userId.fullName,
+      avatarUrl: r.userId.avatarUrl,
+      displayName: r.userId.fullName || r.userId.username || "مستخدم",
+      seenAt: r.at, // Frontend expects 'seenAt' for both read and delivery (or we can send at)
+      deliveredAt: r.at,
+    };
+  };
+
   return {
-    seenBy: message.seenBy,
-    deliveredTo: message.deliveredTo,
+    seenBy: message.seenBy.map(mapReceipt).filter(Boolean),
+    deliveredTo: message.deliveredTo.map(mapReceipt).filter(Boolean),
   };
 }

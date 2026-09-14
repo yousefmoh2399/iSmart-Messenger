@@ -49,6 +49,15 @@ const pushDeviceSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    isLoggedOut: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    unreadSinceLogout: {
+      type: Number,
+      default: 0,
+    },
     lastSeenAt: {
       type: Date,
       default: Date.now,

@@ -238,12 +238,39 @@ async function sendChatPushNotifications({
       isActive: true,
       token: { $ne: null },
     },
-    "userId token platform notificationToneId"
+    "userId token platform notificationToneId isLoggedOut unreadSinceLogout"
   ).lean();
 
-  const deviceGroups = groupPushDevicesByAndroidChannel(devices);
+  const loggedInDevices = [];
+  
+  for (const device of devices) {
+    if (device.isLoggedOut) {
+      const newUnreadCount = (device.unreadSinceLogout || 0) + 1;
+      if (newUnreadCount >= 5) {
+        try {
+          await messaging.send({
+            token: device.token,
+            notification: {
+              title: "لديك رسائل غير مقروءة",
+              body: "سجل الدخول لمشاهدة الرسائل الجديدة والمهمة.",
+            },
+            data: { type: "logged_out_alert" }
+          });
+        } catch (e) {
+          // ignore
+        }
+        await PushDevice.updateOne({ _id: device._id }, { $set: { unreadSinceLogout: 0 } });
+      } else {
+        await PushDevice.updateOne({ _id: device._id }, { $inc: { unreadSinceLogout: 1 } });
+      }
+    } else {
+      loggedInDevices.push(device);
+    }
+  }
+
+  const deviceGroups = groupPushDevicesByAndroidChannel(loggedInDevices);
   const uniqueTokens = [
-    ...new Set(devices.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
+    ...new Set(loggedInDevices.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
   ];
   if (uniqueTokens.length === 0) {
     return {
@@ -359,6 +386,7 @@ async function sendChatReactionPushNotifications({
     {
       userId: { $in: allowedUserIds },
       isActive: true,
+      isLoggedOut: { $ne: true },
       token: { $ne: null },
     },
     "userId token platform notificationToneId"
@@ -474,6 +502,7 @@ async function sendTicketPushNotifications({
     {
       userId: { $in: userIds },
       isActive: true,
+      isLoggedOut: { $ne: true },
       token: { $ne: null },
     },
     "userId token platform notificationToneId"
@@ -587,6 +616,8 @@ async function registerPushDevice(actor, payload = {}) {
           payload.notificationToneId
         ),
         isActive: true,
+        isLoggedOut: false,
+        unreadSinceLogout: 0,
         lastSeenAt: new Date(),
       },
     },
@@ -611,7 +642,8 @@ async function unregisterPushDevice(actor, payload = {}) {
     },
     {
       $set: {
-        isActive: false,
+        isLoggedOut: true,
+        unreadSinceLogout: 0,
       },
     }
   );
