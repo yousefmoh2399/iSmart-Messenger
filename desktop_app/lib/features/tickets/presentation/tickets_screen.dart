@@ -73,12 +73,14 @@ class TicketsScreen extends ConsumerStatefulWidget {
     this.embedded = false,
     this.isWrapped = false,
     this.initialTab = TicketTypeTab.ticket,
+    this.closedOnly = false,
     this.onTabChanged,
   });
 
   final bool embedded;
   final bool isWrapped;
   final TicketTypeTab initialTab;
+  final bool closedOnly;
   final ValueChanged<TicketTypeTab>? onTabChanged;
 
   @override
@@ -94,6 +96,9 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
   void initState() {
     super.initState();
     _activeTab = widget.initialTab;
+    if (widget.closedOnly) {
+      _activeFilter = TicketFilter.closed;
+    }
   }
 
   @override
@@ -102,6 +107,13 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
     if (oldWidget.initialTab != widget.initialTab) {
       setState(() {
         _activeTab = widget.initialTab;
+      });
+    }
+    if (oldWidget.closedOnly != widget.closedOnly) {
+      setState(() {
+        _activeFilter = widget.closedOnly
+            ? TicketFilter.closed
+            : TicketFilter.all;
       });
     }
   }
@@ -163,11 +175,13 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
 
   Future<void> _exportTicketsReport({String format = 'xlsx'}) async {
     try {
-      final status = switch (_activeFilter) {
-        TicketFilter.resolved => 'resolved',
-        TicketFilter.closed => 'closed',
-        _ => null,
-      };
+      final status = widget.closedOnly
+          ? 'closed'
+          : switch (_activeFilter) {
+              TicketFilter.resolved => 'resolved',
+              TicketFilter.closed => 'closed',
+              _ => null,
+            };
       final ticketType = switch (_activeTab) {
         TicketTypeTab.ticket => 'ticket',
         TicketTypeTab.complaint => 'complaint',
@@ -389,7 +403,9 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                for (final filter in TicketFilter.values)
+                for (final filter in widget.closedOnly
+                  ? const [TicketFilter.closed]
+                  : TicketFilter.values)
                   Padding(
                     padding: const EdgeInsetsDirectional.only(end: 8),
                     child: ChoiceChip(
@@ -504,7 +520,9 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
 
   Widget _buildContent() {
     final authUser = ref.watch(authControllerProvider).valueOrNull;
-    final ticketState = ref.watch(ticketsControllerProvider);
+    final ticketState = widget.closedOnly
+        ? ref.watch(closedTicketsControllerProvider)
+        : ref.watch(ticketsControllerProvider);
 
     return Container(
       decoration: BoxDecoration(
@@ -545,8 +563,9 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
           final tickets = _filteredTickets(data.tickets, authUser);
 
           return RefreshIndicator(
-            onRefresh: () =>
-                ref.read(ticketsControllerProvider.notifier).refresh(),
+            onRefresh: () => widget.closedOnly
+                ? ref.read(closedTicketsControllerProvider.notifier).refresh()
+                : ref.read(ticketsControllerProvider.notifier).refresh(),
             child: ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [

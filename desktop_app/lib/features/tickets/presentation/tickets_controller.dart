@@ -132,6 +132,53 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
   }
 }
 
+class ClosedTicketsController extends AsyncNotifier<TicketOverviewData> {
+  StreamSubscription<ChatSocketEvent>? _eventsSubscription;
+  TicketRepository? _repositoryInstance;
+
+  TicketRepository _repository() =>
+      _repositoryInstance ?? ref.read(ticketRepositoryProvider);
+
+  @override
+  Future<TicketOverviewData> build() async {
+    ref.watch(serverRecoveryRevisionProvider);
+    try {
+      await ref.watch(chatSocketConnectionProvider.future);
+    } catch (_) {}
+    _repositoryInstance = ref.read(ticketRepositoryProvider);
+    _listenToSocket();
+    ref.onDispose(() => _eventsSubscription?.cancel());
+    return _repository().fetchOverview(status: 'closed', limit: 200);
+  }
+
+  void _listenToSocket() {
+    _eventsSubscription?.cancel();
+    final socket = ref.read(chatSocketServiceProvider);
+    _eventsSubscription = socket.events.listen((event) {
+      if (event.type == 'ticket_updated' ||
+          event.type == 'tickets_updated' ||
+          event.type == 'ticket_settings_updated') {
+        Future<void>.microtask(refresh);
+      }
+    });
+  }
+
+  Future<void> refresh({bool showLoader = false}) async {
+    final previous = state.valueOrNull;
+    if (showLoader || previous == null) {
+      state = const AsyncLoading();
+    }
+    final next = await AsyncValue.guard(
+      () => _repository().fetchOverview(status: 'closed', limit: 200),
+    );
+    if (next.hasError && previous != null) {
+      state = AsyncData(previous);
+      return;
+    }
+    state = next;
+  }
+}
+
 class TicketDetailsController
     extends AutoDisposeFamilyAsyncNotifier<TicketDetailsData, String> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;

@@ -895,6 +895,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   bool _showRightPanel = false;
   bool _showAdminPanel = false;
   bool _showTicketsPanel = false;
+  bool _showClosedTicketsPanel = false;
   TicketTypeTab _activeTicketTab = TicketTypeTab.ticket;
   double _sidebarWidth = 300;
   double _rightPanelWidth = 320;
@@ -914,6 +915,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     setState(() {
       _showAdminPanel = shouldShowAdmin;
       _showTicketsPanel = shouldShowTickets;
+      _showClosedTicketsPanel = false;
 
       if (_showAdminPanel || _showTicketsPanel) {
         _showRightPanel = false;
@@ -1648,6 +1650,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                   onOpenTickets: () {
                     setState(() {
                       _showTicketsPanel = true;
+                      _showClosedTicketsPanel = false;
                       _showAdminPanel = false;
                       _showRightPanel = false;
                       _selectedConversationId = null;
@@ -1732,11 +1735,24 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                           selected: _activeTicketTab == tab,
                           collapsed: sidebarCollapsed,
                           onTap: () {
-                            setState(() => _activeTicketTab = tab);
+                            setState(() {
+                              _activeTicketTab = tab;
+                              _showClosedTicketsPanel = false;
+                            });
                           },
                         ),
                         const Divider(height: 1),
                       ],
+                      _TicketSectionButton(
+                        label: 'التذاكر المغلقة',
+                        icon: Icons.lock_outline_rounded,
+                        selected: _showClosedTicketsPanel,
+                        collapsed: sidebarCollapsed,
+                        onTap: () {
+                          setState(() => _showClosedTicketsPanel = true);
+                        },
+                      ),
+                      const Divider(height: 1),
                     ],
                   ),
                 ),
@@ -1780,6 +1796,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                         ? TicketsScreen(
                             key: const ValueKey('tickets_panel'),
                             embedded: true,
+                            closedOnly: _showClosedTicketsPanel,
                             initialTab: _activeTicketTab,
                             onTabChanged: (tab) {
                               setState(() => _activeTicketTab = tab);

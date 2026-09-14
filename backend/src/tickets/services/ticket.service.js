@@ -225,10 +225,7 @@ function resolveUserRefId(ref) {
     return null;
   }
   return (
-    ref._id?.toString?.() ||
-    ref.id?.toString?.() ||
-    ref.toString?.() ||
-    null
+    ref._id?.toString?.() || ref.id?.toString?.() || ref.toString?.() || null
   );
 }
 
@@ -237,10 +234,7 @@ function resolveDepartmentRefId(ref) {
     return null;
   }
   return (
-    ref._id?.toString?.() ||
-    ref.id?.toString?.() ||
-    ref.toString?.() ||
-    null
+    ref._id?.toString?.() || ref.id?.toString?.() || ref.toString?.() || null
   );
 }
 
@@ -542,8 +536,8 @@ async function buildNotifyUserIds(ticket, { includeCreator = true } = {}) {
   const ids = new Set([
     includeCreator
       ? ticket.createdBy?._id?.toString?.() ||
-          ticket.createdBy?.toString?.() ||
-          null
+        ticket.createdBy?.toString?.() ||
+        null
       : null,
     ticket.assignedTo?._id?.toString?.() ||
       ticket.assignedTo?.toString?.() ||
@@ -551,7 +545,10 @@ async function buildNotifyUserIds(ticket, { includeCreator = true } = {}) {
   ]);
 
   const ticketType = ticket.ticketType || "ticket";
-  if (ticketType === "ticket" && (await ticketTargetIsVisibleToSupportAgent(ticket))) {
+  if (
+    ticketType === "ticket" &&
+    (await ticketTargetIsVisibleToSupportAgent(ticket))
+  ) {
     const supportAgentIds = await getSupportAgentIdSet();
     for (const agentId of supportAgentIds) {
       ids.add(agentId);
@@ -602,7 +599,9 @@ async function listTickets(currentUser, filters = {}) {
   const isAdmin = currentUser.role === "admin";
   const isSupport = await isSupportAgent(currentUser.id);
   const itDeptIds = isAdmin ? [] : [...(await getItDepartmentIdSet())];
-  const itDeptObjectIds = itDeptIds.map((id) => new mongoose.Types.ObjectId(id));
+  const itDeptObjectIds = itDeptIds.map(
+    (id) => new mongoose.Types.ObjectId(id),
+  );
   const ticketDeptIds = isAdmin
     ? []
     : await getHandledDepartmentIds(currentUser.id, "ticket");
@@ -803,6 +802,34 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
     andClauses.push({ ticketType });
   }
 
+  if (currentUser.role !== "admin") {
+    const personalAccess = [
+      { createdBy: currentUser.id },
+      { assignedTo: currentUser.id },
+    ];
+    const isSupport = await isSupportAgent(currentUser.id);
+    const itDeptIds = [...(await getItDepartmentIdSet())];
+    const itDeptObjectIds = itDeptIds.map(
+      (id) => new mongoose.Types.ObjectId(id),
+    );
+    const handledDeptIds = await getHandledDepartmentIds(
+      currentUser.id,
+      ticketType,
+    );
+    const visibility = buildRoutedTicketHandlerFilters(
+      currentUser,
+      handledDeptIds,
+    );
+
+    if (ticketType === "ticket") {
+      if (isSupport && itDeptObjectIds.length > 0) {
+        visibility.push({ targetDepartmentId: { $in: itDeptObjectIds } });
+      }
+    }
+
+    andClauses.push({ $or: visibility.length ? visibility : personalAccess });
+  }
+
   if (status && TICKET_STATUS.has(status)) {
     andClauses.push({ status: status });
   }
@@ -893,7 +920,9 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
         STATUS_AR[ticket.status] || ticket.status,
         PRIORITY_AR[ticket.priority] || ticket.priority,
         ticket.createdBy?.fullName || ticket.createdBy?.username || "",
-        ticket.assignedTo?.fullName || ticket.assignedTo?.username || "غير مسند",
+        ticket.assignedTo?.fullName ||
+          ticket.assignedTo?.username ||
+          "غير مسند",
         resolvedBy,
         ticket.branchDepartmentId?.name || "",
         ticket.createdAt ? new Date(ticket.createdAt).toISOString() : "",
@@ -910,12 +939,20 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
   ];
 
   if (format === "pdf" || format === "xlsx") {
-    const { buildCustomPdfReport, buildCustomExcelReport, formatDate } = require("./ticket-custom-reports.service");
-    
-    const reportData = tickets.map(ticket => {
-      const isResolved = ticket.status === "resolved" || ticket.status === "closed";
+    const {
+      buildCustomPdfReport,
+      buildCustomExcelReport,
+      formatDate,
+    } = require("./ticket-custom-reports.service");
+
+    const reportData = tickets.map((ticket) => {
+      const isResolved =
+        ticket.status === "resolved" || ticket.status === "closed";
       const resolvedBy = isResolved
-        ? resolvedByMap.get(ticket._id.toString()) || ticket.assignedTo?.fullName || ticket.assignedTo?.username || ""
+        ? resolvedByMap.get(ticket._id.toString()) ||
+          ticket.assignedTo?.fullName ||
+          ticket.assignedTo?.username ||
+          ""
         : "";
 
       return {
@@ -924,27 +961,42 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
         status: STATUS_AR[ticket.status] || ticket.status,
         priority: PRIORITY_AR[ticket.priority] || ticket.priority,
         department: ticket.branchDepartmentId?.name || "",
-        createdBy: ticket.createdBy?.fullName || ticket.createdBy?.username || "",
-        assignedTo: ticket.assignedTo?.fullName || ticket.assignedTo?.username || "غير مسند",
+        createdBy:
+          ticket.createdBy?.fullName || ticket.createdBy?.username || "",
+        assignedTo:
+          ticket.assignedTo?.fullName ||
+          ticket.assignedTo?.username ||
+          "غير مسند",
         resolvedBy: resolvedBy,
         createdAt: formatDate(ticket.createdAt),
         dueDate: formatDate(ticket.dueDate),
         lastUpdateAt: formatDate(ticket.lastUpdateAt),
         resolvedAt: formatDate(ticket.resolvedAt),
         closedAt: formatDate(ticket.closedAt),
-        minutesBetween: minutesBetween(ticket.createdAt, ticket.resolvedAt || ticket.closedAt),
+        minutesBetween: minutesBetween(
+          ticket.createdAt,
+          ticket.resolvedAt || ticket.closedAt,
+        ),
         updatesCount: countsByTicket.get(ticket._id.toString()) || 0,
         rating: ticket.rating ? `${ticket.rating} نجوم` : "لم يقيم",
-        lastPublicMessage: ticket.lastPublicMessage || ""
+        lastPublicMessage: ticket.lastPublicMessage || "",
       };
     });
 
-    const reportTitle = `تقرير ${ticketType === 'complaint' ? 'الشكاوي' : ticketType === 'suggestion' ? 'المقترحات' : 'التذاكر'}`;
-    
+    const reportTitle = `تقرير ${ticketType === "complaint" ? "الشكاوي" : ticketType === "suggestion" ? "المقترحات" : "التذاكر"}`;
+
     if (format === "pdf") {
-      return await buildCustomPdfReport(reportData, "tickets-report", reportTitle);
+      return await buildCustomPdfReport(
+        reportData,
+        "tickets-report",
+        reportTitle,
+      );
     } else {
-      return await buildCustomExcelReport(reportData, "tickets-report", reportTitle);
+      return await buildCustomExcelReport(
+        reportData,
+        "tickets-report",
+        reportTitle,
+      );
     }
   }
 
@@ -966,7 +1018,9 @@ function statusLabel(status) {
       waiting_branch: "بانتظار رد مقدم الطلب",
       resolved: "تم الحل",
       closed: "مغلقة",
-    }[status] || status || ""
+    }[status] ||
+    status ||
+    ""
   );
 }
 
@@ -990,7 +1044,8 @@ function ticketPushBody(action, ticket, update = null) {
   if (action === "status_updated")
     return `${number}: تغيرت الحالة إلى ${statusLabel(ticket?.status)}`;
   if (action === "assignee_updated") {
-    const assignee = ticket?.assignedTo?.fullName || ticket?.assignedTo?.username;
+    const assignee =
+      ticket?.assignedTo?.fullName || ticket?.assignedTo?.username;
     return assignee
       ? `${number}: تم الإسناد إلى ${assignee}`
       : `${number}: تم إلغاء الإسناد`;
@@ -1030,7 +1085,8 @@ async function createTicket(currentUser, payload) {
   const ticketType = ["complaint", "suggestion"].includes(payload.ticketType)
     ? payload.ticketType
     : "ticket";
-  const targetDepartmentId = toNullableString(payload.targetDepartmentId) || null;
+  const targetDepartmentId =
+    toNullableString(payload.targetDepartmentId) || null;
 
   if (title.length < 4) {
     throw new ApiError(400, "Ticket title must be at least 4 characters.");
@@ -1382,7 +1438,9 @@ async function assignTicket(currentUser, ticketId, assignedToId) {
     }
     if (!isTargetAllowed && ticket.targetDepartmentId) {
       const handlerField = getHandlerFieldName(ticket.ticketType || "ticket");
-      const targetDepartmentId = resolveDepartmentRefId(ticket.targetDepartmentId);
+      const targetDepartmentId = resolveDepartmentRefId(
+        ticket.targetDepartmentId,
+      );
       const dept = targetDepartmentId
         ? await Department.findById(targetDepartmentId)
             .select(handlerField)
@@ -1476,8 +1534,7 @@ async function getTicketSettings(currentUser) {
   return {
     supportAgentIds,
     isSupportAgent: support,
-    canManage:
-      currentUser.role === "admin" || support || isDeptHandler,
+    canManage: currentUser.role === "admin" || support || isDeptHandler,
     canExportTicketReport:
       currentUser.role === "admin" || exportTicketTypes.includes("ticket"),
     canExportComplaintReport:
@@ -1822,7 +1879,10 @@ async function updateDepartmentHandlersByType(
   if (!dept) throw new ApiError(404, "القسم غير موجود.");
 
   const existingUsers = handlerIds.length
-    ? await User.find({ _id: { $in: handlerIds }, isActive: true }, "_id").lean()
+    ? await User.find(
+        { _id: { $in: handlerIds }, isActive: true },
+        "_id",
+      ).lean()
     : [];
   const validHandlerIds = existingUsers.map((entry) => entry._id);
 

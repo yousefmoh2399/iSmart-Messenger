@@ -387,6 +387,7 @@ final authSessionManagerProvider = Provider<AuthSessionManager>((ref) {
         ref.invalidate(announcementsControllerProvider);
         ref.invalidate(adminAnnouncementsControllerProvider);
         ref.invalidate(ticketsControllerProvider);
+        ref.invalidate(closedTicketsControllerProvider);
         ref.invalidate(printerControllerProvider);
       });
     },
@@ -692,6 +693,11 @@ final chatRealtimeControllerProvider =
 final ticketsControllerProvider =
     AsyncNotifierProvider<TicketsController, TicketOverviewData>(
       TicketsController.new,
+    );
+
+final closedTicketsControllerProvider =
+    AsyncNotifierProvider<ClosedTicketsController, TicketOverviewData>(
+      ClosedTicketsController.new,
     );
 
 final printerControllerProvider =
