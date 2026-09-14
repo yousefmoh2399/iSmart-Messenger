@@ -13,8 +13,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../core/config/app_config.dart';
-import '../core/utils/formatters.dart';
 import '../core/theme/app_theme.dart';
+import '../core/utils/formatters.dart';
 import '../features/auth/presentation/auth_controller.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/presentation/chat_home_screen.dart';

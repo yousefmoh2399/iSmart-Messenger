@@ -44,8 +44,6 @@ import '../models/remote_document.dart';
 import '../services/app_settings_repository.dart';
 import '../services/desktop_file_save_service.dart';
 import '../services/desktop_print_service.dart';
-import '../services/print_job_tracker.dart';
-import '../services/print_job_processor.dart';
 import '../services/desktop_update_agent.dart'
     if (dart.library.html) '../services/desktop_update_agent_web.dart';
 import '../services/desktop_update_state_store.dart'
@@ -53,6 +51,8 @@ import '../services/desktop_update_state_store.dart'
 import '../services/lan_file_transfer_service.dart';
 import '../services/local_media_storage_service.dart';
 import '../services/local_notification_service.dart';
+import '../services/print_job_processor.dart';
+import '../services/print_job_tracker.dart';
 import '../services/web_platform_bridge.dart' as web_bridge;
 
 DateTime? _lastChatSocketErrorLogAt;

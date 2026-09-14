@@ -13,15 +13,15 @@ import '../core/config/app_config.dart';
 import '../core/settings/user_preferences.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/formatters.dart';
-import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/auth_controller.dart';
+import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/data/chat_socket_service.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../shared/providers/providers.dart';
-import '../shared/services/print_job_processor.dart';
 import '../shared/services/desktop_update_agent.dart'
     if (dart.library.html) '../shared/services/desktop_update_agent_web.dart';
 import '../shared/services/lan_file_transfer_service.dart';
+import '../shared/services/print_job_processor.dart';
 import '../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../shared/widgets/loading_indicator.dart';
 import 'desktop_workspace_shell.dart';
