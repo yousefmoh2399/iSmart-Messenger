@@ -2,7 +2,9 @@
 backend/node_modules/
 
 # Environment files (never commit real secrets)
-
+# Firebase Admin SDK credentials
+backend/*firebase-adminsdk*.json
+*.json
 deployment/
 
 # Flutter / Dart
@@ -32,3 +34,4 @@ backend/uploads/**
 backend/releases/**
 backend/backups/**
 backend/dist/
+backend/*firebase-adminsdk*.json
