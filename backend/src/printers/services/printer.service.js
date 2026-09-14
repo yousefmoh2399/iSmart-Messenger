@@ -1495,26 +1495,31 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
       let startTotal = 0;
       let startMono = 0;
       let startColor = 0;
+      let startScan = 0;
 
       if (hasFreshBaseline) {
         startTotal = baselineSnapshot.lifetimeCounters?.totalPages || baselineSnapshot.counters?.totalPages || 0;
         startMono = baselineSnapshot.lifetimeCounters?.monoPages || baselineSnapshot.counters?.monoPages || 0;
         startColor = baselineSnapshot.lifetimeCounters?.colorPages || baselineSnapshot.counters?.colorPages || 0;
+        startScan = baselineSnapshot.lifetimeCounters?.scanPages || baselineSnapshot.counters?.scanPages || 0;
       } else if (monthlySnapshots.length > 0) {
         startTotal = monthlySnapshots[0].lifetimeCounters?.totalPages || monthlySnapshots[0].counters?.totalPages || 0;
         startMono = monthlySnapshots[0].lifetimeCounters?.monoPages || monthlySnapshots[0].counters?.monoPages || 0;
         startColor = monthlySnapshots[0].lifetimeCounters?.colorPages || monthlySnapshots[0].counters?.colorPages || 0;
+        startScan = monthlySnapshots[0].lifetimeCounters?.scanPages || monthlySnapshots[0].counters?.scanPages || 0;
       }
 
       let endTotal = startTotal;
       let endMono = startMono;
       let endColor = startColor;
+      let endScan = startScan;
 
       if (monthlySnapshots.length > 0) {
         const lastSnapshot = monthlySnapshots[monthlySnapshots.length - 1];
         endTotal = lastSnapshot.lifetimeCounters?.totalPages || lastSnapshot.counters?.totalPages || 0;
         endMono = lastSnapshot.lifetimeCounters?.monoPages || lastSnapshot.counters?.monoPages || 0;
         endColor = lastSnapshot.lifetimeCounters?.colorPages || lastSnapshot.counters?.colorPages || 0;
+        endScan = lastSnapshot.lifetimeCounters?.scanPages || lastSnapshot.counters?.scanPages || 0;
       }
 
       const usage = sanitizeMonthlyCounterUsage({
@@ -1523,6 +1528,8 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
         colorPages: endColor - startColor,
       });
       const { totalPages, monoPages, colorPages } = usage;
+      const scanPages = Math.max(0, endScan - startScan);
+
       const firstSnapshot = monthlySnapshots[0] || null;
       const lastSnapshot = monthlySnapshots[monthlySnapshots.length - 1] || null;
       const hasBaselineSnapshot = Boolean(hasFreshBaseline);
@@ -1719,6 +1726,11 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
     monthlyConsumption = await calculateMonthlyConsumption({ branchId, fromMonth, fromYear, toMonth, toYear, month, year });
   } else if (month && year) {
     monthlyConsumption = await calculateMonthlyConsumption({ branchId, month, year });
+  }
+
+  if (type === "global" || type === "branch") {
+    const { exportCustomReport } = require("./printer-custom-reports.service");
+    return exportCustomReport(actor, { type, format, branchId, month, year });
   }
 
   const [branches, printers, snapshots, waste] = await Promise.all([
