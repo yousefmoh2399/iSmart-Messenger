@@ -102,6 +102,11 @@ class AuthController extends Notifier<AuthState> {
         password: password,
         rememberUsername: rememberUsername,
       );
+
+      // Invalidate all dependent providers first so they refetch with the new
+      // user's session. We do NOT call invalidateSelf() here because that would
+      // re-run initializeAuth() which races with socket/chat providers that are
+      // still reading the token — causing a spurious 401 "session expired" flash.
       ref.invalidate(chatOverviewControllerProvider);
       ref.invalidate(chatRealtimeControllerProvider);
       ref.invalidate(usersControllerProvider);
@@ -113,9 +118,15 @@ class AuthController extends Notifier<AuthState> {
       ref.invalidate(mobilePrinterControllerProvider);
       ref.invalidate(pendingUploadsControllerProvider);
       ref.invalidate(scanSessionControllerProvider);
-      // Invalidate self to gracefully rebuild and avoid CircularDependencyError 
-      // when listeners (like chat providers) read authControllerProvider synchronously
-      ref.invalidateSelf();
+
+      // Set state directly to authenticated — avoids re-running initializeAuth()
+      // and the associated race condition with concurrent token reads.
+      final session = await repository.getSession();
+      state = AuthState(
+        status: AuthStatus.authenticated,
+        session: session,
+        user: user,
+      );
     } catch (error, stackTrace) {
       state = const AuthState(status: AuthStatus.unauthenticated);
       Error.throwWithStackTrace(error, stackTrace);

@@ -96,15 +96,19 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _hasConfirmedServerDisconnect = false;
   bool _serverRestoreRefreshInFlight = false;
   DateTime? _lastResumeTime;
-  bool _isLifecycleResumeRecovery = false;
+  bool _isLifecycleResumeRecovery = true; // Start true: suppress banner on cold-start
   Timer? _resumeRecoveryTimer;
+
+  // Grace period: suppress server-unavailable banner for the first few seconds
+  // after app start / foreground restore while connections are being established.
+  static const _resumeGraceDuration = Duration(seconds: 20);
 
   bool get _isInLifecycleResumeGrace {
     final lastResume = _lastResumeTime;
     return _isLifecycleResumeRecovery ||
         (lastResume != null &&
             DateTime.now().difference(lastResume) <
-                const Duration(seconds: 12));
+                _resumeGraceDuration);
   }
 
   void _setChatVisibility(bool isVisible) {
@@ -147,6 +151,10 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
       debugPrint('[_AuthGateState] User changed: ${user.username}');
       _lastPresenceUserId = user.id;
+      // Reset server-disconnect state for the new session so stale banners
+      // from the previous user's logout don't surface.
+      _hasConfirmedServerDisconnect = false;
+      _lastServerBannerMessage = null;
       final isVisible =
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
       _setChatVisibility(isVisible);
@@ -167,7 +175,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       ref.invalidate(remoteDocumentsControllerProvider);
       ref.invalidate(adminDocumentsControllerProvider);
       unawaited(_syncAdminServerDefaults());
-      unawaited(_refreshServerConnectionState());
+      // Use quiet=true on login so a transient connectivity hiccup doesn't
+      // immediately show the server-unavailable banner to the newly logged-in user.
+      unawaited(_refreshServerConnectionState(quiet: true));
       unawaited(_syncPendingUploadsInBackground());
       unawaited(_tryHandleNotificationNavigation());
     }
@@ -361,6 +371,16 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Suppress server-unavailable banner during cold start / foreground restore.
+    // _isLifecycleResumeRecovery starts true; schedule a timer to clear it after
+    // the grace duration so that any genuine server errors after startup are shown.
+    _lastResumeTime = DateTime.now();
+    _resumeRecoveryTimer = Timer(_resumeGraceDuration, () {
+      if (mounted) {
+        _isLifecycleResumeRecovery = false;
+      }
+    });
 
     // Initialize update agent
     _updateAgent = MobileUpdateAgent(ref.read(updateCheckServiceProvider));
@@ -989,7 +1009,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _lastResumeTime = DateTime.now();
         _isLifecycleResumeRecovery = true;
         _resumeRecoveryTimer?.cancel();
-        _resumeRecoveryTimer = Timer(const Duration(seconds: 12), () {
+        _resumeRecoveryTimer = Timer(_resumeGraceDuration, () {
           if (mounted) {
             _isLifecycleResumeRecovery = false;
           }
@@ -1011,11 +1031,17 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
+        // Clear the time-based grace so it doesn't linger across multiple
+        // pause/resume cycles. The flag will be re-set on the next resume.
+        _lastResumeTime = null;
         _isLifecycleResumeRecovery = false;
         _resumeRecoveryTimer?.cancel();
         socket.setPresenceIdle();
         break;
       case AppLifecycleState.detached:
+        _lastResumeTime = null;
+        _isLifecycleResumeRecovery = false;
+        _resumeRecoveryTimer?.cancel();
         socket.setPresenceOffline();
         socket.disconnect();
         break;

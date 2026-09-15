@@ -2857,7 +2857,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 if (_canManagePinnedMessage(authUserId))
                   _TelegramActionTile(
                     icon: Icons.push_pin_outlined,
-                    label: 'ØªØ«Ø¨ÙŠØª',
+                    label: 'تثبيت الرسالة',
                     color: const Color(0xFF9A6400),
                     onTap: () async {
                       Navigator.pop(context);
