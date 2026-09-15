@@ -22,23 +22,25 @@ class DesktopWorkspaceShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
-  DesktopWorkspaceSection _activeSection = DesktopWorkspaceSection.chat;
+
+
+  // Getter to read the global active section
+  DesktopWorkspaceSection get _activeSection => ref.watch(activeSectionProvider);
 
   void _navigateTo(DesktopWorkspaceSection section) {
-    if (_activeSection == section) {
+    final current = ref.read(activeSectionProvider);
+    if (current == section) {
       if (section == DesktopWorkspaceSection.snipeit) {
-        ref
-            .read(snipeitRefreshEventProvider.notifier)
-            .update((state) => state + 1);
+        ref.read(snipeitRefreshEventProvider.notifier).update((state) => state + 1);
       }
       return;
     }
-    setState(() {
-      _activeSection = section;
-    });
-    ref.read(chatSectionVisibleProvider.notifier).state =
-        section == DesktopWorkspaceSection.chat;
+    ref.read(activeSectionProvider.notifier).state = section;
+    ref.read(chatSectionVisibleProvider.notifier).state = section == DesktopWorkspaceSection.chat;
   }
+
+
+  
 
   int _stackIndexForSection(DesktopWorkspaceSection section) {
     switch (section) {

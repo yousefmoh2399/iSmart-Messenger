@@ -208,29 +208,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  void _goToChat() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(builder: (_) => const ChatDashboardScreen()),
-  );
+  void _goToChat() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.chat;
 
-  void _goToFiles() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(builder: (_) => const FilesDashboardScreen()),
-  );
+  void _goToFiles() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.files;
 
-  void _goToServers() => Navigator.of(
-    context,
-  ).pushReplacement(MaterialPageRoute(builder: (_) => const ServersScreen()));
+  void _goToServers() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.servers;
 
-  void _goToAdminPanel() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(
-      builder: (_) => const ChatDashboardScreen(openAdminOnStart: true),
-    ),
-  );
+  void _goToAdminPanel() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.admin;
 
-  void _goToTicketsPanel() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(
-      builder: (_) => const ChatDashboardScreen(openTicketsOnStart: true),
-    ),
-  );
+  void _goToTicketsPanel() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.tickets;
 
   @override
   Widget build(BuildContext context) {

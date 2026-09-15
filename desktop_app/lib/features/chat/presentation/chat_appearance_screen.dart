@@ -299,43 +299,20 @@ class ChatAppearanceScreen extends ConsumerWidget {
               currentThemeMode: themeMode,
               isDark: themeMode == ThemeMode.dark,
               accentColor: Theme.of(context).colorScheme.primary,
-              onOpenChat: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const ChatDashboardScreen()),
-              ),
+              onOpenChat: () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.chat,
               onRefresh: () => ref.invalidate(authControllerProvider),
-              onOpenFiles: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const FilesDashboardScreen()),
-              ),
-              onOpenServers: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const ServersScreen()),
-              ),
-              onOpenProfile: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              ),
+              onOpenFiles: () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.files,
+              onOpenServers: () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.servers,
+              onOpenProfile: () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.profile,
               onOpenUpdates: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const UpdateCenterScreen()),
               ),
-              onToggleTheme: () => ref
-                  .read(themeModeControllerProvider.notifier)
-                  .cycleThemeMode(),
-              onOpenTickets: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      const ChatDashboardScreen(openTicketsOnStart: true),
-                ),
-              ),
-              onLogout: () =>
-                  ref.read(authControllerProvider.notifier).logout(),
-              onCreateConversation: () => Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const ChatDashboardScreen()),
-              ),
+              onToggleTheme: () => ref.read(themeModeControllerProvider.notifier).cycleThemeMode(),
+              onOpenTickets: () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.tickets,
+              onLogout: () => ref.read(authControllerProvider.notifier).logout(),
+              onCreateConversation: () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.chat,
               onOpenAdmin: canOpenAdmin
-                  ? () => Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            const ChatDashboardScreen(openAdminOnStart: true),
-                      ),
-                    )
+                  ? () => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.admin
                   : null,
             ),
           ],

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:desktop_app/shared/widgets/desktop_workspace_sidebar.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -735,3 +736,6 @@ final adminAnnouncementsControllerProvider =
       AdminAnnouncementsController,
       List<AdminAnnouncement>
     >(AdminAnnouncementsController.new);
+
+// Global provider for the current workspace section
+final activeSectionProvider = StateProvider<DesktopWorkspaceSection>((ref) => DesktopWorkspaceSection.chat);

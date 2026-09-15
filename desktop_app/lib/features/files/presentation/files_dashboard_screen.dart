@@ -563,28 +563,15 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
     }
   }
 
-  void _goToChat() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(builder: (_) => const ChatDashboardScreen()),
-  );
+  void _goToChat() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.chat;
 
-  void _goToAdminPanel() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(
-      builder: (_) => const ChatDashboardScreen(openAdminOnStart: true),
-    ),
-  );
+  void _goToAdminPanel() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.admin;
 
-  void _goToTicketsPanel() => Navigator.of(context).pushReplacement(
-    MaterialPageRoute(
-      builder: (_) => const ChatDashboardScreen(openTicketsOnStart: true),
-    ),
-  );
+  void _goToTicketsPanel() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.tickets;
 
-  void _goToProfile() => Navigator.of(
-    context,
-  ).pushReplacement(MaterialPageRoute(builder: (_) => const ProfileScreen()));
-  void _goToServers() => Navigator.of(
-    context,
-  ).pushReplacement(MaterialPageRoute(builder: (_) => const ServersScreen()));
+  void _goToProfile() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.profile;
+
+  void _goToServers() => ref.read(activeSectionProvider.notifier).state = DesktopWorkspaceSection.servers;
 
   void _showOutgoingTransfer({
     required String fileName,
