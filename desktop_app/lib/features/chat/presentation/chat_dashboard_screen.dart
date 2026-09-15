@@ -2108,6 +2108,14 @@ class _TelegramEmptyState extends StatelessWidget {
               _ShortcutChip(label: 'Esc', hint: 'إغلاق اللوحة'),
             ],
           ),
+          Text(
+           'Copyright © 2026 Yousef Mohamed',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: isDark ? Colors.white54 : const Color(0xFF708499),
+              height: 1.6,
+            ),
+          ),
         ],
       ),
     );
