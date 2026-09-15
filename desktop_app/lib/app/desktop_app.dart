@@ -126,35 +126,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _hasConfirmedServerDisconnect = false;
   bool _serverRestoreRefreshInFlight = false;
   int _serverFailureStreak = 0;
-  bool _isWindowResumeRecovery = false;
   bool _lastKnownWindowVisible = true;
   bool _lastKnownWindowMinimized = false;
-  DateTime? _lastWindowResumeTime;
-  Timer? _windowResumeRecoveryTimer;
 
-  bool get _isInWindowResumeGrace {
-    final lastResume = _lastWindowResumeTime;
-    return _isWindowResumeRecovery ||
-        (lastResume != null &&
-            DateTime.now().difference(lastResume) <
-                const Duration(seconds: 12));
-  }
-
-  void _startWindowResumeGrace() {
-    _lastWindowResumeTime = DateTime.now();
-    _isWindowResumeRecovery = true;
-    _windowResumeRecoveryTimer?.cancel();
-    _windowResumeRecoveryTimer = Timer(const Duration(seconds: 12), () {
-      if (mounted) {
-        _isWindowResumeRecovery = false;
-      }
-    });
-  }
-
-  void _stopWindowResumeGrace() {
-    _isWindowResumeRecovery = false;
-    _windowResumeRecoveryTimer?.cancel();
-  }
+  // Event-driven connection flag.
+  // True while the app is still establishing/re-establishing its connection.
+  // Suppresses false-positive server-unavailable banners during startup and
+  // window restore transitions.
+  // Cleared as soon as the socket reports connected or a health-check succeeds.
+  // A 30-second fallback timer surfaces genuine outages if neither fires.
+  bool _isEstablishingConnection = true;
+  Timer? _connectionEstablishTimer;
+  static const _connectionEstablishTimeoutDuration = Duration(seconds: 30);
 
   Future<void> _restartPreparedUpdate() async {
     try {
@@ -217,9 +200,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _lastKnownWindowVisible = isVisible;
       _lastKnownWindowMinimized = isMinimized;
       if (restoredFromMinimized) {
-        _startWindowResumeGrace();
-      } else if (!isChatVisible) {
-        _stopWindowResumeGrace();
+        _markConnectionEstablishing();
       }
 
       _setChatVisibility(isChatVisible);
@@ -245,6 +226,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _lastPresenceUserId = null;
       _lastConnectionErrorMessage = null;
       _updateAgentUserId = null;
+      _isEstablishingConnection = true;
+      _connectionEstablishTimer?.cancel();
       _isUpdateInProgress = false;
       _isUpdateDialogMinimized = false;
       _isPendingRestart = false;
@@ -275,6 +258,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         }
       }
       unawaited(_syncAdminServerDefaults());
+      _markConnectionEstablishing();
       unawaited(_refreshServerConnectionState());
       if (!kIsWeb) {
         unawaited(_ensureLanTransferServiceRunning());
@@ -298,6 +282,25 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     } catch (_) {}
   }
 
+  /// Marks the app as actively connecting/re-connecting.
+  void _markConnectionEstablishing() {
+    if (!mounted) return;
+    _isEstablishingConnection = true;
+    _connectionEstablishTimer?.cancel();
+    _connectionEstablishTimer = Timer(_connectionEstablishTimeoutDuration, () {
+      if (!mounted) return;
+      _isEstablishingConnection = false;
+      unawaited(_refreshServerConnectionState());
+    });
+  }
+
+  /// Marks the app as successfully connected.
+  void _markConnectionEstablished() {
+    if (!mounted) return;
+    _isEstablishingConnection = false;
+    _connectionEstablishTimer?.cancel();
+  }
+
   Future<void> _refreshServerConnectionState({
     bool recoverVisibleDisconnect = true,
     bool quiet = false,
@@ -315,7 +318,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       result = await ref
           .read(serverConnectionControllerProvider.notifier)
           .refresh(
-            preserveConnectedStateOnFailure: quiet || _isInWindowResumeGrace,
+            preserveConnectedStateOnFailure: quiet || _isEstablishingConnection,
           );
     } finally {
       _serverRefreshInFlight = false;
@@ -324,7 +327,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     if (!result.isConnected) {
-      if (quiet || _isInWindowResumeGrace) {
+      if (quiet || _isEstablishingConnection) {
         return;
       }
       _serverFailureStreak++;
@@ -338,6 +341,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       }
       return;
     }
+    // Connection confirmed — clear establishing flag immediately.
+    _markConnectionEstablished();
     if (_hasConfirmedServerDisconnect) {
       if (quiet || !recoverVisibleDisconnect) {
         _hasConfirmedServerDisconnect = false;
@@ -382,7 +387,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     if (isError) {
-      if (_isInWindowResumeGrace) {
+      if (_isEstablishingConnection) {
         return;
       }
       if (_lastConnectionErrorMessage == message) {
@@ -486,6 +491,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   @override
   void initState() {
     super.initState();
+    // Start in connecting state — suppresses false-positive banners on startup.
+    _markConnectionEstablishing();
     WidgetsBinding.instance.addObserver(this);
     _windowChannel.setMethodCallHandler(_onWindowMethodCall);
     if (kIsWeb && web_bridge.isElectron()) {
@@ -525,7 +532,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       // Widget was disposed, cannot access ref
     }
     _preferencesSubscription?.close();
-    _windowResumeRecoveryTimer?.cancel();
+    _connectionEstablishTimer?.cancel();
     _windowChannel.setMethodCallHandler(null);
     if (kIsWeb && web_bridge.isElectron()) {
       web_bridge.setElectronTrayActionHandler(null);
@@ -546,7 +553,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
       switch (state) {
         case AppLifecycleState.resumed:
-          _startWindowResumeGrace();
+          _markConnectionEstablishing();
           await _syncWindowVisibilityState();
           if (!isElectronWeb) {
             unawaited(
@@ -567,7 +574,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           break;
         case AppLifecycleState.hidden:
         case AppLifecycleState.paused:
-          _stopWindowResumeGrace();
           if (isElectronWeb) {
             await _syncWindowVisibilityState();
           } else {
@@ -730,9 +736,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _lastKnownWindowVisible = isVisible;
     _lastKnownWindowMinimized = isMinimized;
     if (restoredFromMinimized) {
-      _startWindowResumeGrace();
-    } else if (!isChatVisible) {
-      _stopWindowResumeGrace();
+      _markConnectionEstablishing();
     }
 
     _setChatVisibility(isChatVisible);
@@ -819,9 +823,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           _publishDesktopStorageConfig();
         }
 
-        if (_hasConfirmedServerDisconnect &&
-            recoverOnSocketConnected &&
-            !_isInWindowResumeGrace) {
+        // Socket connected — server reachable, clear establishing flag immediately.
+        _markConnectionEstablished();
+        if (_hasConfirmedServerDisconnect && recoverOnSocketConnected) {
           unawaited(_refreshDataAfterServerRestored());
           _showConnectionSnackBar(
             'تمت استعادة الاتصال بالخادم.',
@@ -837,15 +841,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
         unawaited(
           _refreshServerConnectionState(
-            recoverVisibleDisconnect:
-                recoverOnSocketConnected && !_isInWindowResumeGrace,
-            quiet: _isInWindowResumeGrace,
+            recoverVisibleDisconnect: recoverOnSocketConnected,
+            quiet: true,
           ),
         );
         return;
       }
       if (event.type == 'socket_error' || event.type == 'socket_disconnected') {
-        if (_isInWindowResumeGrace) {
+        // Ignore while still establishing — socket will retry on its own.
+        if (_isEstablishingConnection) {
           return;
         }
         unawaited(_refreshServerConnectionState());

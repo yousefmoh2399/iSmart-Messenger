@@ -95,21 +95,16 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _serverRefreshInFlight = false;
   bool _hasConfirmedServerDisconnect = false;
   bool _serverRestoreRefreshInFlight = false;
-  DateTime? _lastResumeTime;
-  bool _isLifecycleResumeRecovery = true; // Start true: suppress banner on cold-start
-  Timer? _resumeRecoveryTimer;
 
-  // Grace period: suppress server-unavailable banner for the first few seconds
-  // after app start / foreground restore while connections are being established.
-  static const _resumeGraceDuration = Duration(seconds: 20);
-
-  bool get _isInLifecycleResumeGrace {
-    final lastResume = _lastResumeTime;
-    return _isLifecycleResumeRecovery ||
-        (lastResume != null &&
-            DateTime.now().difference(lastResume) <
-                _resumeGraceDuration);
-  }
+  // Event-driven connection flag.
+  // True while the app is still establishing/re-establishing its connection to
+  // the server. Suppresses false-positive "server unavailable" banners during
+  // cold start and background-to-foreground transitions.
+  // Cleared as soon as the socket confirms connection or a health-check succeeds.
+  // A 30-second fallback timer surfaces genuine outages if neither event fires.
+  bool _isEstablishingConnection = true;
+  Timer? _connectionEstablishTimer;
+  static const _connectionEstablishTimeoutDuration = Duration(seconds: 30);
 
   void _setChatVisibility(bool isVisible) {
     final current = ref.read(chatAppVisibilityProvider);
@@ -136,6 +131,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       ref.read(chatSocketServiceProvider).disconnect();
       unawaited(_updateAgent.clearUpdateState());
       _updateAgent.stop();
+      _isEstablishingConnection = true;
+      _connectionEstablishTimer?.cancel();
       return;
     }
 
@@ -155,6 +152,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       // from the previous user's logout don't surface.
       _hasConfirmedServerDisconnect = false;
       _lastServerBannerMessage = null;
+      _markConnectionEstablishing();
       final isVisible =
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
       _setChatVisibility(isVisible);
@@ -199,6 +197,28 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     } catch (_) {}
   }
 
+  /// Marks the app as actively connecting/re-connecting.
+  /// Suppresses error banners until the connection is established.
+  /// A fallback timer fires after 30 s to surface genuine outages.
+  void _markConnectionEstablishing() {
+    if (!mounted) return;
+    _isEstablishingConnection = true;
+    _connectionEstablishTimer?.cancel();
+    _connectionEstablishTimer = Timer(_connectionEstablishTimeoutDuration, () {
+      if (!mounted) return;
+      _isEstablishingConnection = false;
+      unawaited(_refreshServerConnectionState());
+    });
+  }
+
+  /// Marks the app as successfully connected.
+  /// Cancels the fallback timer and allows error banners to surface.
+  void _markConnectionEstablished() {
+    if (!mounted) return;
+    _isEstablishingConnection = false;
+    _connectionEstablishTimer?.cancel();
+  }
+
   Future<void> _refreshServerConnectionState({
     bool quiet = false,
     bool refreshAfterRestore = true,
@@ -223,7 +243,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     if (!result.isConnected) {
-      if (quiet || _isInLifecycleResumeGrace) {
+      if (quiet || _isEstablishingConnection) {
         return;
       }
       _hasConfirmedServerDisconnect = true;
@@ -233,6 +253,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       );
       return;
     }
+    // Connection confirmed — clear establishing flag immediately.
+    _markConnectionEstablished();
     if (_hasConfirmedServerDisconnect || _lastServerBannerMessage != null) {
       if (quiet || !refreshAfterRestore) {
         _hasConfirmedServerDisconnect = false;
@@ -272,7 +294,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     if (isError) {
-      if (_isInLifecycleResumeGrace) {
+      if (_isEstablishingConnection) {
         return;
       }
       if (_lastServerBannerMessage == message) {
@@ -372,15 +394,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Suppress server-unavailable banner during cold start / foreground restore.
-    // _isLifecycleResumeRecovery starts true; schedule a timer to clear it after
-    // the grace duration so that any genuine server errors after startup are shown.
-    _lastResumeTime = DateTime.now();
-    _resumeRecoveryTimer = Timer(_resumeGraceDuration, () {
-      if (mounted) {
-        _isLifecycleResumeRecovery = false;
-      }
-    });
+    // Start in connecting state — suppresses false-positive banners on cold start.
+    // Will be cleared when the socket connects or a health check succeeds.
+    _markConnectionEstablishing();
 
     // Initialize update agent
     _updateAgent = MobileUpdateAgent(ref.read(updateCheckServiceProvider));
@@ -503,12 +519,22 @@ class _AuthGateState extends ConsumerState<_AuthGate>
             );
             return;
           }
-          if (event.type == 'socket_connected' ||
-              event.type == 'announcements_updated') {
+          if (event.type == 'socket_connected') {
+            // Socket connected — server reachable, clear establishing flag immediately.
+            _markConnectionEstablished();
             unawaited(
               _refreshServerConnectionState(
-                quiet: _isInLifecycleResumeGrace,
-                refreshAfterRestore: !_isInLifecycleResumeGrace,
+                quiet: true,
+                refreshAfterRestore: true,
+              ),
+            );
+            return;
+          }
+          if (event.type == 'announcements_updated') {
+            unawaited(
+              _refreshServerConnectionState(
+                quiet: true,
+                refreshAfterRestore: true,
               ),
             );
             return;
@@ -519,7 +545,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           }
           if (event.type == 'socket_error' ||
               event.type == 'socket_disconnected') {
-            if (_isInLifecycleResumeGrace) {
+            // Ignore while still establishing — socket will retry on its own.
+            if (_isEstablishingConnection) {
               return;
             }
             unawaited(_refreshServerConnectionState());
@@ -988,7 +1015,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _connectivitySubscription?.cancel();
     _notificationTapSubscription?.cancel();
     _pushOpenedSubscription?.cancel();
-    _resumeRecoveryTimer?.cancel();
+    _connectionEstablishTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _updateAgent.dispose();
     super.dispose();
@@ -1006,42 +1033,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final socket = ref.read(chatSocketServiceProvider);
     switch (state) {
       case AppLifecycleState.resumed:
-        _lastResumeTime = DateTime.now();
-        _isLifecycleResumeRecovery = true;
-        _resumeRecoveryTimer?.cancel();
-        _resumeRecoveryTimer = Timer(_resumeGraceDuration, () {
-          if (mounted) {
-            _isLifecycleResumeRecovery = false;
-          }
-        });
+        // Re-establishing after background — suppress banners until socket
+        // reconnects or health check succeeds (event-driven, no fixed timer).
+        _markConnectionEstablishing();
         socket.setPresenceOnline();
-        unawaited(
-          Future<void>.delayed(const Duration(milliseconds: 800), () async {
-            if (!mounted) {
-              return;
-            }
-            await _refreshServerConnectionState(
-              quiet: true,
-              refreshAfterRestore: false,
-            );
-          }),
-        );
         unawaited(_syncPendingUploadsInBackground());
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
-        // Clear the time-based grace so it doesn't linger across multiple
-        // pause/resume cycles. The flag will be re-set on the next resume.
-        _lastResumeTime = null;
-        _isLifecycleResumeRecovery = false;
-        _resumeRecoveryTimer?.cancel();
         socket.setPresenceIdle();
         break;
       case AppLifecycleState.detached:
-        _lastResumeTime = null;
-        _isLifecycleResumeRecovery = false;
-        _resumeRecoveryTimer?.cancel();
         socket.setPresenceOffline();
         socket.disconnect();
         break;
@@ -1064,7 +1067,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         ref.watch(chatRealtimeControllerProvider);
         final serverConnection = serverState.valueOrNull;
         final serverBannerMessage =
-            !_isInLifecycleResumeGrace &&
+            !_isEstablishingConnection &&
                 serverConnection != null &&
                 !serverConnection.isConnected
             ? _buildServerUnavailableMessage(serverConnection.message)
