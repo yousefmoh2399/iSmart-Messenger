@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -7,11 +8,6 @@ import '../../../core/theme/app_theme.dart';
 import '../data/signature_composer_service.dart';
 
 /// Allows the user to position and resize a signature on top of a scanned page.
-///
-/// The user can:
-/// - Drag the signature to any position (pan gesture)
-/// - Pinch to resize it (scale gesture)
-/// - Tap "تطبيق وحفظ" to composite the signature into the image
 ///
 /// Returns the composited JPEG [Uint8List] or null if the user cancels.
 class SignaturePlacementScreen extends StatefulWidget {
@@ -21,10 +17,7 @@ class SignaturePlacementScreen extends StatefulWidget {
     required this.signatureBytes,
   });
 
-  /// Path to the scanned page JPEG on disk.
   final String pageImagePath;
-
-  /// PNG bytes of the signature (may have transparent background).
   final Uint8List signatureBytes;
 
   @override
@@ -33,24 +26,64 @@ class SignaturePlacementScreen extends StatefulWidget {
 }
 
 class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
-  // Relative position of the signature centre (0.0–1.0 of page size)
-  double _relX = 0.1;
-  double _relY = 0.7;
+  // Relative position of the signature top-left corner (0.0–1.0 of IMAGE bounds)
+  double _relX = 0.05;
+  double _relY = 0.70;
 
   // Signature width as a fraction of the page width (0.0–1.0)
-  double _relW = 0.35;
-
-  // Track scale gesture starting state
-  double _baseRelW = 0.35;
+  double _relW = 0.40;
+  double _baseRelW = 0.40;
 
   bool _applying = false;
 
-  // We need the displayed image size to convert pointer offsets to relative coords
-  final GlobalKey _imageKey = GlobalKey();
+  // Natural image dimensions (loaded once in initState)
+  Size _imageNaturalSize = Size.zero;
 
-  Size get _imageRenderSize {
-    final box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-    return box?.size ?? const Size(300, 400);
+  final GlobalKey _stackKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImageSize();
+  }
+
+  Future<void> _loadImageSize() async {
+    final bytes = await File(widget.pageImagePath).readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final image = frame.image;
+    if (mounted) {
+      setState(() {
+        _imageNaturalSize = Size(
+          image.width.toDouble(),
+          image.height.toDouble(),
+        );
+      });
+    }
+  }
+
+  /// The area (in stack-local coordinates) that the image actually occupies
+  /// after BoxFit.contain letterboxing.
+  Rect _imageFitRect(Size stackSize) {
+    if (_imageNaturalSize == Size.zero || stackSize == Size.zero) {
+      return Rect.fromLTWH(0, 0, stackSize.width, stackSize.height);
+    }
+
+    final scaleX = stackSize.width / _imageNaturalSize.width;
+    final scaleY = stackSize.height / _imageNaturalSize.height;
+    final scale = scaleX < scaleY ? scaleX : scaleY;
+
+    final renderedW = _imageNaturalSize.width * scale;
+    final renderedH = _imageNaturalSize.height * scale;
+    final offsetX = (stackSize.width - renderedW) / 2;
+    final offsetY = (stackSize.height - renderedH) / 2;
+
+    return Rect.fromLTWH(offsetX, offsetY, renderedW, renderedH);
+  }
+
+  Size get _stackSize {
+    final box = _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    return box?.size ?? Size.zero;
   }
 
   Future<void> _apply() async {
@@ -141,78 +174,73 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  final stackSize = Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  );
+                  final fitRect = _imageFitRect(stackSize);
+
+                  // Convert relative-to-image coords → screen coords for display
+                  final screenLeft = fitRect.left + _relX * fitRect.width;
+                  final screenTop = fitRect.top + _relY * fitRect.height;
+                  final screenWidth = _relW * fitRect.width;
+
                   return GestureDetector(
-                    // Pan: move signature
-                    onPanUpdate: (details) {
-                      final size = _imageRenderSize;
-                      setState(() {
-                        _relX =
-                            (_relX + details.delta.dx / size.width).clamp(
-                              0.0,
-                              1.0 - _relW,
-                            );
-                        _relY = (_relY + details.delta.dy / size.height).clamp(
-                          0.0,
-                          0.95,
-                        );
-                      });
-                    },
-                    // Scale: resize signature
+                    // Single gesture handler for both drag and pinch
                     onScaleStart: (_) {
                       _baseRelW = _relW;
                     },
                     onScaleUpdate: (details) {
+                      if (fitRect.width == 0 || fitRect.height == 0) return;
                       setState(() {
-                        _relW = (_baseRelW * details.scale).clamp(0.1, 0.9);
+                        // Move (single finger = focalPointDelta)
+                        final dxRel =
+                            details.focalPointDelta.dx / fitRect.width;
+                        final dyRel =
+                            details.focalPointDelta.dy / fitRect.height;
+                        _relX = (_relX + dxRel).clamp(0.0, 1.0 - _relW);
+                        _relY = (_relY + dyRel).clamp(0.0, 0.95);
+
+                        // Resize (two fingers = scale != 1)
+                        if (details.pointerCount >= 2) {
+                          _relW =
+                              (_baseRelW * details.scale).clamp(0.05, 0.95);
+                        }
                       });
                     },
                     child: Stack(
+                      key: _stackKey,
+                      fit: StackFit.expand,
                       children: [
                         // Page image
-                        Positioned.fill(
-                          child: Image.file(
-                            File(widget.pageImagePath),
-                            key: _imageKey,
-                            fit: BoxFit.contain,
-                          ),
+                        Image.file(
+                          File(widget.pageImagePath),
+                          fit: BoxFit.contain,
                         ),
 
-                        // Signature overlay
-                        LayoutBuilder(
-                          builder: (ctx, inner) {
-                            final size = _imageRenderSize;
-                            final sigLeft = _relX * size.width;
-                            final sigTop = _relY * size.height;
-                            final sigWidth = _relW * size.width;
-
-                            // Centre the displayed stack inside the constraints
-                            final offsetX =
-                                (constraints.maxWidth - size.width) / 2;
-                            final offsetY =
-                                (constraints.maxHeight - size.height) / 2;
-
-                            return Positioned(
-                              left: offsetX + sigLeft,
-                              top: offsetY + sigTop,
-                              child: IgnorePointer(
-                                child: Container(
-                                  width: sigWidth,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: palette.accent.withOpacity(0.7),
-                                      width: 1.5,
-                                    ),
-                                    borderRadius: BorderRadius.circular(4),
+                        // Signature overlay — positioned in screen coords
+                        if (fitRect.width > 0)
+                          Positioned(
+                            left: screenLeft,
+                            top: screenTop,
+                            child: IgnorePointer(
+                              child: Container(
+                                width: screenWidth,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: palette.accent.withOpacity(0.8),
+                                    width: 2,
                                   ),
-                                  child: Image.memory(
-                                    widget.signatureBytes,
-                                    fit: BoxFit.contain,
-                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Image.memory(
+                                  widget.signatureBytes,
+                                  fit: BoxFit.contain,
+                                  gaplessPlayback: true,
                                 ),
                               ),
-                            );
-                          },
-                        ),
+                            ),
+                          ),
                       ],
                     ),
                   );

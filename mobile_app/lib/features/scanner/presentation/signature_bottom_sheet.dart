@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/signature_model.dart';
@@ -50,8 +51,11 @@ class _SignatureBottomSheet extends StatefulWidget {
 }
 
 class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
-  final List<List<Offset>> _strokes = [];
-  List<Offset>? _currentStroke;
+  final _signatureController = _SignatureController();
+
+  /// Key attached to the RepaintBoundary inside _SignaturePadWidget
+  final GlobalKey _repaintKey = GlobalKey();
+
   List<SignatureModel> _savedSignatures = [];
   bool _loadingSignatures = true;
   bool _saving = false;
@@ -59,7 +63,16 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
   @override
   void initState() {
     super.initState();
+    _signatureController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _loadSignatures();
+  }
+
+  @override
+  void dispose() {
+    _signatureController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSignatures() async {
@@ -72,55 +85,10 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
     }
   }
 
-  bool get _hasDrawing =>
-      _strokes.isNotEmpty ||
-      (_currentStroke != null && _currentStroke!.isNotEmpty);
+  bool get _hasDrawing => _signatureController.hasDrawing;
 
-  void _clearCanvas() => setState(() {
-        _strokes.clear();
-        _currentStroke = null;
-      });
-
-  Future<Uint8List> _renderToPng({
-    required Size canvasSize,
-    double devicePixelRatio = 2.0,
-  }) async {
-    final pixelWidth = (canvasSize.width * devicePixelRatio).toInt();
-    final pixelHeight = (canvasSize.height * devicePixelRatio).toInt();
-
-    // Single recorder at 2× resolution for sharpness
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(
-      recorder,
-      Rect.fromLTWH(0, 0, pixelWidth.toDouble(), pixelHeight.toDouble()),
-    );
-    canvas.scale(devicePixelRatio, devicePixelRatio);
-
-    final paint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 3.5
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-
-    for (final stroke in _strokes) {
-      if (stroke.isEmpty) continue;
-      if (stroke.length == 1) {
-        canvas.drawCircle(stroke.first, 2.0, paint..style = PaintingStyle.fill);
-        paint.style = PaintingStyle.stroke;
-        continue;
-      }
-      final p = Path()..moveTo(stroke.first.dx, stroke.first.dy);
-      for (int i = 1; i < stroke.length; i++) {
-        p.lineTo(stroke[i].dx, stroke[i].dy);
-      }
-      canvas.drawPath(p, paint);
-    }
-
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(pixelWidth, pixelHeight);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    return byteData!.buffer.asUint8List();
+  void _clearCanvas() {
+    _signatureController.clear();
   }
 
   Future<void> _confirmNewSignature({required bool save}) async {
@@ -128,26 +96,27 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
     setState(() => _saving = true);
 
     try {
-      // Get canvas size from context — the drawing area
-      final box = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
-      final size = box?.size ?? const Size(300, 200);
-
-      final pngBytes = await _renderToPng(canvasSize: size);
+      final dpr = MediaQuery.of(context).devicePixelRatio;
+      final pngBytes = await _signatureController.captureFromRepaintBoundary(
+        _repaintKey,
+        dpr,
+      );
+      if (pngBytes == null) throw Exception('توقيع فارغ');
 
       if (save) {
         await widget.storageService.saveSignature(pngBytes);
       }
 
       if (mounted) {
-        Navigator.of(context).pop(
-          SignatureResult(pngBytes: pngBytes, isSaved: save),
-        );
+        Navigator.of(
+          context,
+        ).pop(SignatureResult(pngBytes: pngBytes, isSaved: save));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ أثناء معالجة التوقيع: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('خطأ أثناء معالجة التوقيع: $e')));
         setState(() => _saving = false);
       }
     }
@@ -157,9 +126,9 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
     try {
       final bytes = await File(sig.filePath).readAsBytes();
       if (mounted) {
-        Navigator.of(context).pop(
-          SignatureResult(pngBytes: bytes, isSaved: true),
-        );
+        Navigator.of(
+          context,
+        ).pop(SignatureResult(pngBytes: bytes, isSaved: true));
       }
     } catch (_) {
       if (mounted) {
@@ -174,8 +143,6 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
     await widget.storageService.deleteSignature(sig.id);
     await _loadSignatures();
   }
-
-  final GlobalKey _canvasKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +267,9 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
                                       : const Color(0xFFF2F2F7),
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(
-                                    color: palette.accent.withValues(alpha: 0.3),
+                                    color: palette.accent.withValues(
+                                      alpha: 0.3,
+                                    ),
                                   ),
                                 ),
                                 child: ClipRRect(
@@ -358,7 +327,6 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: Container(
-                        key: _canvasKey,
                         height: 220,
                         decoration: BoxDecoration(
                           color: Colors.white,
@@ -370,58 +338,11 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(15),
-                          child: GestureDetector(
-                            onPanStart: (d) {
-                              setState(() {
-                                _currentStroke = [d.localPosition];
-                              });
-                            },
-                            onPanUpdate: (d) {
-                              setState(() {
-                                _currentStroke?.add(d.localPosition);
-                              });
-                            },
-                            onPanEnd: (_) {
-                              if (_currentStroke != null &&
-                                  _currentStroke!.isNotEmpty) {
-                                setState(() {
-                                  _strokes.add(List.from(_currentStroke!));
-                                  _currentStroke = null;
-                                });
-                              }
-                            },
-                            child: CustomPaint(
-                              painter: _SignaturePainter(
-                                strokes: _strokes,
-                                currentStroke: _currentStroke,
-                              ),
-                              child: _hasDrawing
-                                  ? null
-                                  : Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.draw_rounded,
-                                            size: 36,
-                                            color: theme.colorScheme
-                                                .onSurfaceVariant
-                                                .withValues(alpha: 0.4),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            'اسحب إصبعك هنا للتوقيع',
-                                            style: theme.textTheme.bodyMedium
-                                                ?.copyWith(
-                                                  color: theme.colorScheme
-                                                      .onSurfaceVariant
-                                                      .withValues(alpha: 0.5),
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                            ),
+                          child: _SignaturePadWidget(
+                            controller: _signatureController,
+                            showHint: !_hasDrawing,
+                            theme: theme,
+                            repaintKey: _repaintKey,
                           ),
                         ),
                       ),
@@ -439,8 +360,7 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
                             FilledButton.icon(
                               onPressed: _saving
                                   ? null
-                                  : () =>
-                                        _confirmNewSignature(save: true),
+                                  : () => _confirmNewSignature(save: true),
                               icon: _saving
                                   ? const SizedBox(
                                       width: 18,
@@ -463,9 +383,10 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
                             OutlinedButton.icon(
                               onPressed: _saving
                                   ? null
-                                  : () =>
-                                        _confirmNewSignature(save: false),
-                              icon: const Icon(Icons.check_circle_outline_rounded),
+                                  : () => _confirmNewSignature(save: false),
+                              icon: const Icon(
+                                Icons.check_circle_outline_rounded,
+                              ),
                               label: const Text('استخدام مرة واحدة فقط'),
                               style: OutlinedButton.styleFrom(
                                 minimumSize: const Size(double.infinity, 52),
@@ -494,20 +415,153 @@ class _SignatureBottomSheetState extends State<_SignatureBottomSheet> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Custom painter for the drawing canvas
+// Signature Controller
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SignatureController extends ChangeNotifier {
+  final List<List<Offset>> strokes = [];
+  List<Offset>? currentStroke;
+
+  bool get hasDrawing =>
+      strokes.isNotEmpty ||
+      (currentStroke != null && currentStroke!.isNotEmpty);
+
+  void clear() {
+    strokes.clear();
+    currentStroke = null;
+    notifyListeners();
+  }
+
+  void startStroke(Offset point) {
+    currentStroke = [point];
+    notifyListeners();
+  }
+
+  void updateStroke(Offset point) {
+    currentStroke?.add(point);
+    notifyListeners();
+  }
+
+  void endStroke() {
+    if (currentStroke != null && currentStroke!.isNotEmpty) {
+      strokes.add(List.from(currentStroke!));
+    }
+    currentStroke = null;
+    notifyListeners();
+  }
+
+  /// Captures the drawn signature directly from the rendered widget on screen.
+  /// This is the most reliable approach — it captures exactly what the user
+  /// sees, at the device's native pixel density.
+  Future<Uint8List?> captureFromRepaintBoundary(
+    GlobalKey repaintKey,
+    double devicePixelRatio,
+  ) async {
+    if (!hasDrawing) return null;
+
+    // Commit any in-progress stroke
+    if (currentStroke != null && currentStroke!.isNotEmpty) {
+      strokes.add(List.from(currentStroke!));
+      currentStroke = null;
+      notifyListeners();
+    }
+
+    // Wait one frame for the painter to finish rendering the last stroke
+    await Future<void>.delayed(Duration.zero);
+
+    try {
+      final renderObject = repaintKey.currentContext?.findRenderObject();
+      if (renderObject == null) return null;
+      final boundary = renderObject as RenderRepaintBoundary;
+
+      // Capture at native resolution for crisp output
+      final image = await boundary.toImage(pixelRatio: devicePixelRatio);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return null;
+
+      return byteData.buffer.asUint8List(
+        byteData.offsetInBytes,
+        byteData.lengthInBytes,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signature Pad Widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SignaturePadWidget extends StatelessWidget {
+  const _SignaturePadWidget({
+    required this.controller,
+    required this.showHint,
+    required this.theme,
+    required this.repaintKey,
+  });
+
+  final _SignatureController controller;
+  final bool showHint;
+  final ThemeData theme;
+  final GlobalKey repaintKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (d) => controller.startStroke(d.localPosition),
+      onPanUpdate: (d) => controller.updateStroke(d.localPosition),
+      onPanEnd: (_) => controller.endStroke(),
+      onPanCancel: () => controller.endStroke(),
+      child: RepaintBoundary(
+        key: repaintKey,
+        child: CustomPaint(
+          painter: _SignaturePainter(controller),
+          child: showHint
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.draw_rounded,
+                        size: 36,
+                        color: theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'اسحب إصبعك هنا للتوقيع',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signature Painter
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SignaturePainter extends CustomPainter {
-  const _SignaturePainter({required this.strokes, required this.currentStroke});
-
-  final List<List<Offset>> strokes;
-  final List<Offset>? currentStroke;
+  _SignaturePainter(this.controller) : super(repaint: controller);
+  final _SignatureController controller;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = Colors.black
-      ..strokeWidth = 3.2
+      ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
@@ -515,8 +569,13 @@ class _SignaturePainter extends CustomPainter {
     void drawStroke(List<Offset> stroke) {
       if (stroke.isEmpty) return;
       if (stroke.length == 1) {
-        canvas.drawCircle(stroke.first, 2.0, paint..style = PaintingStyle.fill);
-        paint.style = PaintingStyle.stroke;
+        canvas.drawCircle(
+          stroke.first,
+          2.0,
+          Paint()
+            ..color = Colors.black
+            ..style = PaintingStyle.fill,
+        );
         return;
       }
       final path = Path()..moveTo(stroke.first.dx, stroke.first.dy);
@@ -526,15 +585,16 @@ class _SignaturePainter extends CustomPainter {
       canvas.drawPath(path, paint);
     }
 
-    for (final stroke in strokes) {
+    for (final stroke in controller.strokes) {
       drawStroke(stroke);
     }
-    if (currentStroke != null) {
-      drawStroke(currentStroke!);
+
+    final current = controller.currentStroke;
+    if (current != null && current.isNotEmpty) {
+      drawStroke(current);
     }
   }
 
   @override
-  bool shouldRepaint(_SignaturePainter old) =>
-      old.strokes != strokes || old.currentStroke != currentStroke;
+  bool shouldRepaint(covariant _SignaturePainter oldDelegate) => false;
 }

@@ -12,7 +12,7 @@ import '../../../shared/models/signature_model.dart';
 /// Signatures are NEVER uploaded to the backend — they exist only in the
 /// application's documents directory under the "signatures/" subfolder.
 class SignatureStorageService {
-  static const _metadataFileName = 'signatures_index.json';
+  static const _metadataFileName = 'signatures_index_v2.json';
 
   Future<Directory> _signaturesDirectory() async {
     final appDir = await path_provider.getApplicationDocumentsDirectory();
