@@ -1867,6 +1867,16 @@ async function markConversationDelivered(currentUser, conversationId) {
   }).exec();
 
   for (const message of undeliveredMessages) {
+    if (conversation.type === "broadcast" && message.metadata && message.metadata.broadcastTargets) {
+      const targets = message.metadata.broadcastTargets;
+      if (targets && targets.sentToAllDepartments === false) {
+        const targetDeptIds = (targets.departmentIds || []).map(String);
+        const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
+        if (!userDeptId || !targetDeptIds.includes(userDeptId)) {
+          continue;
+        }
+      }
+    }
     message.deliveredTo.push({ userId: currentUser.id, at: new Date() });
     await message.save();
   }
@@ -1902,9 +1912,10 @@ async function markPendingDeliveriesForUser(currentUser) {
 
   const conversations = await Conversation.find(
     conversationQuery,
-    "_id",
+    "_id type",
   ).lean();
   const conversationIds = conversations.map((entry) => entry._id);
+  const conversationTypeMap = new Map(conversations.map(c => [c._id.toString(), c.type]));
   if (conversationIds.length === 0) {
     return [];
   }
@@ -1918,6 +1929,18 @@ async function markPendingDeliveriesForUser(currentUser) {
 
   const grouped = new Map();
   for (const message of undeliveredMessages) {
+    const type = conversationTypeMap.get(message.conversationId.toString());
+    if (type === "broadcast" && message.metadata && message.metadata.broadcastTargets) {
+      const targets = message.metadata.broadcastTargets;
+      if (targets && targets.sentToAllDepartments === false) {
+        const targetDeptIds = (targets.departmentIds || []).map(String);
+        const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
+        if (!userDeptId || !targetDeptIds.includes(userDeptId)) {
+          continue;
+        }
+      }
+    }
+
     message.deliveredTo.push({ userId: currentUser.id, at: new Date() });
     await message.save();
     const key = message.conversationId.toString();
