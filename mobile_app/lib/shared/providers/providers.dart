@@ -29,6 +29,8 @@ import '../../features/scanner/data/image_processing_service.dart';
 import '../../features/scanner/data/local_document_store.dart';
 import '../../features/scanner/data/pdf_builder_service.dart';
 import '../../features/scanner/data/scanner_service.dart';
+import '../../features/scanner/data/signature_composer_service.dart';
+import '../../features/scanner/data/signature_storage_service.dart';
 import '../../features/scanner/presentation/scan_session_controller.dart';
 import '../../features/tickets/data/ticket_repository.dart';
 import '../../features/tickets/models/ticket_models.dart';
@@ -331,6 +333,14 @@ final scannerServiceProvider = Provider<ScannerService>(
   (ref) => ScannerService(),
 );
 
+final signatureStorageServiceProvider = Provider<SignatureStorageService>(
+  (ref) => SignatureStorageService(),
+);
+
+final signatureComposerServiceProvider = Provider<SignatureComposerService>(
+  (ref) => SignatureComposerService(),
+);
+
 /// Bumped whenever tokens are saved or cleared (including silent refresh) so
 /// [authTokenProvider] refetches and socket/widgets see the current access token.
 final authCredentialsRevisionProvider = StateProvider<int>((ref) => 0);
@@ -619,6 +629,10 @@ final scanSessionControllerProvider =
     AsyncNotifierProvider<ScanSessionController, ScanSession?>(
       ScanSessionController.new,
     );
+
+/// Human-readable save-progress message updated by [ScanSessionController]
+/// during PDF generation. Empty string when idle.
+final scanSaveProgressProvider = StateProvider<String>((ref) => '');
 
 final updateCheckServiceProvider = Provider<UpdateCheckService>((ref) {
   return UpdateCheckService(ref.watch(authenticatedApiClientProvider));

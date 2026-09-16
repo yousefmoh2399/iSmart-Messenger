@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,9 @@ import '../../../shared/services/remote_desktop_file_service.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/upload_summary_screen.dart';
 import '../data/scanner_service.dart';
+import 'signature_bottom_sheet.dart';
+import 'signature_placement_screen.dart';
+
 
 enum _PostScanAction { addPage, startNewFile, saveAndFinish }
 
@@ -598,7 +602,60 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
         : rawMessage;
   }
 
+  /// Full signature flow for a single page:
+  /// 1. Show bottom sheet (draw or pick saved signature).
+  /// 2. Navigate to placement screen (drag + pinch to resize).
+  /// 3. Apply composited result back into the session page file.
+  Future<void> _openSignatureFlow(ScanPage page) async {
+    if (_isSavingSession) return;
+
+    // Step 1 — bottom sheet: draw or pick signature
+    final storageService = ref.read(signatureStorageServiceProvider);
+    final signatureResult = await showSignatureBottomSheet(
+      context: context,
+      storageService: storageService,
+    );
+    if (signatureResult == null || !mounted) return;
+
+    // Step 2 — placement screen: drag & resize
+    final compositedBytes = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute<Uint8List>(
+        builder: (_) => SignaturePlacementScreen(
+          pageImagePath: page.imagePath,
+          signatureBytes: signatureResult.pngBytes,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
+
+    if (compositedBytes == null || !mounted) return;
+
+    // Step 3 — write composited image back to the session page
+    try {
+      await ref
+          .read(scanSessionControllerProvider.notifier)
+          .applySignatureToPage(page.id, compositedBytes);
+
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ تم تطبيق التوقيع على الصفحة بنجاح'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر حفظ التوقيع: $e')),
+        );
+      }
+    }
+  }
+
   Future<bool> _shouldAutoSaveToDesktop() async {
+
     try {
       final status = await ref
           .read(remoteDesktopFileServiceProvider)
@@ -1163,6 +1220,40 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                             ),
                                             label: const Text('حذف'),
                                           ),
+                                          // ── Signature button ──
+                                          OutlinedButton.icon(
+                                            onPressed: _isSavingSession
+                                                ? null
+                                                : () => _openSignatureFlow(
+                                                      page,
+                                                    ),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: palette.success,
+                                              side: BorderSide(
+                                                color: palette.success
+                                                    .withValues(alpha: 0.5),
+                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                              minimumSize: const Size(0, 34),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              textStyle: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            icon: const Icon(
+                                              Icons.draw_rounded,
+                                              size: 15,
+                                            ),
+                                            label: const Text('توقيع'),
+                                          ),
                                         ],
                                       ),
                                     ],
@@ -1223,11 +1314,29 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 24),
-                                Text(
-                                  'جارٍ تجهيز الملف وحفظه...',
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.bold),
-                                  textAlign: TextAlign.center,
+                                Consumer(
+                                  builder: (ctx, ref, _) {
+                                    final progress = ref.watch(
+                                      scanSaveProgressProvider,
+                                    );
+                                    return AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 300,
+                                      ),
+                                      child: Text(
+                                        key: ValueKey(progress),
+                                        progress.isNotEmpty
+                                            ? progress
+                                            : 'جارٍ تجهيز الملف وحفظه...',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    );
+                                  },
                                 ),
                                 const SizedBox(height: 10),
                                 Text(

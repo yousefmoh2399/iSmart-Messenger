@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/document_paper_size.dart';
 import '../../../shared/models/pending_upload.dart';
@@ -5,6 +8,7 @@ import '../../../shared/models/scan_page.dart';
 import '../../../shared/models/scan_session.dart';
 import '../../../shared/providers/providers.dart';
 import '../data/pdf_builder_service.dart';
+
 
 class ScanSessionController extends AsyncNotifier<ScanSession?> {
   void resetState() { state = const AsyncLoading(); }
@@ -130,6 +134,14 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
       throw Exception('لا توجد صفحات لحفظها.');
     }
 
+    final pageCount = session.pages.length;
+    final progressNotifier = ref.read(scanSaveProgressProvider.notifier);
+
+    // ── Step 1: Build PDF ──
+    progressNotifier.state = pageCount == 1
+        ? 'جارٍ تجهيز الصفحة وبناء الملف...'
+        : 'جارٍ تجهيز $pageCount صفحات وبناء الملف...';
+
     final pdfBytes = await ref
         .read(pdfBuilderServiceProvider)
         .buildPdf(
@@ -138,19 +150,45 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
           applyEnhancement: applyEnhancement,
         );
 
+    // ── Step 2: Write to disk ──
+    progressNotifier.state = 'جارٍ حفظ الملف على الجهاز...';
+
     final pending = await ref
         .read(localDocumentStoreProvider)
         .createPendingUpload(
           fileName: fileName,
           pdfBytes: pdfBytes,
-          pageCount: session.pages.length,
+          pageCount: pageCount,
           saveDirectoryPath: saveDirectoryPath,
         );
 
+    // ── Cleanup ──
+    progressNotifier.state = '';
     await ref.read(localDocumentStoreProvider).clearDraft();
     await ref.read(localDocumentStoreProvider).clearSessionFiles(session.id);
     state = const AsyncData(null);
     return pending;
+  }
+
+  /// Overwrites the page image on disk with [newImageBytes] (the composited
+  /// JPEG after the signature has been applied) and refreshes the UI.
+  Future<void> applySignatureToPage(
+    String pageId,
+    Uint8List newImageBytes,
+  ) async {
+    final session = state.valueOrNull;
+    if (session == null) return;
+
+    final targetPage = session.pages.firstWhere(
+      (page) => page.id == pageId,
+      orElse: () => throw StateError('Page $pageId not found in session.'),
+    );
+
+    // Overwrite the existing file in-place — no new path needed
+    await File(targetPage.imagePath).writeAsBytes(newImageBytes, flush: true);
+
+    // Force a state refresh so Image.file widgets rebuild with the new content
+    state = AsyncData(session.copyWith(pages: [...session.pages]));
   }
 
   Future<void> clearSession() async {

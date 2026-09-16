@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -113,6 +114,143 @@ Future<Uint8List> _buildPdfBytes(
   return pdfBytes;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Fast path: parse JPEG header without full decode
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Reads JPEG dimensions and EXIF orientation from the file header only.
+/// Returns null if the file is not a valid JPEG or parsing fails.
+/// This is ~100-1000× faster than a full img.decodeImage().
+({int width, int height, int orientation})? _peekJpegInfo(Uint8List bytes) {
+  // Must start with JPEG SOI marker FF D8
+  if (bytes.length < 4) return null;
+  if (bytes[0] != 0xFF || bytes[1] != 0xD8) return null;
+
+  int width = 0;
+  int height = 0;
+  int orientation = 1; // default: no rotation
+  int i = 2;
+
+  while (i + 3 < bytes.length) {
+    // Each segment starts with 0xFF
+    if (bytes[i] != 0xFF) break;
+    final marker = bytes[i + 1];
+
+    // Skip standalone markers (no data segment)
+    if (marker == 0xD8 || marker == 0xD9) {
+      i += 2;
+      continue;
+    }
+    // RST markers
+    if (marker >= 0xD0 && marker <= 0xD7) {
+      i += 2;
+      continue;
+    }
+
+    if (i + 4 > bytes.length) break;
+    final segLen = (bytes[i + 2] << 8) | bytes[i + 3];
+    if (segLen < 2 || i + 2 + segLen > bytes.length) break;
+
+    // ── APP1: may contain EXIF with orientation ──
+    if (marker == 0xE1 && segLen > 6) {
+      // Check for "Exif\0\0" signature
+      if (i + 9 < bytes.length &&
+          bytes[i + 4] == 0x45 && // E
+          bytes[i + 5] == 0x78 && // x
+          bytes[i + 6] == 0x69 && // i
+          bytes[i + 7] == 0x66 && // f
+          bytes[i + 8] == 0x00 &&
+          bytes[i + 9] == 0x00) {
+        final tiffStart = i + 10;
+        orientation = _readTiffOrientation(bytes, tiffStart) ?? 1;
+      }
+    }
+
+    // ── SOF markers: contain image dimensions ──
+    // SOF0=C0, SOF1=C1, SOF2=C2 (progressive), SOF3=C3, SOF5-C7, SOF9-CB, SOF13-CF
+    final isSOF = (marker == 0xC0 ||
+        marker == 0xC1 ||
+        marker == 0xC2 ||
+        marker == 0xC3 ||
+        (marker >= 0xC5 && marker <= 0xC7) ||
+        (marker >= 0xC9 && marker <= 0xCB) ||
+        (marker >= 0xCD && marker <= 0xCF));
+
+    if (isSOF && i + 8 < bytes.length) {
+      // SOF layout: marker(2) + length(2) + precision(1) + height(2) + width(2)
+      height = (bytes[i + 5] << 8) | bytes[i + 6];
+      width = (bytes[i + 7] << 8) | bytes[i + 8];
+    }
+
+    // SOS (Start of Scan) — compressed image data starts, stop scanning
+    if (marker == 0xDA) break;
+
+    i += 2 + segLen;
+  }
+
+  if (width == 0 || height == 0) return null;
+  return (width: width, height: height, orientation: orientation);
+}
+
+/// Reads EXIF Orientation tag from a TIFF block inside JPEG APP1.
+/// Returns null if tag not found or block is malformed.
+int? _readTiffOrientation(Uint8List bytes, int tiffStart) {
+  if (tiffStart + 8 > bytes.length) return null;
+
+  // Byte order mark: 'II' = little-endian, 'MM' = big-endian
+  final isLE = bytes[tiffStart] == 0x49 && bytes[tiffStart + 1] == 0x49;
+  final isBE = bytes[tiffStart] == 0x4D && bytes[tiffStart + 1] == 0x4D;
+  if (!isLE && !isBE) return null;
+
+  int u16(int off) {
+    if (off + 1 >= bytes.length) return 0;
+    return isLE
+        ? bytes[off] | (bytes[off + 1] << 8)
+        : (bytes[off] << 8) | bytes[off + 1];
+  }
+
+  int u32(int off) {
+    if (off + 3 >= bytes.length) return 0;
+    return isLE
+        ? bytes[off] |
+              (bytes[off + 1] << 8) |
+              (bytes[off + 2] << 16) |
+              (bytes[off + 3] << 24)
+        : (bytes[off] << 24) |
+              (bytes[off + 1] << 16) |
+              (bytes[off + 2] << 8) |
+              bytes[off + 3];
+  }
+
+  // TIFF magic number must be 42
+  if (u16(tiffStart + 2) != 42) return null;
+
+  // Offset of first IFD (IFD0), relative to TIFF start
+  final ifd0Offset = u32(tiffStart + 4);
+  final ifd0Start = tiffStart + ifd0Offset;
+  if (ifd0Start + 2 > bytes.length) return null;
+
+  final numEntries = u16(ifd0Start);
+
+  for (int e = 0; e < numEntries && e < 64; e++) {
+    final entryOff = ifd0Start + 2 + e * 12;
+    if (entryOff + 12 > bytes.length) break;
+
+    final tag = u16(entryOff);
+    if (tag == 0x0112) {
+      // Orientation tag — value is stored in bytes 8-9 of the entry
+      return u16(entryOff + 8);
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Image preparation
+// ─────────────────────────────────────────────────────────────────────────────
+
+const int _maxDimension = 2048;
+
 Future<_PreparedPdfImage> _safePrepareImage(
   String imagePath,
   bool applyEnhancement,
@@ -126,6 +264,36 @@ Future<_PreparedPdfImage> _safePrepareImage(
     '[PdfBuilder] File read took ${readStopwatch.elapsedMilliseconds}ms (${originalBytes.length} bytes)',
   );
 
+  // ── FAST PATH ─────────────────────────────────────────────────────────────
+  // Skip the expensive decode+re-encode cycle when the image is already a
+  // valid JPEG with correct orientation and acceptable dimensions.
+  // This is ~100-1000× faster than the full decode path.
+  if (!applyEnhancement) {
+    final info = _peekJpegInfo(originalBytes);
+    if (info != null &&
+        info.orientation == 1 &&
+        info.width <= _maxDimension &&
+        info.height <= _maxDimension) {
+      debugPrint(
+        '[PdfBuilder] ✅ FAST PATH: ${info.width}x${info.height}, orientation=1 — skipping decode/re-encode. '
+        '(${prepareStopwatch.elapsedMilliseconds}ms)',
+      );
+      return _PreparedPdfImage(
+        bytes: originalBytes,
+        width: info.width,
+        height: info.height,
+      );
+    }
+    if (info != null) {
+      debugPrint(
+        '[PdfBuilder] Fast path skipped: orientation=${info.orientation}, '
+        'size=${info.width}x${info.height} — falling back to full decode.',
+      );
+    }
+  }
+
+  // ── SLOW PATH ─────────────────────────────────────────────────────────────
+  // Used when: applyEnhancement=true, orientation≠1, or dimensions>2048.
   img.Image? decoded;
   try {
     decoded = img.decodeImage(originalBytes);
@@ -166,15 +334,14 @@ Future<_PreparedPdfImage> _safePrepareImage(
     decoded = rgb;
   }
 
-  const int maxDimension = 2048;
-  if (decoded.width > maxDimension || decoded.height > maxDimension) {
+  if (decoded.width > _maxDimension || decoded.height > _maxDimension) {
     debugPrint(
-      '[PdfBuilder] Resizing ${decoded.width}x${decoded.height} to max $maxDimension...',
+      '[PdfBuilder] Resizing ${decoded.width}x${decoded.height} to max $_maxDimension...',
     );
     decoded = img.copyResize(
       decoded,
-      width: decoded.width > decoded.height ? maxDimension : null,
-      height: decoded.height > decoded.width ? maxDimension : null,
+      width: decoded.width > decoded.height ? _maxDimension : null,
+      height: decoded.height > decoded.width ? _maxDimension : null,
       interpolation: img.Interpolation.linear,
     );
   }
@@ -196,7 +363,7 @@ Future<_PreparedPdfImage> _safePrepareImage(
   }
 
   debugPrint(
-    '[PdfBuilder] _safePrepareImage DONE in ${prepareStopwatch.elapsedMilliseconds}ms',
+    '[PdfBuilder] ⚠️ SLOW PATH done in ${prepareStopwatch.elapsedMilliseconds}ms',
   );
 
   return _PreparedPdfImage(
