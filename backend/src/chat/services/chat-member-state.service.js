@@ -30,7 +30,13 @@ async function removeConversationMemberState(conversationId, userId) {
 }
 
 async function syncConversationMemberStates(conversationId, memberIds) {
-  const normalized = [...new Set((memberIds || []).map(String))];
+  const normalized = [...new Set((memberIds || []).map(entry => {
+    if (!entry) return "";
+    if (typeof entry === "string") return entry;
+    if (entry._id) return entry._id.toString();
+    return entry.toString();
+  }).filter(Boolean))];
+
   await ensureConversationMemberStates(conversationId, normalized);
   await ConversationMemberState.deleteMany({
     conversationId,

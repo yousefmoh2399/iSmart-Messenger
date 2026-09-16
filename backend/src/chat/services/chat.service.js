@@ -1522,17 +1522,17 @@ async function createMessage(currentUser, payload, file) {
   if (conversation.type === "broadcast") {
     const configuredPublisherIds = new Set(
       (conversation.broadcastPublisherIds || []).map((entry) =>
-        entry.toString(),
+        getObjectIdString(entry),
       ),
     );
     const publisherIds =
       configuredPublisherIds.size > 0
         ? configuredPublisherIds
         : new Set(
-            (conversation.members || []).map((entry) => entry.toString()),
+            (conversation.members || []).map((entry) => getObjectIdString(entry)),
           );
     const adminIds = new Set(
-      (conversation.admins || []).map((entry) => entry.toString()),
+      (conversation.admins || []).map((entry) => getObjectIdString(entry)),
     );
     if (
       currentUser.role !== "admin" &&
@@ -1589,7 +1589,7 @@ async function createMessage(currentUser, payload, file) {
     recipientIds = targetUsers.map((entry) => entry._id.toString());
 
     const conversationMemberIds = new Set(
-      (conversation.members || []).map((entry) => entry.toString()),
+      (conversation.members || []).map((entry) => getObjectIdString(entry)),
     );
     for (const publisherId of publisherIds) {
       conversationMemberIds.add(publisherId);
