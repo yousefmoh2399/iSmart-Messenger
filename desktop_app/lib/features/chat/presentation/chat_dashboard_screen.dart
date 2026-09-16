@@ -2108,8 +2108,9 @@ class _TelegramEmptyState extends StatelessWidget {
               _ShortcutChip(label: 'Esc', hint: 'إغلاق اللوحة'),
             ],
           ),
+          SizedBox(height: 50.0),
           Text(
-           'Copyright © 2026 Yousef Mohamed',
+            'Copyright © 2026 Yousef Mohamed',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: isDark ? Colors.white54 : const Color(0xFF708499),
