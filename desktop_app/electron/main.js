@@ -450,8 +450,13 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
-app.commandLine.appendSwitch("enable-webgl");
-app.commandLine.appendSwitch("enable-accelerated-2d-canvas");
+
+// Windows 7 (NT 6.1) struggles with modern Chromium hardware acceleration,
+// and forcing WebGL causes severe lag, stuttering, and high response times.
+// Disabling hardware acceleration on Windows 7 falls back to a much faster software renderer.
+if (os.release().startsWith("6.1")) {
+  app.disableHardwareAcceleration();
+}
 
 app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
   event.preventDefault();
