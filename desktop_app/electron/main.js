@@ -1595,11 +1595,18 @@ async function fetchUrlBuffer(targetUrl, headers = {}) {
 
 function _runPowerShell(command, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
+    const os = require('os');
+    const path = require('path');
+    const fs = require('fs');
+    const tmpFile = path.join(os.tmpdir(), `ps_${Date.now()}_${Math.random().toString(36).substr(2)}.ps1`);
+    fs.writeFileSync(tmpFile, command, 'utf8');
+
     execFile(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", command],
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", tmpFile],
       { windowsHide: true, timeout: timeoutMs },
       (error, stdout, stderr) => {
+        try { fs.unlinkSync(tmpFile); } catch(e){}
         if (error) {
           // Only reject on real PowerShell errors, not PSReadLine profile warnings
           const stderrClean = (stderr || "")
@@ -1628,7 +1635,7 @@ async function listOpenWindowsPS() {
     "  if ($id -gt 0 -and $title -ne '') { $out += \"$id|$title|$proc\" }",
     "}",
     "$out -join [char]10",
-  ].join("`n");
+  ].join("\n");
   const raw = await _runPowerShell(script);
   if (!raw) return [];
   return raw
@@ -1646,73 +1653,57 @@ async function listOpenWindowsPS() {
 }
 
 async function captureWindowPS(windowId, imagePath) {
-  const escapedPath = imagePath.replace(/\\/g, "\\\\").replace(/'/g, "''");
-  // Use a script-file approach to avoid template-literal/backtick conflicts.
-  const lines = [
-    "$ErrorActionPreference = 'Stop'",
-    "Add-Type -AssemblyName System.Windows.Forms",
-    "Add-Type -AssemblyName System.Drawing",
-    "Add-Type @'",
-    "using System; using System.Drawing; using System.Drawing.Imaging; using System.Runtime.InteropServices;",
-    "public class _ScreenCapW {",
-    "  [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out RECT r);",
-    "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);",
-    "  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int cmd);",
-    "  [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h);",
-    "  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }",
-    "  public static bool Capture(long id, string p) {",
-    "    var hwnd = new IntPtr(id);",
-    "    if (IsIconic(hwnd)) ShowWindow(hwnd, 9);",
-    "    SetForegroundWindow(hwnd);",
-    "    System.Threading.Thread.Sleep(200);",
-    "    RECT r; if (!GetWindowRect(hwnd, out r)) return false;",
-    "    int w = r.R - r.L, h = r.B - r.T; if (w<=0||h<=0) return false;",
-    "    using (var bmp = new Bitmap(w,h)) using (var g = Graphics.FromImage(bmp)) {",
-    "      g.CopyFromScreen(r.L, r.T, 0, 0, new System.Drawing.Size(w,h));",
-    "      bmp.Save(p, ImageFormat.Png); }",
-    "    return true; }",
-    "}",
-    "'@",
-    `[_ScreenCapW]::Capture(${windowId}L, '${escapedPath}')`,
-  ];
-  // Guard against type-already-defined error on subsequent calls.
-  const guardedLines = [
-    "if (-not ([System.Management.Automation.PSTypeName]'_ScreenCapW').Type) {",
-    ...lines.slice(0, lines.length - 1),
-    "}",
-    lines[lines.length - 1],
-  ];
-  const script = guardedLines.join("\n");
+  const escapedPath = imagePath.replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'Stop'
+if (-not ([System.Management.Automation.PSTypeName]'_ScreenCapW').Type) {
+  Add-Type -ReferencedAssemblies System.Drawing, System.Windows.Forms -TypeDefinition @"
+  using System; using System.Drawing; using System.Drawing.Imaging; using System.Runtime.InteropServices;
+  public class _ScreenCapW {
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+    public static bool Capture(long id, string p) {
+      var hwnd = new IntPtr(id);
+      if (IsIconic(hwnd)) ShowWindow(hwnd, 9);
+      SetForegroundWindow(hwnd);
+      System.Threading.Thread.Sleep(200);
+      RECT r; if (!GetWindowRect(hwnd, out r)) return false;
+      int w = r.R - r.L, h = r.B - r.T; if (w<=0||h<=0) return false;
+      using (var bmp = new Bitmap(w,h)) using (var g = Graphics.FromImage(bmp)) {
+        g.CopyFromScreen(r.L, r.T, 0, 0, new System.Drawing.Size(w,h));
+        bmp.Save(p, ImageFormat.Png); }
+      return true; }
+  }
+"@
+}
+[_ScreenCapW]::Capture(${windowId}L, '${escapedPath}')
+  `.trim();
   const result = await _runPowerShell(script);
   return result.trim().toLowerCase() === "true";
 }
 
 async function captureScreenPS(imagePath) {
-  const escapedPath = imagePath.replace(/\\/g, "\\\\").replace(/'/g, "''");
-  const lines = [
-    "$ErrorActionPreference = 'Stop'",
-    "Add-Type -AssemblyName System.Windows.Forms",
-    "Add-Type -AssemblyName System.Drawing",
-    "Add-Type @'",
-    "using System; using System.Drawing; using System.Drawing.Imaging; using System.Windows.Forms;",
-    "public class _ScreenCapS {",
-    "  public static bool Capture(string p) {",
-    "    var s = Screen.PrimaryScreen.Bounds;",
-    "    using (var bmp = new Bitmap(s.Width, s.Height)) using (var g = Graphics.FromImage(bmp)) {",
-    "      g.CopyFromScreen(s.X, s.Y, 0, 0, new System.Drawing.Size(s.Width, s.Height));",
-    "      bmp.Save(p, ImageFormat.Png); }",
-    "    return true; }",
-    "}",
-    "'@",
-    `[_ScreenCapS]::Capture('${escapedPath}')`,
-  ];
-  const guardedLines = [
-    "if (-not ([System.Management.Automation.PSTypeName]'_ScreenCapS').Type) {",
-    ...lines.slice(0, lines.length - 1),
-    "}",
-    lines[lines.length - 1],
-  ];
-  const script = guardedLines.join("\n");
+  const escapedPath = imagePath.replace(/'/g, "''");
+  const script = `
+$ErrorActionPreference = 'Stop'
+if (-not ([System.Management.Automation.PSTypeName]'_ScreenCapS').Type) {
+  Add-Type -ReferencedAssemblies System.Drawing, System.Windows.Forms -TypeDefinition @"
+  using System; using System.Drawing; using System.Drawing.Imaging; using System.Windows.Forms;
+  public class _ScreenCapS {
+    public static bool Capture(string p) {
+      var s = Screen.PrimaryScreen.Bounds;
+      using (var bmp = new Bitmap(s.Width, s.Height)) using (var g = Graphics.FromImage(bmp)) {
+        g.CopyFromScreen(s.X, s.Y, 0, 0, bmp.Size);
+        bmp.Save(p, ImageFormat.Png); }
+      return true; }
+  }
+"@
+}
+[_ScreenCapS]::Capture('${escapedPath}')
+  `.trim();
   const result = await _runPowerShell(script);
   return result.trim().toLowerCase() === "true";
 }
@@ -2699,8 +2690,8 @@ ipcMain.handle("shell:open-rdp", async (_event, payload = {}) => {
     if (!ip) {
       return { success: false, error: "No IP provided." };
     }
-    const { execFile } = require("child_process");
-    execFile("mstsc.exe", [`/v:${ip}`], { windowsHide: false }, (err) => {
+    const { exec } = require("child_process");
+    exec(`mstsc.exe /v:${ip}`, (err) => {
       if (err) console.warn("[electron] mstsc.exe error", err.message);
     });
     return { success: true };

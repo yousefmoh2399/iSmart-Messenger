@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:desktop_app/shared/services/web_platform_bridge_stub.dart' as web_bridge;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -261,6 +262,23 @@ class LanFileTransferService {
     }
 
     try {
+      if (kIsWeb) {
+        final res = await web_bridge.probeLanPeer(trimmedIp);
+        final success = res['success'] == true;
+        final peerIps = (res['ips'] as List<dynamic>? ?? const <dynamic>[])
+            .map((entry) => normalizeIpAddress(entry.toString()))
+            .where((entry) => entry.trim().isNotEmpty)
+            .toList();
+        return LanPeerProbeResult(
+          success: success,
+          peerIp: trimmedIp,
+          peerIps: peerIps,
+          message: success
+              ? 'تم الاتصال بالجهاز $trimmedIp بنجاح.'
+              : 'الجهاز رد لكن خدمة النقل المحلي غير جاهزة.',
+        );
+      }
+
       final response = await _dio.getUri<Map<String, dynamic>>(
         _buildLanUri(trimmedIp, '/lan-transfer/info'),
         options: Options(
