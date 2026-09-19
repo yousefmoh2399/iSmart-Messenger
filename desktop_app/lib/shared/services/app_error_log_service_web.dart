@@ -9,6 +9,8 @@ class AppErrorLogService {
 
   static final AppErrorLogService instance = AppErrorLogService._();
 
+  dynamic chatSocketService;
+
   final UserPreferencesStore _preferencesStore = UserPreferencesStore();
   Future<void> _lastWrite = Future<void>.value();
 
@@ -77,6 +79,17 @@ class AppErrorLogService {
     } catch (logError) {
       debugPrint('Failed to write app error log: $logError');
     }
+    
+    try {
+      if (chatSocketService != null) {
+        chatSocketService.reportClientError(
+          source: source,
+          errorMessage: error.toString(),
+          errorContext: context,
+          stackTrace: stackTrace?.toString(),
+        );
+      }
+    } catch (_) {}
   }
 
   String _formatEntry(

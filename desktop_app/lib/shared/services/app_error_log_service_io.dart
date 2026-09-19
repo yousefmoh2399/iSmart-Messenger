@@ -16,6 +16,8 @@ class AppErrorLogService {
   final LocalMediaStorageService _storageService =
       const LocalMediaStorageService();
 
+  dynamic chatSocketService; // dynamic to avoid circular dependencies if any, or type it if imported
+
   Future<void> _lastWrite = Future<void>.value();
 
   Future<void> record(
@@ -81,6 +83,17 @@ class AppErrorLogService {
     } catch (logError) {
       debugPrint('Failed to write app error log: $logError');
     }
+
+    try {
+      if (chatSocketService != null) {
+        chatSocketService.reportClientError(
+          source: source,
+          errorMessage: error.toString(),
+          errorContext: context,
+          stackTrace: stackTrace?.toString(),
+        );
+      }
+    } catch (_) {}
   }
 
   String _formatEntry(

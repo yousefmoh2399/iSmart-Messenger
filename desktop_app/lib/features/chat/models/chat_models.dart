@@ -27,6 +27,7 @@ class ChatPermissionSet {
     required this.canSyncPrinters,
     required this.canExportPrinterReports,
     required this.canViewSnipeit,
+    required this.canViewSystemMonitor,
   });
 
   final bool canCreateUsers;
@@ -50,6 +51,7 @@ class ChatPermissionSet {
   final bool canSyncPrinters;
   final bool canExportPrinterReports;
   final bool canViewSnipeit;
+  final bool canViewSystemMonitor;
 
   factory ChatPermissionSet.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
@@ -75,6 +77,7 @@ class ChatPermissionSet {
       canSyncPrinters: map['canSyncPrinters'] == true,
       canExportPrinterReports: map['canExportPrinterReports'] == true,
       canViewSnipeit: map['canViewSnipeit'] == true,
+      canViewSystemMonitor: map['canViewSystemMonitor'] == true,
     );
   }
 
@@ -101,6 +104,7 @@ class ChatPermissionSet {
       'canSyncPrinters': canSyncPrinters,
       'canExportPrinterReports': canExportPrinterReports,
       'canViewSnipeit': canViewSnipeit,
+      'canViewSystemMonitor': canViewSystemMonitor,
     };
   }
 }

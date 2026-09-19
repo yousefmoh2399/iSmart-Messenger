@@ -2,9 +2,6 @@ const mongoose = require("mongoose");
 const PurchaseRequest = require("../models/purchase-request.model");
 const PurchaseReceipt = require("../models/purchase-receipt.model");
 const PrCounter = require("../models/pr-counter.model");
-const ItAsset = require("../../it-assets/models/it-asset.model");
-const ItSparePart = require("../../it-assets/models/spare-part.model");
-const ItOperation = require("../../it-assets/models/it-operation.model");
 const AuditLog = require("../../chat/models/audit-log.model");
 const ApiError = require("../../utils/api-error");
 
@@ -285,63 +282,7 @@ async function receiveItems(actor, id, receiptData) {
 
     prItem.receivedQuantity += rItem.acceptedQuantity;
 
-    // Create Asset or Update Spare Part
-    if (prItem.itemType === "Asset") {
-      const serials = rItem.serialNumbers || [];
-      for (let i = 0; i < rItem.acceptedQuantity; i++) {
-        const serialNumber = serials[i] || "";
-        
-        // Generate asset code logic (simplified)
-        const count = await ItAsset.countDocuments();
-        const assetCode = `ASSET-${new Date().getFullYear()}-${String(count + 1 + i).padStart(5, "0")}`;
-        
-        const newAsset = new ItAsset({
-          assetCode,
-          category: prItem.assetCategoryId || "Unknown",
-          assetType: prItem.itemName,
-          brand: prItem.brand,
-          model: prItem.model,
-          serialNumber: serialNumber || undefined,
-          status: "available",
-          location: "المخزن الرئيسي",
-          vendor: "Vendor", // Should be fetched from vendorId ideally
-          invoiceNumber: receiptData.invoiceNo,
-          createdBy: actor.id,
-          updatedBy: actor.id,
-        });
-        await newAsset.save();
-
-        await ItOperation.create({
-          documentNumber: `OP-${new Date().getTime()}-${i}`,
-          operationType: "purchase_received_as_asset",
-          title: "Purchase Received (Asset)",
-          assetId: newAsset._id,
-          quantity: 1,
-          toLocation: "المخزن الرئيسي",
-          status: "completed",
-          createdBy: actor.id,
-          createdByName: actor.displayName || actor.name || "System",
-        });
-      }
-    } else if (prItem.itemType === "Spare Part" || prItem.itemType === "Consumable") {
-      if (prItem.sparePartId) {
-        await ItSparePart.findByIdAndUpdate(prItem.sparePartId, {
-          $inc: { quantityAvailable: rItem.acceptedQuantity }
-        });
-
-        await ItOperation.create({
-          documentNumber: `OP-${new Date().getTime()}-${rItem.purchaseRequestItemId}`,
-          operationType: "purchase_received_to_stock",
-          title: "Purchase Received (Stock)",
-          sparePartId: prItem.sparePartId,
-          quantity: rItem.acceptedQuantity,
-          toLocation: "المخزن الرئيسي",
-          status: "completed",
-          createdBy: actor.id,
-          createdByName: actor.displayName || actor.name || "System",
-        });
-      }
-    }
+    // Create Asset or Update Spare Part (Removed because IT Assets is migrated to SnipeIT)
   }
 
   // Check if fully received

@@ -2,6 +2,7 @@ const fs = require("fs");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/user.model");
+const DeviceSession = require("../../models/device-session.model");
 const { jwtSecret, corsOrigin } = require("../../config/env");
 const { resolveStoredUploadPath } = require("../../utils/storage-paths");
 const logger = require("../../utils/logger");
@@ -320,6 +321,9 @@ async function resolveSocketUser(socket) {
     socket.handshake.query?.clientType ||
     "unknown";
 
+  const deviceInfo = socket.handshake.auth?.deviceInfo || {};
+  const ipAddress = socket.handshake.headers?.["x-forwarded-for"] || socket.handshake.address || null;
+
   return {
     id: user._id.toString(),
     username: user.username,
@@ -328,6 +332,8 @@ async function resolveSocketUser(socket) {
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     permissions: await getEffectivePermissionsForUser(user),
     clientType: normalizeClientType(clientType),
+    deviceInfo,
+    ipAddress,
   };
 }
 
@@ -538,6 +544,21 @@ function initializeChatSocketServer(httpServer) {
     registerUserSocket(currentUser.id, socket.id);
     socketPresence.set(socket.id, "online");
     socketClientType.set(socket.id, currentUser.clientType || "unknown");
+    
+    try {
+      const newSession = await DeviceSession.create({
+        userId: currentUser.id,
+        socketId: socket.id,
+        ipAddress: currentUser.ipAddress,
+        clientType: currentUser.clientType || "unknown",
+        deviceInfo: currentUser.deviceInfo || {},
+        isOnline: true,
+      });
+      socket.deviceSessionId = newSession._id;
+    } catch (e) {
+      logger.warn("Failed to create DeviceSession", e);
+    }
+
     try {
       await publishAggregatedPresence(io, currentUser.id, {
         lastActiveAt: new Date().toISOString(),
@@ -1439,12 +1460,40 @@ function initializeChatSocketServer(httpServer) {
       clearSocketTyping(socket, currentUser.id);
     });
 
+    socket.on("report_client_error", async (payload = {}, ack) => {
+      try {
+        const ClientError = require("../../models/client-error.model");
+        const err = new ClientError({
+          userId: currentUser.id,
+          sessionId: socket.deviceSessionId,
+          clientType: currentUser.clientType || "unknown",
+          source: String(payload.source || "app").slice(0, 100),
+          errorMessage: String(payload.errorMessage || "Unknown error").slice(0, 5000),
+          errorContext: payload.errorContext || {},
+          stackTrace: payload.stackTrace ? String(payload.stackTrace).slice(0, 15000) : null,
+        });
+        await err.save();
+        if (ack) socketAck(ack, { ok: true, success: true });
+      } catch (e) {
+        logger.warn("Failed to report client error", e);
+        if (ack) socketAck(ack, { ok: false, success: false });
+      }
+    });
+
     socket.on("disconnect", async () => {
       socketPresence.delete(socket.id);
       unregisterUserSocket(currentUser.id, socket.id);
       socketClientType.delete(socket.id);
       printerCatalogByUser.delete(currentUser.id);
       desktopStorageByUser.delete(currentUser.id);
+      
+      if (socket.deviceSessionId) {
+        DeviceSession.findByIdAndUpdate(socket.deviceSessionId, {
+          isOnline: false,
+          lastSeenAt: new Date()
+        }).catch(e => logger.warn("Failed to update DeviceSession on disconnect", e));
+      }
+
       await publishAggregatedPresence(io, currentUser.id, {
         lastSeen: new Date().toISOString(),
       });

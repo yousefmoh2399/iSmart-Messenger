@@ -37,8 +37,6 @@ const adminRoleRoutes = require("./chat/routes/admin-role.routes");
 const chatRoutes = require("./chat/routes/chat.routes");
 const ticketRoutes = require("./tickets/routes/ticket.routes");
 const printerRoutes = require("./printers/routes/printer.routes");
-const itAssetsRoutes = require("./it-assets/it-assets.routes");
-const itAssetsAdvancedRoutes = require("./it-assets/it-assets-advanced.routes");
 const purchasingRoutes = require("./purchasing/routes/purchasing.routes");
 const {
   notFoundHandler,
@@ -169,9 +167,11 @@ app.use("/api/admin/backup", adminBackupRoutes);
 
 app.use("/api/admin/updates", adminUpdateRoutes);
 app.use("/api/admin/app-settings", adminAppSettingsRoutes);
+app.use("/api/admin/system-monitor", require("./admin/system-monitor/system-monitor.routes"));
 app.use("/api/updates", updateClientRoutes);
 app.use("/api/announcements", announcementRoutes);
 app.use("/api/app-settings", appSettingsRoutes);
+app.use("/api/client-errors", require("./routes/client-error.routes"));
 app.use("/api/departments", departmentRoutes);
 app.use("/api/admin/departments", adminDepartmentRoutes);
 app.use("/api/branches", branchRoutes);
@@ -184,8 +184,6 @@ app.use("/api/tickets", ticketRoutes);
 app.use("/api/admin/tickets", ticketRoutes);
 app.use("/api/printers", printerRoutes);
 app.use("/api/admin/printers", printerRoutes);
-app.use("/api/it-assets", itAssetsRoutes);
-app.use("/api/it-assets", itAssetsAdvancedRoutes);
 app.use("/api/purchase-requests", purchasingRoutes);
 
 app.use(notFoundHandler);

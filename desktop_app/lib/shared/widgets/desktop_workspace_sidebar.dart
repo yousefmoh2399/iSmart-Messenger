@@ -11,14 +11,14 @@ import 'safe_network_avatar.dart';
 enum DesktopWorkspaceSection {
   chat,
   files,
-  servers,
   profile,
   admin,
-  tickets,
   printers,
-  itAssets,
   purchaseRequests,
+  servers,
+  tickets,
   snipeit,
+  systemMonitor,
 }
 
 class DesktopWorkspaceSidebar extends ConsumerWidget {
@@ -42,7 +42,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
     required this.onLogout,
     this.onCreateConversation,
     this.onOpenAdmin,
-    this.onOpenItAssets,
+    this.onOpenSystemMonitor,
     this.onOpenPurchaseRequests,
     this.onOpenSnipeit,
   });
@@ -65,7 +65,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
   final VoidCallback onLogout;
   final VoidCallback? onCreateConversation;
   final VoidCallback? onOpenAdmin;
-  final VoidCallback? onOpenItAssets;
+  final VoidCallback? onOpenSystemMonitor;
   final VoidCallback? onOpenPurchaseRequests;
   final VoidCallback? onOpenSnipeit;
 
@@ -136,6 +136,15 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
           accentColor: accentColor,
           onPressed: onOpenUpdates!,
         ),
+      if (onOpenSystemMonitor != null)
+        _DesktopWorkspaceIconButton(
+          tooltip: 'مراقبة النظام',
+          icon: Iconsax.monitor,
+          selected: activeSection == DesktopWorkspaceSection.systemMonitor,
+          isDark: isDark,
+          accentColor: accentColor,
+          onPressed: onOpenSystemMonitor!,
+        ),
       if (onOpenAdmin != null)
         _DesktopWorkspaceIconButton(
           tooltip: 'لوحة الإدارة',
@@ -154,15 +163,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
           accentColor: accentColor,
           onPressed: onOpenPrinters!,
         ),
-      if (onOpenItAssets != null)
-        _DesktopWorkspaceIconButton(
-          tooltip: 'إدارة أصول IT',
-          icon: Icons.inventory_2_rounded,
-          selected: activeSection == DesktopWorkspaceSection.itAssets,
-          isDark: isDark,
-          accentColor: accentColor,
-          onPressed: onOpenItAssets!,
-        ),
+
       // if (onOpenPurchaseRequests != null)
       //   _DesktopWorkspaceIconButton(
       //     tooltip: 'طلبات الشراء',

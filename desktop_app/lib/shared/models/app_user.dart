@@ -54,6 +54,8 @@ class AppUser {
       canViewPrinterModule;
 
   bool get canViewSnipeit => isAdmin || can('canViewSnipeit');
+  
+  bool get canViewSystemMonitor => isAdmin || can('canViewSystemMonitor');
 
   bool get canViewPrinterModule =>
       isAdmin ||

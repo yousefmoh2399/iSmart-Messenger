@@ -1212,8 +1212,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _onMessageTextChanged() {
     if (widget.conversation.type != 'group' &&
-        widget.conversation.type != 'department')
+        widget.conversation.type != 'department') {
       return;
+    }
     final text = _messageController.text;
     final selection = _messageController.selection;
     if (selection.baseOffset >= 0 && selection.baseOffset <= text.length) {
@@ -2241,8 +2242,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   List<String> _extractMentions(String text) {
     if (widget.conversation.type != 'group' &&
-        widget.conversation.type != 'department')
+        widget.conversation.type != 'department') {
       return const [];
+    }
     final mentions = <String>[];
     final regex = RegExp(r'@([A-Za-z0-9_]+)');
     for (final match in regex.allMatches(text)) {

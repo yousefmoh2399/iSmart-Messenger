@@ -6,10 +6,10 @@ import '../features/files/presentation/files_dashboard_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../features/printers/presentation/printer_monitoring_screen.dart';
 import '../features/servers/presentation/servers_screen.dart';
-import '../features/it_assets/presentation/it_assets_screen.dart';
 import '../features/updates/presentation/update_center_screen.dart';
 import '../features/purchasing/presentation/screens/purchase_requests_screen.dart';
 import '../features/snipeit/presentation/snipeit_screen.dart';
+import '../features/admin/presentation/system_monitor_screen.dart';
 import '../shared/providers/providers.dart';
 import '../shared/widgets/desktop_workspace_sidebar.dart';
 
@@ -48,19 +48,19 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
       case DesktopWorkspaceSection.admin:
       case DesktopWorkspaceSection.tickets:
         return 0;
-      case DesktopWorkspaceSection.printers:
-        return 4;
-      case DesktopWorkspaceSection.itAssets:
-        return 5;
-      case DesktopWorkspaceSection.purchaseRequests:
-        return 6;
       case DesktopWorkspaceSection.files:
         return 1;
       case DesktopWorkspaceSection.servers:
         return 2;
       case DesktopWorkspaceSection.profile:
         return 3;
+      case DesktopWorkspaceSection.printers:
+        return 4;
+      case DesktopWorkspaceSection.purchaseRequests:
+        return 5;
       case DesktopWorkspaceSection.snipeit:
+        return 6;
+      case DesktopWorkspaceSection.systemMonitor:
         return 7;
     }
   }
@@ -139,9 +139,9 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                     const ServersScreen(isWrapped: true),
                     const ProfileScreen(isWrapped: true),
                     const PrinterMonitoringScreen(isWrapped: true),
-                    const ItAssetsScreen(isWrapped: true),
                     const PurchaseRequestsScreen(),
                     const SnipeitScreen(isWrapped: true),
+                    const SystemMonitorScreen(isWrapped: true),
                   ],
                 ),
               ),
@@ -182,9 +182,7 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                 onOpenPrinters: user.canViewPrinterModule
                     ? () => _navigateTo(DesktopWorkspaceSection.printers)
                     : null,
-                onOpenItAssets: user.canViewItAssets
-                    ? () => _navigateTo(DesktopWorkspaceSection.itAssets)
-                    : null,
+
                 onOpenPurchaseRequests:
                     user.permissions['canViewPurchaseRequests'] == true ||
                         user.role == 'admin'
@@ -198,6 +196,9 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                     _navigateTo(DesktopWorkspaceSection.chat),
                 onOpenAdmin: canOpenAdmin
                     ? () => _navigateTo(DesktopWorkspaceSection.admin)
+                    : null,
+                onOpenSystemMonitor: user.canViewSystemMonitor
+                    ? () => _navigateTo(DesktopWorkspaceSection.systemMonitor)
                     : null,
                 onLogout: () {
                   _confirmAndLogout();

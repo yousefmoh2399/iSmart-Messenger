@@ -37,6 +37,7 @@ const permissionsSchema = new mongoose.Schema(
     canScanItSpareParts: { type: Boolean, default: false },
     canScanItInventory: { type: Boolean, default: false },
     canDeleteItAssets: { type: Boolean, default: false },
+    canViewSystemMonitor: { type: Boolean, default: false },
   },
   { _id: false }
 );

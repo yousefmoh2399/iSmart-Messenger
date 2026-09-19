@@ -56,6 +56,7 @@ const DEFAULT_ROLES = {
     canAttachFilesPurchaseRequests: true,
     canViewReportsPurchaseRequests: true,
     canViewSnipeit: true,
+    canViewSystemMonitor: true,
   },
   manager: {
     canCreateUsers: false,

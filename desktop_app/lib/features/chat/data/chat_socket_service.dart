@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' as io_dart;
 
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -57,6 +58,17 @@ class ChatSocketService implements PrintStatusEmitter {
     _manualDisconnect = false;
 
     final completer = Completer<void>();
+    Map<String, dynamic> deviceInfo = {};
+    if (!const bool.fromEnvironment('dart.library.html')) {
+      try {
+        deviceInfo = {
+          'os': io_dart.Platform.operatingSystem,
+          'osVersion': io_dart.Platform.operatingSystemVersion,
+          'hostname': io_dart.Platform.localHostname,
+        };
+      } catch (_) {}
+    }
+
     final socket =
         socketOverride ??
         io.io(
@@ -69,7 +81,11 @@ class ChatSocketService implements PrintStatusEmitter {
               .enableReconnection()
               .setReconnectionDelay(1200)
               .setReconnectionDelayMax(4000)
-              .setAuth({'token': token, 'clientType': clientType})
+              .setAuth({
+                'token': token, 
+                'clientType': clientType,
+                'deviceInfo': deviceInfo,
+              })
               .setExtraHeaders({
                 'Authorization': 'Bearer $token',
                 'x-client-type': clientType,
@@ -479,6 +495,25 @@ class ChatSocketService implements PrintStatusEmitter {
     _connectedBaseUrl = null;
     _connectedToken = null;
     _joinedConversationIds.clear();
+  }
+
+  void reportClientError({
+    required String source,
+    required String errorMessage,
+    Map<String, dynamic>? errorContext,
+    String? stackTrace,
+  }) {
+    if (!isConnected) return;
+    _socket?.emitWithAck(
+      'report_client_error',
+      {
+        'source': source,
+        'errorMessage': errorMessage,
+        'errorContext': errorContext,
+        'stackTrace': stackTrace,
+      },
+      ack: (_) {},
+    );
   }
 
   void dispose() {

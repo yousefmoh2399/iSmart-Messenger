@@ -15,6 +15,7 @@ import '../../core/settings/user_preferences_store.dart';
 import '../../core/theme/theme_mode_store.dart';
 import '../../features/admin/data/announcement_repository.dart';
 import '../../features/admin/data/backup_repository.dart';
+import '../../features/admin/data/system_monitor_repository.dart';
 import '../../features/admin/data/update_management_repository.dart';
 import '../../features/admin/presentation/announcements_controller.dart';
 import '../../features/auth/data/auth_repository.dart';
@@ -28,7 +29,6 @@ import '../../features/chat/presentation/chat_overview_controller.dart';
 import '../../features/chat/presentation/chat_realtime_controller.dart';
 import '../../features/files/data/document_repository.dart';
 import '../../features/files/presentation/documents_controller.dart';
-import '../../features/it_assets/data/it_assets_repository.dart';
 import '../../features/printers/data/printer_repository.dart';
 import '../../features/printers/models/printer_models.dart';
 import '../../features/printers/presentation/printer_controller.dart';
@@ -43,6 +43,7 @@ import '../models/app_user.dart';
 import '../models/managed_user.dart';
 import '../models/remote_document.dart';
 import '../services/app_settings_repository.dart';
+import '../services/app_error_log_service.dart';
 import '../services/desktop_file_save_service.dart';
 import '../services/desktop_print_service.dart';
 import '../services/desktop_update_agent.dart'
@@ -448,6 +449,10 @@ final backupRepositoryProvider = Provider<BackupRepository>((ref) {
   );
 });
 
+final systemMonitorRepositoryProvider = Provider<SystemMonitorRepository>((ref) {
+  return SystemMonitorRepository(ref.watch(authenticatedApiClientProvider));
+});
+
 final updateManagementRepositoryProvider = Provider<UpdateManagementRepository>(
   (ref) {
     return UpdateManagementRepository(
@@ -459,7 +464,17 @@ final updateManagementRepositoryProvider = Provider<UpdateManagementRepository>(
 
 final chatSocketServiceProvider = Provider<ChatSocketService>((ref) {
   final service = ChatSocketService();
-  ref.onDispose(service.dispose);
+  try {
+    AppErrorLogService.instance.chatSocketService = service;
+  } catch (_) {}
+  ref.onDispose(() {
+    try {
+      if (AppErrorLogService.instance.chatSocketService == service) {
+        AppErrorLogService.instance.chatSocketService = null;
+      }
+    } catch (_) {}
+    service.dispose();
+  });
   return service;
 });
 
@@ -672,9 +687,7 @@ final authTokenProvider = FutureProvider<String?>((ref) async {
   return ref.read(authRepositoryProvider).getValidToken();
 });
 
-final itAssetsRepositoryProvider = Provider<ItAssetsRepository>((ref) {
-  return ItAssetsRepository(ref.watch(authenticatedApiClientProvider));
-});
+
 
 final chatOverviewControllerProvider =
     AsyncNotifierProvider<ChatOverviewController, ChatOverviewData>(

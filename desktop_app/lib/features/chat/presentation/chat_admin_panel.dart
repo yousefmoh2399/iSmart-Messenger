@@ -3316,21 +3316,8 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
       'canManagePrinters': 'إدارة فروع الطابعات',
       'canSyncPrinters': 'مزامنة الطابعات',
       'canExportPrinterReports': 'تصدير تقارير الطابعات',
-      'canViewItAssets': 'عرض صفحة إدارة أصول IT',
-      'canManageItAssets': 'إضافة وتعديل الأجهزة وقطع الغيار',
-      'canExecuteItAssets': 'إنشاء وتنفيذ الحركات والصيانة والجرد',
-      'canAuditItAssets': 'مراجعة واعتماد حركات أصول IT',
-      'canManageItInventory': 'إنشاء وإغلاق جلسات الجرد وحل الفروق',
-      'canInspectDamagedItAssets': 'فحص التالف واتخاذ القرار والتكهين',
-      'canManageItProcurement': 'إدارة الموردين وطلبات الشراء',
-      'canExportItReports': 'تصدير وطباعة تقارير أصول IT',
-      'canManageItSettings': 'إدارة قواعد الاعتماد وإعدادات الوحدة',
-      'canCloseItPeriods': 'قفل الفترات الشهرية',
-      'canScanItAssets': 'مسح QR/Barcode للأجهزة وعرض بياناتها',
-      'canScanItSpareParts': 'مسح QR/Barcode لقطع الغيار وعرض بياناتها',
-      'canScanItInventory': 'تسجيل مسح الأجهزة داخل جلسات الجرد',
-      'canDeleteItAssets': 'أرشفة وحذف الأجهزة وقطع الغيار',
       'canViewSnipeit': 'عرض صفحة Snipe-IT',
+      'canViewSystemMonitor': 'مراقبة النظام',
     };
     Map<String, bool> resolvePermissionsForRole() {
       if (role != 'admin') {
@@ -5311,7 +5298,8 @@ class _RolesAdminTabState extends ConsumerState<_RolesAdminTab> {
         a.canManagePrinters == b.canManagePrinters &&
         a.canSyncPrinters == b.canSyncPrinters &&
         a.canExportPrinterReports == b.canExportPrinterReports &&
-        a.canViewSnipeit == b.canViewSnipeit;
+        a.canViewSnipeit == b.canViewSnipeit &&
+        a.canViewSystemMonitor == b.canViewSystemMonitor;
   }
 
   bool _hasServerRolesChanged(List<ChatRole> previous, List<ChatRole> next) {
@@ -5409,6 +5397,7 @@ class _RolesAdminTabState extends ConsumerState<_RolesAdminTab> {
           ? value
           : source.canExportPrinterReports,
       canViewSnipeit: key == 'canViewSnipeit' ? value : source.canViewSnipeit,
+      canViewSystemMonitor: key == 'canViewSystemMonitor' ? value : source.canViewSystemMonitor,
     );
   }
 
@@ -5629,6 +5618,14 @@ class _RolesAdminTabState extends ConsumerState<_RolesAdminTab> {
                         'canViewSnipeit',
                         'عرض صفحة Snipe-IT',
                         draft.canViewSnipeit,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 300,
+                      child: permissionSwitch(
+                        'canViewSystemMonitor',
+                        'مراقبة النظام',
+                        draft.canViewSystemMonitor,
                       ),
                     ),
                   ],
