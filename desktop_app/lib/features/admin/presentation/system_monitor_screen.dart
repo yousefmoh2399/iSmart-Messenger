@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'system_monitor_controller.dart';
@@ -189,53 +190,104 @@ class SystemMonitorScreen extends ConsumerWidget {
   }
 
   Widget _buildErrorsList(BuildContext context, SystemMonitorState state, SystemMonitorController notifier) {
-    if (state.errors.isEmpty) {
-      return const Center(child: Text('لا توجد أخطاء مسجلة'));
-    }
-
-    return ListView.builder(
-      itemCount: state.errors.length,
-      itemBuilder: (context, index) {
-        final error = state.errors[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          color: error.resolved ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
-          child: ExpansionTile(
-            title: Text(error.errorMessage, maxLines: 2, overflow: TextOverflow.ellipsis),
-            subtitle: Text('${error.username ?? 'مجهول'} • ${error.clientType} • ${error.createdAt.toString().split('.')[0]}'),
-            trailing: IconButton(
-              icon: Icon(
-                error.resolved ? Icons.check_circle : Icons.error,
-                color: error.resolved ? Colors.green : Colors.red,
-              ),
-              onPressed: () {
-                if (!error.resolved) {
-                  notifier.resolveError(error.id);
-                }
-              },
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text('Context:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text(error.errorContext.toString()),
-                    const SizedBox(height: 8),
-                    const Text('StackTrace:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      color: Colors.black.withOpacity(0.05),
-                      child: Text(error.stackTrace ?? 'No stack trace available'),
-                    ),
-                  ],
+              Text('الأخطاء المسجلة (${state.errors.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+              if (state.errors.isNotEmpty)
+                TextButton.icon(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('تأكيد الحذف'),
+                        content: const Text('هل أنت متأكد من حذف جميع الأخطاء المسجلة؟'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              notifier.deleteAllErrors();
+                            },
+                            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  label: const Text('مسح الكل', style: TextStyle(color: Colors.red)),
                 ),
-              ),
             ],
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: state.errors.isEmpty
+              ? const Center(child: Text('لا توجد أخطاء مسجلة'))
+              : ListView.builder(
+                  itemCount: state.errors.length,
+                  itemBuilder: (context, index) {
+                    final error = state.errors[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      color: error.resolved ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                      child: ExpansionTile(
+                        title: Text(error.errorMessage, maxLines: 2, overflow: TextOverflow.ellipsis),
+                        subtitle: Text('${error.username ?? 'مجهول'} • ${error.clientType} • ${error.createdAt.toString().split('.')[0]}'),
+                        trailing: IconButton(
+                          icon: Icon(
+                            error.resolved ? Icons.check_circle : Icons.error,
+                            color: error.resolved ? Colors.green : Colors.red,
+                          ),
+                          onPressed: () {
+                            if (!error.resolved) {
+                              notifier.resolveError(error.id);
+                            }
+                          },
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Text('Context:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Text(error.errorContext.toString()),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('StackTrace:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    TextButton.icon(
+                                      onPressed: () {
+                                        Clipboard.setData(ClipboardData(text: error.stackTrace ?? 'No stack trace'));
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم نسخ الخطأ')));
+                                      },
+                                      icon: const Icon(Icons.copy, size: 16),
+                                      label: const Text('نسخ الخطأ'),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  color: Colors.black.withOpacity(0.05),
+                                  child: SelectableText(error.stackTrace ?? 'No stack trace available'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

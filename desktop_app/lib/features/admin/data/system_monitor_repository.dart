@@ -74,4 +74,8 @@ class SystemMonitorRepository {
     );
     return ClientErrorLog.fromJson(response.data?['data'] as Map<String, dynamic>);
   }
+
+  Future<void> deleteAllErrors() async {
+    await _apiClient.dio.delete<dynamic>('/api/admin/system-monitor/errors');
+  }
 }

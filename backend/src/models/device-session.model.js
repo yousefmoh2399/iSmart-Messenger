@@ -10,7 +10,7 @@ const deviceSessionSchema = new mongoose.Schema(
     },
     socketId: {
       type: String,
-      required: true,
+      required: false,
       index: true,
     },
     ipAddress: {

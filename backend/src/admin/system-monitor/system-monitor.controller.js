@@ -110,8 +110,14 @@ const markErrorResolved = asyncHandler(async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
+const deleteAllErrors = asyncHandler(async (req, res) => {
+  await ClientError.deleteMany({});
+  res.json({ success: true, message: "All errors deleted" });
+});
+
 module.exports = {
   getConnections,
   getErrors,
   markErrorResolved,
+  deleteAllErrors,
 };

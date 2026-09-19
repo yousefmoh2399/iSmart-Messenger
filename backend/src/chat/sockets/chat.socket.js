@@ -322,6 +322,7 @@ async function resolveSocketUser(socket) {
     "unknown";
 
   const deviceInfo = socket.handshake.auth?.deviceInfo || {};
+  console.log("Extracted deviceInfo from auth:", deviceInfo);
   const ipAddress = socket.handshake.headers?.["x-forwarded-for"] || socket.handshake.address || null;
 
   return {
@@ -546,17 +547,27 @@ function initializeChatSocketServer(httpServer) {
     socketClientType.set(socket.id, currentUser.clientType || "unknown");
     
     try {
-      const newSession = await DeviceSession.create({
+      const filter = {
         userId: currentUser.id,
-        socketId: socket.id,
         ipAddress: currentUser.ipAddress,
         clientType: currentUser.clientType || "unknown",
-        deviceInfo: currentUser.deviceInfo || {},
-        isOnline: true,
+      };
+      const update = {
+        $set: {
+          socketId: socket.id,
+          isOnline: true,
+          lastSeenAt: new Date(),
+          deviceInfo: currentUser.deviceInfo || {},
+        },
+      };
+      const session = await DeviceSession.findOneAndUpdate(filter, update, {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
       });
-      socket.deviceSessionId = newSession._id;
+      socket.deviceSessionId = session._id;
     } catch (e) {
-      logger.warn("Failed to create DeviceSession", e);
+      logger.warn("Failed to create or update DeviceSession", e);
     }
 
     try {
@@ -1488,10 +1499,20 @@ function initializeChatSocketServer(httpServer) {
       desktopStorageByUser.delete(currentUser.id);
       
       if (socket.deviceSessionId) {
-        DeviceSession.findByIdAndUpdate(socket.deviceSessionId, {
-          isOnline: false,
-          lastSeenAt: new Date()
-        }).catch(e => logger.warn("Failed to update DeviceSession on disconnect", e));
+        let hasOtherSocketForSession = false;
+        for (const [id, s] of io.sockets.sockets.entries()) {
+           if (s.id !== socket.id && s.deviceSessionId?.toString() === socket.deviceSessionId.toString()) {
+              hasOtherSocketForSession = true;
+              break;
+           }
+        }
+        
+        if (!hasOtherSocketForSession) {
+          DeviceSession.findByIdAndUpdate(socket.deviceSessionId, {
+            isOnline: false,
+            lastSeenAt: new Date()
+          }).catch(e => logger.warn("Failed to update DeviceSession on disconnect", e));
+        }
       }
 
       await publishAggregatedPresence(io, currentUser.id, {

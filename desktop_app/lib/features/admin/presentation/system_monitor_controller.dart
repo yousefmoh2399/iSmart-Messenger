@@ -202,6 +202,14 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       );
     } catch (_) {}
   }
+
+  Future<void> deleteAllErrors() async {
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.deleteAllErrors();
+      state = state.copyWith(errors: []);
+    } catch (_) {}
+  }
 }
 
 final systemMonitorControllerProvider =
