@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import '../../../shared/providers/providers.dart';
@@ -15,8 +17,9 @@ class SnipeitScreen extends ConsumerStatefulWidget {
 }
 
 class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
-  final _webViewController = WebviewController();
+  late final WebviewController _webViewController;
   bool _isWebviewInitialized = false;
+  String? _initError;
 
   Future<void>? _initFuture;
   Future<void>? _urlProcessingFuture;
@@ -30,6 +33,10 @@ class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
   @override
   void initState() {
     super.initState();
+    
+    if (!kIsWeb) {
+      _webViewController = WebviewController();
+    }
 
     _urlSubscription = ref.listenManual<String>(
       appServerDefaultsProvider.select(
@@ -45,17 +52,33 @@ class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
       previous,
       next,
     ) {
-      if (next != previous && _isWebviewInitialized) {
-        _webViewController.reload();
+      if (next != previous) {
+        if (kIsWeb && _loadedUrl != null) {
+          launchUrlString(_loadedUrl!);
+        } else if (!kIsWeb && _isWebviewInitialized) {
+          _webViewController.reload();
+        }
       }
     });
   }
 
   void handleUrl(String url) {
-    final normalized = url.trim();
+    String normalized = url.trim();
     if (normalized.isEmpty || !mounted) return;
 
+    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+      normalized = 'http://$normalized';
+    }
+
     _pendingUrl = normalized;
+
+    if (kIsWeb) {
+      setState(() {
+        _loadedUrl = normalized;
+        _pendingUrl = null;
+      });
+      return;
+    }
 
     if (_urlProcessingFuture != null) return;
 
@@ -64,6 +87,11 @@ class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
     processingFuture = _processPendingUrls()
         .catchError((Object error, StackTrace stackTrace) {
           debugPrint('WebView URL processing failed: $error\n$stackTrace');
+          if (mounted) {
+            setState(() {
+              _initError = error.toString();
+            });
+          }
         })
         .whenComplete(() {
           if (identical(_urlProcessingFuture, processingFuture)) {
@@ -118,11 +146,21 @@ class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
 
     final future = () async {
       if (!_isWebviewInitialized) {
-        await _webViewController.initialize();
-        if (mounted) {
-          setState(() {
-            _isWebviewInitialized = true;
-          });
+        try {
+          await _webViewController.initialize();
+          if (mounted) {
+            setState(() {
+              _isWebviewInitialized = true;
+              _initError = null;
+            });
+          }
+        } catch (e) {
+          if (mounted) {
+            setState(() {
+              _initError = e.toString();
+            });
+          }
+          rethrow;
         }
       }
     }();
@@ -140,12 +178,48 @@ class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
   void dispose() {
     _urlSubscription?.close();
     _refreshSubscription?.close();
-    _webViewController.dispose();
+    if (!kIsWeb) {
+      _webViewController.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return Scaffold(
+        appBar: widget.isWrapped
+            ? null
+            : AppBar(
+                title: const Text('Snipe-IT'),
+              ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.open_in_browser, size: 64, color: Colors.blueGrey),
+              const SizedBox(height: 16),
+              const Text(
+                'يتم عرض Snipe-IT في نافذة منفصلة.',
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () {
+                  final target = _loadedUrl ?? _pendingUrl;
+                  if (target != null && target.isNotEmpty) {
+                    launchUrlString(target);
+                  }
+                },
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('فتح السيرفر'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: widget.isWrapped
           ? null
@@ -157,14 +231,50 @@ class _SnipeitScreenState extends ConsumerState<SnipeitScreen> {
                   onPressed: () {
                     if (_isWebviewInitialized) {
                       _webViewController.reload();
+                    } else if (_initError != null) {
+                      _initFuture = null;
+                      _urlProcessingFuture = null;
+                      if (_loadedUrl != null) handleUrl(_loadedUrl!);
                     }
                   },
                 ),
               ],
             ),
-      body: !_isWebviewInitialized
-          ? const Center(child: CircularProgressIndicator())
-          : Webview(_webViewController),
+      body: _initError != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      'حدث خطأ أثناء تحميل السيرفر:\n$_initError',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _initError = null;
+                        });
+                        _initFuture = null;
+                        _urlProcessingFuture = null;
+                        if (_pendingUrl != null || _loadedUrl != null) {
+                          handleUrl(_pendingUrl ?? _loadedUrl!);
+                        }
+                      },
+                      child: const Text('إعادة المحاولة'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : !_isWebviewInitialized
+              ? const Center(child: CircularProgressIndicator())
+              : Webview(_webViewController),
     );
   }
 }
