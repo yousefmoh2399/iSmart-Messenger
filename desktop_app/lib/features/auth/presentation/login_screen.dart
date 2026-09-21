@@ -172,7 +172,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       autofocus: true,
                       decoration: const InputDecoration(
                         labelText: 'عنوان API',
-                        hintText: 'https://172.17.100.202',
+                        hintText: 'http://192.168.100.253',
                       ),
                       onChanged: (_) {
                         if (dialogError != null) {
