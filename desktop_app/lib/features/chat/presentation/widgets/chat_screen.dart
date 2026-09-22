@@ -1057,22 +1057,27 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   static const int _chatMaxUploadBytesAdmin = 200 * 1024 * 1024;
 
   int _maxChatAttachmentBytes() {
-    return widget.currentUser?.role == 'admin'
+    final customLimitMB = widget.currentUser?.maxAttachmentSizeMB;
+    final defaultLimit = widget.currentUser?.role == 'admin'
         ? _chatMaxUploadBytesAdmin
         : _chatMaxUploadBytesUser;
+        
+    if (customLimitMB != null) {
+      final customBytes = customLimitMB * 1024 * 1024;
+      return customBytes > defaultLimit ? customBytes : defaultLimit;
+    }
+    return defaultLimit;
   }
 
   void _showChatAttachmentSizeExceededSnackbar() {
     if (!mounted) {
       return;
     }
-    final isAdmin = widget.currentUser?.role == 'admin';
+    final limitMB = _maxChatAttachmentBytes() ~/ (1024 * 1024);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          isAdmin
-              ? 'الحد الأقصى لحجم مرفقات الشات للمسؤول هو 200 ميجا.'
-              : 'الحد الأقصى لحجم مرفقات الشات هو 20 ميجا فقط.',
+          'الحد الأقصى لحجم مرفقات الشات هو $limitMB ميجا فقط.',
         ),
       ),
     );
@@ -1086,6 +1091,35 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.addListener(_onMessageDraftChanged);
     _container = ProviderScope.containerOf(context, listen: false);
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final pending = _container.read(pendingChatDropFilesProvider);
+      if (pending != null && pending['files'] != null && pending['conversationId'] == _conversationId) {
+        final files = pending['files'] as List<dynamic>;
+        _container.read(pendingChatDropFilesProvider.notifier).state = null;
+        
+        final overview = _container.read(chatOverviewControllerProvider).valueOrNull;
+        final liveConversation = overview?.conversations
+                .where((c) => c.id == _conversationId)
+                .firstOrNull ?? widget.conversation;
+        
+        if (!_isReadOnlyConversation(liveConversation)) {
+          for (final file in files) {
+            if (kIsWeb) {
+              file.readAsBytes().then((bytes) {
+                _sendPickedWebFiles(
+                  conversation: liveConversation,
+                  files: [PlatformFile(name: file.name, size: bytes.length, bytes: bytes)],
+                  isImageBatch: false,
+                );
+              });
+            } else {
+              _sendFile(file.path);
+            }
+          }
+        }
+      }
+    });
     _searchController.addListener(() {
       if (mounted) {
         setState(() {
@@ -4275,6 +4309,36 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    ref.listen(pendingChatDropFilesProvider, (prev, next) {
+      if (next != null && next['files'] != null && next['conversationId'] == _conversationId) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          final files = next['files'] as List<dynamic>;
+          ref.read(pendingChatDropFilesProvider.notifier).state = null;
+          
+          final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+          final liveConversation = overview?.conversations
+                  .where((c) => c.id == _conversationId)
+                  .firstOrNull ?? widget.conversation;
+          
+          if (_isReadOnlyConversation(liveConversation)) return;
+
+          for (final file in files) {
+            if (kIsWeb) {
+              final bytes = await file.readAsBytes();
+              await _sendPickedWebFiles(
+                conversation: liveConversation,
+                files: [PlatformFile(name: file.name, size: bytes.length, bytes: bytes)],
+                isImageBatch: false,
+              );
+            } else {
+              await _sendFile(file.path);
+            }
+          }
+        });
+      }
+    });
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final enterSendsMessage =
         ref

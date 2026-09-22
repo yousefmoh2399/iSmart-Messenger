@@ -15,6 +15,7 @@ class AppUser {
     required this.avatarUrl,
     required this.lastSeen,
     required this.lastActiveAt,
+    required this.maxAttachmentSizeMB,
     required this.permissions,
     required this.chatPreferences,
   });
@@ -32,6 +33,7 @@ class AppUser {
   final String? avatarUrl;
   final DateTime? lastSeen;
   final DateTime? lastActiveAt;
+  final int maxAttachmentSizeMB;
   final Map<String, bool> permissions;
   final ChatPreferences chatPreferences;
 
@@ -109,6 +111,7 @@ class AppUser {
       lastActiveAt: json['lastActiveAt'] is String
           ? DateTime.tryParse(json['lastActiveAt'] as String)
           : null,
+      maxAttachmentSizeMB: (json['maxAttachmentSizeMB'] as num?)?.toInt() ?? 20,
       permissions: permissionsJson.map(
         (key, value) => MapEntry(key, value == true),
       ),
@@ -131,6 +134,7 @@ class AppUser {
       'avatarUrl': avatarUrl,
       'lastSeen': lastSeen?.toIso8601String(),
       'lastActiveAt': lastActiveAt?.toIso8601String(),
+      'maxAttachmentSizeMB': maxAttachmentSizeMB,
       'permissions': permissions,
       'chatPreferences': chatPreferences.toJson(),
     };

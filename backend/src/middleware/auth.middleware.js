@@ -64,6 +64,7 @@ const requireAuth = asyncHandler(async (req, res, next) => {
     avatarUrl: normalizeMediaUrl(user.avatarUrl),
     lastSeen: user.lastSeen,
     lastActiveAt: user.lastActiveAt || null,
+    maxAttachmentSizeMB: user.maxAttachmentSizeMB,
     tokenVersion: resolveTokenVersion(user.tokenVersion),
     permissions,
   };

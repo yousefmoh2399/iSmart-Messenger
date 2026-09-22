@@ -57,6 +57,8 @@ import '../services/print_job_processor.dart';
 import '../services/print_job_tracker.dart';
 import '../services/web_platform_bridge.dart' as web_bridge;
 
+final pendingChatDropFilesProvider = StateProvider<Map<String, dynamic>?>((ref) => null);
+
 DateTime? _lastChatSocketErrorLogAt;
 String? _lastChatSocketErrorText;
 

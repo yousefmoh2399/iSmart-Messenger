@@ -102,6 +102,7 @@ class UserManagementRepository {
     String? departmentId,
     List<String>? departmentIds,
     String? branchId,
+    int? maxAttachmentSizeMB,
     Map<String, bool>? permissions,
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
@@ -117,6 +118,8 @@ class UserManagementRepository {
         if (departmentIds != null && departmentIds.isNotEmpty)
           'departmentIds': departmentIds,
         if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
+        if (maxAttachmentSizeMB != null)
+          'maxAttachmentSizeMB': maxAttachmentSizeMB,
       },
     );
 
@@ -132,6 +135,7 @@ class UserManagementRepository {
     String? departmentId,
     List<String>? departmentIds,
     String? branchId,
+    int? maxAttachmentSizeMB,
     Map<String, bool>? permissions,
   }) async {
     final response = await _apiClient.dio.put<Map<String, dynamic>>(
@@ -145,6 +149,7 @@ class UserManagementRepository {
         if (departmentId != null) 'departmentId': departmentId,
         if (departmentIds != null) 'departmentIds': departmentIds,
         if (branchId != null) 'branchId': branchId,
+        if (maxAttachmentSizeMB != null) 'maxAttachmentSizeMB': maxAttachmentSizeMB,
       },
     );
 

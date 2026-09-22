@@ -177,10 +177,13 @@ const postChatTransfer = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Transfer file is required.");
   }
 
-  const allowedBytes =
-    req.user.role === "admin"
-      ? ADMIN_CHAT_ATTACHMENT_MAX_BYTES
-      : USER_DIRECT_TRANSFER_MAX_BYTES;
+  let allowedBytes = req.user.role === "admin"
+    ? ADMIN_CHAT_ATTACHMENT_MAX_BYTES
+    : USER_DIRECT_TRANSFER_MAX_BYTES;
+    
+  if (req.user?.maxAttachmentSizeMB) {
+    allowedBytes = Math.max(allowedBytes, req.user.maxAttachmentSizeMB * 1024 * 1024);
+  }
 
   if (Number(req.file.size || 0) > allowedBytes) {
     try {
@@ -188,9 +191,7 @@ const postChatTransfer = asyncHandler(async (req, res) => {
     } catch (_) {}
     throw new ApiError(
       400,
-      req.user.role === "admin"
-        ? "حجم الملف يتجاوز 200 ميجا."
-        : "حجم الملف يتجاوز 30 ميجا لحسابك.",
+      `حجم الملف يتجاوز الحد المسموح به (${Math.round(allowedBytes / (1024 * 1024))} ميجا) لحسابك.`,
     );
   }
 
@@ -541,19 +542,21 @@ const getConversationMessages = asyncHandler(async (req, res) => {
 
 const postChatMessage = asyncHandler(async (req, res) => {
   if (req.file) {
-    const maxBytes =
-      req.user?.role === "admin"
-        ? ADMIN_CHAT_ATTACHMENT_MAX_BYTES
-        : USER_CHAT_ATTACHMENT_MAX_BYTES;
+    let maxBytes = req.user?.role === "admin"
+      ? ADMIN_CHAT_ATTACHMENT_MAX_BYTES
+      : USER_CHAT_ATTACHMENT_MAX_BYTES;
+
+    if (req.user?.maxAttachmentSizeMB) {
+      maxBytes = Math.max(maxBytes, req.user.maxAttachmentSizeMB * 1024 * 1024);
+    }
+
     if (Number(req.file.size || 0) > maxBytes) {
       try {
         fs.unlinkSync(req.file.path);
       } catch (_) {}
       throw new ApiError(
         400,
-        req.user?.role === "admin"
-          ? "حجم الملف يتجاوز الحد الأقصى 200 ميجا."
-          : "حجم الملف يتجاوز الحد الأقصى 20 ميجا لحسابك.",
+        `حجم الملف يتجاوز الحد المسموح به (${Math.round(maxBytes / (1024 * 1024))} ميجا) لحسابك.`,
       );
     }
   }

@@ -495,22 +495,26 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   static const int _chatMaxUploadBytesAdmin = 200 * 1024 * 1024;
 
   int _maxChatAttachmentBytes() {
-    final role = ref.read(authControllerProvider).valueOrNull?.role;
-    return role == 'admin' ? _chatMaxUploadBytesAdmin : _chatMaxUploadBytesUser;
+    final user = ref.read(authControllerProvider).valueOrNull;
+    final customLimitMB = user?.maxAttachmentSizeMB;
+    final defaultLimit = user?.role == 'admin' ? _chatMaxUploadBytesAdmin : _chatMaxUploadBytesUser;
+    
+    if (customLimitMB != null) {
+      final customBytes = customLimitMB * 1024 * 1024;
+      return customBytes > defaultLimit ? customBytes : defaultLimit;
+    }
+    return defaultLimit;
   }
 
   void _showChatAttachmentSizeExceededSnackbar() {
     if (!mounted) {
       return;
     }
-    final isAdmin =
-        ref.read(authControllerProvider).valueOrNull?.role == 'admin';
+    final limitMB = _maxChatAttachmentBytes() ~/ (1024 * 1024);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          isAdmin
-              ? 'الحد الأقصى لحجم مرفقات الشات للمسؤول هو 200 ميجا.'
-              : 'الحد الأقصى لحجم مرفقات الشات هو 20 ميجا فقط.',
+          'الحد الأقصى لحجم مرفقات الشات هو $limitMB ميجا فقط.',
         ),
       ),
     );

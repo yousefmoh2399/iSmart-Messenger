@@ -11,6 +11,7 @@ class ManagedUser {
     required this.isOnline,
     required this.isActive,
     required this.lastSeen,
+    required this.maxAttachmentSizeMB,
     required this.permissions,
     required this.createdAt,
   });
@@ -26,6 +27,7 @@ class ManagedUser {
   final bool isOnline;
   final bool isActive;
   final DateTime? lastSeen;
+  final int maxAttachmentSizeMB;
   final Map<String, bool> permissions;
   final DateTime createdAt;
 
@@ -48,6 +50,7 @@ class ManagedUser {
       lastSeen: json['lastSeen'] is String
           ? DateTime.tryParse(json['lastSeen'] as String)
           : null,
+      maxAttachmentSizeMB: (json['maxAttachmentSizeMB'] as num?)?.toInt() ?? 20,
       permissions: permissionsJson.map(
         (key, value) => MapEntry(key, value == true),
       ),

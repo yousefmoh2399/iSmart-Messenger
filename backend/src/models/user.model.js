@@ -165,6 +165,10 @@ const userSchema = new mongoose.Schema(
         },
       }),
     },
+    maxAttachmentSizeMB: {
+      type: Number,
+      default: 20,
+    },
   },
   {
     timestamps: true,

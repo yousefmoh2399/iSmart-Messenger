@@ -1,5 +1,8 @@
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../shared/providers/providers.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
 import 'chat_ui_helpers.dart';
@@ -64,7 +67,19 @@ class _ChatListItemState extends State<ChatListItem> {
         final horizontalPadding = isNarrow ? 8.0 : 12.0;
         final gap = isNarrow ? 8.0 : 12.0;
 
-        return Draggable<ChatConversation>(
+        return DropTarget(
+          onDragDone: (details) {
+            if (details.files.isNotEmpty) {
+              widget.onTap(); // Select the conversation
+              ProviderScope.containerOf(context, listen: false)
+                  .read(pendingChatDropFilesProvider.notifier)
+                  .state = {
+                'conversationId': widget.conversation.id,
+                'files': details.files,
+              };
+            }
+          },
+          child: Draggable<ChatConversation>(
           data: widget.conversation,
           feedback: Material(
             elevation: 8,
@@ -381,7 +396,8 @@ class _ChatListItemState extends State<ChatListItem> {
               ),
             ),
           ),
-        );
+        
+        ));
       },
     );
   }

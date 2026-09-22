@@ -3294,6 +3294,9 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     var role = user?.role ?? 'user';
     String? departmentId = user?.departmentId;
     String? branchId = user?.branchId;
+    final maxAttachmentSizeMBController = TextEditingController(
+      text: user?.maxAttachmentSizeMB.toString() ?? '20',
+    );
     final permissions = Map<String, bool>.from(user?.permissions ?? const {});
     const permissionLabels = <String, String>{
       'canCreateUsers': 'إدارة المستخدمين',
@@ -3428,6 +3431,13 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                         ),
                   ),
                   const SizedBox(height: 12),
+                  TextField(
+                    controller: maxAttachmentSizeMBController,
+                    enabled: !isSaving,
+                    keyboardType: TextInputType.number,
+                    decoration: _dialogInputDecoration('حجم المرفقات الأقصى (ميجا)'),
+                  ),
+                  const SizedBox(height: 12),
                   ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     title: const Text('صلاحيات مخصصة للمستخدم'),
@@ -3496,6 +3506,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                       try {
                         final effectivePermissions =
                             resolvePermissionsForRole();
+                        final maxAttachmentSizeMB = int.tryParse(maxAttachmentSizeMBController.text.trim()) ?? 20;
                         if (user == null) {
                           await userRepository.createUser(
                             username: username,
@@ -3504,6 +3515,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                             role: role,
                             departmentId: departmentId,
                             branchId: branchId,
+                            maxAttachmentSizeMB: maxAttachmentSizeMB,
                             permissions: effectivePermissions,
                           );
                         } else {
@@ -3515,6 +3527,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                             role: role,
                             departmentId: departmentId,
                             branchId: branchId,
+                            maxAttachmentSizeMB: maxAttachmentSizeMB,
                             permissions: effectivePermissions,
                           );
                         }

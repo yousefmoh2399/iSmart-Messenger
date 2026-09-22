@@ -89,6 +89,7 @@ function serializeUser(user, permissions = null) {
     avatarUrl: buildAvatarUrl(user.avatarUrl),
     lastSeen: user.lastSeen,
     lastActiveAt: user.lastActiveAt || null,
+    maxAttachmentSizeMB: user.maxAttachmentSizeMB || 20,
     permissions,
     chatPreferences: {
       themeId: user.chatPreferences?.themeId || "system",
@@ -334,6 +335,7 @@ async function createUser(
       fullName: String(fullName).trim(),
       role: role || "user",
       permissionOverrides: normalizePermissionOverrides(permissions),
+      maxAttachmentSizeMB: maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
       departmentId: resolvedDepartmentId,
       departmentIds: resolvedDepartmentIds,
       branchId: branchAssignment.branchId,
@@ -436,6 +438,10 @@ async function updateUser(actor, userId, payload) {
   if (payload.permissions != null && (actorIsAdmin || actorCanManageUsers)) {
     user.permissionOverrides = normalizePermissionOverrides(payload.permissions);
     incrementTokenVersion(user);
+  }
+
+  if (payload.maxAttachmentSizeMB != null && (actorIsAdmin || actorCanManageUsers)) {
+    user.maxAttachmentSizeMB = Number(payload.maxAttachmentSizeMB) || 20;
   }
 
   if (

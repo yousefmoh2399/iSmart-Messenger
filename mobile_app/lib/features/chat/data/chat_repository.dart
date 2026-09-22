@@ -568,15 +568,56 @@ class ChatRepository {
     final targetFile = await _fullAttachmentCacheFile(message);
     if (await targetFile.exists()) return targetFile.path;
     final downloadUrl = _downloadUrlFor(message.fileUrl!);
-    final response = await _downloadAttachmentBytesWithRestore(
+    
+    await _downloadAttachmentFileWithRestore(
       message,
       downloadUrl,
+      targetFile.path,
       onProgress: onProgress,
     );
 
-    await targetFile.writeAsBytes(response, flush: true);
-
     return targetFile.path;
+  }
+
+  Future<void> _downloadAttachmentFileWithRestore(
+    ChatMessage message,
+    String downloadUrl,
+    String savePath, {
+    void Function(int received, int total)? onProgress,
+    bool skipErrorLog = false,
+  }) async {
+    try {
+      await _apiClient.dio.download(
+        downloadUrl,
+        savePath,
+        options: Options(
+          extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},
+        ),
+        onReceiveProgress: onProgress,
+      );
+    } on DioException catch (error) {
+      if ((error.response?.statusCode ?? 0) != 404) rethrow;
+      await requestAttachmentRehydrate(message, skipErrorLog: skipErrorLog);
+      for (var attempt = 0; attempt < 8; attempt += 1) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+        try {
+          await _apiClient.dio.download(
+            downloadUrl,
+            savePath,
+            options: Options(
+              extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},
+            ),
+            onReceiveProgress: onProgress,
+          );
+          return;
+        } on DioException catch (retryError) {
+          if ((retryError.response?.statusCode ?? 0) != 404 || attempt == 7) {
+            rethrow;
+          }
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<String> saveAttachmentCopy(
