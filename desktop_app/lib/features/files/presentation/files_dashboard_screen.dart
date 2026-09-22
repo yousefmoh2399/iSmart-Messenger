@@ -24,9 +24,6 @@ import '../../../shared/widgets/app_loading_placeholders.dart';
 import '../../../shared/widgets/button_loading_indicator.dart';
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
-import '../../chat/presentation/chat_dashboard_screen.dart';
-import '../../profile/presentation/profile_screen.dart';
-import '../../servers/presentation/servers_screen.dart';
 import '../../updates/presentation/update_center_screen.dart';
 
 class FilesDashboardScreen extends ConsumerStatefulWidget {

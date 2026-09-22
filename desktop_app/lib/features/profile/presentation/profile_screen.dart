@@ -12,9 +12,6 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/safe_network_avatar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
-import '../../chat/presentation/chat_dashboard_screen.dart';
-import '../../files/presentation/files_dashboard_screen.dart';
-import '../../servers/presentation/servers_screen.dart';
 import '../../updates/presentation/update_center_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {

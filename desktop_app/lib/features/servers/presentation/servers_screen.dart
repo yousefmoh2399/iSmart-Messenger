@@ -18,9 +18,6 @@ import '../../../shared/providers/providers.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../chat/data/chat_socket_service.dart';
-import '../../chat/presentation/chat_dashboard_screen.dart';
-import '../../files/presentation/files_dashboard_screen.dart';
-import '../../profile/presentation/profile_screen.dart';
 import '../../updates/presentation/update_center_screen.dart';
 
 bool _webViewEnvironmentReady = false;

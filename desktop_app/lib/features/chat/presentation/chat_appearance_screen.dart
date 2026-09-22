@@ -4,12 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
-import '../../files/presentation/files_dashboard_screen.dart';
-import '../../profile/presentation/profile_screen.dart';
-import '../../servers/presentation/servers_screen.dart';
 import '../../updates/presentation/update_center_screen.dart';
 import 'chat_appearance.dart';
-import 'chat_dashboard_screen.dart';
 
 class ChatAppearanceScreen extends ConsumerWidget {
   const ChatAppearanceScreen({super.key});
