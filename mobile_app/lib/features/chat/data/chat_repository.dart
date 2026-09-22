@@ -619,29 +619,66 @@ class ChatRepository {
     const maxAttempts = 5;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
-      // Delete partial file before each attempt to avoid corruption
-      try {
-        final partial = File(savePath);
-        if (await partial.exists()) await partial.delete();
-      } catch (_) {}
+      int downloadedBytes = 0;
+      IOSink? fileSink;
 
       try {
-        // Fetch fresh token directly from the AuthRepository
+        final partial = File(savePath);
+        if (await partial.exists()) {
+          downloadedBytes = await partial.length();
+        }
+
         final token = await _authRepository?.getToken();
         final authHeader = token != null ? 'Bearer $token' : null;
 
-        await _getDownloadDio().download(
+        final response = await _getDownloadDio().get<ResponseBody>(
           downloadUrl,
-          savePath,
           options: Options(
+            responseType: ResponseType.stream,
             headers: {
               if (authHeader != null) 'Authorization': authHeader,
+              if (downloadedBytes > 0) 'Range': 'bytes=$downloadedBytes-',
             },
           ),
-          onReceiveProgress: onProgress,
         );
+
+        // If server ignored the Range header and sent 200 instead of 206, reset file
+        if (response.statusCode == 200 && downloadedBytes > 0) {
+          downloadedBytes = 0;
+          if (await partial.exists()) await partial.delete();
+        }
+
+        fileSink = partial.openWrite(
+          mode: downloadedBytes > 0 ? FileMode.append : FileMode.write,
+        );
+
+        int totalBytes = downloadedBytes;
+        final contentLengthHeader = response.headers.value(Headers.contentLengthHeader);
+        if (contentLengthHeader != null) {
+          totalBytes += int.tryParse(contentLengthHeader) ?? 0;
+        }
+
+        final stream = response.data?.stream;
+        if (stream == null) throw Exception('No data stream');
+
+        await for (final chunk in stream) {
+          fileSink.add(chunk);
+          downloadedBytes += chunk.length;
+          if (onProgress != null && totalBytes > 0) {
+            onProgress(downloadedBytes, totalBytes);
+          }
+        }
+
+        await fileSink.flush();
+        await fileSink.close();
+        fileSink = null;
         return; // success
       } on DioException catch (error) {
+        if (fileSink != null) {
+          await fileSink.flush();
+          await fileSink.close();
+        }
+        
         final statusCode = error.response?.statusCode ?? 0;
 
         // 404 → file not on server, request rehydration then retry
@@ -659,6 +696,16 @@ class ChatRepository {
           rethrow;
         }
 
+        // 416 → partial file is invalid/larger than server file
+        if (statusCode == 416) {
+          try {
+            if (await File(savePath).exists()) await File(savePath).delete();
+          } catch (_) {}
+          if (attempt < maxAttempts - 1) {
+            continue;
+          }
+        }
+
         // Connection reset / closed mid-download → retry automatically
         final isConnectionReset =
             error.type == DioExceptionType.unknown &&
@@ -666,7 +713,8 @@ class ChatRepository {
              error.error?.toString().contains('Connection closed') == true ||
              error.error?.toString().contains('Connection reset') == true ||
              error.error?.toString().contains('ECONNABORTED') == true ||
-             error.error?.toString().contains('SocketException') == true);
+             error.error?.toString().contains('SocketException') == true ||
+             error.error?.toString().contains('Software caused connection abort') == true);
 
         if (isConnectionReset && attempt < maxAttempts - 1) {
           await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
