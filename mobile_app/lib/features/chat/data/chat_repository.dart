@@ -579,6 +579,11 @@ class ChatRepository {
     return targetFile.path;
   }
 
+  Future<bool> isAttachmentCached(ChatMessage message) async {
+    final targetFile = await _fullAttachmentCacheFile(message);
+    return targetFile.exists();
+  }
+
   Future<void> _downloadAttachmentFileWithRestore(
     ChatMessage message,
     String downloadUrl,

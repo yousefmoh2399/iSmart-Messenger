@@ -108,9 +108,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   bool _isUploadingAttachment = false;
   double _uploadProgress = 0;
   String? _uploadingFileName;
-  bool _isDownloadingAttachment = false;
-  double _downloadProgress = 0;
-  String? _downloadingFileName;
+
+  // Per-message download state: messageId -> {progress: double, fileName: String}
+  final Map<String, _MessageDownloadState> _downloadStates = {};
+
+  bool get _isDownloadingAttachment => _downloadStates.isNotEmpty;
+  double get _downloadProgress => _downloadStates.isEmpty
+      ? 0
+      : _downloadStates.values.first.progress;
+  String? get _downloadingFileName => _downloadStates.isEmpty
+      ? null
+      : _downloadStates.values.first.fileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
   bool _isRecordingVoice = false;
@@ -1953,11 +1961,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
     try {
-      if (mounted) {
+      // Check if file is already cached locally — no spinner needed
+      final isCached = await ref
+          .read(chatRepositoryProvider)
+          .isAttachmentCached(message);
+
+      // Register download state for this message only if we actually need to download
+      if (!isCached && mounted) {
         setState(() {
-          _isDownloadingAttachment = true;
-          _downloadProgress = 0;
-          _downloadingFileName = message.fileName ?? 'مرفق';
+          _downloadStates[message.id] = _MessageDownloadState(
+            fileName: message.fileName ?? 'مرفق',
+            progress: 0,
+          );
         });
       }
       final localPath = await ref
@@ -1969,9 +1984,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 return;
               }
               setState(() {
-                _downloadProgress = total <= 0
-                    ? 0
-                    : (received / total).clamp(0, 1).toDouble();
+                _downloadStates[message.id] = _MessageDownloadState(
+                  fileName: message.fileName ?? 'مرفق',
+                  progress: total <= 0
+                      ? 0
+                      : (received / total).clamp(0, 1).toDouble(),
+                );
               });
             },
           );
@@ -2019,9 +2037,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     } finally {
       if (mounted) {
         setState(() {
-          _isDownloadingAttachment = false;
-          _downloadProgress = 0;
-          _downloadingFileName = null;
+          _downloadStates.remove(message.id);
         });
       }
     }
@@ -4953,13 +4969,26 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                                   color: subTextColor,
                                                                                                 ),
                                                                                               ),
-                                                                                            Icon(
-                                                                                              message.attachmentDownloadAllowed
-                                                                                                  ? Icons.download_rounded
-                                                                                                  : Icons.lock_rounded,
-                                                                                              size: 18,
-                                                                                              color: subTextColor,
-                                                                                            ),
+                                                                                            if (_downloadStates.containsKey(message.id))
+                                                                                              SizedBox(
+                                                                                                width: 18,
+                                                                                                height: 18,
+                                                                                                child: CircularProgressIndicator(
+                                                                                                  value: _downloadStates[message.id]!.progress > 0
+                                                                                                      ? _downloadStates[message.id]!.progress
+                                                                                                      : null,
+                                                                                                  strokeWidth: 2,
+                                                                                                  color: subTextColor,
+                                                                                                ),
+                                                                                              )
+                                                                                            else
+                                                                                              Icon(
+                                                                                                message.attachmentDownloadAllowed
+                                                                                                    ? Icons.download_rounded
+                                                                                                    : Icons.lock_rounded,
+                                                                                                size: 18,
+                                                                                                color: subTextColor,
+                                                                                              ),
                                                                                           ],
                                                                                         ),
                                                                                       ),
@@ -5241,11 +5270,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       _editingMessage = null;
                     }),
                   ),
-                if (_isDownloadingAttachment)
-                  _DownloadBanner(
-                    colorScheme: colorScheme,
-                    fileName: _downloadingFileName ?? 'مرفق',
-                    progress: _downloadProgress,
+                if (_downloadStates.isNotEmpty)
+                  Column(
+                    children: _downloadStates.entries.map((entry) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: _DownloadBanner(
+                          key: ValueKey(entry.key),
+                          colorScheme: colorScheme,
+                          fileName: entry.value.fileName,
+                          progress: entry.value.progress,
+                        ),
+                      );
+                    }).toList(),
                   ),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 180),
@@ -6004,8 +6041,15 @@ class _ComposerBanner extends StatelessWidget {
   }
 }
 
+class _MessageDownloadState {
+  const _MessageDownloadState({required this.fileName, required this.progress});
+  final String fileName;
+  final double progress;
+}
+
 class _DownloadBanner extends StatelessWidget {
   const _DownloadBanner({
+    super.key,
     required this.colorScheme,
     required this.fileName,
     required this.progress,
