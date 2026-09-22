@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs").promises;
 
 const { fileExists, resolveStoredUploadPath } = require("./storage-paths");
 
@@ -31,6 +32,14 @@ async function sendUploadFile(
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Timing-Allow-Origin", "*");
+
+  // Set Content-Length so clients can show accurate download progress
+  try {
+    const { size } = await fs.stat(resolvedPath);
+    if (size > 0) {
+      res.setHeader("Content-Length", String(size));
+    }
+  } catch (_) {}
 
   const resolvedContentType = contentType || inferContentType(resolvedPath);
   if (resolvedContentType) {

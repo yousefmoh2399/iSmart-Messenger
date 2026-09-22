@@ -396,6 +396,7 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(localMediaStorageServiceProvider),
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
+    authRepository: ref.watch(authRepositoryProvider),
   );
 });
 

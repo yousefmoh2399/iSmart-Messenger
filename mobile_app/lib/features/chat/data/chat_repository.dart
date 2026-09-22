@@ -10,11 +10,17 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/network/api_client.dart';
 import '../../../core/settings/user_preferences.dart';
+import '../../../features/auth/data/auth_repository.dart';
 import '../../../shared/services/local_media_storage_service.dart';
 import '../models/chat_models.dart';
 
 class ChatRepository {
-  ChatRepository(this._apiClient, this._localStorage, this._preferences);
+  ChatRepository(
+    this._apiClient,
+    this._localStorage,
+    this._preferences, {
+    AuthRepository? authRepository,
+  }) : _authRepository = authRepository;
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   static const int _maxConcurrentPreviewDownloads = 3;
@@ -28,6 +34,25 @@ class ChatRepository {
   final ApiClient _apiClient;
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
+  final AuthRepository? _authRepository;
+
+  /// Dedicated Dio instance for file downloads — no timeouts so large files
+  /// never get aborted mid-transfer. The auth token is copied per-request.
+  Dio? _downloadDio;
+
+  Dio _getDownloadDio() {
+    if (_downloadDio != null) return _downloadDio!;
+    _downloadDio = Dio(
+      BaseOptions(
+        // No connect/receive/send timeout — downloads must never be aborted
+        // by timeout. The server controls the flow via TCP backpressure.
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: Duration.zero, // unlimited
+        sendTimeout: Duration.zero,    // unlimited
+      ),
+    );
+    return _downloadDio!;
+  }
 
   List<Map<String, dynamic>> _extractList(
     Map<String, dynamic>? data,
@@ -591,37 +616,65 @@ class ChatRepository {
     void Function(int received, int total)? onProgress,
     bool skipErrorLog = false,
   }) async {
-    try {
-      await _apiClient.dio.download(
-        downloadUrl,
-        savePath,
-        options: Options(
-          extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},
-        ),
-        onReceiveProgress: onProgress,
-      );
-    } on DioException catch (error) {
-      if ((error.response?.statusCode ?? 0) != 404) rethrow;
-      await requestAttachmentRehydrate(message, skipErrorLog: skipErrorLog);
-      for (var attempt = 0; attempt < 8; attempt += 1) {
-        await Future<void>.delayed(const Duration(seconds: 2));
-        try {
-          await _apiClient.dio.download(
-            downloadUrl,
-            savePath,
-            options: Options(
-              extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},
-            ),
-            onReceiveProgress: onProgress,
-          );
-          return;
-        } on DioException catch (retryError) {
-          if ((retryError.response?.statusCode ?? 0) != 404 || attempt == 7) {
-            rethrow;
+    const maxAttempts = 5;
+
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      // Delete partial file before each attempt to avoid corruption
+      try {
+        final partial = File(savePath);
+        if (await partial.exists()) await partial.delete();
+      } catch (_) {}
+
+      try {
+        // Fetch fresh token directly from the AuthRepository
+        final token = await _authRepository?.getToken();
+        final authHeader = token != null ? 'Bearer $token' : null;
+
+        await _getDownloadDio().download(
+          downloadUrl,
+          savePath,
+          options: Options(
+            headers: {
+              if (authHeader != null) 'Authorization': authHeader,
+            },
+          ),
+          onReceiveProgress: onProgress,
+        );
+        return; // success
+      } on DioException catch (error) {
+        final statusCode = error.response?.statusCode ?? 0;
+
+        // 404 → file not on server, request rehydration then retry
+        if (statusCode == 404) {
+          if (attempt == 0) {
+            await requestAttachmentRehydrate(
+              message,
+              skipErrorLog: skipErrorLog,
+            );
           }
+          if (attempt < maxAttempts - 1) {
+            await Future<void>.delayed(const Duration(seconds: 3));
+            continue;
+          }
+          rethrow;
         }
+
+        // Connection reset / closed mid-download → retry automatically
+        final isConnectionReset =
+            error.type == DioExceptionType.unknown &&
+            (error.error is HttpException ||
+             error.error?.toString().contains('Connection closed') == true ||
+             error.error?.toString().contains('Connection reset') == true ||
+             error.error?.toString().contains('ECONNABORTED') == true ||
+             error.error?.toString().contains('SocketException') == true);
+
+        if (isConnectionReset && attempt < maxAttempts - 1) {
+          await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
+          continue;
+        }
+
+        rethrow;
       }
-      rethrow;
     }
   }
 
