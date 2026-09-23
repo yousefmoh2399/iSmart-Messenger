@@ -68,7 +68,40 @@ async function ensureBootstrapAdmins() {
     forced: bootstrapAdminForce,
   });
 
+  // Clear the plain-text password from the config file on disk (security).
+  // The account is already created in MongoDB with a bcrypt hash.
+  _clearBootstrapPasswordFromConfig();
+
   return { enabled: true, created, updated };
+}
+
+/**
+ * Removes BOOTSTRAP_ADMIN*_PASSWORD fields from the JSON config file
+ * that the installer writes (ISMART_CONFIG_PATH or --config path).
+ * Silently no-ops if the file is not found or not writable.
+ */
+function _clearBootstrapPasswordFromConfig() {
+  try {
+    const fs   = require("fs");
+    const path = require("path");
+    const cfgPath = process.env.ISMART_CONFIG_PATH || "";
+    if (!cfgPath || !fs.existsSync(cfgPath)) return;
+    const raw  = fs.readFileSync(cfgPath, "utf8");
+    const obj  = JSON.parse(raw);
+    let changed = false;
+    for (const key of Object.keys(obj)) {
+      if (/BOOTSTRAP_ADMIN.*_PASSWORD/.test(key) || key === "BOOTSTRAP_ADMIN_PASSWORD") {
+        delete obj[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      fs.writeFileSync(cfgPath, JSON.stringify(obj, null, 2), "utf8");
+      logger.info("bootstrap_admin.password_cleared_from_config", { path: cfgPath });
+    }
+  } catch (_) {
+    // Non-critical — don't crash the server
+  }
 }
 
 module.exports = {

@@ -528,9 +528,12 @@ function scheduleBackupWindows(backupHour, backupDir) {
   return result.ok;
 }
 
-function scheduleBackupLinux(backupHour, backupDir) {
+function scheduleBackupLinux(backupHour, backupSaveDir, dataDir) {
   const cronFile = "/etc/cron.d/ismart-backup";
-  const logFile  = "/var/lib/ismart/logs/backup.log";
+  // Use the actual data dir for logs, not a hardcoded path
+  const logFile  = dataDir
+    ? `${dataDir}/logs/backup.log`
+    : "/var/lib/ismart/logs/backup.log";
   const content  = [
     `# iSmart Backend — daily backup at ${backupHour}:00`,
     `0 ${backupHour} * * * root ${EXE_PATH} --backup >> ${logFile} 2>&1`,
@@ -556,16 +559,25 @@ function installWindowsService(configPath) {
   const logDir      = path.join(path.dirname(configPath), "logs");
   fs.mkdirSync(logDir, { recursive: true });
 
-  const escapedExe    = EXE_PATH.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const escapedConfig = configPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const binPathValue  = `${EXE_PATH} --config "${configPath}"`;
+  // sc.exe binPath= format: the ENTIRE value is one double-quoted string.
+  // Inner quotes must be escaped as \".
+  // Format:  sc.exe create ... binPath= "\"C:\path\exe\" --config \"C:\path\cfg\""
+  const exeQ    = EXE_PATH.replace(/"/g, '\\"');
+  const cfgQ    = configPath.replace(/"/g, '\\"');
+  const binPath = `"${exeQ}" --config "${cfgQ}"`;
 
-  run(`sc.exe stop ${serviceName}`);
-  run(`sc.exe delete ${serviceName}`);
+  run(`sc.exe stop "${serviceName}"`);
+  run(`sc.exe delete "${serviceName}"`);
+
+  // Wait asynchronously (caller must be async — we use spawnSync here so it's fine
+  // to do a short synchronous sleep via a tight Date.now loop ONLY for the
+  // 3-second grace period Windows needs after sc delete before sc create).
   const deadline = Date.now() + 3000;
-  while (Date.now() < deadline) { /* wait */ }
+  while (Date.now() < deadline) { /* Windows needs this grace period */ }
 
-  const create = run(`sc.exe create "${serviceName}" binPath= "${binPathValue}" start= auto DisplayName= "${displayName}"`);
+  // The binPath= argument to sc.exe must be wrapped in an EXTRA set of quotes
+  // because sc.exe strips one level of quoting from its argument.
+  const create = run(`sc.exe create "${serviceName}" binPath= "${binPath}" start= auto DisplayName= "${displayName}"`);
   if (!create.ok) throw new Error(`sc.exe create failed: ${create.stderr}`);
 
   run(`sc.exe description "${serviceName}" "${description}"`);
@@ -576,6 +588,7 @@ function installWindowsService(configPath) {
 
   return serviceName;
 }
+
 
 function installLinuxService(configPath, dataDir) {
   const logDir = path.join(dataDir, "logs");
@@ -969,7 +982,7 @@ async function runFreshInstall() {
 
   // Schedule backup
   if (IS_WIN)        scheduleBackupWindows(backupHour, backupSaveDir);
-  else if (IS_LINUX) scheduleBackupLinux(backupHour, backupSaveDir);
+  else if (IS_LINUX) scheduleBackupLinux(backupHour, backupSaveDir, dataDir);
 
   // ── Step 7: Doctor check + Admin verification ───────────────────────────
   step(7, TOTAL, "Running health check and verifying admin account...");
@@ -1151,7 +1164,7 @@ async function runRestoreFlow() {
 
   // Schedule backup
   if (IS_WIN)        scheduleBackupWindows(backupHour, backupSaveDir);
-  else if (IS_LINUX) scheduleBackupLinux(backupHour, backupSaveDir);
+  else if (IS_LINUX) scheduleBackupLinux(backupHour, backupSaveDir, dataDir);
 
   // Doctor
   await sleep(3000);

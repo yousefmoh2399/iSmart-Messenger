@@ -129,8 +129,11 @@ if (args.includes("--install") || args.includes("--uninstall")) {
 
 } else if (args.includes("--doctor")) {
   const { runDoctor } = require("./installer");
-  // Try to load config for doctor
-  const configPath = process.env.ISMART_CONFIG_PATH
+  // Config was already merged into process.env at the top of this file
+  // via the --config arg handler. Also check default paths as fallback.
+  const configArgI  = args.indexOf("--config");
+  const configPath  = (configArgI !== -1 && args[configArgI + 1])
+    || process.env.ISMART_CONFIG_PATH
     || (process.platform === "win32" ? "C:\\ProgramData\\iSmart\\config.json" : "/etc/ismart/config.json");
   let cfg = null;
   try { cfg = JSON.parse(require("fs").readFileSync(configPath, "utf8")); } catch (_) {}
