@@ -116,15 +116,28 @@ process.on("unhandledRejection", (reason) => {
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 if (args.includes("--install") || args.includes("--uninstall")) {
-  // Delegate to the installer module
   const { runInstaller } = require("./installer");
   runInstaller(args.includes("--uninstall"))
     .then((code) => process.exit(code ?? 0))
-    .catch((e) => {
-      // eslint-disable-next-line no-console
-      console.error("Installation failed:", e.message);
-      process.exit(1);
-    });
+    .catch((e) => { console.error("Failed:", e.message); process.exit(1); });
+
+} else if (args.includes("--backup")) {
+  const { runStandaloneBackup } = require("./installer");
+  runStandaloneBackup()
+    .then(() => process.exit(0))
+    .catch((e) => { console.error("Backup failed:", e.message); process.exit(1); });
+
+} else if (args.includes("--doctor")) {
+  const { runDoctor } = require("./installer");
+  // Try to load config for doctor
+  const configPath = process.env.ISMART_CONFIG_PATH
+    || (process.platform === "win32" ? "C:\\ProgramData\\iSmart\\config.json" : "/etc/ismart/config.json");
+  let cfg = null;
+  try { cfg = JSON.parse(require("fs").readFileSync(configPath, "utf8")); } catch (_) {}
+  runDoctor(cfg)
+    .then(() => process.exit(0))
+    .catch((e) => { console.error("Doctor failed:", e.message); process.exit(1); });
+
 } else {
   // Normal server mode
   startServer().catch((error) => {
