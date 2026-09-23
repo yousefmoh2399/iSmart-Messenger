@@ -774,6 +774,37 @@ function checkDirWritable(dirPath) {
   } catch (_) { return false; }
 }
 
+/**
+ * Verifies the admin account was created by trying to log in via the API.
+ * Returns true if login succeeds, false otherwise.
+ */
+async function verifyAdminAccount(port, username, password) {
+  return new Promise((resolve) => {
+    const http = require("http");
+    const body = JSON.stringify({ username, password });
+    const options = {
+      hostname: "127.0.0.1",
+      port:     port,
+      path:     "/api/auth/login",
+      method:   "POST",
+      headers:  {
+        "Content-Type":   "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+    const req = http.request(options, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end",  ()    => resolve(res.statusCode === 200));
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(5000, () => { req.destroy(); resolve(false); });
+    req.write(body);
+    req.end();
+  });
+}
+
+
 // ─── Write config helper ──────────────────────────────────────────────────────
 function writeConfig(configPath, config) {
   const dir = path.dirname(configPath);
@@ -851,11 +882,30 @@ async function runFreshInstall() {
   const defaultMongoUri = "mongodb://127.0.0.1:27017/workplace_documents";
   const mongoUri = await prompt("MongoDB URI", defaultMongoUri);
 
-  const adminUser = await prompt("First admin username (leave empty to skip)", "");
-  let adminPass = "";
-  if (adminUser) {
-    adminPass = await promptSecret("First admin password");
+  log("");
+  log(`  ${C.bold}Admin Account${C.reset}`);
+  log(`  ${C.dim}This account will be used to log in to iSmart for the first time.${C.reset}`);
+  log(`  ${C.dim}Username: min 4 characters | Password: min 8 characters${C.reset}`);
+  log("");
+
+  let adminUser = "";
+  while (adminUser.length < 4) {
+    adminUser = await prompt("Admin username");
+    if (adminUser.length < 4) warn("Username must be at least 4 characters.");
   }
+
+  let adminPass = "";
+  while (adminPass.length < 8) {
+    adminPass = await promptSecret("Admin password");
+    if (adminPass.length < 8) warn("Password must be at least 8 characters.");
+  }
+
+  let adminPassConfirm = "";
+  while (adminPassConfirm !== adminPass) {
+    adminPassConfirm = await promptSecret("Confirm admin password");
+    if (adminPassConfirm !== adminPass) warn("Passwords do not match. Try again.");
+  }
+  ok("Admin credentials accepted.");
 
   // ── Step 5: Backup schedule ─────────────────────────────────────────────
   step(5, TOTAL, "Configure automatic backup...");
@@ -921,10 +971,40 @@ async function runFreshInstall() {
   if (IS_WIN)        scheduleBackupWindows(backupHour, backupSaveDir);
   else if (IS_LINUX) scheduleBackupLinux(backupHour, backupSaveDir);
 
-  // ── Step 7: Doctor check ────────────────────────────────────────────────
-  step(7, TOTAL, "Running health check...");
-  await sleep(3000); // Give service time to start
+  // ── Step 7: Doctor check + Admin verification ───────────────────────────
+  step(7, TOTAL, "Running health check and verifying admin account...");
+  info("Waiting for service to start...");
+
+  // Wait up to 15 seconds for the API to respond
+  const apiPort = parseInt(port, 10);
+  let apiReady  = false;
+  for (let i = 0; i < 15; i++) {
+    await sleep(1000);
+    apiReady = await isPortOpen("127.0.0.1", apiPort);
+    if (apiReady) break;
+    process.stdout.write(".");
+  }
+  if (!apiReady) process.stdout.write("\n");
+
   await runDoctor(config);
+
+  // Verify admin account was created by logging in
+  log("");
+  info("Verifying admin account...");
+  let adminVerified = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await sleep(1000);
+    adminVerified = await verifyAdminAccount(apiPort, adminUser, adminPass);
+    if (adminVerified) break;
+  }
+
+  if (adminVerified) {
+    ok(`Admin account verified: "${adminUser}" can log in successfully.`);
+  } else {
+    warn(`Could not verify admin login — service may still be starting.`);
+    warn(`Try logging in with username "${adminUser}" in a few seconds.`);
+    warn(`If login fails, run: ${IS_WIN ? `"${EXE_PATH}" --doctor` : `sudo ${EXE_PATH} --doctor`}`);
+  }
 
   // ── Done ─────────────────────────────────────────────────────────────────
   log("");
@@ -933,6 +1013,7 @@ async function runFreshInstall() {
   log(`${C.green}${"═".repeat(60)}${C.reset}`);
   log("");
   log(`  ${C.bold}API URL       :${C.reset} http://localhost:${port}`);
+  log(`  ${C.bold}Admin login   :${C.reset} ${C.cyan}${adminUser}${C.reset} ${adminVerified ? C.green + "✓ verified" + C.reset : C.yellow + "(verify manually)" + C.reset}`);
   log(`  ${C.bold}Data dir      :${C.reset} ${dataDir}`);
   log(`  ${C.bold}Uploads dir   :${C.reset} ${uploadsDir}`);
   log(`  ${C.bold}Backup dir    :${C.reset} ${backupSaveDir}`);
@@ -940,11 +1021,11 @@ async function runFreshInstall() {
   log(`  ${C.bold}Backup time   :${C.reset} Daily at ${backupHour}:00 AM`);
   log("");
   log(`  ${C.bold}Manual backup command:${C.reset}`);
-  if (IS_WIN)      log(`    ${C.cyan}"${EXE_PATH}" --backup${C.reset}`);
+  if (IS_WIN)        log(`    ${C.cyan}"${EXE_PATH}" --backup${C.reset}`);
   else if (IS_LINUX) log(`    ${C.cyan}sudo ${EXE_PATH} --backup${C.reset}`);
   log("");
   log(`  ${C.bold}Doctor / health check command:${C.reset}`);
-  if (IS_WIN)      log(`    ${C.cyan}"${EXE_PATH}" --doctor${C.reset}`);
+  if (IS_WIN)        log(`    ${C.cyan}"${EXE_PATH}" --doctor${C.reset}`);
   else if (IS_LINUX) log(`    ${C.cyan}sudo ${EXE_PATH} --doctor${C.reset}`);
   log("");
 
