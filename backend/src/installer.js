@@ -144,29 +144,161 @@ function promptChoice(question, choices) {
 async function validateAndPrepareDir(dirPath, label) {
   const resolved = path.resolve(dirPath);
   log("");
-  info(`Checking ${label}: ${resolved}`);
+  const alreadyExists = fs.existsSync(resolved);
 
-  // Try to create if not exists
+  // Try to create all intermediate directories (recursive)
   try {
     fs.mkdirSync(resolved, { recursive: true });
   } catch (e) {
-    fail(`Cannot create directory: ${e.message}`);
+    fail(`Cannot create directory "${resolved}": ${e.message}`);
     return { ok: false, resolved };
   }
 
-  // Check write permission
+  // Verify write permission
   const testFile = path.join(resolved, ".ismart_write_test");
   try {
     fs.writeFileSync(testFile, "test");
     fs.unlinkSync(testFile);
-    ok(`${label} is valid and writable: ${resolved}`);
+    if (alreadyExists) {
+      ok(`${label}: ${resolved}  ${C.dim}(exists, writable)${C.reset}`);
+    } else {
+      ok(`${label}: ${resolved}  ${C.green}(created)${C.reset}`);
+    }
     return { ok: true, resolved };
   } catch (e) {
-    fail(`Directory is not writable: ${e.message}`);
+    fail(`"${resolved}" is not writable: ${e.message}`);
     return { ok: false, resolved };
   }
 }
 
+/**
+ * Returns available Windows drives (C, D, E…) by probing common letters.
+ */
+function getWindowsDrives() {
+  if (!IS_WIN) return [];
+  return ["C", "D", "E", "F", "G"].filter((d) => {
+    try { fs.accessSync(d + ":\\"); return true; } catch { return false; }
+  });
+}
+
+/**
+ * Returns suggested paths for a given role.
+ * role: "data" | "uploads" | "backups" | "releases" | "backup_save"
+ * parentDir: already chosen parent directory (used to compute sub-suggestions)
+ */
+function getPathSuggestions(role, parentDir = null) {
+  if (IS_WIN) {
+    const drives   = getWindowsDrives();
+    const primary  = drives[0] || "C";        // always C
+    const secondary = drives[1] || primary;   // D if exists, else C
+
+    switch (role) {
+      case "data":
+        return [
+          `C:\\ProgramData\\iSmart`,
+          drives.length > 1 ? `${secondary}:\\iSmart` : null,
+          `C:\\iSmart`,
+        ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+
+      case "uploads":
+        return parentDir
+          ? [`${parentDir}\\uploads`, `${parentDir}\\files`]
+          : [`C:\\ProgramData\\iSmart\\uploads`];
+
+      case "backups":
+        return parentDir
+          ? [`${parentDir}\\backups`]
+          : [`C:\\ProgramData\\iSmart\\backups`];
+
+      case "releases":
+        return parentDir
+          ? [`${parentDir}\\releases`, `${parentDir}\\updates`]
+          : [`C:\\ProgramData\\iSmart\\releases`];
+
+      case "backup_save":
+        return [
+          parentDir ? `${parentDir}\\backups` : `C:\\ProgramData\\iSmart\\backups`,
+          drives.length > 1 ? `${secondary}:\\iSmart\\backups` : null,
+          `\\\\SERVER\\Backups\\iSmart  ${C.dim}(network share example)${C.reset}`,
+        ].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+
+      default:
+        return parentDir ? [`${parentDir}\\${role}`] : [`C:\\ProgramData\\iSmart\\${role}`];
+    }
+  } else {
+    // Linux
+    switch (role) {
+      case "data":
+        return ["/var/lib/ismart", "/opt/ismart", "/home/ismart/data"];
+
+      case "uploads":
+        return parentDir
+          ? [`${parentDir}/uploads`, `${parentDir}/files`]
+          : ["/var/lib/ismart/uploads"];
+
+      case "backups":
+        return parentDir
+          ? [`${parentDir}/backups`]
+          : ["/var/lib/ismart/backups"];
+
+      case "releases":
+        return parentDir
+          ? [`${parentDir}/releases`, `${parentDir}/updates`]
+          : ["/var/lib/ismart/releases"];
+
+      case "backup_save":
+        return [
+          parentDir ? `${parentDir}/backups` : "/var/lib/ismart/backups",
+          "/mnt/nas/ismart-backups  " + C.dim + "(network mount example)" + C.reset,
+          "/media/backup/ismart",
+        ].filter(Boolean);
+
+      default:
+        return parentDir ? [`${parentDir}/${role}`] : [`/var/lib/ismart/${role}`];
+    }
+  }
+}
+
+/**
+ * Prompt for a directory with numbered suggestions.
+ * User can type a path directly OR enter a number to choose a suggestion.
+ */
+async function promptValidatedDirWithSuggestions(label, role, parentDir = null) {
+  const suggestions = getPathSuggestions(role, parentDir);
+
+  log("");
+  log(`  ${C.bold}${label}${C.reset}`);
+  log(`  ${C.dim}Suggested paths (enter number to choose, or type your own):${C.reset}`);
+  suggestions.forEach((s, i) => {
+    // Strip inline color codes for fs.existsSync check
+    const cleanPath = s.replace(/\x1b\[[0-9;]*m/g, "").split(/\s+/)[0];
+    const exists = fs.existsSync(cleanPath);
+    const tag    = exists
+      ? `${C.dim}[exists]${C.reset}`
+      : `${C.dim}[will be created]${C.reset}`;
+    log(`    ${C.cyan}${i + 1})${C.reset}  ${s}  ${tag}`);
+  });
+  log("");
+
+  while (true) {
+    const input = await prompt(`Path or number (1–${suggestions.length})`, "1");
+    let chosen  = input.trim();
+
+    const num = parseInt(input, 10);
+    if (!isNaN(num) && num >= 1 && num <= suggestions.length) {
+      // Strip any color codes and trailing notes from suggestion
+      chosen = suggestions[num - 1].replace(/\x1b\[[0-9;]*m/g, "").split(/\s+/)[0];
+    }
+
+    if (!chosen) { warn("Please enter a path."); continue; }
+
+    const result = await validateAndPrepareDir(chosen, label);
+    if (result.ok) return result.resolved;
+    warn("Please enter a valid, writable directory path.");
+  }
+}
+
+/** Keep old promptValidatedDir for backward compat (restore flow) */
 async function promptValidatedDir(question, defaultValue, label) {
   while (true) {
     const input = await prompt(question, defaultValue);
@@ -175,6 +307,8 @@ async function promptValidatedDir(question, defaultValue, label) {
     warn("Please enter a valid, writable directory path.");
   }
 }
+
+
 
 // ─── Process utilities ────────────────────────────────────────────────────────
 function run(cmd, opts = {}) {
@@ -878,14 +1012,12 @@ async function runFreshInstall() {
   // ── Step 3: Data paths ──────────────────────────────────────────────────
   step(3, TOTAL, "Configure data directories...");
   log("  These directories will store chat files, documents, and backups.");
-  log("  They should be on a disk with enough free space.\n");
+  log("  Enter a number to pick a suggestion, or type your own full path.\n");
 
-  const defaultDataDir = IS_WIN ? "C:\\ProgramData\\iSmart" : "/var/lib/ismart";
-
-  const dataDir    = await promptValidatedDir("Main data directory", defaultDataDir, "Data directory");
-  const uploadsDir = await promptValidatedDir("Chat & uploads directory", path.join(dataDir, "uploads"), "Uploads directory");
-  const backupsDir = await promptValidatedDir("Backups directory", path.join(dataDir, "backups"), "Backups directory");
-  const releasesDir= await promptValidatedDir("App updates directory", path.join(dataDir, "releases"), "Releases directory");
+  const dataDir    = await promptValidatedDirWithSuggestions("Main data directory", "data");
+  const uploadsDir = await promptValidatedDirWithSuggestions("Chat & uploads directory", "uploads", dataDir);
+  const backupsDir = await promptValidatedDirWithSuggestions("Backups directory", "backups", dataDir);
+  const releasesDir= await promptValidatedDirWithSuggestions("App updates / releases directory", "releases", dataDir);
 
   // ── Step 4: Connection & credentials ───────────────────────────────────
   step(4, TOTAL, "Configure connection settings...");
@@ -935,11 +1067,11 @@ async function runFreshInstall() {
 
   log("");
   info("Where should backups be saved?");
-  info("Tip: Use a network share path (e.g. \\\\NAS\\Backups\\iSmart) for off-server backups.");
-  const backupSaveDir = await promptValidatedDir(
+  info("You can use a network share, external drive, or local folder.");
+  const backupSaveDir = await promptValidatedDirWithSuggestions(
     "Backup save directory",
-    backupsDir,
-    "Backup save directory"
+    "backup_save",
+    dataDir
   );
 
   // ── Step 6: Write config & install service ──────────────────────────────
@@ -1231,6 +1363,120 @@ async function runUninstaller() {
   return 0;
 }
 
+// ─── Update flow (upgrade existing installation) ──────────────────────────────
+async function runUpdateFlow() {
+  title("Update iSmart Backend — Upgrade Existing Installation");
+
+  // Privileges
+  if (IS_WIN) {
+    const adminCheck = run("net session >nul 2>&1 && echo YES");
+    if (!adminCheck.stdout.includes("YES")) {
+      fail("Must be run as Administrator."); process.exit(1);
+    }
+    ok("Running as Administrator.");
+  } else if (IS_LINUX) {
+    if (process.getuid && process.getuid() !== 0) {
+      fail("Must be run as root (sudo)."); process.exit(1);
+    }
+    ok("Running as root.");
+  }
+
+  // Locate existing config
+  const defaultConfigPath = IS_WIN
+    ? "C:\\ProgramData\\iSmart\\config.json"
+    : "/etc/ismart/config.json";
+
+  let configPath = defaultConfigPath;
+
+  if (!fs.existsSync(configPath)) {
+    warn("Config file not found at default location.");
+    while (true) {
+      configPath = await prompt("Config file path", defaultConfigPath);
+      if (fs.existsSync(configPath)) break;
+      fail(`File not found: ${configPath}`);
+    }
+  }
+
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+  log("");
+  info(`Config       : ${configPath}`);
+  info(`Data dir     : ${config.DATA_DIR || "N/A"}`);
+  info(`API port     : ${config.PORT || 5000}`);
+  info(`MongoDB URI  : ${config.MONGODB_URI || "N/A"}`);
+  log("");
+  info(`New EXE      : ${EXE_PATH}`);
+  log("");
+
+  const { index: confirm } = await promptChoice(
+    "Proceed with update? (data and config will NOT be changed)",
+    ["Yes — stop service, update, restart", "Cancel"]
+  );
+  if (confirm !== 0) { log("  Cancelled."); process.exit(0); }
+
+  // Stop service
+  info("Stopping service...");
+  if (IS_WIN) {
+    run(`sc.exe stop iSmartBackend`);
+    await sleep(3000);
+    ok("Service stopped.");
+  } else if (IS_LINUX) {
+    runVisible("systemctl stop ismart-backend");
+    await sleep(2000);
+    ok("Service stopped.");
+  }
+
+  // Re-register service pointing to NEW EXE (update binPath)
+  info("Registering new version as service...");
+  try {
+    if (IS_WIN) {
+      // Delete old service registration and re-create with new EXE path
+      run(`sc.exe delete iSmartBackend`);
+      await sleep(2000);
+      installWindowsService(configPath);
+      ok("Windows service updated to new EXE.");
+    } else if (IS_LINUX) {
+      installLinuxService(configPath, config.DATA_DIR || "/var/lib/ismart");
+      ok("systemd service updated to new EXE.");
+    }
+  } catch (e) {
+    fail(`Service update failed: ${e.message}`);
+    warn("You can restart the service manually and check logs.");
+  }
+
+  // Doctor check
+  info("Waiting for service to start...");
+  const apiPort = config.PORT || 5000;
+  let apiReady  = false;
+  for (let i = 0; i < 15; i++) {
+    await sleep(1000);
+    apiReady = await isPortOpen("127.0.0.1", apiPort);
+    if (apiReady) break;
+    process.stdout.write(".");
+  }
+  process.stdout.write("\n");
+
+  await runDoctor(config);
+
+  log("");
+  log(`${C.green}${"═".repeat(60)}${C.reset}`);
+  log(`${C.green}  Update complete! New version is running.${C.reset}`);
+  log(`${C.green}${"═".repeat(60)}${C.reset}`);
+  log("");
+  log(`  ${C.bold}API URL  :${C.reset} http://localhost:${apiPort}`);
+  log(`  ${C.bold}Config   :${C.reset} ${configPath}`);
+  log(`  ${C.bold}Data dir :${C.reset} ${config.DATA_DIR || "N/A"}`);
+  log("");
+  if (IS_WIN) {
+    log(`  ${C.bold}Service  :${C.reset} sc.exe query iSmartBackend`);
+    log(`  ${C.bold}Logs     :${C.reset} ${config.DATA_DIR || "C:\\ProgramData\\iSmart"}\\logs\\stdout.log`);
+  } else {
+    log(`  ${C.bold}Service  :${C.reset} sudo systemctl status ismart-backend`);
+    log(`  ${C.bold}Logs     :${C.reset} sudo tail -f ${(config.DATA_DIR || "/var/lib/ismart")}/logs/stdout.log`);
+  }
+  log("");
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 async function runInstaller(uninstall = false) {
   if (uninstall) {
@@ -1244,12 +1490,15 @@ async function runInstaller(uninstall = false) {
     "What would you like to do?",
     [
       "Fresh installation — set up iSmart Backend from scratch",
+      "Update existing installation — upgrade to this new version",
       "Restore from backup — recover an existing installation",
     ]
   );
 
   if (index === 0) {
     await runFreshInstall();
+  } else if (index === 1) {
+    await runUpdateFlow();
   } else {
     await runRestoreFlow();
   }
