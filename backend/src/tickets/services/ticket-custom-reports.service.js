@@ -149,8 +149,8 @@ async function buildCustomExcelReport(data, reportName, reportTitle) {
     views: [{ rightToLeft: true }],
   });
 
-  const logo1Path = path.join(__dirname, "../../../assets/logo1.png");
-  const logo2Path = path.join(__dirname, "../../../assets/logo2.png");
+  const logo1Path = path.join(__dirname, "../../assets/logo1.png");
+  const logo2Path = path.join(__dirname, "../../assets/logo2.png");
   let logo1Id, logo2Id;
 
   if (fs.existsSync(logo1Path)) {

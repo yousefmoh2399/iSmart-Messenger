@@ -1,8 +1,8 @@
 {
-  "name": "workplace-document-backend",
+  "name": "ismart-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Backend API for workplace document scanning and management",
+  "description": "iSmart Messenger Backend API",
   "main": "src/server.js",
   "bin": "src/server.js",
   "scripts": {

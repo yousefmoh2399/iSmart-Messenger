@@ -1,6 +1,26 @@
 const dotenv = require("dotenv");
 const path = require("path");
+const fs = require("fs");
 
+// When deployed as a standalone EXE (via pkg), the deployment scripts
+// write all settings to a JSON file and pass its path via ISMART_CONFIG_PATH.
+// We load that first so its values are available as process.env vars.
+const configFilePath = String(process.env.ISMART_CONFIG_PATH || "").trim();
+if (configFilePath && fs.existsSync(configFilePath)) {
+  try {
+    const fileConfig = JSON.parse(fs.readFileSync(configFilePath, "utf8"));
+    for (const [key, value] of Object.entries(fileConfig)) {
+      if (process.env[key] === undefined) {
+        process.env[key] = String(value);
+      }
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[env] Failed to load config file at ${configFilePath}: ${err.message}`);
+  }
+}
+
+// Fallback to .env file for local development (ignored inside pkg snapshot)
 dotenv.config({
   path: path.resolve(__dirname, "../../.env"),
 });

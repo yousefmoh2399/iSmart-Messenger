@@ -2,7 +2,13 @@ const fs = require("fs/promises");
 const path = require("path");
 const envConfig = require("../config/env");
 
-const BACKEND_ROOT = path.resolve(__dirname, "../..");
+// When bundled with pkg, __dirname points inside the frozen snapshot.
+// Use the directory containing the actual executable so that mutable
+// data (uploads, backups, releases) is written on real disk next to the EXE.
+const BACKEND_ROOT = process.pkg
+  ? path.dirname(process.execPath)
+  : path.resolve(__dirname, "../..");
+
 
 function getBackendRoot() {
   return BACKEND_ROOT;
