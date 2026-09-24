@@ -12,12 +12,13 @@
 4. [بناء الـ Binary على Linux](#4-بناء-الـ-binary-على-linux)
 5. [نشر على Windows Server](#5-نشر-على-windows-server)
 6. [نشر على Ubuntu Linux](#6-نشر-على-ubuntu-linux)
-7. [تحديث نسخة موجودة](#7-تحديث-نسخة-موجودة)
-8. [النسخ الاحتياطي والاستعادة](#8-النسخ-الاحتياطي-والاستعادة)
-9. [فحص صحة النظام](#9-فحص-صحة-النظام)
-10. [الأوامر المرجعية الكاملة](#10-الأوامر-المرجعية-الكاملة)
-11. [هيكل الملفات على السيرفر](#11-هيكل-الملفات-على-السيرفر)
-12. [استكشاف الأخطاء](#12-استكشاف-الأخطاء)
+7. [سيرفر بهاردين (System + Data)](#7-سيرفر-بهاردين-system--data)
+8. [تحديث نسخة موجودة](#8-تحديث-نسخة-موجودة)
+9. [النسخ الاحتياطي والاستعادة](#9-النسخ-الاحتياطي-والاستعادة)
+10. [فحص صحة النظام](#10-فحص-صحة-النظام)
+11. [الأوامر المرجعية الكاملة](#11-الأوامر-المرجعية-الكاملة)
+12. [هيكل الملفات على السيرفر](#12-هيكل-الملفات-على-السيرفر)
+13. [استكشاف الأخطاء](#13-استكشاف-الأخطاء)
 
 ---
 
@@ -224,7 +225,175 @@ sudo /tmp/ismart-backend-linux --install
 
 ---
 
-## 7. تحديث نسخة موجودة
+## 7. سيرفر بهاردين (System + Data)
+
+سيناريو شائع: هارد للنظام وهارد ثاني مخصص للبيانات.
+
+```
+💿 هارد النظام  → Windows C:\  أو  Linux /
+💾 هارد البيانات → Windows D:\ أو  Linux /mnt/data
+```
+
+### توزيع الملفات على الهاردين:
+
+| الملف / المجلد | الهارد | السبب |
+|----------------|--------|-------|
+| `ismart-backend-win.exe` | أي مكان | يمكن وضعه على النظام |
+| `config.json` (Windows) | هارد البيانات `D:\iSmart\` | يتبع الـ DATA_DIR |
+| `config.json` (Linux) | `/etc/ismart/` ← **دايماً هنا** | ثابت بالكود |
+| `uploads\` — ملفات الشات | **هارد البيانات** | الحجم يكبر مع الوقت |
+| `backups\` | **هارد البيانات** | أو network share |
+| `releases\` | **هارد البيانات** | تحديثات الموبايل |
+| `logs\` | **هارد البيانات** | تتبع DATA_DIR |
+
+---
+
+### Windows — هاردين (C: نظام + D: بيانات)
+
+**لا تحتاج أي إعداد مسبق** — الـ installer يكتشف الـ drives تلقائياً:
+
+```powershell
+.\ismart-backend-win.exe --install
+```
+
+```
+[3/7] Configure data directories...
+
+  Main data directory
+  Suggested paths:
+    1)  C:\ProgramData\iSmart   [will be created]   ← هارد النظام
+    2)  D:\iSmart               [will be created]   ← هارد البيانات ✓
+    3)  C:\iSmart               [will be created]
+
+  Path or number [1]: 2
+  ✓ D:\iSmart  (created)
+
+  Chat & uploads directory
+    1)  D:\iSmart\uploads       [will be created]   ✓ تلقائي تحت D:
+    2)  D:\iSmart\files         [will be created]
+  Path or number [1]:
+  ✓ D:\iSmart\uploads  (created)
+
+  Backups directory
+    1)  D:\iSmart\backups       [will be created]   ✓
+  Path or number [1]:
+  ✓ D:\iSmart\backups  (created)
+
+  Backup save directory
+    1)  D:\iSmart\backups       [will be created]
+    2)  E:\iSmart\backups       [will be created]   ← لو E: موجود
+    3)  \\NAS\Backups\iSmart    (network share)
+  Path or number [1]:
+```
+
+**النتيجة:**
+```
+C:\                                ← هارد النظام
+└── (Windows OS + service registry فقط)
+
+D:\iSmart\                         ← هارد البيانات
+├── config.json
+├── uploads\
+├── backups\
+├── releases\
+└── logs\
+```
+
+---
+
+### Linux — هاردين (/ نظام + /mnt/data بيانات)
+
+على Linux لازم تعمل **mount للهارد الثاني أولاً** قبل التثبيت:
+
+```bash
+# خطوة 1: اعرف اسم الهارد الثاني
+lsblk
+# مثال: sdb أو sdb1
+
+# خطوة 2: هيّئ الـ filesystem لو الهارد جديد
+sudo mkfs.ext4 /dev/sdb1
+
+# خطوة 3: أنشئ نقطة الـ mount
+sudo mkdir -p /mnt/data
+
+# خطوة 4: Mount الهارد
+sudo mount /dev/sdb1 /mnt/data
+
+# خطوة 5: اجعله يتـ mount تلقائياً مع كل restart
+# احصل على UUID الهارد أولاً
+blkid /dev/sdb1
+# مثال: UUID="a1b2c3d4-..."
+
+# أضفه في /etc/fstab
+echo 'UUID=a1b2c3d4-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /mnt/data  ext4  defaults  0  2' | sudo tee -a /etc/fstab
+
+# خطوة 6: تأكد من الـ mount
+df -h /mnt/data
+# يجب أن يظهر الهارد الثاني
+
+# خطوة 7: الآن شغّل الـ installer
+sudo ./ismart-backend-linux --install
+```
+
+**في الـ Wizard — اكتب مسار الهارد الثاني يدوياً:**
+
+```
+[3/7] Configure data directories...
+
+  Main data directory
+  Suggested paths:
+    1)  /var/lib/ismart      [will be created]   ← هارد النظام
+    2)  /opt/ismart          [will be created]
+    3)  /home/ismart/data    [will be created]
+
+  Path or number [1]: /mnt/data/ismart     ← اكتب المسار يدوياً
+  ✓ /mnt/data/ismart  (created)
+
+  Chat & uploads directory
+    1)  /mnt/data/ismart/uploads    [will be created]   ✓ تلقائي
+  Path or number [1]:
+  ✓ /mnt/data/ismart/uploads  (created)
+```
+
+**النتيجة على Linux:**
+```
+/                                  ← هارد النظام
+├── /etc/ismart/config.json        ← دايماً هنا (chmod 600)
+├── /etc/systemd/system/ismart-backend.service
+├── /etc/cron.d/ismart-backup
+└── /usr/local/bin/ismart-backend  ← EXE
+
+/mnt/data/ismart/                  ← هارد البيانات
+├── uploads/
+├── backups/
+├── releases/
+└── logs/
+```
+
+> **ملاحظة مهمة:** على Linux `config.json` دايماً في `/etc/ismart/` على هارد النظام — هذا صحيح عمداً حتى لو هارد البيانات فصل، السيرفر يعرف إعداداته.
+
+---
+
+### عند الاستعادة من Backup (2 هارد):
+
+```powershell
+# Windows
+.\ismart-backend-win.exe --install
+# اختر: 3) Restore from backup
+# Backup file path: D:\iSmart\backups\ismart-backup-2026-09-23.zip
+# ← في Step 3 اختر D:\iSmart كـ Main data directory
+```
+
+```bash
+# Linux — تأكد من mount الهارد الثاني أولاً، ثم
+sudo ./ismart-backend-linux --install
+# اختر: 3) Restore from backup
+# ← في Step 3 اكتب /mnt/data/ismart
+```
+
+---
+
+## 8. تحديث نسخة موجودة
 
 > البيانات والـ config لن تتأثر — فقط الـ EXE يتحدّث
 
@@ -248,7 +417,7 @@ sudo ./ismart-backend-linux-NEW --install
 
 ---
 
-## 8. النسخ الاحتياطي والاستعادة
+## 9. النسخ الاحتياطي والاستعادة
 
 ### Backup يدوي:
 
@@ -287,7 +456,7 @@ ismart-backup-2026-09-23T01-00-00.zip
 
 ---
 
-## 9. فحص صحة النظام
+## 10. فحص صحة النظام
 
 ```powershell
 # Windows
@@ -317,7 +486,7 @@ System Health Check (Doctor)
 
 ---
 
-## 10. الأوامر المرجعية الكاملة
+## 11. الأوامر المرجعية الكاملة
 
 ### Windows (PowerShell كـ Administrator):
 
@@ -347,7 +516,7 @@ System Health Check (Doctor)
 
 ---
 
-## 11. هيكل الملفات على السيرفر
+## 12. هيكل الملفات على السيرفر
 
 ### Windows:
 
@@ -394,7 +563,7 @@ D:\iSmart\                         (DATA_DIR — تختاره عند التثب�
 
 ---
 
-## 12. استكشاف الأخطاء
+## 13. استكشاف الأخطاء
 
 ### "Access Denied" على Windows
 
@@ -458,4 +627,4 @@ icacls "\\NAS\Backups\iSmart" /grant "SYSTEM:(OI)(CI)F"
 
 ---
 
-*iSmart Messenger Backend — آخر تحديث: 2026-09-23*
+*iSmart Messenger Backend — آخر تحديث: 2026-09-24*

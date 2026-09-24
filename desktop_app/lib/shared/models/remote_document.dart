@@ -14,6 +14,7 @@ class RemoteDocument {
     required this.ownerFullName,
     required this.createdAt,
     required this.updatedAt,
+    this.folderId,
   });
 
   final String id;
@@ -28,6 +29,7 @@ class RemoteDocument {
   final String? ownerFullName;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String? folderId;
 
   factory RemoteDocument.fromJson(Map<String, dynamic> json) {
     return RemoteDocument(
@@ -43,6 +45,39 @@ class RemoteDocument {
       ownerFullName: json['ownerFullName'] as String?,
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
+      folderId: json['folderId'] as String?,
+    );
+  }
+
+  RemoteDocument copyWith({
+    String? id,
+    String? fileName,
+    String? originalName,
+    String? mimeType,
+    int? pageCount,
+    int? fileSize,
+    String? downloadUrl,
+    String? ownerId,
+    String? ownerUsername,
+    String? ownerFullName,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    String? folderId,
+  }) {
+    return RemoteDocument(
+      id: id ?? this.id,
+      fileName: fileName ?? this.fileName,
+      originalName: originalName ?? this.originalName,
+      mimeType: mimeType ?? this.mimeType,
+      pageCount: pageCount ?? this.pageCount,
+      fileSize: fileSize ?? this.fileSize,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
+      ownerId: ownerId ?? this.ownerId,
+      ownerUsername: ownerUsername ?? this.ownerUsername,
+      ownerFullName: ownerFullName ?? this.ownerFullName,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      folderId: folderId, // intentional, allow clearing
     );
   }
 }

@@ -11,8 +11,10 @@ import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/utils/formatters.dart';
+import '../../../shared/models/document_folder.dart';
 import '../../../shared/models/remote_document.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/document_folder_service.dart';
 import '../../../shared/services/remote_desktop_file_service.dart';
 import '../../../shared/services/remote_print_service.dart';
 import '../../../shared/widgets/app_loading_placeholders.dart';
@@ -46,6 +48,8 @@ enum _DocumentMenuAction {
   sendToChat,
   share,
   rename,
+  moveToFolder,
+  removeFromFolder,
   delete,
 }
 
@@ -75,6 +79,17 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
   bool _isSendingToChat = false;
   String? _sendingChatFileName;
 
+  // ── View mode ──────────────────────────────────────────────────────────────
+  /// true = grid (2 cols), false = list
+  bool _isGridView = false;
+
+  // ── Folder navigation ──────────────────────────────────────────────────────
+  /// null = root (no folder selected)
+  String? _currentFolderId;
+
+  // ── Drag-to-folder selection ──────────────────────────────────────────────
+
+
   @override
   void initState() {
     super.initState();
@@ -101,10 +116,140 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
 
   List<RemoteDocument> _filter(List<RemoteDocument> documents) {
     final query = _searchController.text.trim().toLowerCase();
-    if (query.isEmpty) return documents;
-    return documents
-        .where((document) => document.fileName.toLowerCase().contains(query))
-        .toList();
+
+      // ── Filter Folders ─────────────────────────────────────────────────────
+      final currentLevelFolders = allFolders
+          .where((f) => f.parentId == _currentFolderId)
+          .where((f) => query.isEmpty || f.name.toLowerCase().contains(query))
+          .toList();
+
+      // ── Filter Documents ───────────────────────────────────────────────────
+      List<RemoteDocument> currentLevelDocs;
+      List<PendingUpload> currentLevelPending;
+
+      if (_currentFolderId == null) {
+        // Root: Show docs not in any folder
+        currentLevelDocs = remoteDocs
+            .where((d) => !allFolderDocIds.contains(d.id))
+            .where((d) => query.isEmpty || d.fileName.toLowerCase().contains(query))
+            .toList();
+        currentLevelPending = query.isEmpty
+            ? pendingDocs
+            : pendingDocs
+                .where((d) => d.fileName.toLowerCase().contains(query))
+                .toList();
+      } else {
+        // Inside Folder
+        final folderDocIds = currentFolder!.documentIds;
+        currentLevelDocs = remoteDocs
+            .where((d) => folderDocIds.contains(d.id))
+            .where((d) => query.isEmpty || d.fileName.toLowerCase().contains(query))
+            .toList();
+        currentLevelPending = []; // Usually no pending uploads inside folders yet
+      }
+
+      final merged = <dynamic>[...currentLevelPending, ...currentLevelDocs];
+      merged.sort((a, b) {
+        final aDate = a is PendingUpload ? a.createdAt : (a as RemoteDocument).createdAt;
+        final bDate = b is PendingUpload ? b.createdAt : (b as RemoteDocument).createdAt;
+        return bDate.compareTo(aDate);
+      });
+
+      final isEmpty = currentLevelFolders.isEmpty && merged.isEmpty;
+
+      return RefreshIndicator(
+        onRefresh: refreshDocuments,
+        child: _isGridView
+            ? CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(child: Column(children: [
+                    headerCard, ...banners, searchField, toolbar,
+                  ])),
+                  if (isEmpty)
+                    const SliverToBoxAdapter(child: Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: Text('المجلد فارغ')),
+                    ))
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                      sliver: SliverGrid(
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) {
+                            // Folders first
+                            if (i < currentLevelFolders.length) {
+                              return _buildFolderCard(
+                                  ctx, currentLevelFolders[i], remoteDocs);
+                            }
+                            // Then docs
+                            final docIndex = i - currentLevelFolders.length;
+                            final item = merged[docIndex];
+                            if (item is PendingUpload) {
+                              return _buildPendingGridCard(ctx, item);
+                            } else {
+                              return _buildDocumentGridCard(
+                                  ctx, item as RemoteDocument, isInFolder: _currentFolderId != null);
+                            }
+                          },
+                          childCount: currentLevelFolders.length + merged.length,
+                        ),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 0.85,
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            : ListView(
+                padding: const EdgeInsets.only(bottom: 80),
+                children: [
+                  headerCard, ...banners, searchField, toolbar,
+                  if (isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: Text('المجلد فارغ')),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Container(
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          children: [
+                            for (final f in currentLevelFolders)
+                              _buildFolderListCard(context, f, remoteDocs),
+                            for (final item in merged)
+                              if (item is PendingUpload)
+                                _buildPendingCard(context, item)
+                              else
+                                _buildDocumentCard(context, item as RemoteDocument, isInFolder: _currentFolderId != null),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+      );
+    }
+  }
+
+  Future<void> _removeDocumentFromFolder(String documentId) async {
+    await ref
+        .read(documentFoldersProvider.notifier)
+        .removeDocumentFromFolder(documentId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم نقل الملف إلى الرئيسية')),
+      );
+    }
   }
 
   Future<void> _renameDocument(RemoteDocument document) async {
@@ -972,6 +1117,12 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       case _DocumentMenuAction.rename:
         await _renameDocument(document);
         return;
+      case _DocumentMenuAction.moveToFolder:
+        await _showMoveFolderPicker(document.id);
+        return;
+      case _DocumentMenuAction.removeFromFolder:
+        await _removeDocumentFromFolder(document.id);
+        return;
       case _DocumentMenuAction.delete:
         await _deleteDocument(document);
         return;
@@ -1173,12 +1324,97 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
     );
   }
 
-  Widget _buildDocumentCard(BuildContext context, RemoteDocument document) {
+  /// Build a menu for a document — shows "نقل لفولدر" or "إزالة من الفولدر"
+  /// depending on whether the document is already in a folder.
+  List<PopupMenuEntry<_DocumentMenuAction>> _buildDocumentMenuItems(
+      bool isInFolder) {
+    return [
+      const PopupMenuItem(
+        value: _DocumentMenuAction.print,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.print_outlined, size: 20),
+          title: Text('طباعة'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      const PopupMenuItem(
+        value: _DocumentMenuAction.sendToDesktop,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.computer_rounded, size: 20),
+          title: Text('إرسال للكمبيوتر'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      const PopupMenuItem(
+        value: _DocumentMenuAction.sendToChat,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.chat_bubble_outline, size: 20),
+          title: Text('إرسال للشات'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      const PopupMenuItem(
+        value: _DocumentMenuAction.share,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.share_outlined, size: 20),
+          title: Text('مشاركة / حفظ في الهاتف'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      const PopupMenuItem(
+        value: _DocumentMenuAction.rename,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.drive_file_rename_outline, size: 20),
+          title: Text('إعادة تسمية'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+      if (isInFolder)
+        const PopupMenuItem(
+          value: _DocumentMenuAction.removeFromFolder,
+          child: ListTile(
+            dense: true,
+            leading: Icon(Icons.folder_off_outlined, size: 20),
+            title: Text('إزالة من الفولدر'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        )
+      else
+        const PopupMenuItem(
+          value: _DocumentMenuAction.moveToFolder,
+          child: ListTile(
+            dense: true,
+            leading: Icon(Icons.drive_file_move_outline, size: 20),
+            title: Text('نقل إلى فولدر'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      const PopupMenuDivider(),
+      const PopupMenuItem(
+        value: _DocumentMenuAction.delete,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.delete_outline, size: 20, color: Colors.red),
+          title: Text('حذف', style: TextStyle(color: Colors.red)),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
+    ];
+  }
+
+  /// List-mode document card
+  Widget _buildDocumentCard(BuildContext context, RemoteDocument document,
+      {bool isInFolder = false}) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
-    return InkWell(
+    final card = InkWell(
       onTap: () => _downloadAndOpen(document),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1219,7 +1455,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
-                      fontSize: 16,
+                      fontSize: 15,
                       color: isDark ? Colors.white : Colors.black,
                     ),
                   ),
@@ -1242,153 +1478,414 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
               onSelected: (action) {
                 unawaited(_handleDocumentMenuAction(action, document));
               },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: _DocumentMenuAction.print,
-                  child: Text('طباعة'),
-                ),
-                PopupMenuItem(
-                  value: _DocumentMenuAction.sendToDesktop,
-                  child: Text('إرسال للكمبيوتر'),
-                ),
-                PopupMenuItem(
-                  value: _DocumentMenuAction.sendToChat,
-                  child: Text('إرسال للشات'),
-                ),
-                PopupMenuItem(
-                  value: _DocumentMenuAction.share,
-                  child: Text('مشاركة / حفظ في الهاتف'),
-                ),
-                PopupMenuItem(
-                  value: _DocumentMenuAction.rename,
-                  child: Text('إعادة تسمية'),
-                ),
-                PopupMenuItem(
-                  value: _DocumentMenuAction.delete,
-                  child: Text('حذف', style: TextStyle(color: Colors.red)),
-                ),
-              ],
+              itemBuilder: (_) => _buildDocumentMenuItems(isInFolder),
             ),
           ],
         ),
       ),
+    );
+
+    return LongPressDraggable<String>(delay: const Duration(milliseconds: 200),
+      data: document.id,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(
+          opacity: 0.8,
+          child: SizedBox(
+            width: MediaQuery.of(context).size.width - 32,
+            child: card,
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.3,
+        child: card,
+      ),
+      child: card,
+    );
+  }
+
+  /// Grid-mode document card
+  Widget _buildDocumentGridCard(BuildContext context, RemoteDocument document,
+      {bool isInFolder = false}) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final card = GestureDetector(
+      onTap: () => _downloadAndOpen(document),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.07)
+                : const Color(0xFFE2E8F0),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.picture_as_pdf_rounded,
+                color: Color(0xFFDC2626),
+                size: 34,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(
+                document.fileName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              formatFileSize(document.fileSize),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 4),
+            PopupMenuButton<_DocumentMenuAction>(
+              icon: Icon(
+                Icons.more_horiz,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              tooltip: 'الخيارات',
+              onSelected: (action) {
+                unawaited(_handleDocumentMenuAction(action, document));
+              },
+              itemBuilder: (_) => _buildDocumentMenuItems(isInFolder),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return LongPressDraggable<String>(delay: const Duration(milliseconds: 200),
+      data: document.id,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(
+          opacity: 0.8,
+          child: SizedBox(
+            width: (MediaQuery.of(context).size.width - 32 - 10) / 2, // half screen roughly
+            child: card,
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(
+        opacity: 0.3,
+        child: card,
+      ),
+      child: card,
+    );
+  }
+
+  /// Folder card shown in root view
+  Widget _buildFolderCard(BuildContext context, DocumentFolder folder,
+      List<RemoteDocument> allDocs) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final docCount = folder.documentIds.length;
+
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          !folder.documentIds.contains(details.data),
+      onAcceptWithDetails: (details) async {
+        await ref
+            .read(documentFoldersProvider.notifier)
+            .moveDocumentToFolder(details.data, folder.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content:
+                    Text('تم نقل الملف إلى ${folder.name} بنجاح')),
+          );
+        }
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isHovered = candidateData.isNotEmpty;
+        return InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => setState(() => _currentFolderId = folder.id),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              color: isHovered
+                  ? theme.colorScheme.primaryContainer
+                  : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isHovered
+                    ? theme.colorScheme.primary
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.07)
+                        : const Color(0xFFE2E8F0)),
+                width: isHovered ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 12),
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      isHovered
+                          ? Icons.folder_open_rounded
+                          : Icons.folder_rounded,
+                      size: 56,
+                      color: const Color(0xFFF59E0B),
+                    ),
+                    if (docCount > 0)
+                      Positioned(
+                        bottom: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                          child: Text(
+                            '$docCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(
+                    folder.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$docCount ملف',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                PopupMenuButton<String>(
+                  icon: Icon(
+                    Icons.more_horiz,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  tooltip: 'خيارات الفولدر',
+                  onSelected: (action) {
+                    if (action == 'rename') {
+                      unawaited(_renameFolder(folder));
+                    } else if (action == 'delete') {
+                      unawaited(_deleteFolder(folder));
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'rename',
+                      child: ListTile(
+                        dense: true,
+                        leading:
+                            Icon(Icons.drive_file_rename_outline, size: 20),
+                        title: Text('إعادة تسمية'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(Icons.delete_outline,
+                            size: 20, color: Colors.red),
+                        title: Text('حذف الفولدر',
+                            style: TextStyle(color: Colors.red)),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+
+  /// List-mode folder row shown in root list view
+  Widget _buildFolderListTile(BuildContext context, DocumentFolder folder) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final docCount = folder.documentIds.length;
+
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          !folder.documentIds.contains(details.data),
+      onAcceptWithDetails: (details) async {
+        await ref
+            .read(documentFoldersProvider.notifier)
+            .moveDocumentToFolder(details.data, folder.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content:
+                    Text('تم نقل الملف إلى ${folder.name} بنجاح')),
+          );
+        }
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isHovered = candidateData.isNotEmpty;
+        return InkWell(
+          onTap: () => setState(() => _currentFolderId = folder.id),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isHovered
+                  ? theme.colorScheme.primaryContainer
+                  : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+              border: Border(
+                bottom: BorderSide(
+                  color: isHovered
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.outlineVariant
+                          .withValues(alpha: 0.5),
+                  width: isHovered ? 2 : 0.5,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isHovered
+                      ? Icons.folder_open_rounded
+                      : Icons.folder_rounded,
+                  size: 44,
+                  color: const Color(0xFFF59E0B),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        folder.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                      ),
+                      Text(
+                        '$docCount ملف',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_horiz,
+                      color: theme.colorScheme.onSurfaceVariant),
+                  tooltip: 'خيارات الفولدر',
+                  onSelected: (action) {
+                    if (action == 'rename') unawaited(_renameFolder(folder));
+                    if (action == 'delete') unawaited(_deleteFolder(folder));
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'rename',
+                      child: Text('إعادة تسمية الفولدر'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('حذف الفولدر',
+                          style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+                const Icon(Icons.chevron_right_rounded, size: 20),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final documentsState = ref.watch(remoteDocumentsControllerProvider);
-    final pendingState = ref.watch(pendingUploadsControllerProvider);
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final pendingState   = ref.watch(pendingUploadsControllerProvider);
+    final foldersState   = ref.watch(documentFoldersProvider);
+    final colorScheme    = Theme.of(context).colorScheme;
+    final isDark         = Theme.of(context).brightness == Brightness.dark;
+
+    final allFolders  = foldersState.valueOrNull ?? <DocumentFolder>[];
+    final remoteDocs  = documentsState.valueOrNull ?? <RemoteDocument>[];
+    final pendingDocs = pendingState.valueOrNull ?? <PendingUpload>[];
+
+    // IDs that are inside any folder
+    final allFolderDocIds = <String>{
+      for (final f in allFolders) ...f.documentIds,
+    };
 
     Future<void> refreshDocuments() async {
       await Future.wait([
         ref.read(remoteDocumentsControllerProvider.notifier).refresh(),
         ref.read(pendingUploadsControllerProvider.notifier).refresh(),
+        ref.read(documentFoldersProvider.notifier).reload(),
       ]);
     }
 
-    final headerCard = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: isDark ? colorScheme.surfaceContainer : Colors.white,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: isDark
-                ? colorScheme.outlineVariant.withValues(alpha: 0.4)
-                : const Color(0xFFF1F5F9),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.05 : 0.02),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 14),
-            FilledButton.icon(
-              onPressed: _sendLocalFileToDesktop,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-                backgroundColor: colorScheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              icon: const Icon(Icons.computer_rounded),
-              label: const Text('إرسال ملف إلى الكمبيوتر'),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _printLocalFileFromDevice,
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    icon: const Icon(Icons.print_outlined),
-                    label: const Text('طباعة من الجهاز'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: refreshDocuments,
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('تحديث الملفات'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-
+    // ── Banners ──────────────────────────────────────────────────────────────
     final banners = <Widget>[
       if (_isDownloading)
         AppDownloadProgressBanner(
           fileName: _downloadingFileName,
           progress: _downloadProgress,
-        ),
-      if (_isDownloading && DateTime.now().millisecondsSinceEpoch < 0)
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'جاري تنزيل ${_downloadingFileName ?? 'الملف'}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(value: _downloadProgress),
-            ],
-          ),
         ),
       if (_isPrinting)
         Container(
@@ -1403,23 +1900,16 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.print_rounded,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.primary,
+              Row(children: [
+                Icon(Icons.print_rounded, size: 18, color: colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'جار إرسال ${_printingFileName ?? 'الملف'} للطباعة...',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'جار إرسال ${_printingFileName ?? 'الملف'} للطباعة...',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ]),
               const SizedBox(height: 8),
               const LinearProgressIndicator(minHeight: 3),
             ],
@@ -1434,39 +1924,28 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('إرسال ${_sendingFileName ?? 'الملف'} إلى الكمبيوتر',
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: _desktopSendProgress <= 0
+                  ? null
+                  : _desktopSendProgress.clamp(0, 1).toDouble(),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: Text(
+                _desktopSendStageMessage ?? 'جاري الإرسال...',
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+              )),
+              const SizedBox(width: 12),
               Text(
-                'إرسال ${_sendingFileName ?? 'الملف'} إلى الكمبيوتر',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                '${(_desktopSendProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                style: Theme.of(context).textTheme.labelLarge,
               ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: _desktopSendProgress <= 0
-                    ? null
-                    : _desktopSendProgress.clamp(0, 1).toDouble(),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _desktopSendStageMessage ?? 'جاري الإرسال...',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    '${(_desktopSendProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ]),
+          ]),
         ),
       if (_isSendingToChat)
         Container(
@@ -1477,36 +1956,83 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.send_rounded,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'جار إرسال ${_sendingChatFileName ?? 'الملف'} إلى الشات...',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const LinearProgressIndicator(minHeight: 3),
-            ],
-          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              Icon(Icons.send_rounded, size: 18, color: colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                'جار إرسال ${_sendingChatFileName ?? 'الملف'} إلى الشات...',
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+              )),
+            ]),
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(minHeight: 3),
+          ]),
         ),
     ];
 
+    // ── Header action card ────────────────────────────────────────────────────
+    final headerCard = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: isDark ? colorScheme.surfaceContainer : Colors.white,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: isDark
+                ? colorScheme.outlineVariant.withValues(alpha: 0.4)
+                : const Color(0xFFF1F5F9),
+          ),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _sendLocalFileToDesktop,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(50),
+              backgroundColor: colorScheme.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+            ),
+            icon: const Icon(Icons.computer_rounded),
+            label: const Text('إرسال ملف إلى الكمبيوتر'),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _printLocalFileFromDevice,
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                ),
+                icon: const Icon(Icons.print_outlined),
+                label: const Text('طباعة من الجهاز'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: refreshDocuments,
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                ),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('تحديث الملفات'),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+
+    // ── Search field ──────────────────────────────────────────────────────────
     final searchField = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
@@ -1547,9 +2073,345 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       ),
     );
 
+    // ── Toolbar: grid/list toggle + folder breadcrumb ─────────────────────────
+    final currentFolder = _currentFolderId == null
+        ? null
+        : allFolders.where((f) => f.id == _currentFolderId).firstOrNull;
+
+    final toolbar = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: Row(
+        children: [
+          // Breadcrumb / folder name
+          if (currentFolder != null) ...[
+            GestureDetector(
+              onTap: () => setState(() => _currentFolderId = null),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.arrow_back_ios_new_rounded,
+                    size: 14, color: colorScheme.primary),
+                const SizedBox(width: 4),
+                Text('رجوع',
+                    style: TextStyle(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13)),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right_rounded, size: 16,
+                color: colorScheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Icon(Icons.folder_rounded, size: 16,
+                color: const Color(0xFFF59E0B)),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                currentFolder.name,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+          ] else
+            Expanded(
+              child: Text('ملفاتي',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700)),
+            ),
+
+          // Grid / List toggle
+          Container(
+            decoration: BoxDecoration(
+              color: isDark ? colorScheme.surfaceContainer : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              _ViewToggleButton(
+                icon: Icons.view_list_rounded,
+                selected: !_isGridView,
+                onTap: () => setState(() => _isGridView = false),
+              ),
+              _ViewToggleButton(
+                icon: Icons.grid_view_rounded,
+                selected: _isGridView,
+                onTap: () => setState(() => _isGridView = true),
+              ),
+            ]),
+          ),
+        ],
+      ),
+    );
+
+    // ── Build list/grid content ───────────────────────────────────────────────
+    Widget buildContent() {
+      final isLoading = documentsState.isLoading || pendingState.isLoading;
+      if (isLoading &&
+          documentsState.valueOrNull == null &&
+          pendingState.valueOrNull == null) {
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 80),
+          children: [
+            headerCard, ...banners, searchField, toolbar,
+            ...List.generate(6, (_) => Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: const Card(child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  ShimmerSkeleton(width: 180, height: 14),
+                  SizedBox(height: 10),
+                  ShimmerSkeleton(width: 260, height: 12),
+                  SizedBox(height: 8),
+                  ShimmerSkeleton(width: 220, height: 12),
+                ]),
+              )),
+            )),
+          ],
+        );
+      }
+
+      if (documentsState.hasError) {
+        return ListView(
+          padding: const EdgeInsets.only(bottom: 80),
+          children: [
+            headerCard, ...banners, searchField, toolbar,
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(child: Text(documentsState.error.toString())),
+            ),
+          ],
+        );
+      }
+
+      final query = _searchController.text.trim().toLowerCase();
+
+      // ── FOLDER VIEW ────────────────────────────────────────────────────────
+      if (_currentFolderId != null && currentFolder != null) {
+        // Show only docs inside this folder
+        final folderDocIds = currentFolder.documentIds;
+        final folderDocs = remoteDocs
+            .where((d) => folderDocIds.contains(d.id))
+            .where((d) =>
+                query.isEmpty || d.fileName.toLowerCase().contains(query))
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+        return RefreshIndicator(
+          onRefresh: refreshDocuments,
+          child: _isGridView
+              ? CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(child: Column(children: [
+                      headerCard, ...banners, searchField, toolbar,
+                    ])),
+                    if (folderDocs.isEmpty)
+                      const SliverToBoxAdapter(child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: Center(child: Column(children: [
+                          Icon(Icons.folder_open_outlined, size: 48,
+                              color: Colors.grey),
+                          SizedBox(height: 12),
+                          Text('الفولدر فارغ'),
+                        ])),
+                      ))
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                        sliver: SliverGrid(
+                          delegate: SliverChildBuilderDelegate(
+                            (ctx, i) => _buildDocumentGridCard(
+                                ctx, folderDocs[i], isInFolder: true),
+                            childCount: folderDocs.length,
+                          ),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                            childAspectRatio: 0.85,
+                          ),
+                        ),
+                      ),
+                  ],
+                )
+              : ListView(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  children: [
+                    headerCard, ...banners, searchField, toolbar,
+                    if (folderDocs.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(40),
+                        child: Center(child: Column(children: [
+                          Icon(Icons.folder_open_outlined, size: 48,
+                              color: Colors.grey),
+                          SizedBox(height: 12),
+                          Text('الفولدر فارغ'),
+                        ])),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Container(
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(children: folderDocs.map((doc) =>
+                            _buildDocumentCard(context, doc, isInFolder: true),
+                          ).toList()),
+                        ),
+                      ),
+                  ],
+                ),
+        );
+      }
+
+      // ── ROOT VIEW ──────────────────────────────────────────────────────────
+      // Docs not in any folder
+      final filteredRemote = remoteDocs
+          .where((d) => !allFolderDocIds.contains(d.id))
+          .where((d) =>
+              query.isEmpty || d.fileName.toLowerCase().contains(query))
+          .toList();
+      final filteredPending = query.isEmpty
+          ? pendingDocs
+          : pendingDocs
+              .where((d) => d.fileName.toLowerCase().contains(query))
+              .toList();
+
+      final filteredFolders = query.isEmpty
+          ? allFolders
+          : allFolders
+              .where((f) => f.name.toLowerCase().contains(query))
+              .toList();
+
+      final merged = <dynamic>[...filteredPending, ...filteredRemote];
+      merged.sort((a, b) {
+        final aDate = a is PendingUpload ? a.createdAt : (a as RemoteDocument).createdAt;
+        final bDate = b is PendingUpload ? b.createdAt : (b as RemoteDocument).createdAt;
+        return bDate.compareTo(aDate);
+      });
+
+      final isEmpty = filteredFolders.isEmpty && merged.isEmpty;
+
+      return RefreshIndicator(
+        onRefresh: refreshDocuments,
+        child: _isGridView
+            ? CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(child: Column(children: [
+                    headerCard, ...banners, searchField, toolbar,
+                  ])),
+                  if (isEmpty)
+                    const SliverToBoxAdapter(child: Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: Text('لا توجد ملفات')),
+                    ))
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                      sliver: SliverGrid(
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) {
+                            // Folders first
+                            if (i < filteredFolders.length) {
+                              return _buildFolderCard(
+                                  ctx, filteredFolders[i], remoteDocs);
+                            }
+                            final doc = merged[i - filteredFolders.length];
+                            if (doc is PendingUpload) {
+                              return _buildPendingCard(ctx, doc);
+                            }
+                            return _buildDocumentGridCard(
+                                ctx, doc as RemoteDocument);
+                          },
+                          childCount: filteredFolders.length + merged.length,
+                        ),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 0.85,
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            : ListView(
+                padding: const EdgeInsets.only(bottom: 80),
+                children: [
+                  headerCard, ...banners, searchField, toolbar,
+                  if (isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Center(child: Text('لا توجد ملفات')),
+                    )
+                  else ...[
+                    // ── Folders section ──
+                    if (filteredFolders.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        child: Container(
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(children: filteredFolders
+                              .map((f) => _buildFolderListTile(context, f))
+                              .toList()),
+                        ),
+                      ),
+                    // ── Files section ──
+                    if (merged.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        child: Container(
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(children: merged.map((doc) {
+                            if (doc is PendingUpload) {
+                              return _buildPendingCard(context, doc);
+                            }
+                            return _buildDocumentCard(
+                                context, doc as RemoteDocument);
+                          }).toList()),
+                        ),
+                      ),
+                  ],
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: OutlinedButton.icon(
+                      onPressed: () => ref
+                          .read(remoteDocumentsControllerProvider.notifier)
+                          .loadMore(),
+                      icon: const Icon(Icons.expand_more_rounded),
+                      label: const Text('تحميل المزيد'),
+                    ),
+                  ),
+                ],
+              ),
+      );
+    }
+
+    // ── AppBar title ──────────────────────────────────────────────────────────
+    final appBarTitle = currentFolder != null
+        ? Text(currentFolder.name)
+        : const Text('الملفات');
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('الملفات'),
+        title: appBarTitle,
+        leading: currentFolder != null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                onPressed: () => setState(() => _currentFolderId = null),
+              )
+            : null,
         actions: [
           IconButton(
             tooltip: 'طباعة ملف من الجهاز',
@@ -1562,144 +2424,19 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'create_folder_fab',
+        tooltip: 'فولدر جديد',
+        onPressed: _createFolder,
+        child: const Icon(Icons.create_new_folder_rounded),
+      ),
       body: Stack(
         children: [
-          Builder(
-            builder: (context) {
-              final isLoading =
-                  documentsState.isLoading || pendingState.isLoading;
-              if (isLoading &&
-                  documentsState.valueOrNull == null &&
-                  pendingState.valueOrNull == null) {
-                return ListView(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  children: [
-                    headerCard,
-                    ...banners,
-                    searchField,
-                    ...List.generate(
-                      6,
-                      (_) => Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        child: const Card(
-                          child: Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                ShimmerSkeleton(width: 180, height: 14),
-                                SizedBox(height: 10),
-                                ShimmerSkeleton(width: 260, height: 12),
-                                SizedBox(height: 8),
-                                ShimmerSkeleton(width: 220, height: 12),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              }
-
-              if (documentsState.hasError) {
-                return ListView(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  children: [
-                    headerCard,
-                    ...banners,
-                    searchField,
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Center(
-                        child: Text(documentsState.error.toString()),
-                      ),
-                    ),
-                  ],
-                );
-              }
-
-              final remoteDocs = documentsState.valueOrNull ?? [];
-              final pendingDocs = pendingState.valueOrNull ?? [];
-
-              final filteredRemote = _filter(remoteDocs);
-              final query = _searchController.text.trim().toLowerCase();
-              final filteredPending = query.isEmpty
-                  ? pendingDocs
-                  : pendingDocs
-                        .where(
-                          (doc) => doc.fileName.toLowerCase().contains(query),
-                        )
-                        .toList();
-
-              final merged = <dynamic>[...filteredPending, ...filteredRemote];
-              merged.sort((a, b) {
-                final aDate = a is PendingUpload
-                    ? a.createdAt
-                    : (a as RemoteDocument).createdAt;
-                final bDate = b is PendingUpload
-                    ? b.createdAt
-                    : (b as RemoteDocument).createdAt;
-                return bDate.compareTo(aDate);
-              });
-
-              return RefreshIndicator(
-                onRefresh: refreshDocuments,
-                child: ListView(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  children: [
-                    headerCard,
-                    ...banners,
-                    searchField,
-                    if (merged.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Center(child: Text('لا توجد ملفات')),
-                      )
-                    else
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Container(
-                          clipBehavior: Clip.antiAlias,
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF1C1C1E)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Column(
-                            children: merged.map((doc) {
-                              if (doc is PendingUpload) {
-                                return _buildPendingCard(context, doc);
-                              } else {
-                                return _buildDocumentCard(
-                                  context,
-                                  doc as RemoteDocument,
-                                );
-                              }
-                            }).toList(),
-                          ),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                      child: OutlinedButton.icon(
-                        onPressed: () => ref
-                            .read(remoteDocumentsControllerProvider.notifier)
-                            .loadMore(),
-                        icon: const Icon(Icons.expand_more_rounded),
-                        label: const Text('تحميل المزيد'),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
+          buildContent(),
+          // Desktop-send overlay
           if (_isSendingToDesktop)
             Positioned.fill(
               child: IgnorePointer(
-                ignoring: true,
                 child: ColoredBox(
                   color: Colors.black.withValues(alpha: 0.18),
                   child: Center(
@@ -1712,62 +2449,39 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.computer_rounded,
-                                    color: colorScheme.primary,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      'إرسال ${_sendingFileName ?? 'الملف'} إلى الكمبيوتر',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                              Row(children: [
+                                Icon(Icons.computer_rounded,
+                                    color: colorScheme.primary),
+                                const SizedBox(width: 10),
+                                Expanded(child: Text(
+                                  'إرسال ${_sendingFileName ?? 'الملف'} إلى الكمبيوتر',
+                                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                )),
+                              ]),
                               const SizedBox(height: 16),
                               LinearProgressIndicator(
                                 value: _desktopSendProgress <= 0
                                     ? null
-                                    : _desktopSendProgress
-                                          .clamp(0, 1)
-                                          .toDouble(),
+                                    : _desktopSendProgress.clamp(0, 1).toDouble(),
                                 minHeight: 8,
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      _desktopSendStageMessage ??
-                                          'جاري الإرسال...',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    '${(_desktopSendProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w800),
-                                  ),
-                                ],
-                              ),
+                              Row(children: [
+                                Expanded(child: Text(
+                                  _desktopSendStageMessage ?? 'جاري الإرسال...',
+                                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                )),
+                                const SizedBox(width: 12),
+                                Text(
+                                  '${(_desktopSendProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                              ]),
                             ],
                           ),
                         ),
@@ -1778,6 +2492,41 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Helper widget: view toggle button ───────────────────────────────────────
+
+class _ViewToggleButton extends StatelessWidget {
+  const _ViewToggleButton({
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(7),
+        decoration: BoxDecoration(
+          color: selected ? colorScheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: selected ? Colors.white : colorScheme.onSurfaceVariant,
+        ),
       ),
     );
   }

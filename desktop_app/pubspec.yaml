@@ -41,6 +41,8 @@ dependencies:
   shimmer: ^4.0.0
   any_link_preview: ^3.0.3
   http: ^1.6.0
+  uuid: ^4.6.0
+  timeago: ^3.7.1
 
 dev_dependencies:
   flutter_test:
