@@ -2236,106 +2236,26 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
 
       final query = _searchController.text.trim().toLowerCase();
 
-      // ── FOLDER VIEW ────────────────────────────────────────────────────────
-      if (_currentFolderId != null && currentFolder != null) {
-        // Show only docs inside this folder
-        final folderDocIds = currentFolder.documentIds;
-        final folderDocs = remoteDocs
-            .where((d) => folderDocIds.contains(d.id))
-            .where((d) =>
-                query.isEmpty || d.fileName.toLowerCase().contains(query))
-            .toList()
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      
+      // ── UNIFIED VIEW ────────────────────────────────────────────────────────
+      List<RemoteDocument> filteredRemote;
+      List<DocumentFolder> filteredFolders;
 
-        return RefreshIndicator(
-          onRefresh: refreshDocuments,
-          child: _isGridView
-              ? CustomScrollView(
-                  slivers: [
-                    SliverToBoxAdapter(child: Column(children: [
-                      headerCard, ...banners, searchField, toolbar,
-                    ])),
-                    if (folderDocs.isEmpty)
-                      const SliverToBoxAdapter(child: Padding(
-                        padding: EdgeInsets.all(40),
-                        child: Center(child: Column(children: [
-                          Icon(Icons.folder_open_outlined, size: 48,
-                              color: Colors.grey),
-                          SizedBox(height: 12),
-                          Text('الفولدر فارغ'),
-                        ])),
-                      ))
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                        sliver: SliverGrid(
-                          delegate: SliverChildBuilderDelegate(
-                            (ctx, i) => _buildDocumentGridCard(
-                                ctx, folderDocs[i], isInFolder: true),
-                            childCount: folderDocs.length,
-                          ),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                            childAspectRatio: 0.85,
-                          ),
-                        ),
-                      ),
-                  ],
-                )
-              : ListView(
-                  padding: const EdgeInsets.only(bottom: 80),
-                  children: [
-                    headerCard, ...banners, searchField, toolbar,
-                    if (folderDocs.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(40),
-                        child: Center(child: Column(children: [
-                          Icon(Icons.folder_open_outlined, size: 48,
-                              color: Colors.grey),
-                          SizedBox(height: 12),
-                          Text('الفولدر فارغ'),
-                        ])),
-                      )
-                    else
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Container(
-                          clipBehavior: Clip.antiAlias,
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Column(children: folderDocs.map((doc) =>
-                            _buildDocumentCard(context, doc, isInFolder: true),
-                          ).toList()),
-                        ),
-                      ),
-                  ],
-                ),
-        );
+      if (query.isNotEmpty) {
+        filteredRemote = remoteDocs.where((d) => d.fileName.toLowerCase().contains(query)).toList();
+        filteredFolders = allFolders.where((f) => f.name.toLowerCase().contains(query)).toList();
+      } else if (_currentFolderId != null && currentFolder != null) {
+        final folderDocIds = currentFolder.documentIds.toSet();
+        filteredRemote = remoteDocs.where((d) => folderDocIds.contains(d.id)).toList();
+        filteredFolders = allFolders.where((f) => f.parentId == _currentFolderId).toList();
+      } else {
+        filteredRemote = remoteDocs.where((d) => !allFolderDocIds.contains(d.id)).toList();
+        filteredFolders = allFolders.where((f) => f.parentId == null).toList();
       }
 
-      // ── ROOT VIEW ──────────────────────────────────────────────────────────
-      // Docs not in any folder
-      final filteredRemote = remoteDocs
-          .where((d) => !allFolderDocIds.contains(d.id))
-          .where((d) =>
-              query.isEmpty || d.fileName.toLowerCase().contains(query))
-          .toList();
-      final filteredPending = query.isEmpty
-          ? pendingDocs
-          : pendingDocs
-              .where((d) => d.fileName.toLowerCase().contains(query))
-              .toList();
-
-      final filteredFolders = query.isEmpty
-          ? allFolders
-          : allFolders
-              .where((f) => f.name.toLowerCase().contains(query))
-              .toList();
+      final filteredPending = (_currentFolderId == null && query.isEmpty) || query.isNotEmpty
+          ? pendingDocs.where((d) => query.isEmpty || d.fileName.toLowerCase().contains(query)).toList()
+          : <PendingUpload>[];
 
       final merged = <dynamic>[...filteredPending, ...filteredRemote];
       merged.sort((a, b) {

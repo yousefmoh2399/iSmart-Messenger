@@ -2827,7 +2827,7 @@ class _FilesFeed extends StatelessWidget {
           ),
         ),
 
-        if (currentFolderId == null && folders.isNotEmpty) ...[
+        if (folders.isNotEmpty) ...[
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 10, right: 4),
