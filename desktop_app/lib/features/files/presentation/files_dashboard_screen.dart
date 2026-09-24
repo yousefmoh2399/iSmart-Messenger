@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -17,6 +18,8 @@ import '../../../shared/models/admin_announcement.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/models/managed_user.dart';
 import '../../../shared/models/remote_document.dart';
+import '../../../shared/models/document_folder.dart';
+import '../../../shared/services/document_folder_service.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/services/lan_file_transfer_service.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
@@ -42,6 +45,8 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
   static const int _lanTransferMaxBytes = 500 * 1024 * 1024;
   final _searchController = TextEditingController();
   bool _latestFirst = true;
+  bool _isGridView = false;
+  String? _currentFolderId;
   bool _isDownloading = false;
   double _downloadProgress = 0;
   String? _downloadingFileName;
@@ -84,6 +89,67 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
     _searchController.dispose();
     super.dispose();
   }
+
+  Future<void> _createFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('فولدر جديد'),
+      content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'اسم الفولدر', prefixIcon: Icon(Icons.folder_outlined))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('إنشاء')),
+      ],
+    ));
+    if (name == null || name.isEmpty) return;
+    if (!mounted) return;
+    final color = Colors.primaries[Random().nextInt(Colors.primaries.length)].value;
+    await ref.read(documentFoldersProvider.notifier).createFolder(name, parentId: _currentFolderId, colorValue: color);
+  }
+  Future<void> _renameFolder(DocumentFolder folder) async {
+    final controller = TextEditingController(text: folder.name);
+    final name = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('إعادة تسمية الفولدر'),
+      content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'اسم الفولدر')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('حفظ')),
+      ],
+    ));
+    if (name == null || name.isEmpty) return;
+    if (!mounted) return;
+    await ref.read(documentFoldersProvider.notifier).renameFolder(folder.id, name);
+  }
+  Future<void> _deleteFolder(DocumentFolder folder) async {
+    final confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('حذف الفولدر'),
+      content: Text('سيتم حذف الفولدر «${folder.name}» والملفات ستعود للقائمة الرئيسية.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+        FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف')),
+      ],
+    ));
+    if (confirm != true) return;
+    if (!mounted) return;
+    await ref.read(documentFoldersProvider.notifier).deleteFolder(folder.id);
+    if (mounted && _currentFolderId == folder.id) setState(() => _currentFolderId = null);
+  }
+  Future<void> _showMoveFolderPicker(String documentId) async {
+    final folders = ref.read(documentFoldersProvider).valueOrNull ?? [];
+    if (folders.isEmpty) return;
+    final targetFolderId = await showModalBottomSheet<String>(context: context, builder: (ctx) => SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Padding(padding: EdgeInsets.all(16), child: Text('اختر الفولدر', style: TextStyle(fontWeight: FontWeight.w800))),
+        ...folders.map((f) => ListTile(title: Text(f.name), onTap: () => Navigator.pop(ctx, f.id))),
+      ])
+    ));
+    if (targetFolderId == null) return;
+    if (!mounted) return;
+    await ref.read(documentFoldersProvider.notifier).moveDocumentToFolder(documentId, targetFolderId);
+  }
+  Future<void> _removeDocumentFromFolder(String documentId) async {
+    await ref.read(documentFoldersProvider.notifier).removeDocumentFromFolder(documentId);
+  }
+
 
   Future<void> _refreshPendingLanReceiveRequests() async {
     if (!kIsWeb || !web_bridge.isElectron()) {
@@ -398,7 +464,7 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
     return _sortPeers(_filterPeersOnSameNetwork(merged.values.toList()));
   }
 
-  List<RemoteDocument> _filterAndSort(List<RemoteDocument> documents) {
+  List<RemoteDocument> _filterAndSort(List<RemoteDocument> documents, List<DocumentFolder> folders) {
     final query = _searchController.text.trim().toLowerCase();
     final filtered = query.isEmpty
         ? documents
@@ -1687,9 +1753,11 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
         false;
 
     return Scaffold(
+      floatingActionButton: FloatingActionButton.extended(onPressed: _createFolder, icon: const Icon(Icons.create_new_folder), label: const Text('إنشاء مجلد')),
       body: SafeArea(
         child: Row(
           children: [
+            
             Expanded(
               child: Stack(
                 children: [
@@ -1699,7 +1767,10 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                       error: (error, _) =>
                           Center(child: Text(error.toString())),
                       data: (documents) {
-                        final rows = _filterAndSort(documents);
+                        final documentFolders = ref.watch(documentFoldersProvider);
+                        final folders = documentFolders.valueOrNull ?? [];
+                        final rows = _filterAndSort(documents, folders);
+                        final visibleFolders = folders.where((f) => f.parentId == _currentFolderId).toList();
                         final totalPages = documents.fold<int>(
                           0,
                           (s, d) => s + d.pageCount,
@@ -1737,6 +1808,16 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                 onPrintDocument: _printDocument,
                                 onRenameDocument: _renameDocument,
                                 onDeleteDocument: _deleteDocument,
+                                folders: visibleFolders,
+                                currentFolderId: _currentFolderId,
+                                isGridView: _isGridView,
+                                onRemoveFromFolder: _removeDocumentFromFolder,
+                                onMoveToFolder: _showMoveFolderPicker,
+                                onFolderRename: _renameFolder,
+                                onFolderDelete: _deleteFolder,
+                                onGoBack: () => setState(() => _currentFolderId = null),
+                                onFolderTap: (id) => setState(() => _currentFolderId = id),
+                                onViewChanged: (v) => setState(() => _isGridView = v),
                                 onGoToChat: _goToChat,
                                 onGoToProfile: _goToProfile,
                                 onGoToServers: _goToServers,
@@ -1839,6 +1920,17 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                             onPrintDocument: _printDocument,
                                             onRenameDocument: _renameDocument,
                                             onDeleteDocument: _deleteDocument,
+
+                                            folders: visibleFolders,
+                                            currentFolderId: _currentFolderId,
+                                            isGridView: _isGridView,
+                                            onRemoveFromFolder: _removeDocumentFromFolder,
+                                            onMoveToFolder: _showMoveFolderPicker,
+                                            onFolderRename: _renameFolder,
+                                            onFolderDelete: _deleteFolder,
+                                            onGoBack: () => setState(() => _currentFolderId = null),
+                                            onFolderTap: (id) => setState(() => _currentFolderId = id),
+                                            onViewChanged: (v) => setState(() => _isGridView = v),
                                           ),
                                         ),
                                       ),
@@ -2235,6 +2327,17 @@ class _FilesWorkspace extends StatelessWidget {
     required this.onPrintDocument,
     required this.onRenameDocument,
     required this.onDeleteDocument,
+  
+    required this.folders,
+    this.currentFolderId,
+    this.isGridView = false,
+    required this.onRemoveFromFolder,
+    required this.onMoveToFolder,
+    required this.onFolderRename,
+    required this.onFolderDelete,
+    required this.onGoBack,
+    required this.onFolderTap,
+    required this.onViewChanged,
   });
 
   final int totalDocuments;
@@ -2252,6 +2355,17 @@ class _FilesWorkspace extends StatelessWidget {
   final Future<void> Function(RemoteDocument) onPrintDocument;
   final Future<void> Function(RemoteDocument) onRenameDocument;
   final Future<void> Function(RemoteDocument) onDeleteDocument;
+
+  final List<DocumentFolder> folders;
+  final String? currentFolderId;
+  final bool isGridView;
+  final Future<void> Function(String) onRemoveFromFolder;
+  final Future<void> Function(String) onMoveToFolder;
+  final Future<void> Function(DocumentFolder) onFolderRename;
+  final Future<void> Function(DocumentFolder) onFolderDelete;
+  final VoidCallback onGoBack;
+  final void Function(String) onFolderTap;
+  final void Function(bool) onViewChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -2274,8 +2388,7 @@ class _FilesWorkspace extends StatelessWidget {
                 latestFirst: latestFirst,
                 onSearchChanged: onSearchChanged,
                 onSortChanged: onSortChanged,
-                isGridView: isGridView,
-                onViewChanged: onViewChanged,
+                  isGridView: isGridView, onViewChanged: onViewChanged,
               ),
             ],
             documents: documents,
@@ -2284,6 +2397,15 @@ class _FilesWorkspace extends StatelessWidget {
             onPrint: onPrintDocument,
             onRename: onRenameDocument,
             onDelete: onDeleteDocument,
+              folders: folders,
+              currentFolderId: currentFolderId,
+              isGridView: isGridView,
+              onRemoveFromFolder: onRemoveFromFolder,
+              onMoveToFolder: onMoveToFolder,
+              onFolderRename: onFolderRename,
+              onFolderDelete: onFolderDelete,
+              onGoBack: onGoBack,
+              onFolderTap: onFolderTap,
           ),
         ),
       ],
@@ -2396,6 +2518,17 @@ class _MobileLayout extends StatelessWidget {
     required this.preparingLanDesktopSend,
     required this.sendingToLanDesktop,
     required this.localLanIps,
+  
+    required this.folders,
+    this.currentFolderId,
+    this.isGridView = false,
+    required this.onRemoveFromFolder,
+    required this.onMoveToFolder,
+    required this.onFolderRename,
+    required this.onFolderDelete,
+    required this.onGoBack,
+    required this.onFolderTap,
+    required this.onViewChanged,
   });
 
   final String userName;
@@ -2417,6 +2550,17 @@ class _MobileLayout extends StatelessWidget {
   final Future<void> Function(RemoteDocument) onPrintDocument;
   final Future<void> Function(RemoteDocument) onRenameDocument;
   final Future<void> Function(RemoteDocument) onDeleteDocument;
+
+  final List<DocumentFolder> folders;
+  final String? currentFolderId;
+  final bool isGridView;
+  final Future<void> Function(String) onRemoveFromFolder;
+  final Future<void> Function(String) onMoveToFolder;
+  final Future<void> Function(DocumentFolder) onFolderRename;
+  final Future<void> Function(DocumentFolder) onFolderDelete;
+  final VoidCallback onGoBack;
+  final void Function(String) onFolderTap;
+  final void Function(bool) onViewChanged;
   final VoidCallback onGoToChat;
   final VoidCallback onGoToAdmin;
   final VoidCallback onGoToProfile;
@@ -2576,6 +2720,15 @@ class _MobileLayout extends StatelessWidget {
         onPrint: onPrintDocument,
         onRename: onRenameDocument,
         onDelete: onDeleteDocument,
+          folders: folders,
+          currentFolderId: currentFolderId,
+          isGridView: isGridView,
+          onRemoveFromFolder: onRemoveFromFolder,
+          onMoveToFolder: onMoveToFolder,
+          onFolderRename: onFolderRename,
+          onFolderDelete: onFolderDelete,
+          onGoBack: onGoBack,
+          onFolderTap: onFolderTap,
       ),
     );
   }
@@ -2586,73 +2739,187 @@ class _FilesFeed extends StatelessWidget {
     required this.padding,
     required this.header,
     required this.documents,
+    required this.folders,
+    required this.currentFolderId,
+    required this.isGridView,
     required this.onRefresh,
     required this.onOpen,
     required this.onPrint,
     required this.onRename,
     required this.onDelete,
+    required this.onRemoveFromFolder,
+    required this.onMoveToFolder,
+    required this.onFolderRename,
+    required this.onFolderDelete,
+    required this.onGoBack,
+    required this.onFolderTap,
   });
 
   final EdgeInsets padding;
   final List<Widget> header;
   final List<RemoteDocument> documents;
+  final List<DocumentFolder> folders;
+  final String? currentFolderId;
+  final bool isGridView;
   final VoidCallback onRefresh;
   final Future<void> Function(RemoteDocument) onOpen;
   final Future<void> Function(RemoteDocument) onPrint;
   final Future<void> Function(RemoteDocument) onRename;
   final Future<void> Function(RemoteDocument) onDelete;
+  final Future<void> Function(String) onRemoveFromFolder;
+  final Future<void> Function(String) onMoveToFolder;
+  final Future<void> Function(DocumentFolder) onFolderRename;
+  final Future<void> Function(DocumentFolder) onFolderDelete;
+  final VoidCallback onGoBack;
+  final void Function(String) onFolderTap;
 
   @override
   Widget build(BuildContext context) {
     final visibleHeader = header.where((entry) => entry is! SizedBox).toList();
-    if (documents.isEmpty) {
-      return ListView(
-        padding: padding,
-        children: [
-          ...visibleHeader,
-          const SizedBox(height: 14),
-          _EmptyFilesState(onRefresh: onRefresh),
-        ],
-      );
-    }
 
-    final headerCount = visibleHeader.length + 2;
-    return ListView.separated(
-      padding: padding,
-      itemCount: documents.length + headerCount,
-      separatorBuilder: (_, index) => index >= headerCount - 1
-          ? const SizedBox(height: 10)
-          : const SizedBox.shrink(),
-      itemBuilder: (context, index) {
-        if (index < visibleHeader.length) {
-          return visibleHeader[index];
-        }
-        if (index == visibleHeader.length) {
-          return const SizedBox(height: 14);
-        }
-        if (index == visibleHeader.length + 1) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10, right: 4),
-            child: Text(
-              'قائمة الملفات',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+    return Padding(padding: padding, child: CustomScrollView(
+      
+      
+      slivers: [
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ...visibleHeader,
+              const SizedBox(height: 14),
+              if (currentFolderId != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: onGoBack,
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text('رجوع للرئيسية'),
+                      ),
+                      const Spacer(),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        if (currentFolderId == null && folders.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10, right: 4),
+              child: Text(
+                'المجلدات',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
             ),
-          );
-        }
-        final document = documents[index - headerCount];
-        return _FileListItem(
-          document: document,
-          onOpen: () => onOpen(document),
-          onPrint: () => onPrint(document),
-          onRename: () => onRename(document),
-          onDelete: () => onDelete(document),
-        );
-      },
+          ),
+          if (isGridView)
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 1.0,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  return _FolderGridCard(
+                    folder: folders[index],
+                    onTap: () => onFolderTap(folders[index].id),
+                    onRename: () => onFolderRename(folders[index]),
+                    onDelete: () => onFolderDelete(folders[index]),
+                  );
+                },
+                childCount: folders.length,
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _FolderListCard(
+                      folder: folders[index],
+                      onTap: () => onFolderTap(folders[index].id),
+                      onRename: () => onFolderRename(folders[index]),
+                      onDelete: () => onFolderDelete(folders[index]),
+                    ),
+                  );
+                },
+                childCount: folders.length,
+              ),
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+
+        if (documents.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10, right: 4),
+              child: Text(
+                'الملفات',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          if (isGridView)
+            SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 180,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.85,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  return _DocumentGridCard(
+                    document: documents[index],
+                    isInFolder: currentFolderId != null,
+                    onOpen: () => onOpen(documents[index]),
+                    onPrint: () => onPrint(documents[index]),
+                    onRename: () => onRename(documents[index]),
+                    onDelete: () => onDelete(documents[index]),
+                    onMoveToFolder: () => onMoveToFolder(documents[index].id),
+                    onRemoveFromFolder: () => onRemoveFromFolder(documents[index].id),
+                  );
+                },
+                childCount: documents.length,
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _FileListItem(
+                      document: documents[index],
+                      isInFolder: currentFolderId != null,
+                      onOpen: () => onOpen(documents[index]),
+                      onPrint: () => onPrint(documents[index]),
+                      onRename: () => onRename(documents[index]),
+                      onDelete: () => onDelete(documents[index]),
+                      onMoveToFolder: () => onMoveToFolder(documents[index].id),
+                      onRemoveFromFolder: () => onRemoveFromFolder(documents[index].id),
+                    ),
+                  );
+                },
+                childCount: documents.length,
+              ),
+            ),
+        ] else if (folders.isEmpty)
+          SliverToBoxAdapter(
+            child: _EmptyFilesState(onRefresh: onRefresh),
+          ),
+      ],
+    ),
     );
   }
 }
+
 
 class _AnnouncementsSection extends StatelessWidget {
   const _AnnouncementsSection({required this.announcementsState});
@@ -2919,11 +3186,15 @@ class _StatChip extends StatelessWidget {
 }
 
 class _SearchAndSortBar extends StatelessWidget {
+  final bool isGridView;
+  final void Function(bool) onViewChanged;
   const _SearchAndSortBar({
     required this.searchController,
     required this.latestFirst,
     required this.onSearchChanged,
     required this.onSortChanged,
+    required this.isGridView,
+    required this.onViewChanged,
   });
 
   final TextEditingController searchController;
@@ -2933,8 +3204,30 @@ class _SearchAndSortBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       children: [
+        // Grid / List toggle
+        Container(
+          decoration: BoxDecoration(
+            color: isDark ? scheme.surfaceContainer : const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            _ViewToggleBtn(
+              icon: Icons.view_list_rounded,
+              selected: !isGridView,
+              onTap: () => onViewChanged(false),
+            ),
+            _ViewToggleBtn(
+              icon: Icons.grid_view_rounded,
+              selected: isGridView,
+              onTap: () => onViewChanged(true),
+            ),
+          ]),
+        ),
+        const SizedBox(width: 10),
         Expanded(
           child: TextField(
             controller: searchController,
@@ -2969,208 +3262,373 @@ class _SearchAndSortBar extends StatelessWidget {
   }
 }
 
-class _FileListItem extends StatelessWidget {
-  const _FileListItem({
-    required this.document,
-    required this.onOpen,
-    required this.onPrint,
+class _ViewToggleBtn extends StatelessWidget {
+  const _ViewToggleBtn({
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: selected ? scheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, size: 20, color: selected ? scheme.onPrimary : scheme.onSurfaceVariant),
+      ),
+    );
+  }
+}
+
+class _FolderGridCard extends ConsumerWidget {
+  const _FolderGridCard({
+    required this.folder,
+    required this.onTap,
     required this.onRename,
     required this.onDelete,
   });
 
-  final RemoteDocument document;
-  final VoidCallback onOpen;
-  final VoidCallback onPrint;
+  final DocumentFolder folder;
+  final VoidCallback onTap;
   final VoidCallback onRename;
   final VoidCallback onDelete;
 
-  IconData _fileIcon(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.pdf')) return Icons.picture_as_pdf_outlined;
-    if (lower.endsWith('.doc') || lower.endsWith('.docx')) {
-      return Icons.description_outlined;
-    }
-    if (lower.endsWith('.xls') || lower.endsWith('.xlsx')) {
-      return Icons.table_chart_outlined;
-    }
-    if (lower.endsWith('.png') ||
-        lower.endsWith('.jpg') ||
-        lower.endsWith('.jpeg')) {
-      return Icons.image_outlined;
-    }
-    return Icons.insert_drive_file_outlined;
-  }
-
   @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBgColor = isDark
-        ? cs.surface.withValues(alpha: 0.65)
-        : Colors.white;
-    final cardBorderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.08);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final docCount = folder.documentIds.length;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 2), // Subtle margin for list look
-      decoration: BoxDecoration(
-        color: cardBgColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cardBorderColor, width: 1.0),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) => !folder.documentIds.contains(details.data),
+      onAcceptWithDetails: (details) async {
+        await ref.read(documentFoldersProvider.notifier).moveDocumentToFolder(details.data, folder.id);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('تم النقل إلى ${folder.name}')),
+          );
+        }
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isHovered = candidateData.isNotEmpty;
+        return InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: onOpen,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            child: Row(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              color: isHovered ? theme.colorScheme.primaryContainer : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isHovered ? theme.colorScheme.primary : (isDark ? Colors.white.withOpacity(0.07) : const Color(0xFFE2E8F0)),
+                width: isHovered ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Icon
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: cs.primaryContainer,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(
-                    _fileIcon(document.fileName),
-                    color: cs.onPrimaryContainer,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Info
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        document.fileName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        children: [
-                          _MetaLabel(formatDate(document.createdAt)),
-                          _MetaLabel('${document.pageCount} صفحة'),
-                          _MetaLabel(formatFileSize(document.fileSize)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Tooltip(
-                  message: 'تنزيل على الكمبيوتر',
-                  child: IconButton.filledTonal(
-                    onPressed: onOpen,
-                    icon: const Icon(Icons.download_rounded, size: 18),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                OutlinedButton.icon(
-                  onPressed: onOpen,
-                  icon: const Icon(Icons.open_in_new, size: 16),
-                  label: const Text('فتح'),
-                ),
-                const SizedBox(width: 6),
-                // Actions menu
-                _FileMenu(
-                  onPrint: onPrint,
-                  onRename: onRename,
-                  onDelete: onDelete,
+                Icon(isHovered ? Icons.folder_open_rounded : Icons.folder_rounded, size: 56, color: const Color(0xFFF59E0B)),
+                const SizedBox(height: 10),
+                Text(folder.name, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700)),
+                Text('$docCount ملف', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant, fontSize: 11)),
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_horiz, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                  onSelected: (action) {
+                    if (action == 'rename') onRename();
+                    else if (action == 'delete') onDelete();
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'rename', child: Text('إعادة تسمية')),
+                    const PopupMenuItem(value: 'delete', child: Text('حذف', style: TextStyle(color: Colors.red))),
+                  ],
                 ),
               ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
 
-class _MetaLabel extends StatelessWidget {
-  const _MetaLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Text(
-    text,
-    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: Theme.of(context).colorScheme.onSurfaceVariant,
-    ),
-  );
-}
-
-class _FileMenu extends StatelessWidget {
-  const _FileMenu({
-    required this.onPrint,
+class _FolderListCard extends ConsumerWidget {
+  const _FolderListCard({
+    required this.folder,
+    required this.onTap,
     required this.onRename,
     required this.onDelete,
   });
 
-  final VoidCallback onPrint;
+  final DocumentFolder folder;
+  final VoidCallback onTap;
   final VoidCallback onRename;
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<_FileAction>(
-      tooltip: 'خيارات',
-      onSelected: (value) {
-        switch (value) {
-          case _FileAction.print:
-            onPrint();
-          case _FileAction.rename:
-            onRename();
-          case _FileAction.delete:
-            onDelete();
-        }
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final docCount = folder.documentIds.length;
+
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) => !folder.documentIds.contains(details.data),
+      onAcceptWithDetails: (details) async {
+        await ref.read(documentFoldersProvider.notifier).moveDocumentToFolder(details.data, folder.id);
       },
-      itemBuilder: (context) => [
-        const PopupMenuItem(
-          value: _FileAction.print,
-          child: ListTile(
-            leading: Icon(Icons.print_rounded),
-            title: Text('طباعة'),
-            contentPadding: EdgeInsets.zero,
+      builder: (context, candidateData, rejectedData) {
+        final isHovered = candidateData.isNotEmpty;
+        return InkWell(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isHovered ? theme.colorScheme.primaryContainer : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: isHovered ? theme.colorScheme.primary : (isDark ? Colors.white.withOpacity(0.07) : const Color(0xFFE2E8F0))),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.folder_rounded, size: 44, color: const Color(0xFFF59E0B)),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(folder.name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                      Text('$docCount ملف', style: theme.textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_horiz, color: theme.colorScheme.onSurfaceVariant),
+                  onSelected: (action) {
+                    if (action == 'rename') onRename();
+                    if (action == 'delete') onDelete();
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'rename', child: Text('إعادة تسمية')),
+                    const PopupMenuItem(value: 'delete', child: Text('حذف', style: TextStyle(color: Colors.red))),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        const PopupMenuItem(
-          value: _FileAction.rename,
-          child: ListTile(
-            leading: Icon(Icons.drive_file_rename_outline),
-            title: Text('إعادة تسمية'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: _FileAction.delete,
-          child: ListTile(
-            leading: Icon(Icons.delete_outline),
-            title: Text('حذف'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-      ],
-      child: const Padding(
-        padding: EdgeInsets.all(8),
-        child: Icon(Icons.more_vert, size: 20),
-      ),
+        );
+      },
     );
   }
 }
 
-enum _FileAction { print, rename, delete }
+class _DocumentGridCard extends StatelessWidget {
+  const _DocumentGridCard({
+    required this.document,
+    required this.isInFolder,
+    required this.onOpen,
+    required this.onPrint,
+    required this.onRename,
+    required this.onDelete,
+    required this.onMoveToFolder,
+    required this.onRemoveFromFolder,
+  });
+
+  final RemoteDocument document;
+  final bool isInFolder;
+  final VoidCallback onOpen;
+  final VoidCallback onPrint;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+  final VoidCallback onMoveToFolder;
+  final VoidCallback onRemoveFromFolder;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final card = GestureDetector(
+      onTap: onOpen,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isDark ? Colors.white.withOpacity(0.07) : const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: const Color(0xFFDC2626).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFDC2626), size: 34),
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(document.fileName, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: 4),
+            Text(formatFileSize(document.fileSize), style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
+            _FileMenu(
+              isInFolder: isInFolder,
+              onPrint: onPrint,
+              onRename: onRename,
+              onDelete: onDelete,
+              onMoveToFolder: onMoveToFolder,
+              onRemoveFromFolder: onRemoveFromFolder,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return LongPressDraggable<String>(
+      data: document.id,
+      feedback: Material(color: Colors.transparent, child: Opacity(opacity: 0.8, child: SizedBox(width: 150, child: card))),
+      childWhenDragging: Opacity(opacity: 0.3, child: card),
+      child: card,
+    );
+  }
+}
+
+class _FileListItem extends StatelessWidget {
+  const _FileListItem({
+    required this.document,
+    required this.isInFolder,
+    required this.onOpen,
+    required this.onPrint,
+    required this.onRename,
+    required this.onDelete,
+    required this.onMoveToFolder,
+    required this.onRemoveFromFolder,
+  });
+
+  final RemoteDocument document;
+  final bool isInFolder;
+  final VoidCallback onOpen;
+  final VoidCallback onPrint;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+  final VoidCallback onMoveToFolder;
+  final VoidCallback onRemoveFromFolder;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final card = InkWell(
+      onTap: onOpen,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          border: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant.withOpacity(0.5), width: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFDC2626), size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(document.fileName, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text('${formatDate(document.createdAt)} • ${formatFileSize(document.fileSize)}', style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
+            _FileMenu(
+              isInFolder: isInFolder,
+              onPrint: onPrint,
+              onRename: onRename,
+              onDelete: onDelete,
+              onMoveToFolder: onMoveToFolder,
+              onRemoveFromFolder: onRemoveFromFolder,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return LongPressDraggable<String>(
+      data: document.id,
+      feedback: Material(color: Colors.transparent, child: Opacity(opacity: 0.8, child: SizedBox(width: MediaQuery.of(context).size.width * 0.7, child: card))),
+      childWhenDragging: Opacity(opacity: 0.3, child: card),
+      child: card,
+    );
+  }
+}
+
+enum _FileAction { print, rename, delete, moveToFolder, removeFromFolder }
+
+class _FileMenu extends StatelessWidget {
+  const _FileMenu({
+    required this.isInFolder,
+    required this.onPrint,
+    required this.onRename,
+    required this.onDelete,
+    required this.onMoveToFolder,
+    required this.onRemoveFromFolder,
+  });
+
+  final bool isInFolder;
+  final VoidCallback onPrint;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+  final VoidCallback onMoveToFolder;
+  final VoidCallback onRemoveFromFolder;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_FileAction>(
+      tooltip: 'الخيارات',
+      onSelected: (value) {
+        switch (value) {
+          case _FileAction.print: onPrint();
+          case _FileAction.rename: onRename();
+          case _FileAction.delete: onDelete();
+          case _FileAction.moveToFolder: onMoveToFolder();
+          case _FileAction.removeFromFolder: onRemoveFromFolder();
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: _FileAction.print, child: ListTile(leading: Icon(Icons.print_rounded), title: Text('طباعة'), contentPadding: EdgeInsets.zero)),
+        const PopupMenuItem(value: _FileAction.rename, child: ListTile(leading: Icon(Icons.drive_file_rename_outline), title: Text('إعادة تسمية'), contentPadding: EdgeInsets.zero)),
+        if (isInFolder)
+          const PopupMenuItem(value: _FileAction.removeFromFolder, child: ListTile(leading: Icon(Icons.folder_off_outlined), title: Text('إزالة من الفولدر'), contentPadding: EdgeInsets.zero))
+        else
+          const PopupMenuItem(value: _FileAction.moveToFolder, child: ListTile(leading: Icon(Icons.drive_file_move_outline), title: Text('نقل لفولدر'), contentPadding: EdgeInsets.zero)),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: _FileAction.delete, child: ListTile(leading: Icon(Icons.delete_outline, color: Colors.red), title: Text('حذف', style: TextStyle(color: Colors.red)), contentPadding: EdgeInsets.zero)),
+      ],
+    );
+  }
+}
+
 
 class _AdminOverviewCard extends StatelessWidget {
   const _AdminOverviewCard({

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -116,127 +117,177 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
 
   List<RemoteDocument> _filter(List<RemoteDocument> documents) {
     final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return documents;
+    return documents
+        .where((document) => document.fileName.toLowerCase().contains(query))
+        .toList();
+  }
 
-      // ── Filter Folders ─────────────────────────────────────────────────────
-      final currentLevelFolders = allFolders
-          .where((f) => f.parentId == _currentFolderId)
-          .where((f) => query.isEmpty || f.name.toLowerCase().contains(query))
-          .toList();
+  // ── Folder management ──────────────────────────────────────────────────────
 
-      // ── Filter Documents ───────────────────────────────────────────────────
-      List<RemoteDocument> currentLevelDocs;
-      List<PendingUpload> currentLevelPending;
+  Future<void> _createFolder() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('فولدر جديد'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'اسم الفولدر',
+            prefixIcon: Icon(Icons.folder_outlined),
+          ),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('إنشاء'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    if (!mounted) return;
+    final color = Colors.primaries[Random().nextInt(Colors.primaries.length)].value;
+    await ref.read(documentFoldersProvider.notifier).createFolder(name, parentId: _currentFolderId, colorValue: color);
+  }
 
-      if (_currentFolderId == null) {
-        // Root: Show docs not in any folder
-        currentLevelDocs = remoteDocs
-            .where((d) => !allFolderDocIds.contains(d.id))
-            .where((d) => query.isEmpty || d.fileName.toLowerCase().contains(query))
-            .toList();
-        currentLevelPending = query.isEmpty
-            ? pendingDocs
-            : pendingDocs
-                .where((d) => d.fileName.toLowerCase().contains(query))
-                .toList();
-      } else {
-        // Inside Folder
-        final folderDocIds = currentFolder!.documentIds;
-        currentLevelDocs = remoteDocs
-            .where((d) => folderDocIds.contains(d.id))
-            .where((d) => query.isEmpty || d.fileName.toLowerCase().contains(query))
-            .toList();
-        currentLevelPending = []; // Usually no pending uploads inside folders yet
-      }
+  Future<void> _renameFolder(DocumentFolder folder) async {
+    final controller = TextEditingController(text: folder.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إعادة تسمية الفولدر'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'اسم الفولدر'),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    if (!mounted) return;
+    await ref
+        .read(documentFoldersProvider.notifier)
+        .renameFolder(folder.id, name);
+  }
 
-      final merged = <dynamic>[...currentLevelPending, ...currentLevelDocs];
-      merged.sort((a, b) {
-        final aDate = a is PendingUpload ? a.createdAt : (a as RemoteDocument).createdAt;
-        final bDate = b is PendingUpload ? b.createdAt : (b as RemoteDocument).createdAt;
-        return bDate.compareTo(aDate);
-      });
+  Future<void> _deleteFolder(DocumentFolder folder) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف الفولدر'),
+        content: Text(
+          'سيتم حذف الفولدر «${folder.name}» والملفات ستعود للقائمة الرئيسية.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    if (!mounted) return;
+    await ref
+        .read(documentFoldersProvider.notifier)
+        .deleteFolder(folder.id);
+    if (mounted && _currentFolderId == folder.id) {
+      setState(() => _currentFolderId = null);
+    }
+  }
 
-      final isEmpty = currentLevelFolders.isEmpty && merged.isEmpty;
+  /// Shows a bottom-sheet picker for the user to choose a target folder,
+  /// then moves [documentId] into that folder.
+  Future<void> _showMoveFolderPicker(String documentId) async {
+    final folders =
+        ref.read(documentFoldersProvider).valueOrNull ?? [];
+    if (folders.isEmpty) {
+      // No folders yet — offer to create one first
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('أنشئ فولدراً أولاً باستخدام زر +'),
+          action: SnackBarAction(
+            label: 'إنشاء',
+            onPressed: () async {
+              await _createFolder();
+              if (mounted) {
+                await Future.delayed(const Duration(milliseconds: 300));
+                if (mounted) _showMoveFolderPicker(documentId);
+              }
+            },
+          ),
+        ),
+      );
+      return;
+    }
 
-      return RefreshIndicator(
-        onRefresh: refreshDocuments,
-        child: _isGridView
-            ? CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(child: Column(children: [
-                    headerCard, ...banners, searchField, toolbar,
-                  ])),
-                  if (isEmpty)
-                    const SliverToBoxAdapter(child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: Center(child: Text('المجلد فارغ')),
-                    ))
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-                      sliver: SliverGrid(
-                        delegate: SliverChildBuilderDelegate(
-                          (ctx, i) {
-                            // Folders first
-                            if (i < currentLevelFolders.length) {
-                              return _buildFolderCard(
-                                  ctx, currentLevelFolders[i], remoteDocs);
-                            }
-                            // Then docs
-                            final docIndex = i - currentLevelFolders.length;
-                            final item = merged[docIndex];
-                            if (item is PendingUpload) {
-                              return _buildPendingGridCard(ctx, item);
-                            } else {
-                              return _buildDocumentGridCard(
-                                  ctx, item as RemoteDocument, isInFolder: _currentFolderId != null);
-                            }
-                          },
-                          childCount: currentLevelFolders.length + merged.length,
-                        ),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
-                          childAspectRatio: 0.85,
-                        ),
-                      ),
-                    ),
-                ],
-              )
-            : ListView(
-                padding: const EdgeInsets.only(bottom: 80),
-                children: [
-                  headerCard, ...banners, searchField, toolbar,
-                  if (isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(40),
-                      child: Center(child: Text('المجلد فارغ')),
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Container(
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Column(
-                          children: [
-                            for (final f in currentLevelFolders)
-                              _buildFolderListCard(context, f, remoteDocs),
-                            for (final item in merged)
-                              if (item is PendingUpload)
-                                _buildPendingCard(context, item)
-                              else
-                                _buildDocumentCard(context, item as RemoteDocument, isInFolder: _currentFolderId != null),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
+    final targetFolderId = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Text(
+                'اختر الفولدر',
+                style: TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 16),
               ),
+            ),
+            ...folders.map(
+              (f) => ListTile(
+                leading: const Icon(Icons.folder_rounded,
+                    color: Color(0xFFF59E0B)),
+                title: Text(f.name),
+                subtitle: Text('${f.documentIds.length} ملف'),
+                onTap: () => Navigator.pop(ctx, f.id),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (targetFolderId == null) return;
+    if (!mounted) return;
+    await ref
+        .read(documentFoldersProvider.notifier)
+        .moveDocumentToFolder(documentId, targetFolderId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم نقل الملف إلى الفولدر')),
       );
     }
   }
@@ -1485,7 +1536,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       ),
     );
 
-    return LongPressDraggable<String>(delay: const Duration(milliseconds: 200),
+    return LongPressDraggable<String>(delay: const Duration(milliseconds: 100),
       data: document.id,
       feedback: Material(
         color: Colors.transparent,
@@ -1580,7 +1631,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       ),
     );
 
-    return LongPressDraggable<String>(delay: const Duration(milliseconds: 200),
+    return LongPressDraggable<String>(delay: const Duration(milliseconds: 100),
       data: document.id,
       feedback: Material(
         color: Colors.transparent,
@@ -1614,7 +1665,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         await ref
             .read(documentFoldersProvider.notifier)
             .moveDocumentToFolder(details.data, folder.id);
-        if (mounted) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content:
@@ -1628,7 +1679,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
           borderRadius: BorderRadius.circular(14),
           onTap: () => setState(() => _currentFolderId = folder.id),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 100),
             decoration: BoxDecoration(
               color: isHovered
                   ? theme.colorScheme.primaryContainer
@@ -1764,7 +1815,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         await ref
             .read(documentFoldersProvider.notifier)
             .moveDocumentToFolder(details.data, folder.id);
-        if (mounted) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content:
@@ -1777,7 +1828,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         return InkWell(
           onTap: () => setState(() => _currentFolderId = folder.id),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 100),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: isHovered
@@ -1868,6 +1919,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
     final pendingDocs = pendingState.valueOrNull ?? <PendingUpload>[];
 
     // IDs that are inside any folder
+    final visibleFolders = allFolders.where((f) => f.parentId == _currentFolderId).toList();
     final allFolderDocIds = <String>{
       for (final f in allFolders) ...f.documentIds,
     };
