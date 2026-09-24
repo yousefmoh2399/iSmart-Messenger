@@ -63,6 +63,15 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
   List<Map<String, dynamic>> _pendingLanReceiveRequests =
       const <Map<String, dynamic>>[];
 
+  void _goBack() {
+    if (_currentFolderId == null) return;
+    final folders = ref.read(documentFoldersProvider).valueOrNull ?? [];
+    final currentFolder = folders.where((f) => f.id == _currentFolderId).firstOrNull;
+    setState(() {
+      _currentFolderId = currentFolder?.parentId;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1837,7 +1846,7 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                 onMoveToFolder: _showMoveFolderPicker,
                                 onFolderRename: _renameFolder,
                                 onFolderDelete: _deleteFolder,
-                                onGoBack: () => setState(() => _currentFolderId = null),
+                                onGoBack: _goBack,
                                 onFolderTap: (id) => setState(() => _currentFolderId = id),
                                 onViewChanged: (v) => setState(() => _isGridView = v),
                                 onGoToChat: _goToChat,
@@ -1950,7 +1959,7 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                                             onMoveToFolder: _showMoveFolderPicker,
                                             onFolderRename: _renameFolder,
                                             onFolderDelete: _deleteFolder,
-                                            onGoBack: () => setState(() => _currentFolderId = null),
+                                            onGoBack: _goBack,
                                             onFolderTap: (id) => setState(() => _currentFolderId = id),
                                             onViewChanged: (v) => setState(() => _isGridView = v),
                                           ),

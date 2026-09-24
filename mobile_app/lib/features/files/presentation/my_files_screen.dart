@@ -91,6 +91,15 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
   // ── Drag-to-folder selection ──────────────────────────────────────────────
 
 
+  void _goBack() {
+    if (_currentFolderId == null) return;
+    final folders = ref.read(documentFoldersProvider).valueOrNull ?? [];
+    final currentFolder = folders.where((f) => f.id == _currentFolderId).firstOrNull;
+    setState(() {
+      _currentFolderId = currentFolder?.parentId;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2137,7 +2146,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
           // Breadcrumb / folder name
           if (currentFolder != null) ...[
             GestureDetector(
-              onTap: () => setState(() => _currentFolderId = null),
+              onTap: _goBack,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(Icons.arrow_back_ios_new_rounded,
                     size: 14, color: colorScheme.primary),
@@ -2381,7 +2390,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         leading: currentFolder != null
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                onPressed: () => setState(() => _currentFolderId = null),
+                onPressed: _goBack,
               )
             : null,
         actions: [
