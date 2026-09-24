@@ -466,11 +466,33 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
 
   List<RemoteDocument> _filterAndSort(List<RemoteDocument> documents, List<DocumentFolder> folders) {
     final query = _searchController.text.trim().toLowerCase();
-    final filtered = query.isEmpty
-        ? documents
-        : documents
-              .where((d) => d.fileName.toLowerCase().contains(query))
-              .toList();
+
+    // Collect ALL document IDs that are inside any folder
+    final allFolderDocIds = <String>{};
+    for (final f in folders) {
+      allFolderDocIds.addAll(f.documentIds);
+    }
+
+    List<RemoteDocument> filtered;
+    if (query.isNotEmpty) {
+      // Search mode: search ALL documents regardless of folder
+      filtered = documents
+          .where((d) => d.fileName.toLowerCase().contains(query))
+          .toList();
+    } else if (_currentFolderId != null) {
+      // Inside a folder: show only documents belonging to this folder
+      final currentFolder = folders.where((f) => f.id == _currentFolderId).firstOrNull;
+      if (currentFolder != null) {
+        final docIds = currentFolder.documentIds.toSet();
+        filtered = documents.where((d) => docIds.contains(d.id)).toList();
+      } else {
+        filtered = [];
+      }
+    } else {
+      // Root level: show only documents NOT inside any folder
+      filtered = documents.where((d) => !allFolderDocIds.contains(d.id)).toList();
+    }
+
     filtered.sort(
       (a, b) => _latestFirst
           ? b.createdAt.compareTo(a.createdAt)
