@@ -2347,30 +2347,40 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       conversationMessagesControllerProvider(_conversationId).notifier,
     );
 
-    if (_editingMessage != null) {
-      await notifier.editMessage(
-        messageId: _editingMessage!.id,
-        content: content,
-      );
-    } else {
-      await notifier.sendText(
-        content,
-        replyToMessageId: _replyingTo?.id,
-        metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
-        isSilent: isSilent,
-        scheduledFor: scheduledFor,
-      );
-    }
+    try {
+      if (_editingMessage != null) {
+        await notifier.editMessage(
+          messageId: _editingMessage!.id,
+          content: content,
+        );
+      } else {
+        await notifier.sendText(
+          content,
+          replyToMessageId: _replyingTo?.id,
+          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+          isSilent: isSilent,
+          scheduledFor: scheduledFor,
+        );
+      }
 
-    if (!mounted) return;
-    _messageController.clear();
-    unawaited(_draftStore.clear(_conversationId));
-    _stopTypingNow();
-    setState(() {
-      _replyingTo = null;
-      _editingMessage = null;
-    });
-    _scrollToBottom();
+      if (!mounted) return;
+      _messageController.clear();
+      unawaited(_draftStore.clear(_conversationId));
+      _stopTypingNow();
+      setState(() {
+        _replyingTo = null;
+        _editingMessage = null;
+      });
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('فشل الإرسال: لا يوجد اتصال بالسيرفر حالياً.'),
+          ),
+        );
+      }
+    }
   }
 
   void _showMessageDetails(ChatMessage message) {

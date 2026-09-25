@@ -1512,8 +1512,8 @@ class ConversationMessagesController
           isLoadingMore: false,
         ),
       );
-    } catch (error, stackTrace) {
-      state = AsyncError(error, stackTrace);
+    } catch (error) {
+      state = AsyncData(current.copyWith(isLoadingMore: false));
     }
   }
 

@@ -843,6 +843,7 @@ import 'widgets/chat_ui_helpers.dart';
 import 'widgets/new_conversation_dialog.dart' as widgets;
 import 'widgets/right_panel.dart';
 
+
 // ─── Telegram-style colour tokens ────────────────────────────────────────────
 class _TgColors {
   _TgColors._();
@@ -1480,7 +1481,10 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
           child: Scaffold(
             backgroundColor: shellBackdropColor,
             body: SafeArea(
-              child: chatState.when(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: chatState.when(
                 loading: () => const Center(
                   child: Padding(
                     padding: EdgeInsets.all(20),
@@ -1522,6 +1526,9 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                 },
               ),
             ),
+          ],
+        ),
+      ),
           ),
         ),
       ),

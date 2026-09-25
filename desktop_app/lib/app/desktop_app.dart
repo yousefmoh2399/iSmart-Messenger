@@ -26,6 +26,74 @@ import '../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../shared/widgets/loading_indicator.dart';
 import 'desktop_workspace_shell.dart';
 
+import '../features/chat/presentation/chat_realtime_controller.dart';
+
+class _WindowTitleBarConnectionStatus extends ConsumerWidget {
+  const _WindowTitleBarConnectionStatus();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!web_bridge.isElectron()) return const SizedBox.shrink();
+
+    final connectionState = ref.watch(chatRealtimeControllerProvider);
+    final isConnected = connectionState.status == ChatConnectionStatus.connected;
+    final isConnecting = connectionState.status == ChatConnectionStatus.connecting || connectionState.status == ChatConnectionStatus.reconnecting;
+    
+    final color = isConnected 
+        ? const Color(0xFF10B981) // Green
+        : isConnecting
+            ? const Color(0xFFF59E0B) // Amber
+            : const Color(0xFFEF4444); // Red
+
+    final text = isConnected 
+        ? 'متصل بالسيرفر'
+        : isConnecting 
+            ? 'جاري الاتصال...' 
+            : 'غير متصل';
+
+    return Positioned(
+      top: 0,
+      left: 16,
+      right: 150, // Avoid overlapping window controls on the right
+      height: 34,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color,
+                  boxShadow: [
+                    BoxShadow(color: color.withOpacity(0.5), blurRadius: 4),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                text,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class WorkplaceDesktopApp extends ConsumerWidget {
   const WorkplaceDesktopApp({super.key});
 
@@ -60,9 +128,17 @@ class WorkplaceDesktopApp extends ConsumerWidget {
       themeAnimationDuration: Duration.zero,
       builder: (context, child) {
         if (web_bridge.isElectron()) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 34),
-            child: child ?? const SizedBox.shrink(),
+          return Directionality(
+            textDirection: TextDirection.rtl,
+            child: Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 34),
+                  child: child ?? const SizedBox.shrink(),
+                ),
+                const _WindowTitleBarConnectionStatus(),
+              ],
+            ),
           );
         }
         return child ?? const SizedBox.shrink();

@@ -247,7 +247,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
                     ),
                   ),
                 ),
-                _DesktopWorkspaceConnectionIcon(isDark: isDark),
+                
               ],
             ),
           ),
@@ -309,6 +309,7 @@ class _DesktopWorkspaceIconButton extends StatefulWidget {
     this.selected = false,
     this.accent = false,
     this.badgeCount = 0,
+    this.statusColor,
   });
 
   final String tooltip;
@@ -319,6 +320,7 @@ class _DesktopWorkspaceIconButton extends StatefulWidget {
   final VoidCallback onPressed;
   final bool selected;
   final bool accent;
+  final Color? statusColor;
 
   @override
   State<_DesktopWorkspaceIconButton> createState() =>
@@ -421,20 +423,38 @@ class _DesktopWorkspaceIconButtonState
                         ),
                       ),
                     ),
-                  AnimatedPositioned(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    bottom: selected ? 6 : 2,
-                    child: AnimatedContainer(
+                    AnimatedPositioned(
                       duration: const Duration(milliseconds: 220),
-                      width: selected ? 18 : 0,
-                      height: 3,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(99),
-                        color: accentColor,
+                      curve: Curves.easeOutCubic,
+                      bottom: selected ? 6 : 2,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        width: selected ? 18 : 0,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(99),
+                          color: accentColor,
+                        ),
                       ),
                     ),
-                  ),
+                  if (widget.statusColor != null)
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: widget.statusColor,
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF6F6F6),
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -495,27 +515,53 @@ class _DesktopWorkspaceConnectionIconState
         child: GestureDetector(
           onTap: _onTap,
           onSecondaryTap: _onSecondaryTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            width: 16,
-            height: 16,
-            margin: const EdgeInsets.only(top: 10, bottom: 10),
+          child: Container(
+            width: 32,
+            height: 32,
+            margin: const EdgeInsets.only(top: 8, bottom: 8),
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              boxShadow: _hovered
-                  ? [
-                      BoxShadow(
-                        color: color.withValues(alpha: 0.5),
-                        blurRadius: 8,
-                        spreadRadius: 2,
-                      )
-                    ]
-                  : null,
-              border: Border.all(
-                color: widget.isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF6F6F6),
-                width: 2,
-              ),
+              borderRadius: BorderRadius.circular(10),
+              color: _hovered
+                  ? (widget.isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.04))
+                  : Colors.transparent,
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(
+                  Icons.dns_rounded,
+                  size: 20,
+                  color: widget.isDark ? Colors.white70 : const Color(0xFF728397),
+                ),
+                Positioned(
+                  right: 2,
+                  bottom: 2,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: color,
+                      border: Border.all(
+                        color: widget.isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF6F6F6),
+                        width: 1.5,
+                      ),
+                      boxShadow: _hovered
+                          ? [
+                              BoxShadow(
+                                color: color.withValues(alpha: 0.5),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              )
+                            ]
+                          : null,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
