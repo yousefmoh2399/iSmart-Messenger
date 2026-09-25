@@ -14,6 +14,7 @@ import '../../../shared/services/local_media_storage_service.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../auth/data/auth_repository.dart';
 import '../models/chat_models.dart';
+import 'chat_local_cache.dart';
 
 class ChatRepository {
   ChatRepository(
@@ -21,6 +22,7 @@ class ChatRepository {
     this._authRepository,
     this._localStorage,
     this._preferences,
+    this._cache,
   );
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
@@ -31,6 +33,9 @@ class ChatRepository {
   final AuthRepository _authRepository;
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
+  final ChatLocalCache _cache;
+
+  ChatLocalCache get cache => _cache;
 
   List<Map<String, dynamic>> _extractList(
     Map<String, dynamic>? data,
@@ -51,13 +56,27 @@ class ChatRepository {
   }
 
   Future<List<ChatConversation>> fetchConversations() async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations',
-    );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations',
+      );
+      final list = _extractList(
+        response.data,
+        'conversations',
+      ).map(ChatConversation.fromJson).toList();
+      if (response.data != null) {
+        await _cache.saveRawJson('conversations', response.data!);
+      }
+      return list;
+    } catch (e) {
+      if (e is DioException) {
+        final cached = await _cache.loadRawJson('conversations');
+        if (cached != null) {
+          return _extractList(cached, 'conversations').map(ChatConversation.fromJson).toList();
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<List<ChatConversation>> fetchManageableConversations() async {
@@ -248,24 +267,57 @@ class ChatRepository {
     int limit = 40,
     bool isScheduled = false,
   }) async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations/$conversationId/messages',
-      queryParameters: {
-        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
-        'limit': limit,
-        if (isScheduled) 'isScheduled': 'true',
-      },
-    );
-    final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
-    return ChatMessagesPage(
-      messages: _extractList(
-        response.data,
-        'messages',
-      ).map(ChatMessage.fromJson).toList(),
-      nextCursor: meta['nextCursor'] as String?,
-      hasMore: meta['hasMore'] == true,
-      limit: meta['limit'] as int? ?? limit,
-    );
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations/$conversationId/messages',
+        queryParameters: {
+          if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+          'limit': limit,
+          if (isScheduled) 'isScheduled': 'true',
+        },
+      );
+      final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
+      if (cursor == null && !isScheduled && response.data != null) {
+        await _cache.saveRawJson('messages_$conversationId', response.data!);
+      }
+      return ChatMessagesPage(
+        messages: _extractList(
+          response.data,
+          'messages',
+        ).map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: meta['limit'] as int? ?? limit,
+      );
+    } catch (e) {
+      if (e is DioException && cursor == null && !isScheduled) {
+        final cached = await _cache.loadRawJson('messages_$conversationId');
+        if (cached != null) {
+          final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+          return ChatMessagesPage(
+            messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+            nextCursor: meta['nextCursor'] as String?,
+            hasMore: meta['hasMore'] == true,
+            limit: meta['limit'] as int? ?? limit,
+          );
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<ChatMessagesPage?> getCachedMessages(String conversationId) async {
+    final cached = await _cache.loadRawJson('messages_$conversationId');
+    if (cached != null) {
+      final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+      return ChatMessagesPage(
+        messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: meta['limit'] as int? ?? 40,
+      );
+    }
+    return null;
   }
 
   Future<ChatSearchResult> searchMessages({

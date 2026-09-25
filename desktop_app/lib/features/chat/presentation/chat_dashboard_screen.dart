@@ -479,7 +479,7 @@
 //                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
 //                 child: Column(
 //                   children: [
-//                     // ChatConnectionBanner(state: connectionState),
+
 //                     Expanded(
 //                       child: chatState.when(
 //                         loading: () =>

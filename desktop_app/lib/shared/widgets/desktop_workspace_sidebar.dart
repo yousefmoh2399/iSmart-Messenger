@@ -7,6 +7,8 @@ import 'package:iconsax/iconsax.dart';
 import '../models/app_user.dart';
 import '../providers/providers.dart';
 import 'safe_network_avatar.dart';
+import 'server_settings_dialog.dart';
+import '../../features/chat/presentation/chat_realtime_controller.dart';
 
 enum DesktopWorkspaceSection {
   chat,
@@ -245,6 +247,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
                     ),
                   ),
                 ),
+                _DesktopWorkspaceConnectionIcon(isDark: isDark),
               ],
             ),
           ),
@@ -433,6 +436,85 @@ class _DesktopWorkspaceIconButtonState
                     ),
                   ),
                 ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopWorkspaceConnectionIcon extends ConsumerStatefulWidget {
+  const _DesktopWorkspaceConnectionIcon({
+    required this.isDark,
+  });
+
+  final bool isDark;
+
+  @override
+  ConsumerState<_DesktopWorkspaceConnectionIcon> createState() =>
+      _DesktopWorkspaceConnectionIconState();
+}
+
+class _DesktopWorkspaceConnectionIconState
+    extends ConsumerState<_DesktopWorkspaceConnectionIcon> {
+  bool _hovered = false;
+
+  void _onTap() {
+    ref.invalidate(chatSocketConnectionProvider);
+  }
+
+  void _onSecondaryTap() {
+    ServerSettingsDialog.show(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connectionState = ref.watch(chatRealtimeControllerProvider);
+    final isConnected = connectionState.status == ChatConnectionStatus.connected;
+    final isConnecting = connectionState.status == ChatConnectionStatus.connecting || connectionState.status == ChatConnectionStatus.reconnecting;
+    
+    final color = isConnected 
+        ? const Color(0xFF10B981) // Green
+        : isConnecting 
+            ? const Color(0xFFF59E0B) // Amber
+            : const Color(0xFFEF4444); // Red
+
+    final tooltip = isConnected 
+        ? 'متصل (اضغط للتحديث)'
+        : isConnecting
+            ? 'جاري الاتصال...'
+            : 'غير متصل (اضغط للاتصال)';
+
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: _onTap,
+          onSecondaryTap: _onSecondaryTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            width: 16,
+            height: 16,
+            margin: const EdgeInsets.only(top: 10, bottom: 10),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: _hovered
+                  ? [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.5),
+                        blurRadius: 8,
+                        spreadRadius: 2,
+                      )
+                    ]
+                  : null,
+              border: Border.all(
+                color: widget.isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF6F6F6),
+                width: 2,
               ),
             ),
           ),

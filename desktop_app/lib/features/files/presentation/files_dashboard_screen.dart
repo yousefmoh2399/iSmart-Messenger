@@ -3376,8 +3376,11 @@ class _FolderGridCard extends ConsumerWidget {
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, size: 18, color: theme.colorScheme.onSurfaceVariant),
                   onSelected: (action) {
-                    if (action == 'rename') onRename();
-                    else if (action == 'delete') onDelete();
+                    if (action == 'rename') {
+                      onRename();
+                    } else if (action == 'delete') {
+                      onDelete();
+                    }
                   },
                   itemBuilder: (_) => [
                     const PopupMenuItem(value: 'rename', child: Text('إعادة تسمية')),

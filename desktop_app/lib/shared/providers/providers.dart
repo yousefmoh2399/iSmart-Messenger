@@ -22,6 +22,7 @@ import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/data/auth_session_manager.dart';
 import '../../features/auth/data/session_store.dart';
 import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/chat/data/chat_local_cache.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -423,6 +424,10 @@ final announcementRepositoryProvider = Provider<AnnouncementRepository>((ref) {
   );
 });
 
+final chatLocalCacheProvider = Provider<ChatLocalCache>((ref) {
+  return ChatLocalCache();
+});
+
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
   return ChatRepository(
     ref.watch(authenticatedApiClientProvider),
@@ -430,6 +435,7 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(localMediaStorageServiceProvider),
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
+    ref.watch(chatLocalCacheProvider),
   );
 });
 

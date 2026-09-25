@@ -99,12 +99,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
     final repository = _repository();
     final conversations = await _guardAuth(repository.fetchConversations);
-    final usersPage = await _guardAuth(repository.fetchUsersPage);
-    _usersPage = usersPage.page;
-    _hasMoreUsers = usersPage.hasMore;
-    final departments = await _guardAuth(repository.fetchDepartments);
-    final branches = await _guardAuth(repository.fetchBranches);
-
     Future<List<T>> safeList<T>(Future<List<T>> Function() loader) async {
       try {
         return await _guardAuth(loader);
@@ -115,6 +109,19 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         return <T>[];
       }
     }
+
+    late ChatDirectoryUsersPage usersPage;
+    try {
+      usersPage = await _guardAuth(repository.fetchUsersPage);
+    } catch (error) {
+      if (_isUnauthorized(error)) rethrow;
+      usersPage = const ChatDirectoryUsersPage(users: [], page: 1, hasMore: false, limit: 40);
+    }
+    _usersPage = usersPage.page;
+    _hasMoreUsers = usersPage.hasMore;
+    
+    final departments = await safeList(repository.fetchDepartments);
+    final branches = await safeList(repository.fetchBranches);
 
     final manageableConversations = await safeList(
       repository.fetchManageableConversations,
@@ -1194,6 +1201,12 @@ class ConversationMessagesController
       _socketService?.leaveConversation(arg);
     });
 
+    final cached = await _repository().getCachedMessages(arg);
+    if (cached != null) {
+      Future.microtask(() => refresh());
+      return ConversationMessagesState.initial(_dedupePage(cached));
+    }
+
     final page = await _guardAuth(() => _repository().fetchMessages(arg));
     return ConversationMessagesState.initial(_dedupePage(page));
   }
@@ -1458,12 +1471,16 @@ class ConversationMessagesController
       if (_disposed) {
         return;
       }
+
       state = AsyncData(ConversationMessagesState.initial(_dedupePage(page)));
     } catch (error, stackTrace) {
       if (_disposed) {
         return;
       }
-      state = AsyncError(error, stackTrace);
+      final current = state.valueOrNull;
+      if (current == null || current.messages.isEmpty) {
+        state = AsyncError(error, stackTrace);
+      }
     } finally {
       _isRefreshing = false;
     }
