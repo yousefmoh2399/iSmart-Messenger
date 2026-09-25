@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -157,7 +157,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         for (final user in current.users) user.id: user,
         for (final user in page.users) user.id: user,
       };
-      state = AsyncData(
+      _setStateAndCache(
         _copyOverview(source: current, users: byId.values.toList()),
       );
     } finally {
@@ -398,7 +398,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
           .toList();
     }
 
-    state = AsyncData(
+    _setStateAndCache(
       ChatOverviewData(
         conversations: updateConversations(current.conversations),
         manageableConversations: updateConversations(
@@ -459,7 +459,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         ? DateTime.tryParse(event.payload['lastActiveAt'] as String)
         : null;
 
-    state = AsyncData(
+    _setStateAndCache(
       ChatOverviewData(
         conversations: current.conversations
             .map(
@@ -550,7 +550,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
             updatedAt: message.createdAt,
           );
 
-          state = AsyncData(
+          _setStateAndCache(
             _copyOverview(
               source: latest,
               conversations: _sortConversations([
@@ -578,7 +578,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       updatedAt: message.createdAt,
     );
 
-    state = AsyncData(
+    _setStateAndCache(
       _copyOverview(
         source: current,
         conversations: _sortConversations(updated),
@@ -625,7 +625,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return conversation.copyWith(lastMessage: _buildLastMessage(message));
     }).toList();
 
-    state = AsyncData(_copyOverview(source: current, conversations: updated));
+    _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }
 
   void _applyMessageDeleted(String? conversationId) {
@@ -653,7 +653,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       );
     }).toList();
 
-    state = AsyncData(_copyOverview(source: current, conversations: updated));
+    _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }
 
   void _applySeenUpdate({
@@ -677,7 +677,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         )
         .toList();
 
-    state = AsyncData(_copyOverview(source: current, conversations: updated));
+    _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }
 
   void _applyConversationUpdate(ChatConversation conversation) {
@@ -706,7 +706,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       );
     }
 
-    state = AsyncData(
+    _setStateAndCache(
       _copyOverview(
         source: current,
         conversations: _sortConversations(updated),
@@ -724,7 +724,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    state = AsyncData(
+    _setStateAndCache(
       _copyOverview(
         source: current,
         conversations: current.conversations
@@ -744,7 +744,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    state = AsyncData(
+    _setStateAndCache(
       _copyOverview(
         source: current,
         conversations: current.conversations
@@ -766,7 +766,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    state = AsyncData(
+    _setStateAndCache(
       _copyOverview(
         source: current,
         conversations: current.conversations
@@ -803,7 +803,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
     if (next.hasError && previous != null) {
-      state = AsyncData(previous);
+      _setStateAndCache(previous);
       return;
     }
     state = next;
@@ -1129,7 +1129,18 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
     _applyConversationUpdate(conversation);
     return conversation;
-  }
+    }
+
+    Future<void> _saveStateToCache(ChatOverviewData data) async {
+      try {
+        final jsonList = data.conversations.map((c) => c.toJson()).toList();
+        await _repository().cache.saveRawJson('conversations', {'conversations': jsonList});
+      } catch (_) {}
+    }
+    void _setStateAndCache(ChatOverviewData data) {
+      state = AsyncData(data);
+      _saveStateToCache(data);
+    }
 }
 
 class ConversationMessagesController
@@ -1227,7 +1238,7 @@ class ConversationMessagesController
       if (event.type == 'receive_message') {
         final message = ChatMessage.fromJson(event.payload);
         if (message.conversationId == conversationId) {
-          state = AsyncData(
+          _setStateAndCache(
             current.copyWith(
               messages: _upsertMessage(current.messages, message),
             ),
@@ -1239,7 +1250,7 @@ class ConversationMessagesController
       if (event.type == 'message_updated') {
         final message = ChatMessage.fromJson(event.payload);
         if (message.conversationId == conversationId) {
-          state = AsyncData(
+          _setStateAndCache(
             current.copyWith(
               messages: _upsertMessage(current.messages, message),
             ),
@@ -1252,7 +1263,7 @@ class ConversationMessagesController
           event.payload['conversationId']?.toString() == conversationId) {
         final messageId = event.payload['messageId']?.toString();
         if (messageId != null) {
-          state = AsyncData(
+          _setStateAndCache(
             current.copyWith(
               messages: _markMessageDeleted(current.messages, messageId),
             ),
@@ -1305,7 +1316,7 @@ class ConversationMessagesController
           );
         }).toList();
 
-        state = AsyncData(current.copyWith(messages: updatedMessages));
+        _setStateAndCache(current.copyWith(messages: updatedMessages));
 
         if (!matchedAny) {
           Future<void>.microtask(() async {
@@ -1332,7 +1343,7 @@ class ConversationMessagesController
           return;
         }
 
-        state = AsyncData(
+        _setStateAndCache(
           current.copyWith(
             messages: current.messages
                 .map(
@@ -1472,7 +1483,7 @@ class ConversationMessagesController
         return;
       }
 
-      state = AsyncData(ConversationMessagesState.initial(_dedupePage(page)));
+      _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
     } catch (error, stackTrace) {
       if (_disposed) {
         return;
@@ -1495,7 +1506,7 @@ class ConversationMessagesController
       return;
     }
 
-    state = AsyncData(current.copyWith(isLoadingMore: true));
+    _setStateAndCache(current.copyWith(isLoadingMore: true));
     try {
       final page = await _guardAuth(
         () => _repository().fetchMessages(arg, cursor: current.nextCursor),
@@ -1504,7 +1515,7 @@ class ConversationMessagesController
         ...page.messages,
         ...current.messages,
       ]);
-      state = AsyncData(
+      _setStateAndCache(
         current.copyWith(
           messages: merged,
           nextCursor: page.nextCursor,
@@ -1513,7 +1524,7 @@ class ConversationMessagesController
         ),
       );
     } catch (error) {
-      state = AsyncData(current.copyWith(isLoadingMore: false));
+      _setStateAndCache(current.copyWith(isLoadingMore: false));
     }
   }
 
@@ -1533,7 +1544,7 @@ class ConversationMessagesController
 
     final merged = _sortAndDedupeMessages([...current.messages, ...messages]);
 
-    state = AsyncData(current.copyWith(messages: merged));
+    _setStateAndCache(current.copyWith(messages: merged));
   }
 
   Future<void> sendText(
@@ -1595,7 +1606,7 @@ class ConversationMessagesController
           hasMore: false,
           isLoadingMore: false,
         );
-    state = AsyncData(
+    _setStateAndCache(
       current.copyWith(
         messages: _upsertMessage(current.messages, result.message),
       ),
@@ -1632,7 +1643,7 @@ class ConversationMessagesController
           hasMore: false,
           isLoadingMore: false,
         );
-    state = AsyncData(
+    _setStateAndCache(
       current.copyWith(
         messages: _upsertMessage(current.messages, result.message),
       ),
@@ -1650,7 +1661,7 @@ class ConversationMessagesController
     if (current == null) {
       return;
     }
-    state = AsyncData(
+    _setStateAndCache(
       current.copyWith(messages: _upsertMessage(current.messages, updated)),
     );
   }
@@ -1661,7 +1672,7 @@ class ConversationMessagesController
     if (current == null) {
       return;
     }
-    state = AsyncData(
+    _setStateAndCache(
       current.copyWith(
         messages: _markMessageDeleted(current.messages, messageId),
       ),
@@ -1684,7 +1695,7 @@ class ConversationMessagesController
         }
       }
       if (previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           current.copyWith(
             messages: _upsertMessage(
               current.messages,
@@ -1705,7 +1716,7 @@ class ConversationMessagesController
       );
       final latest = state.valueOrNull;
       if (latest != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
         );
       }
@@ -1717,7 +1728,7 @@ class ConversationMessagesController
     } catch (error) {
       final latest = state.valueOrNull;
       if (latest != null && previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(
             messages: _upsertMessage(latest.messages, previousMessage),
           ),
@@ -1740,7 +1751,7 @@ class ConversationMessagesController
         }
       }
       if (previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           current.copyWith(
             messages: _upsertMessage(
               current.messages,
@@ -1757,14 +1768,14 @@ class ConversationMessagesController
       );
       final latest = state.valueOrNull;
       if (latest != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
         );
       }
     } catch (error) {
       final latest = state.valueOrNull;
       if (latest != null && previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(
             messages: _upsertMessage(latest.messages, previousMessage),
           ),
@@ -1780,7 +1791,7 @@ class ConversationMessagesController
     );
     final latest = state.valueOrNull;
     if (latest != null) {
-      state = AsyncData(
+      _setStateAndCache(
         latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
       );
     }
@@ -1807,6 +1818,28 @@ class ConversationMessagesController
   }
 
   void sendTyping() => _socketService?.sendTyping(arg);
-
   void stopTyping() => _socketService?.stopTyping(arg);
+
+  Future<void> _saveStateToCache(ConversationMessagesState data) async {
+    try {
+      final jsonList = data.messages.map((m) => m.toJson()).toList();
+      await _repository().cache.saveRawJson('messages_$arg', {
+        'messages': jsonList,
+        'meta': {
+          'nextCursor': data.nextCursor,
+          'hasMore': data.hasMore,
+        }
+      });
+    } catch (_) {}
+  }
+  void _setStateAndCache(ConversationMessagesState data) {
+    state = AsyncData(data);
+    _saveStateToCache(data);
+  }
 }
+
+
+
+
+
+
