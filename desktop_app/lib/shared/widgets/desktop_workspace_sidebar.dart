@@ -10,6 +10,7 @@ import 'safe_network_avatar.dart';
 import 'server_settings_dialog.dart';
 import '../../features/chat/presentation/chat_realtime_controller.dart';
 
+
 enum DesktopWorkspaceSection {
   chat,
   files,
@@ -247,7 +248,8 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
                     ),
                   ),
                 ),
-                
+                const SizedBox(height: 12),
+                const _SidebarConnectionStatus(),
               ],
             ),
           ),
@@ -562,6 +564,90 @@ class _DesktopWorkspaceConnectionIconState
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarConnectionStatus extends ConsumerStatefulWidget {
+  const _SidebarConnectionStatus();
+
+  @override
+  ConsumerState<_SidebarConnectionStatus> createState() => _SidebarConnectionStatusState();
+}
+
+class _SidebarConnectionStatusState extends ConsumerState<_SidebarConnectionStatus> {
+  bool _hovered = false;
+
+  void _onTap() {
+    final connectionState = ref.read(chatRealtimeControllerProvider);
+    if (connectionState.status != ChatConnectionStatus.connected) {
+      ref.read(chatRealtimeControllerProvider.notifier).reconnect();
+    }
+  }
+
+  void _onSecondaryTap() {
+    ServerSettingsDialog.show(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connectionState = ref.watch(chatRealtimeControllerProvider);
+    final isConnected = connectionState.status == ChatConnectionStatus.connected;
+    final isConnecting = connectionState.status == ChatConnectionStatus.connecting || connectionState.status == ChatConnectionStatus.reconnecting;
+    
+    final color = isConnected 
+        ? const Color(0xFF10B981) 
+        : isConnecting 
+            ? const Color(0xFFF59E0B) 
+            : const Color(0xFFEF4444); 
+
+    final tooltip = isConnected 
+        ? 'متصل بالسيرفر'
+        : isConnecting
+            ? 'جاري الاتصال...'
+            : 'غير متصل';
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Tooltip(
+      message: tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: _onTap,
+          onSecondaryTap: _onSecondaryTap,
+          child: Container(
+            width: 44,
+            height: 44,
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _hovered
+                  ? (isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.04))
+                  : Colors.transparent,
+            ),
+            child: Center(
+              child: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color,
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.4),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

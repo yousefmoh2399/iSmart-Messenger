@@ -79,7 +79,7 @@ function applyWindowTheme(mode = currentWindowTheme) {
   mainWindow.setBackgroundColor(palette.color);
   if (typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
-      color: palette.color,
+      color: "rgba(0,0,0,0)",
       symbolColor: palette.symbolColor,
       height: 34,
     });
@@ -839,7 +839,7 @@ function createWindow(startUrl) {
     backgroundColor: titleBarPalette().color,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      ...titleBarPalette(),
+      ...titleBarPalette(), color: "rgba(0,0,0,0)",
       height: 34,
     },
     webPreferences: {

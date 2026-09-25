@@ -248,6 +248,15 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
       lastChangedAt: DateTime.now(),
     );
   }
+
+  void reconnect() {
+    state = ChatRealtimeState(
+      status: ChatConnectionStatus.connecting,
+      message: 'جاري إعادة الاتصال...',
+      lastChangedAt: DateTime.now(),
+    );
+    ref.invalidate(chatSocketConnectionProvider);
+  }
 }
 
 String _ticketNotificationFallbackTitle(String? action, Object? ticket) {
