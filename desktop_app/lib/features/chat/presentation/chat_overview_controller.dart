@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,7 +72,10 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         roles: [],
       );
     }
-    await ref.watch(chatSocketConnectionProvider.future);
+    // The overview must be able to render cached conversations while the
+    // socket is offline. Socket connection/reconnection is independent from
+    // the REST/cache loading path.
+    unawaited(ref.read(chatSocketConnectionProvider.future));
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatSocketService = ref.read(chatSocketServiceProvider);
     _currentUserId = ref.read(authControllerProvider).valueOrNull?.id ?? '';
@@ -115,11 +118,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       usersPage = await _guardAuth(repository.fetchUsersPage);
     } catch (error) {
       if (_isUnauthorized(error)) rethrow;
-      usersPage = const ChatDirectoryUsersPage(users: [], page: 1, hasMore: false, limit: 40);
+      usersPage = const ChatDirectoryUsersPage(
+        users: [],
+        page: 1,
+        hasMore: false,
+        limit: 40,
+      );
     }
     _usersPage = usersPage.page;
     _hasMoreUsers = usersPage.hasMore;
-    
+
     final departments = await safeList(repository.fetchDepartments);
     final branches = await safeList(repository.fetchBranches);
 
@@ -1129,18 +1137,21 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
     _applyConversationUpdate(conversation);
     return conversation;
-    }
+  }
 
-    Future<void> _saveStateToCache(ChatOverviewData data) async {
-      try {
-        final jsonList = data.conversations.map((c) => c.toJson()).toList();
-        await _repository().cache.saveRawJson('conversations', {'conversations': jsonList});
-      } catch (_) {}
-    }
-    void _setStateAndCache(ChatOverviewData data) {
-      state = AsyncData(data);
-      _saveStateToCache(data);
-    }
+  Future<void> _saveStateToCache(ChatOverviewData data) async {
+    try {
+      final jsonList = data.conversations.map((c) => c.toJson()).toList();
+      await _repository().cache.saveRawJson('conversations', {
+        'conversations': jsonList,
+      });
+    } catch (_) {}
+  }
+
+  void _setStateAndCache(ChatOverviewData data) {
+    state = AsyncData(data);
+    _saveStateToCache(data);
+  }
 }
 
 class ConversationMessagesController
@@ -1200,7 +1211,10 @@ class ConversationMessagesController
         isLoadingMore: false,
       );
     }
-    await ref.watch(chatSocketConnectionProvider.future);
+    // Do not block cached messages on the socket connection. The socket will
+    // reconnect in the background and realtime updates will be applied when
+    // it becomes available.
+    unawaited(ref.read(chatSocketConnectionProvider.future));
     _socketService = ref.read(chatSocketServiceProvider);
     _chatRepository = ref.read(chatRepositoryProvider);
     _disposed = false;
@@ -1825,21 +1839,13 @@ class ConversationMessagesController
       final jsonList = data.messages.map((m) => m.toJson()).toList();
       await _repository().cache.saveRawJson('messages_$arg', {
         'messages': jsonList,
-        'meta': {
-          'nextCursor': data.nextCursor,
-          'hasMore': data.hasMore,
-        }
+        'meta': {'nextCursor': data.nextCursor, 'hasMore': data.hasMore},
       });
     } catch (_) {}
   }
+
   void _setStateAndCache(ConversationMessagesState data) {
     state = AsyncData(data);
     _saveStateToCache(data);
   }
 }
-
-
-
-
-
-
