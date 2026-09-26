@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io' as io_dart;
 
 import 'package:socket_io_client/socket_io_client.dart' as io;
@@ -72,7 +72,7 @@ class ChatSocketService implements PrintStatusEmitter {
     final socket =
         socketOverride ??
         io.io(
-          baseUrl,
+            Uri.parse(baseUrl).origin,
           io.OptionBuilder()
               .setTransports(['websocket'])
               .setPath('/socket.io')
@@ -521,3 +521,4 @@ class ChatSocketService implements PrintStatusEmitter {
     _eventsController.close();
   }
 }
+
