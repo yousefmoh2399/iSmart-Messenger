@@ -27,6 +27,15 @@ void main() {
             source.contains('_titleAttentionTimer')) {
           continue;
         }
+        // The printer monitoring screen intentionally refreshes the status of
+        // an active print job while that screen is open. This is scoped UI
+        // status refresh, not the removed app-wide background polling.
+        if (path.endsWith(
+              'features/printers/presentation/printer_monitoring_screen.dart',
+            ) &&
+            source.contains("_timer = Timer.periodic")) {
+          continue;
+        }
         offenders.add(path);
       }
     }

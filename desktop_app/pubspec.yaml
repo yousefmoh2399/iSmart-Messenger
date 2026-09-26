@@ -58,10 +58,6 @@ flutter:
     - assets/notification_sounds/chime_tone.wav
     - assets/notification_sounds/alert_tone.wav
   fonts:
-    - family: Noto Color Emoji
-      fonts:
-        - asset: assets/fonts/NotoColorEmoji.ttf
-          weight: 400
     - family: Roboto
       fonts:
         - asset: assets/fonts/Roboto-Regular.ttf

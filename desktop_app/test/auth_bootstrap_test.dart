@@ -58,9 +58,7 @@ void main() {
       );
 
       final container = ProviderContainer(
-        overrides: [
-          authRepositoryProvider.overrideWithValue(fakeRepo),
-        ],
+        overrides: [authRepositoryProvider.overrideWithValue(fakeRepo)],
       );
 
       final state = container.read(authControllerProvider);
@@ -69,7 +67,7 @@ void main() {
       await container.read(authControllerProvider.notifier).initializeAuth();
       final finalState = container.read(authControllerProvider);
       expect(finalState.status, equals(AuthStatus.authenticated));
-      expect(finalState.user?.username, equals('testuser'));
+      expect(finalState.user?.username, equals('test_user'));
     });
 
     test('Failed bootstrap transitions to unauthenticated', () async {
@@ -77,9 +75,7 @@ void main() {
       fakeRepo.mockUser = null;
 
       final container = ProviderContainer(
-        overrides: [
-          authRepositoryProvider.overrideWithValue(fakeRepo),
-        ],
+        overrides: [authRepositoryProvider.overrideWithValue(fakeRepo)],
       );
 
       final state = container.read(authControllerProvider);

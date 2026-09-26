@@ -37,10 +37,16 @@ class AuthRepository {
   String? get currentToken => _sessionManager.accessToken;
 
   Future<void> _clearSession({bool notifySessionCleared = true}) async {
-    await _sessionManager.clearSessionOnce(reason: 'auth_repository_clear');
-    await _clearCachedUser();
-    if (notifySessionCleared) {
-      onSessionCleared?.call();
+    try {
+      await _sessionManager.clearSessionOnce(reason: 'auth_repository_clear');
+    } finally {
+      // Chat data is user-sensitive. It must never survive logout, including
+      // when the server logout request or session cleanup fails.
+      await _clearUserSpecificCaches();
+      await _clearCachedUser();
+      if (notifySessionCleared) {
+        onSessionCleared?.call();
+      }
     }
   }
 
@@ -194,7 +200,8 @@ class AuthRepository {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys();
       for (final key in keys) {
-        if (key.startsWith('chat_pref_') ||
+        if (key.startsWith('chat_cache_') ||
+            key.startsWith('chat_pref_') ||
             key.startsWith('printer_pref_') ||
             key.contains('_cache_')) {
           await prefs.remove(key);
