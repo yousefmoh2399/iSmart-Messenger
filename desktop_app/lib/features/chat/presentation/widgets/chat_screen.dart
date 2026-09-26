@@ -2964,25 +2964,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     final messagesState = ref.read(
       conversationMessagesControllerProvider(_conversationId),
     );
-    final hasProtectedAttachment =
-        messagesState.valueOrNull?.messages.any(
-          (message) =>
-              message.hasAttachment && !message.attachmentDownloadAllowed,
-        ) ??
-        false;
-    if (hasProtectedAttachment) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'تم تعطيل إرسال لقطة شاشة داخل هذه المحادثة لوجود مرفقات محمية.',
-          ),
-        ),
-      );
-      return;
-    }
 
     final windows = await _listOpenDesktopWindows();
     if (!mounted) {
