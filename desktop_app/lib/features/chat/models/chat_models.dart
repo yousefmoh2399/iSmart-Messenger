@@ -1,4 +1,4 @@
-﻿import '../../../core/network/media_url_resolver.dart';
+import '../../../core/network/media_url_resolver.dart';
 
 List<String> _normalizeStringList(List<String>? value) {
   return List<String>.from(value ?? const <String>[]);
@@ -145,28 +145,9 @@ class ChatDirectoryUser {
   String get displayName => fullName.trim().isEmpty ? username : fullName;
   bool get isIdle => presenceStatus == 'idle';
 
-        Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'username': username,
-      'fullName': fullName,
-      'role': role,
-      'departmentId': departmentId,
-      'departmentIds': departmentIds,
-      'branchId': branchId,
-      'branchCode': branchCode,
-      'isOnline': isOnline,
-      'presenceStatus': presenceStatus,
-      'isActive': isActive,
-      'avatarUrl': avatarUrl,
-      'lastSeen': lastSeen?.toIso8601String(),
-      'lastActiveAt': lastActiveAt?.toIso8601String(),
-    };
-  }
-
   factory ChatDirectoryUser.fromJson(Map<String, dynamic> json) {
     return ChatDirectoryUser(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      id: json['id'] as String,
       username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
       role: json['role'] as String? ?? 'user',
@@ -225,7 +206,7 @@ class DepartmentSummary {
 
   factory DepartmentSummary.fromJson(Map<String, dynamic> json) {
     return DepartmentSummary(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      id: json['id'] as String,
       name: json['name'] as String? ?? '',
       code: json['code'] as String? ?? '',
       description: json['description'] as String? ?? '',
@@ -255,7 +236,7 @@ class BranchSummary {
 
   factory BranchSummary.fromJson(Map<String, dynamic> json) {
     return BranchSummary(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      id: json['id'] as String,
       name: json['name'] as String? ?? '',
       code: json['code'] as String? ?? '',
       description: json['description'] as String? ?? '',
@@ -277,7 +258,7 @@ class ChatRole {
 
   factory ChatRole.fromJson(Map<String, dynamic> json) {
     return ChatRole(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      id: json['id'] as String,
       roleName: json['roleName'] as String? ?? 'user',
       permissions: ChatPermissionSet.fromJson(
         json['permissions'] as Map<String, dynamic>?,
@@ -300,16 +281,6 @@ class ChatLastMessage {
   final String senderName;
   final String messageType;
   final DateTime? createdAt;
-
-    Map<String, dynamic> toJson() {
-    return {
-      'content': content,
-      'senderId': senderId,
-      'senderName': senderName,
-      'messageType': messageType,
-      'createdAt': createdAt?.toIso8601String(),
-    };
-  }
 
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
@@ -341,17 +312,6 @@ class ChatPinnedMessage {
   final String setByName;
   final DateTime? createdAt;
   final DateTime? updatedAt;
-
-    Map<String, dynamic> toJson() {
-    return {
-      'messageId': messageId,
-      'content': content,
-      'setBy': setBy,
-      'setByName': setByName,
-      'createdAt': createdAt?.toIso8601String(),
-      'updatedAt': updatedAt?.toIso8601String(),
-    };
-  }
 
   factory ChatPinnedMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
@@ -480,35 +440,9 @@ class ChatConversation {
     );
   }
 
-    Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'type': type,
-      'name': name,
-      'description': description,
-      'departmentId': departmentId,
-      'createdBy': createdBy,
-      'members': members.map((e) => e.toJson()).toList(),
-      'admins': admins.map((e) => e.toJson()).toList(),
-      'broadcastPublisherIds': broadcastPublisherIds,
-      'blockedMemberIds': blockedMemberIds,
-      'blockedMembers': blockedMembers.map((e) => e.toJson()).toList(),
-      'pinnedMessage': pinnedMessage?.toJson(),
-      'lastMessage': lastMessage?.toJson(),
-      'unreadCount': unreadCount,
-      'isArchived': isArchived,
-      'isMuted': isMuted,
-      'isPinned': isPinned,
-      'isFavorite': isFavorite,
-      'isActive': isActive,
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
-    };
-  }
-
   factory ChatConversation.fromJson(Map<String, dynamic> json) {
     return ChatConversation(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      id: json['id'] as String,
       type: json['type'] as String? ?? 'direct',
       name: json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
@@ -568,16 +502,9 @@ class ChatReceipt {
   final String userId;
   final DateTime? at;
 
-    Map<String, dynamic> toJson() {
-    return {
-      'userId': userId,
-      'at': at?.toIso8601String(),
-    };
-  }
-
   factory ChatReceipt.fromJson(Map<String, dynamic> json) {
     return ChatReceipt(
-      userId: json['userId']?.toString() ?? '',
+      userId: json['userId'] as String,
       at: json['at'] is String ? DateTime.tryParse(json['at'] as String) : null,
     );
   }
@@ -809,33 +736,11 @@ class ChatMessage {
     );
   }
 
-    Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'conversationId': conversationId,
-      'senderId': senderId,
-      'sender': sender?.toJson(),
-      'content': content,
-      'messageType': messageType,
-      'fileUrl': fileUrl,
-      'fileName': fileName,
-      'fileSize': fileSize,
-      'mimeType': mimeType,
-      'replyToMessageId': replyToMessageId,
-      'isDeleted': isDeleted,
-      'metadata': metadata,
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
-      'seenBy': seenBy.map((e) => e.toJson()).toList(),
-      'deliveredTo': deliveredTo.map((e) => e.toJson()).toList(),
-    };
-  }
-
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
-      conversationId: json['conversationId']?.toString() ?? '',
-      senderId: json['senderId']?.toString() ?? '',
+      id: json['id'] as String,
+      conversationId: json['conversationId'] as String,
+      senderId: json['senderId'] as String,
       sender: json['sender'] is Map<String, dynamic>
           ? ChatDirectoryUser.fromJson(json['sender'] as Map<String, dynamic>)
           : null,
@@ -1106,8 +1011,8 @@ class ChatFolder {
 
   factory ChatFolder.fromJson(Map<String, dynamic> json) {
     return ChatFolder(
-      id: (json['_id'] ?? json['id'])?.toString() ?? '',
-      name: json['name']?.toString() ?? '',
+      id: json['_id'] as String? ?? json['id'] as String,
+      name: json['name'] as String,
       icon: json['icon'] as String?,
       conversationIds: (json['conversationIds'] as List?)?.cast<String>() ?? [],
       order: json['order'] as int? ?? 0,
@@ -1140,10 +1045,3 @@ class ChatFolder {
     );
   }
 }
-
-
-
-
-
-
-
