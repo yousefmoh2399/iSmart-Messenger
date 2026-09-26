@@ -11,6 +11,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:gal/gal.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -113,12 +114,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   final Map<String, _MessageDownloadState> _downloadStates = {};
 
   bool get _isDownloadingAttachment => _downloadStates.isNotEmpty;
-  double get _downloadProgress => _downloadStates.isEmpty
-      ? 0
-      : _downloadStates.values.first.progress;
-  String? get _downloadingFileName => _downloadStates.isEmpty
-      ? null
-      : _downloadStates.values.first.fileName;
+  double get _downloadProgress =>
+      _downloadStates.isEmpty ? 0 : _downloadStates.values.first.progress;
+  String? get _downloadingFileName =>
+      _downloadStates.isEmpty ? null : _downloadStates.values.first.fileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
   bool _isRecordingVoice = false;
@@ -505,8 +504,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   int _maxChatAttachmentBytes() {
     final user = ref.read(authControllerProvider).valueOrNull;
     final customLimitMB = user?.maxAttachmentSizeMB;
-    final defaultLimit = user?.role == 'admin' ? _chatMaxUploadBytesAdmin : _chatMaxUploadBytesUser;
-    
+    final defaultLimit = user?.role == 'admin'
+        ? _chatMaxUploadBytesAdmin
+        : _chatMaxUploadBytesUser;
+
     if (customLimitMB != null) {
       final customBytes = customLimitMB * 1024 * 1024;
       return customBytes > defaultLimit ? customBytes : defaultLimit;
@@ -521,15 +522,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final limitMB = _maxChatAttachmentBytes() ~/ (1024 * 1024);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          'الحد الأقصى لحجم مرفقات الشات هو $limitMB ميجا فقط.',
-        ),
+        content: Text('الحد الأقصى لحجم مرفقات الشات هو $limitMB ميجا فقط.'),
       ),
     );
   }
 
   @override
   void dispose() {
+    // Do not leave a stale active conversation behind after navigating back.
+    // The overview controller uses this value to decide whether an incoming
+    // message should increment the unread badge.
+    final activeConversationId = _container.read(activeConversationIdProvider);
+    if (activeConversationId == widget.conversation.id) {
+      _clearActiveConversationSelection();
+    }
     _messageController.removeListener(_onMessageTextChanged);
     _messageController.removeListener(_onMessageDraftChanged);
     _scrollController.removeListener(_onScroll);
@@ -1001,6 +1007,38 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               : 'تم إرسال $sentCount صورة وتخطي $skippedCount ملف بسبب الحجم.',
         ),
       ),
+    );
+  }
+
+  Future<void> _takePhotoAndSend() async {
+    final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
+    if (_isReadOnlyFor(authUserId)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_readOnlyTextFor(authUserId))));
+      return;
+    }
+    if (_isUploadingAttachment) return;
+
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 92,
+      maxWidth: 2400,
+      maxHeight: 2400,
+    );
+    if (photo == null || !mounted) return;
+
+    final file = File(photo.path);
+    if (await file.length() > _maxChatAttachmentBytes()) {
+      if (mounted) _showChatAttachmentSizeExceededSnackbar();
+      return;
+    }
+
+    await _sendPreparedFile(
+      sendPath: photo.path,
+      displayName: p.basename(photo.path),
+      restrictForwardAndDownload: false,
     );
   }
 
@@ -4969,12 +5007,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                                   color: subTextColor,
                                                                                                 ),
                                                                                               ),
-                                                                                            if (_downloadStates.containsKey(message.id))
+                                                                                            if (_downloadStates.containsKey(
+                                                                                              message.id,
+                                                                                            ))
                                                                                               SizedBox(
                                                                                                 width: 18,
                                                                                                 height: 18,
                                                                                                 child: CircularProgressIndicator(
-                                                                                                  value: _downloadStates[message.id]!.progress > 0
+                                                                                                  value:
+                                                                                                      _downloadStates[message.id]!.progress >
+                                                                                                          0
                                                                                                       ? _downloadStates[message.id]!.progress
                                                                                                       : null,
                                                                                                   strokeWidth: 2,
@@ -5368,6 +5410,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     enterSendsMessage: enterSendsMessage,
                     onAttach: _sendFile,
                     onPickImage: _sendImages,
+                    onTakePhoto: _takePhotoAndSend,
                     onSendSpecificFile: _sendSpecificFile,
                     onSendScreenshot: _sendScreenshotFromDevice,
                     onOpenReactionPicker: _showComposerReactionPicker,
@@ -6283,6 +6326,7 @@ class _MessageComposer extends StatefulWidget {
     required this.enterSendsMessage,
     required this.onAttach,
     required this.onPickImage,
+    required this.onTakePhoto,
     this.onSendSpecificFile,
     required this.onSendScreenshot,
     required this.onOpenReactionPicker,
@@ -6320,6 +6364,7 @@ class _MessageComposer extends StatefulWidget {
   final bool enterSendsMessage;
   final VoidCallback onAttach;
   final VoidCallback onPickImage;
+  final VoidCallback onTakePhoto;
   final ValueChanged<String>? onSendSpecificFile;
   final VoidCallback onSendScreenshot;
   final VoidCallback onOpenReactionPicker;
@@ -6446,6 +6491,19 @@ class _MessageComposerState extends State<_MessageComposer> {
                     onSendPoll: widget.onSendPoll,
                     onSendChecklist: widget.onSendChecklist,
                     onSendGif: widget.onSendGif,
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    tooltip: 'Ø§Ù„ÙƒØ§Ù…ÙŠØ±Ø§',
+                    onPressed: enabled && !isUploading
+                        ? widget.onTakePhoto
+                        : null,
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(42, 42),
+                      padding: EdgeInsets.zero,
+                      backgroundColor: colorScheme.surfaceContainerHighest,
+                    ),
+                    icon: const Icon(Icons.camera_alt_rounded, size: 20),
                   ),
                 ],
                 Expanded(

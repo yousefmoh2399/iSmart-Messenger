@@ -10,7 +10,6 @@ import 'safe_network_avatar.dart';
 import 'server_settings_dialog.dart';
 import '../../features/chat/presentation/chat_realtime_controller.dart';
 
-
 enum DesktopWorkspaceSection {
   chat,
   files,
@@ -425,20 +424,20 @@ class _DesktopWorkspaceIconButtonState
                         ),
                       ),
                     ),
-                    AnimatedPositioned(
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    bottom: selected ? 6 : 2,
+                    child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      bottom: selected ? 6 : 2,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width: selected ? 18 : 0,
-                        height: 3,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(99),
-                          color: accentColor,
-                        ),
+                      width: selected ? 18 : 0,
+                      height: 3,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(99),
+                        color: accentColor,
                       ),
                     ),
+                  ),
                   if (widget.statusColor != null)
                     Positioned(
                       right: 8,
@@ -451,7 +450,9 @@ class _DesktopWorkspaceIconButtonState
                           shape: BoxShape.circle,
                           color: widget.statusColor,
                           border: Border.all(
-                            color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF6F6F6),
+                            color: isDark
+                                ? const Color(0xFF1C1C1E)
+                                : const Color(0xFFF6F6F6),
                             width: 1.5,
                           ),
                         ),
@@ -468,9 +469,7 @@ class _DesktopWorkspaceIconButtonState
 }
 
 class _DesktopWorkspaceConnectionIcon extends ConsumerStatefulWidget {
-  const _DesktopWorkspaceConnectionIcon({
-    required this.isDark,
-  });
+  const _DesktopWorkspaceConnectionIcon({required this.isDark});
 
   final bool isDark;
 
@@ -494,20 +493,23 @@ class _DesktopWorkspaceConnectionIconState
   @override
   Widget build(BuildContext context) {
     final connectionState = ref.watch(chatRealtimeControllerProvider);
-    final isConnected = connectionState.status == ChatConnectionStatus.connected;
-    final isConnecting = connectionState.status == ChatConnectionStatus.connecting || connectionState.status == ChatConnectionStatus.reconnecting;
-    
-    final color = isConnected 
-        ? const Color(0xFF10B981) // Green
-        : isConnecting 
-            ? const Color(0xFFF59E0B) // Amber
-            : const Color(0xFFEF4444); // Red
+    final isConnected =
+        connectionState.status == ChatConnectionStatus.connected;
+    final isConnecting =
+        connectionState.status == ChatConnectionStatus.connecting ||
+        connectionState.status == ChatConnectionStatus.reconnecting;
 
-    final tooltip = isConnected 
+    final color = isConnected
+        ? const Color(0xFF10B981) // Green
+        : isConnecting
+        ? const Color(0xFFF59E0B) // Amber
+        : const Color(0xFFEF4444); // Red
+
+    final tooltip = isConnected
         ? 'متصل (اضغط للتحديث)'
         : isConnecting
-            ? 'جاري الاتصال...'
-            : 'غير متصل (اضغط للاتصال)';
+        ? 'جاري الاتصال...'
+        : 'غير متصل (اضغط للاتصال)';
 
     return Tooltip(
       message: tooltip,
@@ -525,8 +527,8 @@ class _DesktopWorkspaceConnectionIconState
               borderRadius: BorderRadius.circular(10),
               color: _hovered
                   ? (widget.isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.04))
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.black.withValues(alpha: 0.04))
                   : Colors.transparent,
             ),
             child: Stack(
@@ -535,7 +537,9 @@ class _DesktopWorkspaceConnectionIconState
                 Icon(
                   Icons.dns_rounded,
                   size: 20,
-                  color: widget.isDark ? Colors.white70 : const Color(0xFF728397),
+                  color: widget.isDark
+                      ? Colors.white70
+                      : const Color(0xFF728397),
                 ),
                 Positioned(
                   right: 2,
@@ -548,7 +552,9 @@ class _DesktopWorkspaceConnectionIconState
                       shape: BoxShape.circle,
                       color: color,
                       border: Border.all(
-                        color: widget.isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF6F6F6),
+                        color: widget.isDark
+                            ? const Color(0xFF1C1C1E)
+                            : const Color(0xFFF6F6F6),
                         width: 1.5,
                       ),
                       boxShadow: _hovered
@@ -557,7 +563,7 @@ class _DesktopWorkspaceConnectionIconState
                                 color: color.withValues(alpha: 0.5),
                                 blurRadius: 4,
                                 spreadRadius: 1,
-                              )
+                              ),
                             ]
                           : null,
                     ),
@@ -576,10 +582,12 @@ class _SidebarConnectionStatus extends ConsumerStatefulWidget {
   const _SidebarConnectionStatus();
 
   @override
-  ConsumerState<_SidebarConnectionStatus> createState() => _SidebarConnectionStatusState();
+  ConsumerState<_SidebarConnectionStatus> createState() =>
+      _SidebarConnectionStatusState();
 }
 
-class _SidebarConnectionStatusState extends ConsumerState<_SidebarConnectionStatus> {
+class _SidebarConnectionStatusState
+    extends ConsumerState<_SidebarConnectionStatus> {
   bool _hovered = false;
 
   void _onTap() {
@@ -596,20 +604,23 @@ class _SidebarConnectionStatusState extends ConsumerState<_SidebarConnectionStat
   @override
   Widget build(BuildContext context) {
     final connectionState = ref.watch(chatRealtimeControllerProvider);
-    final isConnected = connectionState.status == ChatConnectionStatus.connected;
-    final isConnecting = connectionState.status == ChatConnectionStatus.connecting || connectionState.status == ChatConnectionStatus.reconnecting;
-    
-    final color = isConnected 
-        ? const Color(0xFF10B981) 
-        : isConnecting 
-            ? const Color(0xFFF59E0B) 
-            : const Color(0xFFEF4444); 
+    final isConnected =
+        connectionState.status == ChatConnectionStatus.connected;
+    final isConnecting =
+        connectionState.status == ChatConnectionStatus.connecting ||
+        connectionState.status == ChatConnectionStatus.reconnecting;
 
-    final tooltip = isConnected 
+    final color = isConnected
+        ? const Color(0xFF10B981)
+        : isConnecting
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFFEF4444);
+
+    final tooltip = isConnected
         ? 'متصل بالسيرفر'
         : isConnecting
-            ? 'جاري الاتصال...'
-            : 'غير متصل';
+        ? 'جاري الاتصال...'
+        : 'غير متصل';
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -629,23 +640,34 @@ class _SidebarConnectionStatusState extends ConsumerState<_SidebarConnectionStat
               shape: BoxShape.circle,
               color: _hovered
                   ? (isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.04))
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.black.withValues(alpha: 0.04))
                   : Colors.transparent,
             ),
             child: Center(
-              child: Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color,
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.4),
-                      blurRadius: 6,
-                    ),
-                  ],
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 260),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.32),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                  child: Image.asset(
+                    isConnected
+                        ? 'assets/images/server-online.png'
+                        : 'assets/images/server-down.png',
+                    key: ValueKey(isConnected),
+                    width: 34,
+                    height: 34,
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
             ),
