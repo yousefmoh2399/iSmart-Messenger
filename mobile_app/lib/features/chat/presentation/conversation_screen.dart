@@ -5850,57 +5850,118 @@ class _ChatMediaAlbum extends StatelessWidget {
   final double width;
   final ValueChanged<ChatMessage> onOpen;
 
+  Widget _buildImage(ChatMessage message, [int? overflowCount]) {
+    return InkWell(
+      onTap: () => onOpen(message),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Hero(
+            tag: 'image_${message.id}',
+            child: _ChatAttachmentImage(
+              message: message,
+              fit: BoxFit.cover,
+            ),
+          ),
+          if (overflowCount != null)
+            ColoredBox(
+              color: Colors.black54,
+              child: Center(
+                child: Text(
+                  '+${overflowCount}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final shown = messages.take(4).toList();
+    final count = messages.length;
+    if (count == 0) return const SizedBox.shrink();
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: SizedBox(
         width: width,
-        height: 210,
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: shown.length == 1 ? 1 : 2,
-            crossAxisSpacing: 2,
-            mainAxisSpacing: 2,
-          ),
-          itemCount: shown.length,
-          itemBuilder: (context, index) => InkWell(
-            onTap: () => onOpen(shown[index]),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Hero(
-                  tag: 'image_${shown[index].id}',
-                  child: _ChatAttachmentImage(
-                    message: shown[index],
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                if (index == 3 && messages.length > 4)
-                  ColoredBox(
-                    color: Colors.black54,
-                    child: Center(
-                      child: Text(
-                        '+${messages.length - 4}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
+        height: 240,
+        child: _buildLayout(),
       ),
     );
   }
-}
 
+  Widget _buildLayout() {
+    final count = messages.length;
+    
+    if (count == 1) {
+      return _buildImage(messages[0]);
+    }
+    
+    if (count == 2) {
+      return Row(
+        children: [
+          Expanded(child: _buildImage(messages[0])),
+          const SizedBox(width: 2),
+          Expanded(child: _buildImage(messages[1])),
+        ],
+      );
+    } 
+    
+    if (count == 3) {
+      return Column(
+        children: [
+          Expanded(
+            flex: 2,
+            child: _buildImage(messages[0]),
+          ),
+          const SizedBox(height: 2),
+          Expanded(
+            flex: 1,
+            child: Row(
+              children: [
+                Expanded(child: _buildImage(messages[1])),
+                const SizedBox(width: 2),
+                Expanded(child: _buildImage(messages[2])),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    
+    final overflow = count > 4 ? count - 4 : null;
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: _buildImage(messages[0])),
+              const SizedBox(width: 2),
+              Expanded(child: _buildImage(messages[1])),
+            ],
+          ),
+        ),
+        const SizedBox(height: 2),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: _buildImage(messages[2])),
+              const SizedBox(width: 2),
+              Expanded(child: _buildImage(messages[3], overflow)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 class _ReactionWrap extends StatelessWidget {
   const _ReactionWrap({
     required this.message,
@@ -7164,4 +7225,125 @@ bool _reactionHasUser(List<String> userIds, String? currentUserId) {
     return false;
   }
   return userIds.contains(currentUserId);
+}
+
+class _FullscreenImageViewer extends StatefulWidget {
+  const _FullscreenImageViewer({
+    required this.images,
+    required this.initialIndex,
+    required this.onDownload,
+  });
+  final List<ChatMessage> images;
+  final int initialIndex;
+  final void Function(ChatMessage, BuildContext) onDownload;
+
+  @override
+  State<_FullscreenImageViewer> createState() => _FullscreenImageViewerState();
+}
+
+class _FullscreenImageViewerState extends State<_FullscreenImageViewer> {
+  late final PageController _pageController;
+  late int _currentIndex;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (_currentIndex > 0) {
+          _pageController.previousPage(duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        if (_currentIndex < widget.images.length - 1) {
+          _pageController.nextPage(duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      backgroundColor: Colors.black,
+      child: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          _handleKeyEvent(event);
+          return KeyEventResult.handled;
+        },
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              onPageChanged: (idx) => setState(() => _currentIndex = idx),
+              itemCount: widget.images.length,
+              itemBuilder: (_, index) => Center(
+                child: InteractiveViewer(
+                  child: Hero(
+                    tag: 'image_${widget.images[index].id}',
+                    child: _ChatAttachmentImage(
+                      message: widget.images[index],
+                      fit: BoxFit.contain,
+                      height: 400,
+                      width: double.infinity,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            PositionedDirectional(
+              top: 18,
+              start: 18,
+              child: IconButton.filledTonal(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+            if (widget.images[_currentIndex].attachmentDownloadAllowed)
+              PositionedDirectional(
+                top: 18,
+                end: 18,
+                child: IconButton.filledTonal(
+                  onPressed: () => widget.onDownload(widget.images[_currentIndex], context),
+                  icon: const Icon(Icons.download_rounded),
+                ),
+              ),
+            if (widget.images.length > 1)
+               Positioned(
+                 bottom: 24,
+                 left: 0,
+                 right: 0,
+                 child: Center(
+                   child: Container(
+                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                     decoration: BoxDecoration(
+                       color: Colors.black54,
+                       borderRadius: BorderRadius.circular(16)
+                     ),
+                     child: Text(
+                       '${_currentIndex + 1} / ${widget.images.length}',
+                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
+                     ),
+                   )
+                 ),
+               ),
+          ],
+        ),
+      ),
+    );
+  }
 }
