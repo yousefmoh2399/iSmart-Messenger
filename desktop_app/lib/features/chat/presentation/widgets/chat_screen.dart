@@ -3887,49 +3887,14 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         .indexWhere((m) => m.id == message.id)
         .clamp(0, images.length - 1)
         .toInt();
-    await showDialog<void>(
+        await showDialog<void>(
       context: context,
-      builder: (context) => Dialog.fullscreen(
-        backgroundColor: Colors.black,
-        child: Stack(
-          children: [
-            PageView.builder(
-              controller: PageController(initialPage: initialIndex),
-              itemCount: images.length,
-              itemBuilder: (_, index) => Center(
-                child: InteractiveViewer(
-                  child: Hero(
-                    tag: 'image_${images[index].id}',
-                    child: AuthenticatedAttachmentImage(
-                      message: images[index],
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            PositionedDirectional(
-              top: 18,
-              start: 18,
-              child: IconButton.filledTonal(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ),
-            PositionedDirectional(
-              top: 18,
-              end: 18,
-              child: message.attachmentDownloadAllowed
-                  ? IconButton.filledTonal(
-                      onPressed: () => _startOverlayDownload(
-                        message,
-                        overlayContext: context,
-                      ),
-                      icon: const Icon(Icons.download_rounded),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ],
+      builder: (context) => _FullscreenImageViewer(
+        images: images,
+        initialIndex: initialIndex,
+        onDownload: (msg, ctx) => _startOverlayDownload(
+          msg,
+          overlayContext: ctx,
         ),
       ),
     );
@@ -5903,6 +5868,126 @@ class _TgOutlinedButton extends StatelessWidget {
             fontWeight: FontWeight.w600,
             color: Color(0xFF3390EC),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _FullscreenImageViewer extends StatefulWidget {
+  const _FullscreenImageViewer({
+    required this.images,
+    required this.initialIndex,
+    required this.onDownload,
+  });
+  final List<ChatMessage> images;
+  final int initialIndex;
+  final void Function(ChatMessage, BuildContext) onDownload;
+
+  @override
+  State<_FullscreenImageViewer> createState() => _FullscreenImageViewerState();
+}
+
+class _FullscreenImageViewerState extends State<_FullscreenImageViewer> {
+  late final PageController _pageController;
+  late int _currentIndex;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (_currentIndex > 0) {
+          _pageController.previousPage(duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        if (_currentIndex < widget.images.length - 1) {
+          _pageController.nextPage(duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      backgroundColor: Colors.black,
+      child: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          _handleKeyEvent(event);
+          return KeyEventResult.handled;
+        },
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              onPageChanged: (idx) => setState(() => _currentIndex = idx),
+              itemCount: widget.images.length,
+              itemBuilder: (_, index) => Center(
+                child: InteractiveViewer(
+                  child: Hero(
+                    tag: 'image_${widget.images[index].id}',
+                    child: AuthenticatedAttachmentImage(
+                      message: widget.images[index],
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            PositionedDirectional(
+              top: 18,
+              start: 18,
+              child: IconButton.filledTonal(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+            if (widget.images[_currentIndex].attachmentDownloadAllowed)
+              PositionedDirectional(
+                top: 18,
+                end: 18,
+                child: IconButton.filledTonal(
+                  onPressed: () => widget.onDownload(widget.images[_currentIndex], context),
+                  icon: const Icon(Icons.download_rounded),
+                ),
+              ),
+            if (widget.images.length > 1)
+               Positioned(
+                 bottom: 24,
+                 left: 0,
+                 right: 0,
+                 child: Center(
+                   child: Container(
+                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                     decoration: BoxDecoration(
+                       color: Colors.black54,
+                       borderRadius: BorderRadius.circular(16)
+                     ),
+                     child: Text(
+                       '${_currentIndex + 1} / ${widget.images.length}',
+                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
+                     ),
+                   )
+                 ),
+               ),
+          ],
         ),
       ),
     );

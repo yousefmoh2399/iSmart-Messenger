@@ -894,54 +894,115 @@ class _DesktopMediaAlbum extends StatelessWidget {
   final List<ChatMessage> messages;
   final ValueChanged<ChatMessage> onOpen;
 
+  Widget _buildImage(ChatMessage message, [int? overflowCount]) {
+    return InkWell(
+      onTap: () => onOpen(message),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          AuthenticatedAttachmentImage(
+            message: message,
+            fit: BoxFit.cover,
+          ),
+          if (overflowCount != null)
+            ColoredBox(
+              color: Colors.black54,
+              child: Center(
+                child: Text(
+                  '+${overflowCount}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final shown = messages.take(4).toList();
+    final count = messages.length;
+    if (count == 0) return const SizedBox.shrink();
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: SizedBox(
         width: 300,
-        height: 210,
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: shown.length == 1 ? 1 : 2,
-            crossAxisSpacing: 2,
-            mainAxisSpacing: 2,
-          ),
-          itemCount: shown.length,
-          itemBuilder: (_, index) => InkWell(
-            onTap: () => onOpen(shown[index]),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                AuthenticatedAttachmentImage(
-                  message: shown[index],
-                  fit: BoxFit.cover,
-                ),
-                if (index == 3 && messages.length > 4)
-                  ColoredBox(
-                    color: Colors.black54,
-                    child: Center(
-                      child: Text(
-                        '+${messages.length - 4}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 28,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
+        height: 240,
+        child: _buildLayout(),
       ),
     );
   }
-}
 
+  Widget _buildLayout() {
+    final count = messages.length;
+    
+    if (count == 1) {
+      return _buildImage(messages[0]);
+    }
+    
+    if (count == 2) {
+      return Row(
+        children: [
+          Expanded(child: _buildImage(messages[0])),
+          const SizedBox(width: 2),
+          Expanded(child: _buildImage(messages[1])),
+        ],
+      );
+    } 
+    
+    if (count == 3) {
+      return Column(
+        children: [
+          Expanded(
+            flex: 2,
+            child: _buildImage(messages[0]),
+          ),
+          const SizedBox(height: 2),
+          Expanded(
+            flex: 1,
+            child: Row(
+              children: [
+                Expanded(child: _buildImage(messages[1])),
+                const SizedBox(width: 2),
+                Expanded(child: _buildImage(messages[2])),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    
+    final overflow = count > 4 ? count - 4 : null;
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: _buildImage(messages[0])),
+              const SizedBox(width: 2),
+              Expanded(child: _buildImage(messages[1])),
+            ],
+          ),
+        ),
+        const SizedBox(height: 2),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(child: _buildImage(messages[2])),
+              const SizedBox(width: 2),
+              Expanded(child: _buildImage(messages[3], overflow)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
 class _ReactionBar extends StatelessWidget {
   const _ReactionBar({
     required this.message,
