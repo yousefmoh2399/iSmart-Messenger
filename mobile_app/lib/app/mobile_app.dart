@@ -1182,6 +1182,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         // reconnects or health check succeeds (event-driven, no fixed timer).
         _markConnectionEstablishing();
         socket.setPresenceOnline();
+        unawaited(_refreshSessionAndSocketAfterResume());
         unawaited(_syncPendingUploadsInBackground());
         break;
       case AppLifecycleState.inactive:
@@ -1194,6 +1195,16 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         socket.disconnect();
         break;
     }
+  }
+
+  Future<void> _refreshSessionAndSocketAfterResume() async {
+    try {
+      await ref.read(authRepositoryProvider).getValidToken();
+    } catch (_) {}
+    if (!mounted) {
+      return;
+    }
+    ref.invalidate(chatSocketConnectionProvider);
   }
 
   @override

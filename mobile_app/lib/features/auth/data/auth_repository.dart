@@ -36,15 +36,32 @@ class AuthRepository {
 
   int _latestLoginAttemptId = 0;
 
+  StoredAuthSession? _cachedSession;
+  bool _isSessionLoaded = false;
+
   Future<StoredAuthSession?> _readSession() async {
+    if (_isSessionLoaded) return _cachedSession;
+
     try {
       final secureVal = await _storage.read(key: _sessionKey);
       if (secureVal != null && secureVal.isNotEmpty) {
-        return StoredAuthSession.fromJson(
+        _cachedSession = StoredAuthSession.fromJson(
           jsonDecode(secureVal) as Map<String, dynamic>,
         );
+        _isSessionLoaded = true;
+        return _cachedSession;
       }
-    } catch (_) {}
+    } catch (error) {
+      if (error is FormatException) {
+        // Corrupted json
+      } else {
+        // PlatformException, Keystore locked, etc
+        throw ApiException(
+          'Keystore temporarily unavailable: $error',
+          statusCode: 503,
+        );
+      }
+    }
 
     try {
       final legacyAccess = await _storage.read(key: _tokenKey);
@@ -62,9 +79,13 @@ class AuthRepository {
         if (verify != null && verify.isNotEmpty) {
           await _clearLegacyTokens();
         }
+        _cachedSession = session;
+        _isSessionLoaded = true;
         return session;
       }
     } catch (_) {}
+
+    _isSessionLoaded = true;
     return null;
   }
 
@@ -245,10 +266,8 @@ class AuthRepository {
           ? session!.accessToken
           : null;
     } catch (e) {
-      debugPrint(
-        'AuthRepository: Keystore corrupted or error reading token: $e',
-      );
-      await _storage.deleteAll();
+      debugPrint('AuthRepository: error reading token: $e');
+      if (e is ApiException) rethrow;
       return null;
     }
   }
@@ -267,8 +286,18 @@ class AuthRepository {
       return token;
     }
 
-    final refreshed = await _refreshTokenSingleFlight();
-    return refreshed['token'] ?? await getToken();
+    try {
+      final refreshed = await refreshToken();
+      return refreshed['token'] ?? await getToken();
+    } catch (error) {
+      if (error is ApiException && error.isUnauthorized) {
+        rethrow;
+      }
+      if (!_isTokenFullyExpired(token)) {
+        return token;
+      }
+      rethrow;
+    }
   }
 
   Future<String?> getRefreshToken() async {
@@ -278,17 +307,28 @@ class AuthRepository {
           ? session!.refreshToken
           : null;
     } catch (e) {
-      debugPrint(
-        'AuthRepository: Keystore corrupted or error reading refresh token: $e',
-      );
-      await _storage.deleteAll();
+      debugPrint('AuthRepository: error reading refresh token: $e');
+      if (e is ApiException) rethrow;
       return null;
     }
   }
 
   Future<Map<String, String>> refreshToken() async {
+    if (_tokenRefreshFuture != null) {
+      return _tokenRefreshFuture!;
+    }
+    _tokenRefreshFuture = _refreshTokenInternal();
+    try {
+      return await _tokenRefreshFuture!;
+    } finally {
+      _tokenRefreshFuture = null;
+    }
+  }
+
+  Future<Map<String, String>> _refreshTokenInternal() async {
     final rToken = await getRefreshToken();
     if (rToken == null || rToken.trim().isEmpty) {
+      await _clearSession();
       throw const ApiException(
         'لا يوجد رمز تجديد الجلسة. سجّل الدخول مرة أخرى.',
         statusCode: 401,
@@ -308,7 +348,6 @@ class AuthRepository {
           newToken.isEmpty ||
           newRefreshToken == null ||
           newRefreshToken.isEmpty) {
-        await _clearSession();
         throw const ApiException(
           'استجابة تجديد الجلسة غير صالحة من الخادم.',
           statusCode: 500,
@@ -338,24 +377,16 @@ class AuthRepository {
     }
   }
 
-  Future<Map<String, String>> _refreshTokenSingleFlight() async {
-    if (_tokenRefreshFuture != null) {
-      return _tokenRefreshFuture!;
-    }
-    _tokenRefreshFuture = refreshToken();
-    try {
-      return await _tokenRefreshFuture!;
-    } finally {
-      _tokenRefreshFuture = null;
-    }
-  }
-
   bool _wasJustRefreshed(String token) {
     final refreshedAt = _lastSuccessfulRefreshAt;
     return _lastSuccessfulRefreshAccessToken == token &&
         refreshedAt != null &&
         DateTime.now().toUtc().difference(refreshedAt) <
             const Duration(seconds: 15);
+  }
+
+  bool _isTokenFullyExpired(String token) {
+    return _isTokenExpiringSoon(token, Duration.zero);
   }
 
   bool _isTokenExpiringSoon(String token, Duration refreshBefore) {

@@ -18,7 +18,7 @@ class RemoteDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
     } catch (error, stackTrace) {
       if (error is ApiException && error.isUnauthorized) {
         Future<void>.microtask(
-          () => ref.read(authControllerProvider.notifier).logout(),
+          () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
       }
       Error.throwWithStackTrace(error, stackTrace);
@@ -89,7 +89,7 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
     } catch (error, stackTrace) {
       if (error is ApiException && error.isUnauthorized) {
         Future<void>.microtask(
-          () => ref.read(authControllerProvider.notifier).logout(),
+          () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
       }
       Error.throwWithStackTrace(error, stackTrace);

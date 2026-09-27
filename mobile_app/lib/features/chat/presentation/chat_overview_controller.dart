@@ -37,7 +37,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     } catch (error, stackTrace) {
       if (error is ApiException && error.isUnauthorized) {
         Future<void>.microtask(
-          () => ref.read(authControllerProvider.notifier).logout(),
+          () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
       }
       Error.throwWithStackTrace(error, stackTrace);
@@ -1122,7 +1122,7 @@ class ConversationMessagesController
     } catch (error, stackTrace) {
       if (error is ApiException && error.isUnauthorized) {
         Future<void>.microtask(
-          () => ref.read(authControllerProvider.notifier).logout(),
+          () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
       }
       Error.throwWithStackTrace(error, stackTrace);

@@ -62,17 +62,10 @@ class ApiClient {
               tokenFingerprint =
                   '${token.length}:${token.substring(max(0, token.length - 6))}';
             } catch (error) {
-              handler.reject(
-                _apiExceptionDioError(
-                  options,
-                  error is ApiException
-                      ? error
-                      : const ApiException(
-                          'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-                          statusCode: 401,
-                        ),
-                ),
-              );
+              final mapped = error is ApiException
+                  ? error
+                  : mapError(error);
+              handler.reject(_apiExceptionDioError(options, mapped));
               return;
             }
           }
@@ -140,6 +133,11 @@ class ApiClient {
               }
             } catch (refreshError) {
               debugPrint('Token refresh failed: $refreshError');
+              final mapped = mapError(refreshError);
+              if (!mapped.isUnauthorized) {
+                handler.reject(_apiExceptionDioError(requestOptions, mapped));
+                return;
+              }
             }
           }
 

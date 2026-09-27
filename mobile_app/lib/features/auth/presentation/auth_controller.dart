@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -40,6 +42,15 @@ class AuthController extends Notifier<AuthState> {
 
   @override
   AuthState build() {
+    ref.listen<int>(sessionInvalidationRevisionProvider, (previous, next) {
+      if (previous == next) {
+        return;
+      }
+      if (state.status != AuthStatus.authenticated) {
+        return;
+      }
+      unawaited(logout());
+    });
     initializeAuth();
     return const AuthState(status: AuthStatus.initializing);
   }
@@ -153,6 +164,13 @@ class AuthController extends Notifier<AuthState> {
       rethrow;
     } finally {
       _isLoggingOut = false;
+    }
+  }
+
+  Future<void> logoutIfSessionGone() async {
+    final refresh = await ref.read(authRepositoryProvider).getRefreshToken();
+    if (refresh == null || refresh.trim().isEmpty) {
+      await logout();
     }
   }
 

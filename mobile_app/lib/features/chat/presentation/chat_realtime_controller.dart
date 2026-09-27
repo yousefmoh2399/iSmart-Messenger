@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
@@ -234,10 +235,16 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
             await ref.read(authRepositoryProvider).refreshToken();
             ref.invalidate(authTokenProvider);
             ref.invalidate(chatSocketConnectionProvider);
-          } catch (_) {
-            try {
-              await ref.read(authControllerProvider.notifier).logout();
-            } catch (_) {}
+          } catch (error) {
+            final isUnauthorized =
+                error is ApiException && error.isUnauthorized;
+            if (isUnauthorized) {
+              try {
+                await ref.read(authControllerProvider.notifier).logout();
+              } catch (_) {}
+            } else {
+              ref.invalidate(chatSocketConnectionProvider);
+            }
           }
           break;
         case 'force_logout':

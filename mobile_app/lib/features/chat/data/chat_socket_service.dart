@@ -27,9 +27,9 @@ class ChatSocketService {
   bool _isSessionExpiredError(Object? error) {
     final message = error?.toString().toLowerCase() ?? '';
     return message.contains('session expired') ||
-        message.contains('login again') ||
         message.contains('invalid or expired token') ||
-        message.contains('token version mismatch');
+        message.contains('token version mismatch') ||
+        message.contains('jwt expired');
   }
 
   Future<void> connect({
