@@ -2333,6 +2333,30 @@ class _ConversationCard extends StatelessWidget {
                                       ),
                                     ),
                                   const SizedBox(width: 8),
+                                  if (conversation.unreadCount > 0)
+                                    Container(
+                                      margin: const EdgeInsetsDirectional.only(
+                                        end: 6,
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 7,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: accent,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        '${conversation.unreadCount}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
                                   Text(
                                     conversation.lastMessage?.createdAt != null
                                         ? formatEgyptTime(
@@ -2359,8 +2383,10 @@ class _ConversationCard extends StatelessWidget {
                                       color: isTypingPreview
                                           ? appearance.accent
                                           : colorScheme.onSurfaceVariant,
-                                      fontWeight: isTypingPreview
-                                          ? FontWeight.w700
+                                      fontWeight:
+                                          conversation.unreadCount > 0 ||
+                                              isTypingPreview
+                                          ? FontWeight.w800
                                           : FontWeight.w500,
                                     ),
                               ),

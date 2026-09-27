@@ -97,6 +97,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _hasConfirmedServerDisconnect = false;
   bool _serverRestoreRefreshInFlight = false;
   StreamSubscription<AndroidSharedContent>? _androidShareSubscription;
+  AndroidSharedContent? _pendingAndroidShare;
+  bool _shareSheetOpen = false;
 
   // Event-driven connection flag.
   // True while the app is still establishing/re-establishing its connection to
@@ -424,13 +426,29 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _presentIncomingShare(AndroidSharedContent content) async {
+    _pendingAndroidShare = content;
+    if (_shareSheetOpen) return;
     if (!mounted) return;
     final auth = ref.read(authControllerProvider);
-    if (auth.status != AuthStatus.authenticated) return;
+    if (auth.status != AuthStatus.authenticated) {
+      Future<void>.delayed(const Duration(milliseconds: 600), () {
+        if (mounted && _pendingAndroidShare != null)
+          _presentIncomingShare(_pendingAndroidShare!);
+      });
+      return;
+    }
     final conversations =
         ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
         const [];
-    if (conversations.isEmpty) return;
+    if (conversations.isEmpty) {
+      Future<void>.delayed(const Duration(milliseconds: 600), () {
+        if (mounted && _pendingAndroidShare != null)
+          _presentIncomingShare(_pendingAndroidShare!);
+      });
+      return;
+    }
+    _shareSheetOpen = true;
+    _pendingAndroidShare = null;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -552,6 +570,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         );
       },
     );
+    _shareSheetOpen = false;
   }
 
   void _listenToNotificationNavigation() {
