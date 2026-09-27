@@ -16,7 +16,7 @@
  * - يضمن إغلاق المقابس والعمليتين المنشأتين فقط داخل بلوك finally حتى عند حدوث خطأ.
  */
 
-const { spawn } = require("child_process");
+const { spawn, execFileSync } = require("child_process");
 const http = require("http");
 const net = require("net");
 const path = require("path");
@@ -31,6 +31,8 @@ const WebSocket = require("ws");
 const User = require("../src/models/user.model");
 const DeviceSession = require("../src/models/device-session.model");
 
+const MONGO_CONTAINER_NAME = "ismart-test-mongo";
+const REDIS_CONTAINER_NAME = "ismart-test-redis";
 const MONGO_HOST = "127.0.0.1";
 const MONGO_PORT = 27018;
 const REDIS_HOST = "127.0.0.1";
@@ -383,9 +385,67 @@ async function stopChildProcessSafely(childProc) {
   });
 }
 
+// التحقق الصارم قبل أي كتابة من أن المنفذين 27018 و 6389 تابعان فعليًا للحاويتين الاختباريتين المقصودتين
+async function verifyTestContainersOwnership(mongooseConn, redisClient) {
+  // 1. فحص حاوية Mongo عبر docker inspect ومطابقة الـ Hostname الداخلي مع اتصال Mongoose الفعلي
+  const mongoInspectRaw = execFileSync(
+    "docker",
+    ["inspect", "--format", "{{.State.Running}}|{{.Config.Hostname}}|{{json .NetworkSettings.Ports}}", MONGO_CONTAINER_NAME],
+    { encoding: "utf8" }
+  ).trim();
+  const [mongoRunning, mongoContainerHostname, mongoPortsJson] = mongoInspectRaw.split("|");
+  if (mongoRunning !== "true" || !mongoContainerHostname) {
+    throw new Error(`الحاوية ${MONGO_CONTAINER_NAME} ليست في حالة تشغيل!`);
+  }
+  const mongoPorts = JSON.parse(mongoPortsJson || "{}");
+  const mongoBinding = (mongoPorts["27017/tcp"] || [])[0];
+  if (!mongoBinding || mongoBinding.HostIp !== MONGO_HOST || String(mongoBinding.HostPort) !== String(MONGO_PORT)) {
+    throw new Error(`الحاوية ${MONGO_CONTAINER_NAME} غير مربوطة حصريًا بـ ${MONGO_HOST}:${MONGO_PORT}!`);
+  }
+  const hostInfo = await mongooseConn.db.command({ hostInfo: 1 });
+  const connectedMongoHost = String(hostInfo?.system?.hostname || "").split(":")[0];
+  if (!connectedMongoHost || !connectedMongoHost.startsWith(mongoContainerHostname)) {
+    throw new Error(
+      `فشل التحقق من هوية Mongo على ${MONGO_HOST}:${MONGO_PORT}: المتصل به (${connectedMongoHost}) لا يطابق حاوية الاختبار (${mongoContainerHostname})!`
+    );
+  }
+
+  // 2. فحص حاوية Redis عبر docker inspect ومطابقة الـ run_id الفريد مع اتصال Redis الفعلي
+  const redisInspectRaw = execFileSync(
+    "docker",
+    ["inspect", "--format", "{{.State.Running}}|{{json .NetworkSettings.Ports}}", REDIS_CONTAINER_NAME],
+    { encoding: "utf8" }
+  ).trim();
+  const [redisRunning, redisPortsJson] = redisInspectRaw.split("|");
+  if (redisRunning !== "true") {
+    throw new Error(`الحاوية ${REDIS_CONTAINER_NAME} ليست في حالة تشغيل!`);
+  }
+  const redisPorts = JSON.parse(redisPortsJson || "{}");
+  const redisBinding = (redisPorts["6379/tcp"] || [])[0];
+  if (!redisBinding || redisBinding.HostIp !== REDIS_HOST || String(redisBinding.HostPort) !== String(REDIS_PORT)) {
+    throw new Error(`الحاوية ${REDIS_CONTAINER_NAME} غير مربوطة حصريًا بـ ${REDIS_HOST}:${REDIS_PORT}!`);
+  }
+  const containerRedisInfo = execFileSync(
+    "docker",
+    ["exec", REDIS_CONTAINER_NAME, "redis-cli", "INFO", "server"],
+    { encoding: "utf8" }
+  );
+  const socketRedisInfo = await redisClient.info("server");
+  const extractRunId = (txt) => (txt.match(/run_id:([a-f0-9]+)/i) || [])[1] || null;
+  const containerRunId = extractRunId(containerRedisInfo);
+  const socketRunId = extractRunId(socketRedisInfo);
+  if (!containerRunId || containerRunId !== socketRunId) {
+    throw new Error(
+      `فشل التحقق من هوية Redis على ${REDIS_HOST}:${REDIS_PORT}: run_id المتصل به (${socketRunId}) لا يطابق حاوية الاختبار (${containerRunId})!`
+    );
+  }
+}
+
 async function runIntegrationSuite() {
   const runId = `${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const createdSockets = [];
+  const createdRedisKeys = new Set();
+  let testUserId = null;
   let redisClient = null;
   let app1 = null;
   let app2 = null;
@@ -408,13 +468,17 @@ async function runIntegrationSuite() {
     await assertPortFree("127.0.0.1", APP2_PORT);
     await assertPortOpen(MONGO_HOST, MONGO_PORT, "MongoDB-Test");
     await assertPortOpen(REDIS_HOST, REDIS_PORT, "Redis-Test");
-    console.log("✓ فحص المنافذ: 3101 و 3102 شاغران، و 27018 (Mongo) و 6389 (Redis) جاهزان.");
+    console.log("✓ فحص المنافذ: 3101 و 3102 شاغران، و 27018 (Mongo) و 6389 (Redis) يستجيبان.");
 
-    // 2. إنشاء مستخدم الاختبار الحقيقي وتوليد JWT مطابق للـ Middleware
-    console.log("[2/7] تهيئة مستخدم الاختبار عبر النموذج الحقيقي User...");
+    // 2. التحقق الصارم من تبعية المنفذين للحاويتين الاختباريتين قبل أي كتابة
+    console.log("[2/7] التحقق من تبعية Mongo (27018) و Redis (6389) للحاويتين الاختباريتين قبل الكتابة...");
     await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
     redisClient = new Redis(REDIS_URL, { maxRetriesPerRequest: 2 });
+    await verifyTestContainersOwnership(mongoose.connection, redisClient);
+    console.log(`✓ تم إثبات تبعية المنفذين 27018 و 6389 للحاويتين (${MONGO_CONTAINER_NAME}, ${REDIS_CONTAINER_NAME}).`);
 
+    // 3. إنشاء مستخدم الاختبار الحقيقي وتوليد JWT مطابق للـ Middleware
+    console.log("[3/7] تهيئة مستخدم الاختبار عبر النموذج الحقيقي User...");
     const username = `ha_user_${runId}`.toLowerCase();
     const passwordHash = await bcrypt.hash("HaTestPassword!2026", 4);
     const testUser = await User.create({
@@ -426,9 +490,8 @@ async function runIntegrationSuite() {
       isActive: true,
       tokenVersion: 1,
     });
-    const testUserId = testUser._id.toString();
+    testUserId = testUser._id.toString();
 
-    // مطابق تمامًا لدالة buildToken في src/services/auth.service.js
     const testToken = jwt.sign(
       {
         sub: testUserId,
@@ -441,8 +504,8 @@ async function runIntegrationSuite() {
     );
     console.log(`✓ تم إنشاء المستخدم الحقيقي: username=${username}, id=${testUserId}`);
 
-    // 3. تشغيل العمليتين المعزولتين App1 و App2 مع قراءة آمنة للمخرجات
-    console.log("[3/7] تشغيل العمليتين App1 (3101) و App2 (3102)...");
+    // 4. تشغيل العمليتين المعزولتين App1 و App2 مع قراءة آمنة للمخرجات
+    console.log("[4/7] تشغيل العمليتين App1 (3101) و App2 (3102)...");
     const serverEntry = path.resolve(__dirname, "../src/server.js");
 
     app1 = spawn(process.execPath, [serverEntry], {
@@ -466,8 +529,8 @@ async function runIntegrationSuite() {
     console.log("✓ App1 /ready:", JSON.stringify(ready1));
     console.log("✓ App2 /ready:", JSON.stringify(ready2));
 
-    // 4. السيناريو الأول: حجز الطباعة الذري عبر العقدتين (50 طلب متزامن)
-    console.log("[4/7] اختبار 50 طلب طباعة متزامن (25 عبر App1 و 25 عبر App2)...");
+    // 5. السيناريو الأول: حجز الطباعة الذري عبر العقدتين (50 طلب متزامن)
+    console.log("[5/7] اختبار 50 طلب طباعة متزامن (25 عبر App1 و 25 عبر App2)...");
     const desktopSocket = trackSocket(
       new SocketIOv4Client(`http://127.0.0.1:${APP1_PORT}`, {
         auth: { token: testToken, clientType: "desktop", deviceInfo: { deviceName: "Desktop-App1" } },
@@ -493,6 +556,10 @@ async function runIntegrationSuite() {
     await Promise.all([mobileApp1.connect(), mobileApp2.connect()]);
 
     const clientRequestId = `req_${runId}`;
+    const reservationKey = `ismart:printreq:${testUserId}:${clientRequestId}`;
+    createdRedisKeys.add(reservationKey);
+    createdRedisKeys.add(`ismart:printreq:${clientRequestId}`);
+
     const printPayload = {
       clientRequestId,
       fileName: `doc_${runId}.pdf`,
@@ -509,17 +576,27 @@ async function runIntegrationSuite() {
     const acks = await Promise.all(concurrentPromises);
     await new Promise((r) => setTimeout(r, 1000));
 
-    // فحص مفاتيح Redis الخاصة بهذا الـ runId فقط
-    const reservationKey = `ismart:printreq:${testUserId}:${clientRequestId}`;
+    // فحص مفاتيح Redis الخاصة بهذا الـ runId فقط عبر GET + JSON.parse (وليس HGETALL)
     const reservedJobId = await redisClient.get(reservationKey);
 
     const allJobKeys = await redisClient.keys("ismart:printjob:*");
     const matchingJobsInRedis = [];
     for (const key of allJobKeys) {
-      const hash = await redisClient.hgetall(key);
-      if (hash && hash.clientRequestId === clientRequestId) {
-        matchingJobsInRedis.push({ key, ...hash });
-      }
+      const rawJson = await redisClient.get(key);
+      if (!rawJson) continue;
+      try {
+        const parsed = JSON.parse(rawJson);
+        if (
+          parsed?.payload?.clientRequestId === clientRequestId &&
+          parsed?.payload?.requestedByUserId === testUserId
+        ) {
+          createdRedisKeys.add(key);
+          if (parsed?.payload?.jobId) {
+            createdRedisKeys.add(`ismart:jobowner:print:${parsed.payload.jobId}`);
+          }
+          matchingJobsInRedis.push({ key, record: parsed });
+        }
+      } catch (_) {}
     }
 
     const returnedJobIds = new Set(
@@ -528,7 +605,7 @@ async function runIntegrationSuite() {
     const inFlightRetries = acks.filter((a) => a && !a.ok && a.retryable === true && a.status === "in_flight");
 
     console.log(`  - أحداث print_job_requested المستلمة على Desktop: ${receivedPrintEvents.length}`);
-    console.log(`  - عدد الوظائف المسجلة في Redis لهذا الطلب: ${matchingJobsInRedis.length}`);
+    console.log(`  - عدد الوظائف المسجلة في Redis لهذا الطلب (${clientRequestId}): ${matchingJobsInRedis.length}`);
     console.log(`  - قيمة مفتاح الحجز في Redis: ${reservedJobId}`);
     console.log(`  - عدد معرفات الوظائف الفريدة في ردود ACK الناجحة: ${returnedJobIds.size} (مع ${inFlightRetries.length} رد in_flight قابل لإعادة المحاولة)`);
 
@@ -536,9 +613,9 @@ async function runIntegrationSuite() {
       throw new Error(`فشل: استلم Desktop ${receivedPrintEvents.length} حدث طباعة بدلًا من 1`);
     }
     if (matchingJobsInRedis.length !== 1) {
-      throw new Error(`فشل: تم إنشاء ${matchingJobsInRedis.length} وظيفة في Redis بدلًا من 1`);
+      throw new Error(`فشل: تم إنشاء ${matchingJobsInRedis.length} وظيفة في Redis لهذا الطلب بدلًا من 1`);
     }
-    const winningJobId = matchingJobsInRedis[0].jobId;
+    const winningJobId = matchingJobsInRedis[0].record.payload.jobId;
     if (reservedJobId !== winningJobId || receivedPrintEvents[0].jobId !== winningJobId) {
       throw new Error(`فشل عدم تطابق معرف الوظيفة الفائزة: redis=${reservedJobId}, job=${winningJobId}`);
     }
@@ -547,8 +624,8 @@ async function runIntegrationSuite() {
     }
     console.log(`✓ نجاح السيناريو 1: 50 طلب متزامن عبر العقدتين أنتج وظيفة واحدة فقط (${winningJobId}) وحدثًا واحدًا فقط.`);
 
-    // 5. السيناريو الثاني: انتقالات حالة الوظيفة الذرية عبر العقدتين
-    console.log("[5/7] اختبار انتقالات حالة الوظيفة الذرية عبر العقد (forwarded -> processing -> submitted)...");
+    // 6. السيناريو الثاني: انتقالات حالة الوظيفة الذرية عبر العقدتين (باستخدام GET + JSON.parse)
+    console.log("[6/7] اختبار انتقالات حالة الوظيفة الذرية عبر العقد (forwarded -> processing -> submitted)...");
     const statusEventsOnApp2 = [];
     mobileApp2.on("print_job_status", (ev) => {
       if (ev && ev.jobId === winningJobId) statusEventsOnApp2.push(ev);
@@ -568,19 +645,27 @@ async function runIntegrationSuite() {
     });
 
     await new Promise((r) => setTimeout(r, 500));
-    const finalJobHash = await redisClient.hgetall(`ismart:printjob:${winningJobId}`);
+    const finalJobRaw = await redisClient.get(`ismart:printjob:${winningJobId}`);
+    const finalJobRecord = finalJobRaw ? JSON.parse(finalJobRaw) : null;
 
-    if (!procAck.ok || !subAck.ok || invalidBackAck.ok !== false || finalJobHash.state !== "submitted") {
-      throw new Error(`فشل انتقال الحالة الذري: proc=${procAck.ok}, sub=${subAck.ok}, invalidBack=${invalidBackAck.ok}, state=${finalJobHash.state}`);
+    if (
+      !procAck.ok ||
+      !subAck.ok ||
+      invalidBackAck.ok !== false ||
+      !finalJobRecord ||
+      finalJobRecord.state !== "submitted"
+    ) {
+      throw new Error(
+        `فشل انتقال الحالة الذري: proc=${procAck.ok}, sub=${subAck.ok}, invalidBack=${invalidBackAck.ok}, state=${finalJobRecord?.state}`
+      );
     }
     if (statusEventsOnApp2.length < 2) {
       throw new Error(`فشل وصول إشعارات حالة الطباعة عبر Redis Adapter إلى العميل المتصل بـ App2 (وصل ${statusEventsOnApp2.length})`);
     }
     console.log("✓ نجاح السيناريو 2: انتقالات الحالة الذرية في Redis ومنع الانتقال العكسي ووصول الإشعارات عبر العقدتين.");
 
-    // 6. السيناريو الثالث: تجميع أولوية الحضور (Presence Priority) عبر العقدتين
-    console.log("[6/8] اختبار تجميع أولوية الحضور عبر العقدتين (online > meeting > offline)...");
-    // تحديث جلسات App1 إلى "meeting" بينما mobileApp2 على App2 هي "online"
+    // 7. السيناريو الثالث: تجميع أولوية الحضور (Presence Priority) عبر العقدتين
+    console.log("[7/7] اختبار تجميع أولوية الحضور عبر العقدتين (online > meeting > offline)...");
     const presAck1 = await desktopSocket.emitWithAck("presence:activity", { status: "meeting" });
     const presAck2 = await mobileApp1.emitWithAck("presence:activity", { status: "meeting" });
     if (!presAck1.ok || !presAck2.ok) {
@@ -593,7 +678,6 @@ async function runIntegrationSuite() {
       throw new Error(`فشل أولوية الحضور: المتوقع 'online' لوجود جلسة متصلة على App2، لكن الفعلي '${userWhileApp2Online.presenceStatus}'`);
     }
 
-    // فصل جلسة App2 التي تحمل حالة "online"؛ يجب أن تنتقل الحالة الكلية للمستخدم إلى "meeting" (الجلسة النشطة على App1)
     mobileApp2.close();
     await new Promise((r) => setTimeout(r, 800));
 
@@ -604,62 +688,10 @@ async function runIntegrationSuite() {
       );
     }
     console.log("✓ نجاح السيناريو 3: أولوية الحضور عبر العقدتين حافظت على 'online' ثم انتقلت إلى 'meeting' عند غلق جلسة App2.");
-
-    // 7. السيناريو الرابع: فشل Redis (Fail-Closed & /ready 503) ثم استعادة الخدمة (Recovery)
-    console.log("[7/8] اختبار فشل Redis (منع Fallback المحلي + /ready 503) واستعادة الخدمة...");
-    const eventsBeforeOutage = receivedPrintEvents.length;
-    try {
-      // تعطيل أوامر القراءة/الكتابة/Lua في Redis الاختباري لإحداث فشل حقيقي لعمليات App1 و App2
-      await redisClient.call("ACL", "SETUSER", "default", "on", "nopass", "~*", "-@all", "+@connection", "+acl");
-
-      // التحقق من تحول /ready إلى 503 Degraded
-      const degradedStatus = await new Promise((resolve, reject) => {
-        const req = http.get(`http://127.0.0.1:${APP1_PORT}/ready`, { timeout: 3000 }, (res) => {
-          res.resume();
-          resolve(res.statusCode);
-        });
-        req.on("error", reject);
-      });
-      if (degradedStatus !== 503) {
-        throw new Error(`المتوقع أن يعيد /ready الكود 503 أثناء تعطل Redis، لكن أعاد ${degradedStatus}`);
-      }
-
-      // محاولة إرسال طلب طباعة أثناء تعطل Redis في وضع CLUSTER_MODE=true -> يجب أن يرفض (Fail-Closed)
-      const failClosedAck = await mobileApp1.emitWithAck("print_request", {
-        clientRequestId: `req_outage_${runId}`,
-        fileName: "outage.pdf",
-        inlineFileBase64: Buffer.from("Outage Test").toString("base64"),
-        mimeType: "application/pdf",
-      });
-
-      if (failClosedAck && failClosedAck.ok === true) {
-        throw new Error("خرق Fail-Closed: نجح طلب الطباعة محليًا رغم تعطل Redis في CLUSTER_MODE=true!");
-      }
-      if (receivedPrintEvents.length !== eventsBeforeOutage) {
-        throw new Error("خرق Fail-Closed: تم إرسال حدث print_job_requested إلى Desktop أثناء تعطل Redis!");
-      }
-    } finally {
-      // استعادة صلاحيات Redis الكاملة دائمًا
-      await redisClient.call("ACL", "SETUSER", "default", "on", "nopass", "~*", "+@all");
-    }
-
-    // التحقق من التعافي (Recovery): عودة /ready إلى 200 ونجاح طلب طباعة جديد
-    await waitForReady(APP1_PORT, 5000);
-    const recoveryAck = await mobileApp1.emitWithAck("print_request", {
-      clientRequestId: `req_recovery_${runId}`,
-      fileName: "recovery.pdf",
-      inlineFileBase64: Buffer.from("Recovery Test").toString("base64"),
-      mimeType: "application/pdf",
-    });
-    await new Promise((r) => setTimeout(r, 400));
-
-    if (!recoveryAck || !recoveryAck.ok || receivedPrintEvents.length !== eventsBeforeOutage + 1) {
-      throw new Error("فشل التعافي بعد عودة Redis: لم ينجح طلب الطباعة الجديد أو لم يصل إلى Desktop");
-    }
-    console.log("✓ نجاح السيناريو 4: /ready أعاد 503، وطلب الطباعة فشل بأمان (Fail-Closed)، ثم تعافى النظام إلى 200 فور عودة Redis.");
+    console.log("ℹ️ [NOT RUN] سيناريو انقطاع/عودة Redis الفعلي مفصول في خطة مستقلة بانتظار الموافقة اللاحقة.");
 
     console.log("\n========================================================");
-    console.log(`🎉 اكتملت جميع سيناريوهات التكامل الموزع (4/4) بنجاح (RunID: ${runId})`);
+    console.log(`🎉 اكتملت سيناريوهات التكامل الموزع (3/3) بنجاح (RunID: ${runId})`);
     console.log("========================================================");
   } catch (err) {
     console.error("\n❌ فشل اختبار التكامل:", err.message);
@@ -671,19 +703,34 @@ async function runIntegrationSuite() {
     }
     process.exitCode = 1;
   } finally {
-    console.log("[7/7] إغلاق المقابس والعمليات الخاصة بالاختبار فقط (finally)...");
+    console.log("[Finally] إغلاق المقابس والعمليات وتنظيف سجلات هذا التشغيل فقط...");
     for (const s of createdSockets) {
       try { s.close(); } catch (_) {}
     }
     await stopChildProcessSafely(app1);
     await stopChildProcessSafely(app2);
+
+    // تنظيف مقيد بمفاتيح Redis التي أنشأها هذا التشغيل فقط
+    if (redisClient && createdRedisKeys.size > 0) {
+      try {
+        await redisClient.del(...createdRedisKeys);
+      } catch (_) {}
+    }
+    // تنظيف مقيد بمستخدم Mongo وجلساته التي أنشأها هذا التشغيل فقط
+    if (testUserId && mongoose.connection.readyState === 1) {
+      try {
+        await DeviceSession.deleteMany({ userId: testUserId });
+        await User.deleteOne({ _id: testUserId });
+      } catch (_) {}
+    }
+
     if (redisClient) {
       try { await redisClient.quit(); } catch (_) {}
     }
     if (mongoose.connection.readyState !== 0) {
       try { await mongoose.disconnect(); } catch (_) {}
     }
-    console.log("✓ تم إغلاق المقابس والعمليتين App1 و App2 بأمان.");
+    console.log("✓ تم إغلاق المقابس والعمليتين وحذف مستخدم ومفاتيح هذا التشغيل بأمان.");
   }
 }
 

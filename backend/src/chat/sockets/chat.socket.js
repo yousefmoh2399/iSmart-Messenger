@@ -1308,9 +1308,9 @@ async function initializeChatSocketServer(httpServer) {
         `fallback-req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       if (existingJob) {
-        // If job is already forwarded, processing or submitted, do NOT reprint
+        // If job is already pending, forwarded, processing or submitted, do NOT reprint
         if (
-          ["forwarded", "processing", "submitted"].includes(existingJob.state)
+          ["pending", "forwarded", "processing", "submitted"].includes(existingJob.state)
         ) {
           logger.info("event=print_job_duplicate_ignored", {
             jobId,
@@ -1325,8 +1325,11 @@ async function initializeChatSocketServer(httpServer) {
               status:
                 existingJob.state === "submitted"
                   ? "completed"
-                  : existingJob.state,
-              executionState: existingJob.state,
+                  : existingJob.state === "pending"
+                    ? "forwarded"
+                    : existingJob.state,
+              executionState:
+                existingJob.state === "pending" ? "forwarded" : existingJob.state,
             },
           });
           return;
@@ -1360,6 +1363,22 @@ async function initializeChatSocketServer(httpServer) {
           createdAt: new Date().toISOString(),
         };
         printJobStore.createJob(jobId, printJob);
+
+        // Transition state to forwarded in Redis BEFORE committing clientRequestId
+        try {
+          await printJobStore.validateAndTransitionAsync(jobId, "forwarded");
+        } catch (err) {
+          if (reservationToken) {
+            await printJobStore.releasePrintReservation({
+              userId: currentUser.id,
+              clientRequestId,
+              token: reservationToken,
+            });
+          }
+          socketAck(ack, { ok: false, success: false, error: err.message });
+          return;
+        }
+
         if (clientRequestId) {
           const committed = await printJobStore.commitPrintRequest({
             userId: currentUser.id,
@@ -1379,22 +1398,7 @@ async function initializeChatSocketServer(httpServer) {
         }
       }
 
-      const printJob = printJobStore.getJob(jobId).payload;
-
-      // Update state to forwarded
-      try {
-        await printJobStore.validateAndTransitionAsync(jobId, "forwarded");
-      } catch (err) {
-        if (reservationToken) {
-          await printJobStore.releasePrintReservation({
-            userId: currentUser.id,
-            clientRequestId,
-            token: reservationToken,
-          });
-        }
-        socketAck(ack, { ok: false, success: false, error: err.message });
-        return;
-      }
+      const printJob = (await printJobStore.getJobAsync(jobId))?.payload || printJobStore.getJob(jobId)?.payload;
 
       // Explicit target check
       let targetDesktopSocketId = null;
