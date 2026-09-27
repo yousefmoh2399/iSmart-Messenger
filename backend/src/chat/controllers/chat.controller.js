@@ -2,6 +2,7 @@ const ApiError = require("../../utils/api-error");
 const asyncHandler = require("../../utils/async-handler");
 const logger = require("../../utils/logger");
 const { sendUploadFile } = require("../../utils/send-upload-file");
+const { storage } = require("../../utils/storage-provider");
 const Conversation = require("../models/conversation.model");
 const User = require("../../models/user.model");
 const { listRoles } = require("../services/role.service");
@@ -567,7 +568,11 @@ const postChatMessage = asyncHandler(async (req, res) => {
       req.body.metadata = null;
     }
   }
-  const result = await createMessage(req.user, req.body, req.file);
+  const result = await (req.file
+    ? storage.withUploadTransaction(req.file.path, () =>
+        createMessage(req.user, req.body, req.file)
+      )
+    : createMessage(req.user, req.body, req.file));
   const io = req.app.get("io");
 
   const isScheduledFuture =

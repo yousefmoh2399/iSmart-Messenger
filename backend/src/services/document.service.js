@@ -4,6 +4,7 @@ const ApiError = require("../utils/api-error");
 const { baseUrl } = require("../config/env");
 const { deleteFileIfExists } = require("../utils/file.util");
 const { toRelativeUploadPath } = require("../utils/storage-paths");
+const { storage } = require("../utils/storage-provider");
 
 function normalizeDocumentName(fileName) {
   const trimmed = String(fileName || "").trim();
@@ -112,18 +113,22 @@ async function createDocumentForUser(userId, file, payload) {
   const localSyncTarget = String(payload.localSyncTarget || "").trim();
   const localSyncStatus = localSyncTarget === "desktop" ? "pending" : "none";
 
-  const document = await Document.create({
-    userId,
-    fileName,
-    originalName: file.originalname,
-    storedName: path.basename(file.path),
-    filePath: toRelativeUploadPath(file.path),
-    mimeType: file.mimetype || "application/pdf",
-    pageCount,
-    fileSize: file.size,
-    localSyncStatus,
-    localSyncRequestedAt: localSyncStatus === "pending" ? new Date() : null,
-  });
+  const document = await storage.withUploadTransaction(
+    file.path,
+    async (verified) =>
+      Document.create({
+        userId,
+        fileName,
+        originalName: file.originalname,
+        storedName: path.basename(file.path),
+        filePath: toRelativeUploadPath(file.path),
+        mimeType: file.mimetype || "application/pdf",
+        pageCount,
+        fileSize: verified.size || file.size,
+        localSyncStatus,
+        localSyncRequestedAt: localSyncStatus === "pending" ? new Date() : null,
+      })
+  );
 
   return serializeDocument(document);
 }

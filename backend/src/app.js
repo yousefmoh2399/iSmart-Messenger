@@ -17,9 +17,12 @@ const {
   corsOrigin,
   env,
   trustProxy,
+  instanceId,
 } = require("./config/env");
 const { getDatabaseStatus } = require("./config/database");
-const { getRedisStatus } = require("./config/redis");
+const { getRedisStatus, getPubSubStatus } = require("./config/redis");
+const { storage } = require("./utils/storage-provider");
+const { getConnectedSocketStats, getAdapterStatus } = require("./chat/sockets/chat.socket");
 const authRoutes = require("./routes/auth.routes");
 const documentRoutes = require("./routes/document.routes");
 const userRoutes = require("./routes/user.routes");
@@ -133,23 +136,129 @@ app.use("/api/chat/transfers", (req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  res.setHeader("X-Instance-Id", instanceId);
+  next();
+});
+
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "ok",
     service: "workplace-document-backend",
+    instanceId,
   });
 });
 
-app.get("/health", (req, res) => {
-  const payload = {
-    status: "ok",
-    service: "workplace-document-backend",
-  };
-  if (allowDetailedHealth) {
-    payload.database = getDatabaseStatus();
-    payload.redis = getRedisStatus();
+let cachedStorageHealth = null;
+let lastStorageCheckTime = 0;
+let isCheckingStorage = false;
+const STORAGE_CACHE_TTL_MS = 5000;
+
+async function checkStorageHealthCached() {
+  const now = Date.now();
+  if (cachedStorageHealth && now - lastStorageCheckTime < STORAGE_CACHE_TTL_MS) {
+    return cachedStorageHealth;
   }
+  if (isCheckingStorage) {
+    return cachedStorageHealth || { available: false, status: "checking" };
+  }
+
+  isCheckingStorage = true;
+  try {
+    const storagePromise = storage.checkHealth().catch((e) => ({
+      available: false,
+      status: "error",
+      error: e?.message,
+    }));
+    const storageTimeout = new Promise((resolve) =>
+      setTimeout(() => resolve({ available: false, status: "timeout" }), 1000)
+    );
+    cachedStorageHealth = await Promise.race([storagePromise, storageTimeout]);
+    lastStorageCheckTime = Date.now();
+  } finally {
+    isCheckingStorage = false;
+  }
+  return cachedStorageHealth;
+}
+
+async function buildHealthPayload() {
+  const dbStatus = getDatabaseStatus();
+  const redisInfo = getRedisStatus();
+  const pubSubInfo = typeof getPubSubStatus === "function"
+    ? getPubSubStatus()
+    : { enabled: false, ready: false, status: "disabled" };
+  const adapterInfo = typeof getAdapterStatus === "function"
+    ? getAdapterStatus()
+    : { attached: false, configured: false };
+
+  // Cached storage check to prevent libuv threadpool starvation during NFS outages
+  const storageInfo = await checkStorageHealthCached();
+
+  const redisLabel = !redisInfo.enabled
+    ? "disabled"
+    : redisInfo.ready
+      ? "connected"
+      : redisInfo.status || "disconnected";
+
+  // Strict cluster mode: only enforced if CLUSTER_MODE=true or if REDIS_URL is configured alongside INSTANCE_ID
+  const isMultiNode = Boolean(
+    process.env.CLUSTER_MODE === "true" ||
+    (process.env.CLUSTER_MODE !== "false" && Boolean(process.env.REDIS_URL) && Boolean(process.env.INSTANCE_ID && process.env.INSTANCE_ID !== "default"))
+  );
+
+  let redisHealthy = !redisInfo.enabled || redisInfo.ready;
+  let pubSubHealthy = true;
+
+  if (pubSubInfo.enabled) {
+    pubSubHealthy = pubSubInfo.ready && (adapterInfo.attached || !isMultiNode);
+  }
+
+  const isReady =
+    dbStatus === "connected" &&
+    storageInfo.available &&
+    redisHealthy &&
+    (!isMultiNode || pubSubHealthy);
+
+  const payload = {
+    status: isReady ? "ok" : "degraded",
+    service: "ismart-api",
+    version: "1.0.0",
+    instanceId,
+    database: dbStatus,
+    redis: redisLabel,
+    pubSub: pubSubInfo.status,
+    adapter: adapterInfo.attached
+      ? "attached"
+      : adapterInfo.configured
+        ? "failed"
+        : "disabled",
+    storage: storageInfo.status,
+  };
+
+  if (allowDetailedHealth) {
+    payload.sockets = getConnectedSocketStats();
+    if (adapterInfo.error) {
+      payload.adapterError = adapterInfo.error;
+    }
+  }
+
+  return { isReady, payload };
+}
+
+// Liveness check endpoint (Node process is responsive and event loop is healthy)
+app.get("/health", async (req, res) => {
+  const { payload } = await buildHealthPayload();
+  // Liveness returns 200 as long as Express server process is up and responding
   res.status(200).json(payload);
+});
+
+// Readiness check endpoint for HAProxy (verifies MongoDB, Storage, and Redis)
+app.get("/ready", async (req, res) => {
+  const { isReady, payload } = await buildHealthPayload();
+  res.status(isReady ? 200 : 503).json({
+    ...payload,
+    ready: isReady,
+  });
 });
 
 app.use("/api/auth", authRoutes);

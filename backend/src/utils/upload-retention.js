@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { withDistributedLock } = require("./distributed-lock");
 
 const DEFAULT_RETENTION_DAYS = 7;
 
@@ -28,7 +29,11 @@ function cleanupOldFiles(directoryPath, maxAgeMs) {
       if (!entry.isFile()) continue;
       const stat = fs.statSync(entryPath);
       if (now - stat.mtimeMs > maxAgeMs) {
-        fs.unlinkSync(entryPath);
+        try {
+          fs.unlinkSync(entryPath);
+        } catch (err) {
+          if (err.code !== "ENOENT") throw err;
+        }
       }
     }
   } catch (error) {
@@ -41,7 +46,12 @@ function scheduleUploadRetentionCleanup({
   envKey,
   intervalMs = 60 * 60 * 1000,
 }) {
-  const run = () => cleanupOldFiles(directoryPath, retentionMs(envKey));
+  const lockKey = `retention:${envKey || path.basename(directoryPath || "uploads")}`;
+  const run = () => {
+    withDistributedLock(lockKey, 10 * 60 * 1000, async () => {
+      cleanupOldFiles(directoryPath, retentionMs(envKey));
+    }).catch(() => {});
+  };
   setTimeout(run, 30 * 1000).unref?.();
   const timer = setInterval(run, intervalMs);
   if (typeof timer.unref === "function") timer.unref();

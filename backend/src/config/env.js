@@ -1,6 +1,7 @@
 const dotenv = require("dotenv");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 // When deployed as a standalone EXE (via pkg), the deployment scripts
 // write all settings to a JSON file and pass its path via ISMART_CONFIG_PATH.
@@ -20,10 +21,12 @@ if (configFilePath && fs.existsSync(configFilePath)) {
   }
 }
 
-// Fallback to .env file for local development (ignored inside pkg snapshot)
-dotenv.config({
-  path: path.resolve(__dirname, "../../.env"),
-});
+// Fallback to .env file for local development (ignored inside pkg snapshot or when DISABLE_DOTENV=true)
+if (process.env.DISABLE_DOTENV !== "true") {
+  dotenv.config({
+    path: process.env.DOTENV_CONFIG_PATH || path.resolve(__dirname, "../../.env"),
+  });
+}
 
 const port = Number(process.env.PORT || 5000);
 const maxFileSizeMb = Number(process.env.MAX_FILE_SIZE_MB || 20);
@@ -167,4 +170,6 @@ module.exports = {
     true,
   ),
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+  instanceId: String(process.env.INSTANCE_ID || os.hostname() || "backend-01").trim(),
+  storageType: String(process.env.STORAGE_TYPE || "local").trim().toLowerCase(),
 };

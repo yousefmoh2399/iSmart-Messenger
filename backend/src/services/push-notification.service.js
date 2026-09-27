@@ -24,7 +24,19 @@ function normalizePlatform(value) {
   return "unknown";
 }
 
+function isFirebaseDisabled() {
+  return (
+    String(process.env.FIREBASE_DISABLED || "")
+      .trim()
+      .toLowerCase() === "true"
+  );
+}
+
 function loadServiceAccountFromEnv() {
+  if (isFirebaseDisabled()) {
+    return null;
+  }
+
   const rawJson = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
   if (rawJson) {
     return JSON.parse(rawJson);
@@ -42,16 +54,23 @@ function loadServiceAccountFromEnv() {
     return JSON.parse(fs.readFileSync(rawPath, "utf8"));
   }
 
-  try {
-    return require("../../ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json");
-  } catch (err) {
-    // ignore
+  const defaultLocalPath = path.resolve(
+    __dirname,
+    "../../ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json"
+  );
+  if (fs.existsSync(defaultLocalPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(defaultLocalPath, "utf8"));
+    } catch (_) {}
   }
 
   return null;
 }
 
 function getMessaging() {
+  if (isFirebaseDisabled()) {
+    return null;
+  }
   if (cachedMessaging) {
     return cachedMessaging;
   }

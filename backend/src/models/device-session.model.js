@@ -13,6 +13,11 @@ const deviceSessionSchema = new mongoose.Schema(
       required: false,
       index: true,
     },
+    instanceId: {
+      type: String,
+      default: null,
+      index: true,
+    },
     ipAddress: {
       type: String,
       default: null,
@@ -29,6 +34,12 @@ const deviceSessionSchema = new mongoose.Schema(
     isOnline: {
       type: Boolean,
       default: true,
+      index: true,
+    },
+    presenceStatus: {
+      type: String,
+      enum: ["online", "idle", "meeting", "lunch", "offline"],
+      default: "online",
       index: true,
     },
     lastSeenAt: {

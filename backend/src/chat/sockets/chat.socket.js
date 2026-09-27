@@ -1,9 +1,12 @@
 const fs = require("fs");
 const { Server } = require("socket.io");
+const { createAdapter } = require("@socket.io/redis-adapter");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/user.model");
 const DeviceSession = require("../../models/device-session.model");
-const { jwtSecret, corsOrigin } = require("../../config/env");
+const { jwtSecret, corsOrigin, instanceId } = require("../../config/env");
+const { getRedisClient, createRedisPubSubClients } = require("../../config/redis");
+const { withDistributedLock } = require("../../utils/distributed-lock");
 const { resolveStoredUploadPath } = require("../../utils/storage-paths");
 const logger = require("../../utils/logger");
 const printJobStore = require("../services/print-job-store");
@@ -46,6 +49,16 @@ const SOCKET_MAX_PAYLOAD_BYTES =
   Number(process.env.SOCKET_MAX_PAYLOAD_BYTES) || 96 * 1024 * 1024;
 const ADMIN_TRANSFER_MAX_BYTES = 200 * 1024 * 1024;
 const USER_TRANSFER_MAX_BYTES = 30 * 1024 * 1024;
+
+const redisAdapterStatus = {
+  configured: false,
+  attached: false,
+  error: null,
+};
+
+function getAdapterStatus() {
+  return { ...redisAdapterStatus };
+}
 
 function normalizeClientType(value) {
   const normalized = String(value || "")
@@ -127,6 +140,27 @@ function pruneUserSockets(io, userId) {
   return sockets;
 }
 
+const remoteMobileOnlineUsers = new Set();
+const remoteDesktopOnlineUsers = new Set();
+
+async function refreshClusterClientTypeSets() {
+  try {
+    const cutoff = new Date(Date.now() - 3 * 60 * 1000);
+    const activeSessions = await DeviceSession.find(
+      { isOnline: true, lastSeenAt: { $gte: cutoff } },
+      "userId clientType"
+    ).lean();
+    remoteMobileOnlineUsers.clear();
+    remoteDesktopOnlineUsers.clear();
+    for (const s of activeSessions) {
+      const uid = String(s.userId || "");
+      if (!uid) continue;
+      if (s.clientType === "mobile") remoteMobileOnlineUsers.add(uid);
+      if (s.clientType === "desktop") remoteDesktopOnlineUsers.add(uid);
+    }
+  } catch (_) {}
+}
+
 function getDesktopSocketIds(io, userId) {
   const sockets = pruneUserSockets(io, userId);
   const desktopSockets = [...sockets].filter(
@@ -139,6 +173,32 @@ function getDesktopSocketIds(io, userId) {
     : [];
 }
 
+async function resolveClusterDesktopTargets(io, userId) {
+  const localIds = getDesktopSocketIds(io, userId);
+  if (localIds.length) {
+    return localIds;
+  }
+  try {
+    const cutoff = new Date(Date.now() - 3 * 60 * 1000);
+    const sessions = await DeviceSession.find(
+      {
+        userId,
+        clientType: "desktop",
+        isOnline: true,
+        lastSeenAt: { $gte: cutoff },
+        socketId: { $ne: null },
+      },
+      "socketId"
+    )
+      .sort({ lastSeenAt: -1 })
+      .lean();
+    if (sessions.length && sessions[0].socketId) {
+      return [sessions[0].socketId];
+    }
+  } catch (_) {}
+  return [];
+}
+
 function getMobileSocketIds(io, userId) {
   const sockets = pruneUserSockets(io, userId);
   return [...sockets].filter(
@@ -146,6 +206,29 @@ function getMobileSocketIds(io, userId) {
       socketClientType.get(socketId) === "mobile" &&
       (socketPresence.get(socketId) || "online") !== "offline",
   );
+}
+
+async function resolveClusterMobileTargets(io, userId) {
+  const localIds = getMobileSocketIds(io, userId);
+  if (localIds.length) {
+    return localIds;
+  }
+  try {
+    const cutoff = new Date(Date.now() - 3 * 60 * 1000);
+    const sessions = await DeviceSession.find(
+      {
+        userId,
+        clientType: "mobile",
+        isOnline: true,
+        lastSeenAt: { $gte: cutoff },
+        socketId: { $ne: null },
+      },
+      "socketId"
+    ).lean();
+    return sessions.map((s) => s.socketId).filter(Boolean);
+  } catch (_) {
+    return [];
+  }
 }
 
 function maxTransferBytesForRole(role) {
@@ -181,9 +264,10 @@ async function buildInlineTransferPayload(transferMeta, role) {
 }
 
 function getUserDeliveryContext(io, userId) {
-  const sockets = pruneUserSockets(io, userId);
-  let hasDesktop = false;
-  let hasMobile = false;
+  const uid = String(userId || "");
+  const sockets = pruneUserSockets(io, uid);
+  let hasDesktop = remoteDesktopOnlineUsers.has(uid);
+  let hasMobile = remoteMobileOnlineUsers.has(uid);
   let hasWeb = false;
   for (const socketId of sockets) {
     if ((socketPresence.get(socketId) || "online") === "offline") {
@@ -245,26 +329,60 @@ function getAggregatedPresence(io, userId) {
 
 async function publishAggregatedPresence(io, userId, extra = {}) {
   const aggregated = getAggregatedPresence(io, userId);
-  const nextSignature = `${aggregated.isOnline ? "1" : "0"}:${aggregated.status}`;
+  let effectiveOnline = aggregated.isOnline;
+  let effectiveStatus = aggregated.status;
+
+  // Check active device sessions across cluster instances whenever local status is below "online"
+  // so that cross-node sessions properly respect online > meeting > lunch > idle > offline
+  if (effectiveStatus !== "online") {
+    try {
+      const cutoff = new Date(Date.now() - 3 * 60 * 1000);
+      const otherSessions = await DeviceSession.find(
+        { userId, isOnline: true, lastSeenAt: { $gte: cutoff } },
+        "presenceStatus"
+      ).lean();
+
+      if (otherSessions.length > 0) {
+        effectiveOnline = true;
+        const statuses = new Set(otherSessions.map((s) => s.presenceStatus || "online"));
+        if (aggregated.isOnline && aggregated.status) {
+          statuses.add(aggregated.status);
+        }
+        if (statuses.has("online")) {
+          effectiveStatus = "online";
+        } else if (statuses.has("meeting")) {
+          effectiveStatus = "meeting";
+        } else if (statuses.has("lunch")) {
+          effectiveStatus = "lunch";
+        } else if (statuses.has("idle")) {
+          effectiveStatus = "idle";
+        } else {
+          effectiveStatus = "online";
+        }
+      }
+    } catch (_) {}
+  }
+
+  const nextSignature = `${effectiveOnline ? "1" : "0"}:${effectiveStatus}`;
   const hasExtra = extra && Object.keys(extra).length > 0;
   const currentSignature = publishedPresenceState.get(userId);
   if (!hasExtra && currentSignature === nextSignature) {
     return;
   }
   await setUserPresence(userId, {
-    isOnline: aggregated.isOnline,
-    status: aggregated.status,
+    isOnline: effectiveOnline,
+    status: effectiveStatus,
   });
   publishedPresenceState.set(userId, nextSignature);
 
   const payload = { ...extra };
-  if (aggregated.isOnline) {
+  if (effectiveOnline) {
     payload.lastActiveAt = payload.lastActiveAt || new Date().toISOString();
   } else {
     payload.lastSeen = payload.lastSeen || new Date().toISOString();
   }
 
-  emitPresence(io, userId, aggregated.isOnline, aggregated.status, payload);
+  emitPresence(io, userId, effectiveOnline, effectiveStatus, payload);
 }
 
 async function markActive(io, currentUser, socketId) {
@@ -443,7 +561,34 @@ function clearSocketTyping(socket, userId) {
   }
 }
 
-function initializeChatSocketServer(httpServer) {
+async function emitConversationToMembers(io, conversationId, members = null) {
+  try {
+    const conversation = await getConversationById(conversationId);
+    if (!conversation) return;
+    const memberIds = Array.isArray(members)
+      ? members.map((m) => String(m?.userId || m?._id || m))
+      : (conversation.members || []).map((m) => String(m?.userId || m?._id || m));
+    await emitConversationToUsers(io, conversationId, memberIds);
+  } catch (error) {
+    logger.warn("chat.conversation_members.emit_failed", {
+      conversationId: String(conversationId),
+      errorMessage: error?.message,
+    });
+  }
+}
+
+function getConnectedSocketStats() {
+  let totalSockets = 0;
+  for (const set of userSockets.values()) {
+    totalSockets += set.size;
+  }
+  return {
+    connectedUsersLocal: userSockets.size,
+    connectedSocketsLocal: totalSockets,
+  };
+}
+
+async function initializeChatSocketServer(httpServer) {
   const socketCorsOrigin =
     corsOrigin === "*"
       ? true
@@ -463,25 +608,86 @@ function initializeChatSocketServer(httpServer) {
     },
   });
 
-  // On server restart, clear stale online flags from previous process lifetime.
-  User.updateMany(
-    {
-      $or: [
-        { isOnline: true },
-        { presenceStatus: { $in: ["online", "idle", "meeting", "lunch"] } },
-      ],
-    },
-    {
-      $set: {
-        isOnline: false,
-        presenceStatus: "offline",
-        lastSeen: new Date(),
-      },
-    },
-  ).catch(() => {});
+  // Attach Redis Adapter for cross-instance Socket.IO rooms/events when REDIS_URL is configured
+  const pubSub = createRedisPubSubClients();
+  if (pubSub && pubSub.pubClient && pubSub.subClient) {
+    redisAdapterStatus.configured = true;
+    try {
+      // Connect both clients concurrently; do NOT swallow errors with .catch(() => {})!
+      await Promise.all([
+        pubSub.pubClient.connect(),
+        pubSub.subClient.connect(),
+      ]);
+      io.adapter(createAdapter(pubSub.pubClient, pubSub.subClient));
+      redisAdapterStatus.attached = true;
+      redisAdapterStatus.error = null;
+      logger.info("socketio.redis_adapter.attached", { instanceId });
+    } catch (err) {
+      redisAdapterStatus.attached = false;
+      redisAdapterStatus.error = err?.message || "Adapter connection failed";
+      logger.error("socketio.redis_adapter.attach_failed", {
+        instanceId,
+        errorMessage: err?.message,
+      });
+    }
+  } else {
+    redisAdapterStatus.configured = false;
+    redisAdapterStatus.attached = false;
+    redisAdapterStatus.error = null;
+    logger.info("socketio.redis_adapter.disabled_single_node", { instanceId });
+  }
 
-  const sweepInterval = setInterval(() => {
-    for (const userId of [...userSockets.keys()]) {
+  // Instance-scoped startup cleanup: ONLY clear sessions that belonged to THIS instanceId
+  // from a previous process crash/restart, without touching users connected to other Backend nodes!
+  (async () => {
+    try {
+      const prevSessions = await DeviceSession.find(
+        { instanceId, isOnline: true },
+        "userId"
+      ).lean();
+      if (prevSessions.length > 0) {
+        await DeviceSession.updateMany(
+          { instanceId, isOnline: true },
+          { $set: { isOnline: false, presenceStatus: "offline", lastSeenAt: new Date() } }
+        );
+        const affectedUserIds = [
+          ...new Set(prevSessions.map((s) => String(s.userId)).filter(Boolean)),
+        ];
+        const stillOnline = await DeviceSession.distinct("userId", {
+          userId: { $in: affectedUserIds },
+          isOnline: true,
+        });
+        const stillOnlineSet = new Set(stillOnline.map(String));
+        const toOfflineIds = affectedUserIds.filter(
+          (id) => !stillOnlineSet.has(id)
+        );
+        if (toOfflineIds.length > 0) {
+          await User.updateMany(
+            { _id: { $in: toOfflineIds } },
+            {
+              $set: {
+                isOnline: false,
+                presenceStatus: "offline",
+                lastSeen: new Date(),
+              },
+            }
+          );
+        }
+      }
+      await refreshClusterClientTypeSets();
+    } catch (_) {}
+  })();
+
+  const sweepInterval = setInterval(async () => {
+    const localUserIds = [...userSockets.keys()];
+    if (localUserIds.length > 0) {
+      await DeviceSession.updateMany(
+        { instanceId, userId: { $in: localUserIds }, isOnline: true },
+        { $set: { lastSeenAt: new Date() } }
+      ).catch(() => {});
+    }
+    await refreshClusterClientTypeSets();
+    for (const userId of localUserIds) {
       publishAggregatedPresence(io, userId).catch(() => {});
     }
   }, 25000);
@@ -490,40 +696,64 @@ function initializeChatSocketServer(httpServer) {
   }
 
   const reconcileInterval = setInterval(async () => {
-    try {
-      for (const userId of [...userSockets.keys()]) {
-        pruneUserSockets(io, userId);
-      }
-      const activeSocketUserIds = [...userSockets.keys()];
-      const staleFilter = activeSocketUserIds.length
-        ? { isOnline: true, _id: { $nin: activeSocketUserIds } }
-        : { isOnline: true };
-      const staleUsers = await User.find(staleFilter, "_id").lean();
-      if (!staleUsers.length) {
-        return;
-      }
-      const staleIds = staleUsers.map((entry) => entry._id.toString());
-      await User.updateMany(
-        { _id: { $in: staleIds } },
-        {
-          $set: {
-            isOnline: false,
-            presenceStatus: "offline",
-            lastSeen: new Date(),
-          },
-        },
-      );
-      for (const userId of staleIds) {
-        emitPresence(io, userId, false, "offline", {
-          lastSeen: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      logger.warn("chat.presence.reconcile_failed", {
-        errorName: error?.name,
-        errorMessage: error?.message,
-      });
+    for (const userId of [...userSockets.keys()]) {
+      pruneUserSockets(io, userId);
     }
+    await withDistributedLock(
+      "socket:cluster_presence_reconcile",
+      45_000,
+      async () => {
+        try {
+          const staleCutoff = new Date(Date.now() - 3 * 60 * 1000);
+          // Mark any DeviceSession across the cluster whose heartbeat is older than 3 minutes as offline
+          await DeviceSession.updateMany(
+            { isOnline: true, lastSeenAt: { $lt: staleCutoff } },
+            { $set: { isOnline: false, presenceStatus: "offline" } }
+          );
+
+          // Any user with at least one active DeviceSession on ANY Backend instance is genuinely online
+          const clusterOnlineUserIds = await DeviceSession.distinct("userId", {
+            isOnline: true,
+            lastSeenAt: { $gte: staleCutoff },
+          });
+          const activeUserIdStrings = [
+            ...new Set([
+              ...clusterOnlineUserIds.map(String),
+              ...[...userSockets.keys()].map(String),
+            ]),
+          ];
+
+          const staleFilter = activeUserIdStrings.length
+            ? { isOnline: true, _id: { $nin: activeUserIdStrings } }
+            : { isOnline: true };
+          const staleUsers = await User.find(staleFilter, "_id").lean();
+          if (!staleUsers.length) {
+            return;
+          }
+          const staleIds = staleUsers.map((entry) => entry._id.toString());
+          await User.updateMany(
+            { _id: { $in: staleIds } },
+            {
+              $set: {
+                isOnline: false,
+                presenceStatus: "offline",
+                lastSeen: new Date(),
+              },
+            }
+          );
+          for (const userId of staleIds) {
+            emitPresence(io, userId, false, "offline", {
+              lastSeen: new Date().toISOString(),
+            });
+          }
+        } catch (error) {
+          logger.warn("chat.presence.reconcile_failed", {
+            errorName: error?.name,
+            errorMessage: error?.message,
+          });
+        }
+      }
+    );
   }, 60000);
   if (typeof reconcileInterval.unref === "function") {
     reconcileInterval.unref();
@@ -540,22 +770,32 @@ function initializeChatSocketServer(httpServer) {
 
   io.on("connection", async (socket) => {
     const currentUser = socket.user;
+    const normalizedClientType = currentUser.clientType || "unknown";
     socket.join(`user:${currentUser.id}`);
+    socket.join(`user:${currentUser.id}:${normalizedClientType}`);
     socket.join("lobby");
     registerUserSocket(currentUser.id, socket.id);
     socketPresence.set(socket.id, "online");
-    socketClientType.set(socket.id, currentUser.clientType || "unknown");
-    
+    socketClientType.set(socket.id, normalizedClientType);
+    if (normalizedClientType === "mobile") {
+      remoteMobileOnlineUsers.add(currentUser.id);
+    } else if (normalizedClientType === "desktop") {
+      remoteDesktopOnlineUsers.add(currentUser.id);
+    }
+
     try {
       const filter = {
         userId: currentUser.id,
+        instanceId,
         ipAddress: currentUser.ipAddress,
-        clientType: currentUser.clientType || "unknown",
+        clientType: normalizedClientType,
       };
       const update = {
         $set: {
           socketId: socket.id,
+          instanceId,
           isOnline: true,
+          presenceStatus: "online",
           lastSeenAt: new Date(),
           deviceInfo: currentUser.deviceInfo || {},
         },
@@ -804,13 +1044,26 @@ function initializeChatSocketServer(httpServer) {
                 ? "offline"
                 : "online";
 
+      const isOnline = requestedStatus !== "offline";
+      socketPresence.set(socket.id, requestedStatus);
+
+      if (socket.deviceSessionId) {
+        try {
+          await DeviceSession.findByIdAndUpdate(socket.deviceSessionId, {
+            isOnline,
+            presenceStatus: requestedStatus,
+            lastSeenAt: new Date(),
+          });
+        } catch (e) {
+          logger.warn("Failed to update DeviceSession on presence:activity", e);
+        }
+      }
+
       if (requestedStatus === "offline") {
-        socketPresence.set(socket.id, "offline");
         await publishAggregatedPresence(io, currentUser.id, {
           lastSeen: new Date().toISOString(),
         });
       } else {
-        socketPresence.set(socket.id, requestedStatus);
         await publishAggregatedPresence(io, currentUser.id, {
           lastActiveAt: new Date().toISOString(),
         });
@@ -849,19 +1102,38 @@ function initializeChatSocketServer(httpServer) {
         updatedAt: new Date().toISOString(),
       };
       printerCatalogByUser.set(currentUser.id, catalog);
+      const redis = getRedisClient();
+      if (redis && redis.status === "ready") {
+        redis
+          .set(`ismart:printers:${currentUser.id}`, JSON.stringify(catalog), "EX", 86400)
+          .catch(() => {});
+      }
       io.to(`user:${currentUser.id}`).emit("printers_catalog_updated", catalog);
       socketAck(ack, { ok: true, success: true, data: catalog });
     });
 
-    socket.on("printers:get", (payload = {}, ack) => {
-      const desktopSocketIds = getDesktopSocketIds(io, currentUser.id);
+    socket.on("printers:get", async (payload = {}, ack) => {
+      const desktopSocketIds = await resolveClusterDesktopTargets(io, currentUser.id);
       for (const desktopSocketId of desktopSocketIds) {
         io.to(desktopSocketId).emit("printers_catalog_refresh_requested", {
           requestedByUserId: currentUser.id,
           at: new Date().toISOString(),
         });
       }
-      const catalog = printerCatalogByUser.get(currentUser.id) || {
+      let catalog = printerCatalogByUser.get(currentUser.id);
+      if (!catalog) {
+        const redis = getRedisClient();
+        if (redis && redis.status === "ready") {
+          try {
+            const raw = await redis.get(`ismart:printers:${currentUser.id}`);
+            if (raw) {
+              catalog = JSON.parse(raw);
+              printerCatalogByUser.set(currentUser.id, catalog);
+            }
+          } catch (_) {}
+        }
+      }
+      catalog = catalog || {
         printers: [],
         defaultPrinter: null,
         updatedAt: null,
@@ -892,33 +1164,47 @@ function initializeChatSocketServer(httpServer) {
         updatedAt: new Date().toISOString(),
       };
       desktopStorageByUser.set(currentUser.id, storage);
+      const redis = getRedisClient();
+      if (redis && redis.status === "ready") {
+        redis
+          .set(`ismart:desktop_storage:${currentUser.id}`, JSON.stringify(storage), "EX", 86400)
+          .catch(() => {});
+      }
       io.to(`user:${currentUser.id}`).emit("desktop_storage_updated", storage);
       socketAck(ack, { ok: true, success: true, data: storage });
     });
 
-    socket.on("desktop_storage:get", (payload = {}, ack) => {
-      const storage = desktopStorageByUser.get(currentUser.id) || {
+    socket.on("desktop_storage:get", async (payload = {}, ack) => {
+      let storage = desktopStorageByUser.get(currentUser.id);
+      if (!storage) {
+        const redis = getRedisClient();
+        if (redis && redis.status === "ready") {
+          try {
+            const raw = await redis.get(`ismart:desktop_storage:${currentUser.id}`);
+            if (raw) {
+              storage = JSON.parse(raw);
+              desktopStorageByUser.set(currentUser.id, storage);
+            }
+          } catch (_) {}
+        }
+      }
+      storage = storage || {
         autoSaveAfterScan: false,
         updatedAt: null,
       };
+      const desktopTargets = await resolveClusterDesktopTargets(io, currentUser.id);
       socketAck(ack, {
         ok: true,
         success: true,
         data: {
           ...storage,
-          hasDesktop: getDesktopSocketIds(io, currentUser.id).length > 0,
+          hasDesktop: desktopTargets.length > 0,
         },
       });
     });
 
-    socket.on("print_request", (payload = {}, ack) => {
-      const allDesktopSocketIds = [
-        ...pruneUserSockets(io, currentUser.id),
-      ].filter(
-        (socketId) =>
-          socketClientType.get(socketId) === "desktop" &&
-          (socketPresence.get(socketId) || "online") !== "offline",
-      );
+    socket.on("print_request", async (payload = {}, ack) => {
+      const allDesktopSocketIds = await resolveClusterDesktopTargets(io, currentUser.id);
 
       if (!allDesktopSocketIds.length) {
         socketAck(ack, {
@@ -957,15 +1243,62 @@ function initializeChatSocketServer(httpServer) {
         .trim()
         .slice(0, 40);
 
-      // clientRequestId mapping and validation
+      // clientRequestId mapping and validation with atomic reservation
       const clientRequestId = String(payload.clientRequestId || "").trim();
       let jobId = null;
       let existingJob = null;
+      let reservationToken = null;
 
       if (clientRequestId) {
-        jobId = printJobStore.getJobIdForRequest(clientRequestId);
-        if (jobId) {
-          existingJob = printJobStore.getJob(jobId);
+        let reservation = await printJobStore.reservePrintRequest({
+          userId: currentUser.id,
+          clientRequestId,
+          ttlMs: 15000,
+        });
+
+        // If in-flight by a concurrent node/request, briefly poll (up to 3x 100ms) to allow commit
+        if (reservation.status === "in_flight") {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            await new Promise((r) => setTimeout(r, 100));
+            const committedJobId = await printJobStore.getJobIdForRequestAsync(
+              clientRequestId,
+              currentUser.id
+            );
+            if (committedJobId) {
+              reservation = { status: "existing", jobId: committedJobId };
+              break;
+            }
+          }
+        }
+
+        if (reservation.status === "failed") {
+          socketAck(ack, {
+            ok: false,
+            success: false,
+            retryable: true,
+            error: reservation.error || "Cluster print reservation failed.",
+          });
+          return;
+        }
+
+        if (reservation.status === "existing") {
+          jobId = reservation.jobId;
+          existingJob = await printJobStore.getJobAsync(jobId);
+        } else if (reservation.status === "reserved") {
+          reservationToken = reservation.token;
+        } else {
+          logger.info("event=print_job_in_flight_ignored", {
+            clientRequestId,
+            userId: currentUser.id,
+          });
+          socketAck(ack, {
+            ok: false,
+            success: false,
+            retryable: true,
+            status: "in_flight",
+            error: "Print request is currently in-flight on another cluster instance. Please retry shortly.",
+          });
+          return;
         }
       }
 
@@ -1002,7 +1335,7 @@ function initializeChatSocketServer(httpServer) {
         // If it was failed, retry allows transitioning failed -> processing
         if (existingJob.state === "failed") {
           try {
-            printJobStore.validateAndTransition(jobId, "processing");
+            await printJobStore.validateAndTransitionAsync(jobId, "processing");
           } catch (err) {
             socketAck(ack, { ok: false, success: false, error: err.message });
             return;
@@ -1011,9 +1344,6 @@ function initializeChatSocketServer(httpServer) {
       } else {
         // Create new job
         jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        if (clientRequestId) {
-          printJobStore.registerRequest(clientRequestId, jobId);
-        }
         const printJob = {
           jobId,
           clientRequestId: effectiveClientRequestId,
@@ -1030,14 +1360,38 @@ function initializeChatSocketServer(httpServer) {
           createdAt: new Date().toISOString(),
         };
         printJobStore.createJob(jobId, printJob);
+        if (clientRequestId) {
+          const committed = await printJobStore.commitPrintRequest({
+            userId: currentUser.id,
+            clientRequestId,
+            token: reservationToken,
+            jobId,
+          });
+          if (!committed) {
+            socketAck(ack, {
+              ok: false,
+              success: false,
+              retryable: true,
+              error: "Print reservation expired or was invalidated. Please retry.",
+            });
+            return;
+          }
+        }
       }
 
       const printJob = printJobStore.getJob(jobId).payload;
 
       // Update state to forwarded
       try {
-        printJobStore.validateAndTransition(jobId, "forwarded");
+        await printJobStore.validateAndTransitionAsync(jobId, "forwarded");
       } catch (err) {
+        if (reservationToken) {
+          await printJobStore.releasePrintReservation({
+            userId: currentUser.id,
+            clientRequestId,
+            token: reservationToken,
+          });
+        }
         socketAck(ack, { ok: false, success: false, error: err.message });
         return;
       }
@@ -1064,6 +1418,7 @@ function initializeChatSocketServer(httpServer) {
       });
 
       printJobOwnerById.set(jobId, currentUser.id);
+      printJobStore.setJobOwner("print", jobId, currentUser.id);
       io.to(targetDesktopSocketId).emit("print_job_requested", printJob);
 
       socketAck(ack, {
@@ -1073,17 +1428,17 @@ function initializeChatSocketServer(httpServer) {
       });
     });
 
-    socket.on("print_job_status_update", (payload = {}, ack) => {
+    socket.on("print_job_status_update", async (payload = {}, ack) => {
       const jobId = String(payload.jobId || "").trim();
       const status = String(payload.status || "").trim();
       const printExecutionId = String(payload.printExecutionId || "").trim();
       const errorCode = String(payload.errorCode || "").trim();
       const errorMessage = String(payload.errorMessage || "").trim();
 
-      const jobRecord = printJobStore.getJob(jobId);
+      const jobRecord = await printJobStore.getJobAsync(jobId);
       if (jobRecord) {
         try {
-          printJobStore.validateAndTransition(jobId, status);
+          await printJobStore.validateAndTransitionAsync(jobId, status);
         } catch (err) {
           logger.warn(
             "chat.socket.print_job_status_update.invalid_transition",
@@ -1098,7 +1453,9 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      const ownerUserId = printJobOwnerById.get(jobId) || currentUser.id;
+      const ownerUserId =
+        printJobOwnerById.get(jobId) ||
+        (await printJobStore.resolveJobOwner("print", jobId, currentUser.id));
       io.to(`user:${ownerUserId}`).emit("print_job_status", {
         jobId,
         status: status === "submitted" ? "completed" : status,
@@ -1113,7 +1470,7 @@ function initializeChatSocketServer(httpServer) {
       socketAck(ack, { ok: true, success: true });
     });
 
-    socket.on("print_job_result", (payload = {}, ack) => {
+    socket.on("print_job_result", async (payload = {}, ack) => {
       const jobId = String(payload.jobId || "").trim();
       const success = payload.success === true;
       const status = success ? "submitted" : "failed";
@@ -1123,7 +1480,7 @@ function initializeChatSocketServer(httpServer) {
         payload.errorMessage || payload.message || "",
       ).trim();
 
-      const jobRecord = printJobStore.getJob(jobId);
+      const jobRecord = await printJobStore.getJobAsync(jobId);
       if (jobRecord) {
         try {
           printJobStore.validateAndTransition(jobId, status);
@@ -1138,9 +1495,12 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      const ownerUserId = printJobOwnerById.get(jobId) || currentUser.id;
+      const ownerUserId =
+        printJobOwnerById.get(jobId) ||
+        (await printJobStore.resolveJobOwner("print", jobId, currentUser.id));
       if (jobId && success) {
         printJobOwnerById.delete(jobId);
+        printJobStore.deleteJobOwner("print", jobId);
       }
 
       const resultPayload = {
@@ -1188,7 +1548,7 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      const desktopSocketIds = getDesktopSocketIds(io, targetUserId);
+      const desktopSocketIds = await resolveClusterDesktopTargets(io, targetUserId);
       if (!desktopSocketIds.length) {
         socketAck(ack, {
           ok: false,
@@ -1285,6 +1645,7 @@ function initializeChatSocketServer(httpServer) {
       };
 
       saveJobOwnerById.set(jobId, currentUser.id);
+      printJobStore.setJobOwner("save", jobId, currentUser.id);
       for (const desktopSocketId of desktopSocketIds) {
         io.to(desktopSocketId).emit("file_save_requested", saveJob);
       }
@@ -1297,7 +1658,7 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("file_receive_request", async (payload = {}, ack) => {
-      const mobileSocketIds = getMobileSocketIds(io, currentUser.id);
+      const mobileSocketIds = await resolveClusterMobileTargets(io, currentUser.id);
       if (!mobileSocketIds.length) {
         socketAck(ack, {
           ok: false,
@@ -1382,6 +1743,7 @@ function initializeChatSocketServer(httpServer) {
       };
 
       receiveJobOwnerById.set(jobId, currentUser.id);
+      printJobStore.setJobOwner("receive", jobId, currentUser.id);
       for (const mobileSocketId of mobileSocketIds) {
         io.to(mobileSocketId).emit("file_receive_requested", receiveJob);
       }
@@ -1393,9 +1755,11 @@ function initializeChatSocketServer(httpServer) {
       });
     });
 
-    socket.on("file_save_progress", (payload = {}, ack) => {
+    socket.on("file_save_progress", async (payload = {}, ack) => {
       const jobId = String(payload.jobId || "").trim();
-      const ownerUserId = saveJobOwnerById.get(jobId) || currentUser.id;
+      const ownerUserId =
+        saveJobOwnerById.get(jobId) ||
+        (await printJobStore.resolveJobOwner("save", jobId, currentUser.id));
       const resultPayload = {
         jobId: jobId || null,
         stage: String(payload.stage || "unknown").trim() || "unknown",
@@ -1409,9 +1773,11 @@ function initializeChatSocketServer(httpServer) {
       socketAck(ack, { ok: true, success: true, data: resultPayload });
     });
 
-    socket.on("file_receive_progress", (payload = {}, ack) => {
+    socket.on("file_receive_progress", async (payload = {}, ack) => {
       const jobId = String(payload.jobId || "").trim();
-      const ownerUserId = receiveJobOwnerById.get(jobId) || currentUser.id;
+      const ownerUserId =
+        receiveJobOwnerById.get(jobId) ||
+        (await printJobStore.resolveJobOwner("receive", jobId, currentUser.id));
       const resultPayload = {
         jobId: jobId || null,
         stage: String(payload.stage || "unknown").trim() || "unknown",
@@ -1425,11 +1791,14 @@ function initializeChatSocketServer(httpServer) {
       socketAck(ack, { ok: true, success: true, data: resultPayload });
     });
 
-    socket.on("file_save_result", (payload = {}, ack) => {
+    socket.on("file_save_result", async (payload = {}, ack) => {
       const jobId = String(payload.jobId || "").trim();
-      const ownerUserId = saveJobOwnerById.get(jobId) || currentUser.id;
+      const ownerUserId =
+        saveJobOwnerById.get(jobId) ||
+        (await printJobStore.resolveJobOwner("save", jobId, currentUser.id));
       if (jobId) {
         saveJobOwnerById.delete(jobId);
+        printJobStore.deleteJobOwner("save", jobId);
       }
       const resultPayload = {
         jobId: jobId || null,
@@ -1445,11 +1814,14 @@ function initializeChatSocketServer(httpServer) {
       socketAck(ack, { ok: true, success: true, data: resultPayload });
     });
 
-    socket.on("file_receive_result", (payload = {}, ack) => {
+    socket.on("file_receive_result", async (payload = {}, ack) => {
       const jobId = String(payload.jobId || "").trim();
-      const ownerUserId = receiveJobOwnerById.get(jobId) || currentUser.id;
+      const ownerUserId =
+        receiveJobOwnerById.get(jobId) ||
+        (await printJobStore.resolveJobOwner("receive", jobId, currentUser.id));
       if (jobId) {
         receiveJobOwnerById.delete(jobId);
+        printJobStore.deleteJobOwner("receive", jobId);
       }
       const resultPayload = {
         jobId: jobId || null,
@@ -1500,7 +1872,7 @@ function initializeChatSocketServer(httpServer) {
       
       if (socket.deviceSessionId) {
         let hasOtherSocketForSession = false;
-        for (const [id, s] of io.sockets.sockets.entries()) {
+        for (const [, s] of io.sockets.sockets.entries()) {
            if (s.id !== socket.id && s.deviceSessionId?.toString() === socket.deviceSessionId.toString()) {
               hasOtherSocketForSession = true;
               break;
@@ -1508,10 +1880,15 @@ function initializeChatSocketServer(httpServer) {
         }
         
         if (!hasOtherSocketForSession) {
-          DeviceSession.findByIdAndUpdate(socket.deviceSessionId, {
-            isOnline: false,
-            lastSeenAt: new Date()
-          }).catch(e => logger.warn("Failed to update DeviceSession on disconnect", e));
+          try {
+            await DeviceSession.findByIdAndUpdate(socket.deviceSessionId, {
+              isOnline: false,
+              presenceStatus: "offline",
+              lastSeenAt: new Date()
+            });
+          } catch (e) {
+            logger.warn("Failed to update DeviceSession on disconnect", e);
+          }
         }
       }
 
@@ -1527,4 +1904,9 @@ function initializeChatSocketServer(httpServer) {
 module.exports = {
   initializeChatSocketServer,
   getUserDeliveryContext,
+  emitMessageToRecipients,
+  emitConversationToUsers,
+  emitConversationToMembers,
+  getConnectedSocketStats,
+  getAdapterStatus,
 };

@@ -1,61 +1,28 @@
-# Deployment Guide for iSmart Messenger Backend
+# Deployment & Migration Guide (`docs/deployment.md`)
 
-This guide explains how to install the packaged backend as a background service on Linux (systemd) and Windows (Windows Service).
+## 1. Resource Sizing Plan (Corporate Internal Scale)
 
-## Configuration
-The backend uses a `config.json` file instead of `.env` to manage configuration cleanly across system reboots.
-The configuration file dictates the `DATA_DIR`, which is the persistent root folder for all file uploads, backups, and chat transfers.
+| VM Name | vCPU | RAM | Disk | OS |
+| :--- | :--- | :--- | :--- | :--- |
+| `vm-hap1` / `vm-hap2` | 2 vCPU | 2 GB | 20 GB | Ubuntu 22.04 LTS |
+| `vm-app1` / `vm-app2` | 4 vCPU | 4 GB | 40 GB | Ubuntu 22.04 LTS |
+| `vm-mongo1` / `vm-mongo2` | 4 vCPU | 8 GB | 100 GB SSD | Ubuntu 22.04 LTS |
+| `vm-mongo3` | 2 vCPU | 4 GB | 80 GB SSD | Ubuntu 22.04 LTS |
+| `vm-redis` | 2 vCPU | 4 GB | 20 GB | Ubuntu 22.04 LTS |
+| `vm-storage` | 2–4 vCPU | 4–8 GB | 500 GB+ | Ubuntu 22.04 LTS / TrueNAS |
 
-### Default Configuration Paths
-- **Windows**: `C:\ProgramData\iSmart\config.json`
-- **Linux**: `/etc/ismart/config.json`
+## 2. Step-by-Step Staging-First Migration Strategy (`iSmart HA Test`)
 
-The backend can be overridden to use a different configuration path by setting the `ISMART_CONFIG_PATH` environment variable.
+Never migrate production in-place without validating in `iSmart HA Test`:
 
-## Linux Installation (systemd)
-1. Ensure the executable `ismart-backend-linux` is located in `backend/dist/`.
-2. Navigate to `backend/deployment/ubuntu/`.
-3. Run the installation script as root:
-```bash
-sudo ./install-service.sh
-```
-4. Follow the interactive prompts to set the `DATA_DIR` (default: `/var/lib/ismart`), MongoDB URI, and Port. The script will:
-   - Create a dedicated `ismart` system user.
-   - Generate a secure `JWT_SECRET` and write the `config.json` file.
-   - Install and start the `ismart-backend` systemd service.
-
-### Useful Linux Commands
-- Check status: `sudo systemctl status ismart-backend`
-- View logs: `sudo journalctl -u ismart-backend -f`
-- Restart service: `sudo systemctl restart ismart-backend`
-
-## Windows Installation (NSSM)
-1. Ensure `ismart-backend-win.exe` is located in `backend/dist/`.
-2. Ensure you have [NSSM](https://nssm.cc/) (`nssm.exe`) downloaded and available in the `deployment/windows` directory. Note: NSSM is public domain software and can be freely redistributed.
-3. Open PowerShell as Administrator.
-4. Navigate to `backend/deployment/windows/`.
-5. Run the installation script:
-```powershell
-.\install-service.ps1
-```
-6. Follow the interactive prompts to set the `DATA_DIR` (default: `C:\ProgramData\iSmart`), MongoDB URI, and Port. The script will:
-   - Generate a secure `JWT_SECRET` and write the `config.json` file.
-   - Install the executable as a Windows Service named `iSmartBackend` via NSSM.
-   - Start the service automatically.
-
-### Managing the Windows Service
-You can manage the service via the standard Windows `services.msc` snap-in, or via PowerShell:
-- Restart service: `Restart-Service iSmartBackend`
-- Stop service: `Stop-Service iSmartBackend`
-
-## Changing DATA_DIR
-To change the data directory after installation:
-1. Stop the service.
-2. Move your data from the old `DATA_DIR` to the new location.
-3. Update the `DATA_DIR` path in the `config.json` file.
-4. Start the service.
-
-## Limitations Deferred to Later Phases
-- Licensing checks are not yet enforced.
-- The First Run Setup Wizard UI is not yet implemented (an admin user is created via the `config.json` bootstrap settings automatically).
-- A unified graphical installer (e.g., Inno Setup / InstallShield / NSIS) will be built in a future phase.
+1. **Clone Backend** repository onto `vm-app1` and `vm-app2` under `/opt/ismart/backend`.
+2. **Setup Shared Storage** (`vm-storage`) and mount `/data/ismart` on both `vm-app1` and `vm-app2`.
+3. **Setup MongoDB Replica Set** (`ismartRS`) across `vm-mongo1`, `vm-mongo2`, `vm-mongo3` using [`mongod-rs.conf`](file:///g:/iSmart-Messenger-Full/backend/deployment/ha/mongodb/mongod-rs.conf) and [`init-replica-set.js`](file:///g:/iSmart-Messenger-Full/backend/deployment/ha/mongodb/init-replica-set.js).
+4. **Setup Redis** on `vm-redis` using [`redis-ha.conf`](file:///g:/iSmart-Messenger-Full/backend/deployment/ha/redis/redis-ha.conf).
+5. **Deploy Backend 1 & Backend 2:**
+   - Set `INSTANCE_ID=backend-01` on `vm-app1` and `INSTANCE_ID=backend-02` on `vm-app2`.
+   - Ensure both share the exact same `JWT_SECRET`, `MONGODB_URI`, and `REDIS_URL`.
+   - Enable systemd unit [`ismart-backend.service`](file:///g:/iSmart-Messenger-Full/backend/deployment/ha/systemd/ismart-backend.service).
+6. **Setup HAProxy & Keepalived** on `vm-hap1` and `vm-hap2` with Virtual IP `<VIP_IP>`.
+7. **Execute Failover Tests** ([`run-failover-tests.sh`](file:///g:/iSmart-Messenger-Full/backend/deployment/ha/tests/run-failover-tests.sh)) and verify backup/restore ([`verify-restore.sh`](file:///g:/iSmart-Messenger-Full/backend/deployment/ha/backup/verify-restore.sh)).
+8. **Cutover Production DNS:** Point `ismart.company.local` to `<VIP_IP>`.

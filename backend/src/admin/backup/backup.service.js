@@ -14,6 +14,7 @@ const logger = require("../../utils/logger");
 const { backupPreRestoreSnapshot, mongodbUri } = require("../../config/env");
 const { logAuditEvent } = require("../../chat/services/audit.service");
 const { getBackupsRoot, getUploadsRoot } = require("../../utils/storage-paths");
+const { withDistributedLock } = require("../../utils/distributed-lock");
 
 const ZIP_FILE_NAME_PATTERN = /^[a-zA-Z0-9._-]+\.zip$/;
 const MAX_BACKUP_ENTRIES = Number(process.env.BACKUP_MAX_ENTRIES || 200000);
@@ -659,7 +660,19 @@ async function withOperationLock(operationName, operation) {
 
   activeOperation = operationName;
   try {
-    return await operation();
+    const lockOutcome = await withDistributedLock(
+      "admin:backup_operation",
+      30 * 60 * 1000,
+      operation,
+      { fallbackToLocal: false }
+    );
+    if (!lockOutcome.acquired) {
+      throw new ApiError(
+        409,
+        `Cannot start ${operationName} while another backup/restore operation is running on the cluster.`,
+      );
+    }
+    return lockOutcome.result;
   } finally {
     activeOperation = null;
   }

@@ -72,7 +72,7 @@ async function startServer() {
   server.keepAliveTimeout = 120_000; // 2 minutes
   server.headersTimeout   = 125_000; // must be > keepAliveTimeout
 
-  const io = initializeChatSocketServer(server);
+  const io = await initializeChatSocketServer(server);
   app.set("io", io);
   startPrinterScheduler();
 
