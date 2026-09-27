@@ -34,6 +34,7 @@ class MessageBubble extends StatefulWidget {
     required this.onOpenAttachment,
     required this.onToggleFavorite,
     this.onSaveAttachment,
+    this.onSaveSticker,
     this.onPrintAttachment,
     required this.onReact,
     this.onShowDetails,
@@ -71,6 +72,7 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback onOpenAttachment;
   final VoidCallback onToggleFavorite;
   final VoidCallback? onSaveAttachment;
+  final VoidCallback? onSaveSticker;
   final VoidCallback? onPrintAttachment;
   final Future<void> Function(String emoji) onReact;
   final VoidCallback? onShowDetails;
@@ -119,6 +121,9 @@ class _MessageBubbleState extends State<MessageBubble> {
         break;
       case _BubbleMenuAction.saveAttachment:
         widget.onSaveAttachment?.call();
+        break;
+      case _BubbleMenuAction.saveSticker:
+        widget.onSaveSticker?.call();
         break;
       case _BubbleMenuAction.edit:
         widget.onEdit?.call();
@@ -180,6 +185,15 @@ class _MessageBubbleState extends State<MessageBubble> {
               icon: Icons.save_alt_rounded,
               label: 'حفظ الملف',
               color: Color(0xFF2E7D32),
+            ),
+          ),
+        if (widget.message.isStickerMessage && widget.onSaveSticker != null)
+          const PopupMenuItem(
+            value: _BubbleMenuAction.saveSticker,
+            child: _PopupActionRow(
+              icon: Icons.sticky_note_2_outlined,
+              label: 'حفظ ضمن الملصقات',
+              color: Color(0xFF7B61FF),
             ),
           ),
         if (widget.onEdit != null)
@@ -914,6 +928,7 @@ enum _BubbleMenuAction {
   favorite,
   copy,
   saveAttachment,
+  saveSticker,
   edit,
   delete,
   pin,

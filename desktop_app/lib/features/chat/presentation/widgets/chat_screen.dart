@@ -1061,7 +1061,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     final defaultLimit = widget.currentUser?.role == 'admin'
         ? _chatMaxUploadBytesAdmin
         : _chatMaxUploadBytesUser;
-        
+
     if (customLimitMB != null) {
       final customBytes = customLimitMB * 1024 * 1024;
       return customBytes > defaultLimit ? customBytes : defaultLimit;
@@ -1076,9 +1076,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     final limitMB = _maxChatAttachmentBytes() ~/ (1024 * 1024);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          'الحد الأقصى لحجم مرفقات الشات هو $limitMB ميجا فقط.',
-        ),
+        content: Text('الحد الأقصى لحجم مرفقات الشات هو $limitMB ميجا فقط.'),
       ),
     );
   }
@@ -1094,22 +1092,34 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final pending = _container.read(pendingChatDropFilesProvider);
-      if (pending != null && pending['files'] != null && pending['conversationId'] == _conversationId) {
+      if (pending != null &&
+          pending['files'] != null &&
+          pending['conversationId'] == _conversationId) {
         final files = pending['files'] as List<dynamic>;
         _container.read(pendingChatDropFilesProvider.notifier).state = null;
-        
-        final overview = _container.read(chatOverviewControllerProvider).valueOrNull;
-        final liveConversation = overview?.conversations
+
+        final overview = _container
+            .read(chatOverviewControllerProvider)
+            .valueOrNull;
+        final liveConversation =
+            overview?.conversations
                 .where((c) => c.id == _conversationId)
-                .firstOrNull ?? widget.conversation;
-        
+                .firstOrNull ??
+            widget.conversation;
+
         if (!_isReadOnlyConversation(liveConversation)) {
           for (final file in files) {
             if (kIsWeb) {
               file.readAsBytes().then((bytes) {
                 _sendPickedWebFiles(
                   conversation: liveConversation,
-                  files: [PlatformFile(name: file.name, size: bytes.length, bytes: bytes)],
+                  files: [
+                    PlatformFile(
+                      name: file.name,
+                      size: bytes.length,
+                      bytes: bytes,
+                    ),
+                  ],
                   isImageBatch: false,
                 );
               });
@@ -2884,7 +2894,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         widget.conversation;
     if (_isReadOnlyConversation(conversation)) return;
 
-    final gifUrl = await showDialog<String>(
+    final sticker = await showDialog<LocalSticker>(
       context: context,
       builder: (_) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -2892,18 +2902,16 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
 
-    if (gifUrl != null && mounted) {
-      await ref
-          .read(
-            conversationMessagesControllerProvider(_conversationId).notifier,
-          )
-          .sendMessage(
-            content: '',
-            messageType: 'gif',
-            fileUrl: gifUrl,
-            replyToMessageId: _replyingTo?.id,
-          );
-      setState(() => _replyingTo = null);
+    if (sticker != null && mounted) {
+      await _sendPreparedFile(
+        conversation: conversation,
+        sendPath: sticker.name,
+        displayName: sticker.name,
+        sourceFileName: sticker.name,
+        fileBytes: sticker.bytes,
+        restrictForwardAndDownload: false,
+        isSticker: true,
+      );
     }
   }
 
@@ -2961,6 +2969,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
+    // ignore: unused_local_variable
     final messagesState = ref.read(
       conversationMessagesControllerProvider(_conversationId),
     );
@@ -3438,6 +3447,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     String? sourceFileName,
     int? knownFileSize,
     Map<String, dynamic>? fixedBroadcastMetadata,
+    bool isSticker = false,
     bool showFailureSnackbar = true,
   }) async {
     if (isChatAttachmentExtensionBlocked(sendPath)) {
@@ -3473,6 +3483,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         'allowDownload': !restrictForwardAndDownload,
         'allowForward': !restrictForwardAndDownload,
       },
+      if (isSticker) 'sticker': true,
     };
 
     setState(() {
@@ -3731,6 +3742,30 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           _downloadProgress = 0;
           _downloadingFileName = null;
         });
+      }
+    }
+  }
+
+  Future<void> _saveReceivedSticker(ChatMessage message) async {
+    if (!message.attachmentDownloadAllowed) return;
+    try {
+      final path = await ref
+          .read(chatRepositoryProvider)
+          .downloadAttachment(message);
+      await saveLocalSticker(
+        name: message.fileName ?? 'sticker.png',
+        bytes: await File(path).readAsBytes(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حفظ الملصق في مكتبتك.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حفظ الملصق حاليًا.')),
+        );
       }
     }
   }
@@ -4301,17 +4336,21 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     ref.listen(pendingChatDropFilesProvider, (prev, next) {
-      if (next != null && next['files'] != null && next['conversationId'] == _conversationId) {
+      if (next != null &&
+          next['files'] != null &&
+          next['conversationId'] == _conversationId) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
           final files = next['files'] as List<dynamic>;
           ref.read(pendingChatDropFilesProvider.notifier).state = null;
-          
+
           final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-          final liveConversation = overview?.conversations
+          final liveConversation =
+              overview?.conversations
                   .where((c) => c.id == _conversationId)
-                  .firstOrNull ?? widget.conversation;
-          
+                  .firstOrNull ??
+              widget.conversation;
+
           if (_isReadOnlyConversation(liveConversation)) return;
 
           for (final file in files) {
@@ -4319,7 +4358,13 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               final bytes = await file.readAsBytes();
               await _sendPickedWebFiles(
                 conversation: liveConversation,
-                files: [PlatformFile(name: file.name, size: bytes.length, bytes: bytes)],
+                files: [
+                  PlatformFile(
+                    name: file.name,
+                    size: bytes.length,
+                    bytes: bytes,
+                  ),
+                ],
                 isImageBatch: false,
               );
             } else {
@@ -4844,6 +4889,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               message,
                                               forceSaveAs: true,
                                             )
+                                          : null,
+                                      onSaveSticker:
+                                          message.isStickerMessage &&
+                                              message.attachmentDownloadAllowed
+                                          ? () => _saveReceivedSticker(message)
                                           : null,
                                       onPrintAttachment:
                                           message.isPrintableAttachment

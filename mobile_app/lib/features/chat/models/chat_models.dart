@@ -543,6 +543,10 @@ class ChatMessage {
       messageType == 'image' ||
       (mimeType?.toLowerCase().startsWith('image/') ?? false);
   bool get isGifMessage => messageType == 'gif';
+
+  /// Sticker files are regular local image attachments, marked in metadata to
+  /// stay compatible with older servers and clients.
+  bool get isStickerMessage => metadata?['sticker'] == true;
   bool get isPollMessage => messageType == 'poll' || messageType == 'checklist';
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';
@@ -784,7 +788,12 @@ class ChatOverviewData {
       conversations.where((entry) => entry.type == 'department').toList();
 
   List<ChatConversation> get roomConversations => conversations
-      .where((entry) => entry.type == 'group' || entry.type == 'broadcast' || entry.type == 'department')
+      .where(
+        (entry) =>
+            entry.type == 'group' ||
+            entry.type == 'broadcast' ||
+            entry.type == 'department',
+      )
       .toList();
 
   int get totalUnread =>

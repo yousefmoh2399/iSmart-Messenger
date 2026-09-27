@@ -1626,6 +1626,10 @@ function _runPowerShell(command, timeoutMs = 30000) {
 }
 
 async function listOpenWindowsPS() {
+  // Keep the PowerShell-to-Node protocol ASCII-only. Windows PowerShell writes
+  // pipeline output using the active console code page, which turns Arabic (and
+  // other Unicode) window titles into question marks before Node receives them.
+  // Each textual field is sent as UTF-16LE Base64 and decoded below.
   // Uses Get-Process — no Add-Type needed, no backtick/template-literal issues.
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
@@ -1634,7 +1638,9 @@ async function listOpenWindowsPS() {
     "  $id = $_.MainWindowHandle.ToInt64()",
     "  $title = $_.MainWindowTitle.Trim()",
     "  $proc = $_.ProcessName",
-    "  if ($id -gt 0 -and $title -ne '') { $out += \"$id|$title|$proc\" }",
+    "  $title64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($title))",
+    "  $proc64 = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($proc))",
+    "  if ($id -gt 0 -and $title -ne '') { $out += \"$id|$title64|$proc64\" }",
     "}",
     "$out -join [char]10",
   ].join("\n");
@@ -1647,8 +1653,15 @@ async function listOpenWindowsPS() {
     .map((line) => {
       const parts = line.split("|");
       const windowId = parseInt(parts[0] || "0", 10);
-      const title = (parts[1] || "").trim();
-      const appName = (parts[2] || "").trim();
+      const decodeUnicodeField = (value) => {
+        try {
+          return Buffer.from(value || "", "base64").toString("utf16le").trim();
+        } catch (_) {
+          return "";
+        }
+      };
+      const title = decodeUnicodeField(parts[1]);
+      const appName = decodeUnicodeField(parts[2]);
       return windowId > 0 && title ? { windowId, title, appName } : null;
     })
     .filter(Boolean);

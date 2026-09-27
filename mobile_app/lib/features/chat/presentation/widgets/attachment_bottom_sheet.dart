@@ -9,7 +9,7 @@ enum AttachmentBottomSheetResult {
   reaction,
   poll,
   checklist,
-  gif
+  gif,
 }
 
 class AttachmentBottomSheet extends StatefulWidget {
@@ -64,7 +64,7 @@ class _AttachmentBottomSheetState extends State<AttachmentBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    
+
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
@@ -84,7 +84,7 @@ class _AttachmentBottomSheetState extends State<AttachmentBottomSheet> {
             ),
             margin: const EdgeInsets.only(bottom: 16),
           ),
-          
+
           // Recent Photos Horizontal List
           if (_hasPermission)
             SizedBox(
@@ -92,32 +92,32 @@ class _AttachmentBottomSheetState extends State<AttachmentBottomSheet> {
               child: _isLoadingPhotos
                   ? const Center(child: CircularProgressIndicator())
                   : _recentPhotos.isEmpty
-                      ? const Center(child: Text('لا توجد صور حديثة'))
-                      : ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: _recentPhotos.length,
-                          itemBuilder: (listContext, index) {
-                            final asset = _recentPhotos[index];
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
-                              child: GestureDetector(
-                                onTap: () async {
-                                  final file = await asset.file;
-                                  if (file != null && context.mounted) {
-                                    Navigator.pop(context, file.path);
-                                  }
-                                },
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: AssetThumbnail(asset: asset),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                  ? const Center(child: Text('لا توجد صور حديثة'))
+                  : ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: _recentPhotos.length,
+                      itemBuilder: (listContext, index) {
+                        final asset = _recentPhotos[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: GestureDetector(
+                            onTap: () async {
+                              final file = await asset.file;
+                              if (file != null && context.mounted) {
+                                Navigator.pop(context, file.path);
+                              }
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: AssetThumbnail(asset: asset),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
             ),
-          
+
           if (_hasPermission)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -136,37 +136,47 @@ class _AttachmentBottomSheetState extends State<AttachmentBottomSheet> {
                   icon: Icons.image_rounded,
                   label: 'المعرض',
                   color: Colors.blue,
-                  onTap: () => Navigator.pop(context, AttachmentBottomSheetResult.image),
+                  onTap: () =>
+                      Navigator.pop(context, AttachmentBottomSheetResult.image),
                 ),
                 _AttachmentIconBtn(
                   icon: Icons.insert_drive_file_rounded,
                   label: 'ملف',
                   color: Colors.orange,
-                  onTap: () => Navigator.pop(context, AttachmentBottomSheetResult.file),
+                  onTap: () =>
+                      Navigator.pop(context, AttachmentBottomSheetResult.file),
                 ),
                 _AttachmentIconBtn(
                   icon: Icons.poll_rounded,
                   label: 'استطلاع',
                   color: Colors.green,
-                  onTap: () => Navigator.pop(context, AttachmentBottomSheetResult.poll),
+                  onTap: () =>
+                      Navigator.pop(context, AttachmentBottomSheetResult.poll),
                 ),
                 _AttachmentIconBtn(
                   icon: Icons.checklist_rounded,
                   label: 'مهام',
                   color: Colors.teal,
-                  onTap: () => Navigator.pop(context, AttachmentBottomSheetResult.checklist),
+                  onTap: () => Navigator.pop(
+                    context,
+                    AttachmentBottomSheetResult.checklist,
+                  ),
                 ),
                 _AttachmentIconBtn(
-                  icon: Icons.gif_box_rounded,
-                  label: 'GIF',
+                  icon: Icons.sticky_note_2_rounded,
+                  label: 'ملصقات',
                   color: Colors.pink,
-                  onTap: () => Navigator.pop(context, AttachmentBottomSheetResult.gif),
+                  onTap: () =>
+                      Navigator.pop(context, AttachmentBottomSheetResult.gif),
                 ),
                 _AttachmentIconBtn(
                   icon: Icons.add_reaction_rounded,
                   label: 'تفاعل',
                   color: Colors.purple,
-                  onTap: () => Navigator.pop(context, AttachmentBottomSheetResult.reaction),
+                  onTap: () => Navigator.pop(
+                    context,
+                    AttachmentBottomSheetResult.reaction,
+                  ),
                 ),
               ],
             ),
@@ -196,12 +206,7 @@ class AssetThumbnail extends StatelessWidget {
             child: const Center(child: CircularProgressIndicator()),
           );
         }
-        return Image.memory(
-          bytes,
-          width: 120,
-          height: 120,
-          fit: BoxFit.cover,
-        );
+        return Image.memory(bytes, width: 120, height: 120, fit: BoxFit.cover);
       },
     );
   }

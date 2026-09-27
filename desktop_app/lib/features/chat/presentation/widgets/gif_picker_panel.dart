@@ -1,148 +1,262 @@
-import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// The GIF entry point is now an offline sticker library; it never calls web APIs.
+class LocalSticker {
+  const LocalSticker({
+    required this.id,
+    required this.name,
+    required this.bytes,
+  });
+  final String id;
+  final String name;
+  final Uint8List bytes;
+
+  Map<String, String> toJson() => {
+    'id': id,
+    'name': name,
+    'bytes': base64Encode(bytes),
+  };
+  static LocalSticker? fromJson(Object? value) {
+    if (value is! Map) return null;
+    try {
+      final id = value['id']?.toString() ?? '';
+      final name = value['name']?.toString() ?? '';
+      final bytes = base64Decode(value['bytes']?.toString() ?? '');
+      return id.isEmpty || name.isEmpty || bytes.isEmpty
+          ? null
+          : LocalSticker(id: id, name: name, bytes: bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+Future<void> saveLocalSticker({
+  required String name,
+  required Uint8List bytes,
+}) async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString('offline_stickers_v1');
+  final current = raw == null
+      ? <LocalSticker>[]
+      : (jsonDecode(raw) as List)
+            .map(LocalSticker.fromJson)
+            .whereType<LocalSticker>()
+            .toList();
+  current.add(
+    LocalSticker(
+      id: '${DateTime.now().microsecondsSinceEpoch}_${current.length}',
+      name: name,
+      bytes: bytes,
+    ),
+  );
+  await prefs.setString(
+    'offline_stickers_v1',
+    jsonEncode(current.map((e) => e.toJson()).toList()),
+  );
+}
 
 class GifPickerPanel extends StatefulWidget {
   const GifPickerPanel({super.key});
-
   @override
   State<GifPickerPanel> createState() => _GifPickerPanelState();
 }
 
 class _GifPickerPanelState extends State<GifPickerPanel> {
-  final _searchController = TextEditingController();
-  List<String> _gifUrls = [];
-  bool _isLoading = false;
-  Timer? _debounce;
-  final String _tenorKey = 'LIVDSRZULELA';
+  static const _prefsKey = 'offline_stickers_v1';
+  static const _maxStickerBytes = 5 * 1024 * 1024;
+  List<LocalSticker> _stickers = const [];
+  bool _loading = true;
+  bool _importing = false;
+  bool _dragging = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchGifs(''); // trending
+    _load();
   }
 
-  Future<void> _fetchGifs(String query) async {
-    setState(() => _isLoading = true);
+  Future<void> _load() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_prefsKey);
     try {
-      final endpoint = query.isEmpty ? 'featured' : 'search';
-      final url = 'https://tenor.googleapis.com/v2/$endpoint?key=$_tenorKey&client_key=ismart&limit=30${query.isNotEmpty ? '&q=$query' : ''}';
-      
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final results = data['results'] as List;
-        
-        final urls = results.map((result) {
-          final mediaFormats = result['media_formats'];
-          // Try to get tinygif or nanogif for faster loading, fallback to gif
-          if (mediaFormats['tinygif'] != null) {
-            return mediaFormats['tinygif']['url'] as String;
-          }
-          if (mediaFormats['gif'] != null) {
-            return mediaFormats['gif']['url'] as String;
-          }
-          return '';
-        }).where((url) => url.isNotEmpty).toList();
-
-        if (mounted) {
-          setState(() {
-            _gifUrls = urls;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Error fetching GIFs: $e');
-    } finally {
+      final stickers = raw == null
+          ? const <LocalSticker>[]
+          : (jsonDecode(raw) as List)
+                .map(LocalSticker.fromJson)
+                .whereType<LocalSticker>()
+                .toList();
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _stickers = stickers;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loading = false);
       }
     }
   }
 
-  void _onSearchChanged(String query) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 500), () {
-      _fetchGifs(query);
-    });
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _debounce?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.7,
-      ),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              decoration: InputDecoration(
-                hintText: 'البحث عن GIF...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
-            ),
-          ),
-          Expanded(
-            child: _isLoading && _gifUrls.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : GridView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemCount: _gifUrls.length,
-                    itemBuilder: (context, index) {
-                      final url = _gifUrls[index];
-                      return InkWell(
-                        onTap: () {
-                          Navigator.of(context).pop(url);
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            url,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, progress) {
-                              if (progress == null) return child;
-                              return Center(
-                                child: CircularProgressIndicator(
-                                  value: progress.expectedTotalBytes != null
-                                      ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                                      : null,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+  Future<void> _persist() async {
+    await (await SharedPreferences.getInstance()).setString(
+      _prefsKey,
+      jsonEncode(_stickers.map((e) => e.toJson()).toList()),
     );
   }
+
+  Future<void> _import() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'gif'],
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null) {
+      return;
+    }
+    await _addFiles(result.files);
+  }
+
+  Future<void> _addFiles(List<PlatformFile> files) async {
+    setState(() => _importing = true);
+    final additions = <LocalSticker>[];
+    for (final file in files) {
+      final bytes = file.bytes;
+      if (bytes == null || bytes.isEmpty || bytes.length > _maxStickerBytes) {
+        continue;
+      }
+      additions.add(
+        LocalSticker(
+          id: '${DateTime.now().microsecondsSinceEpoch}_${additions.length}',
+          name: file.name,
+          bytes: bytes,
+        ),
+      );
+    }
+    if (additions.isNotEmpty) {
+      setState(() => _stickers = [..._stickers, ...additions]);
+      await _persist();
+    }
+    if (mounted) {
+      setState(() => _importing = false);
+    }
+  }
+
+  Future<void> _remove(LocalSticker sticker) async {
+    setState(
+      () => _stickers = _stickers.where((e) => e.id != sticker.id).toList(),
+    );
+    await _persist();
+  }
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surface,
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'الملصقات',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _importing ? null : _import,
+                icon: _importing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_photo_alternate_outlined),
+                label: const Text('استيراد'),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'تعمل محليًا بدون إنترنت. اضغط مطولًا لحذف ملصق.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: DropTarget(
+            onDragEntered: (_) => setState(() => _dragging = true),
+            onDragExited: (_) => setState(() => _dragging = false),
+            onDragDone: (details) async {
+              setState(() => _dragging = false);
+              final files = <PlatformFile>[];
+              for (final file in details.files) {
+                final bytes = await file.readAsBytes();
+                files.add(
+                  PlatformFile(
+                    name: file.name,
+                    size: bytes.length,
+                    bytes: bytes,
+                  ),
+                );
+              }
+              await _addFiles(files);
+            },
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: _dragging
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer.withValues(alpha: 0.45)
+                    : null,
+              ),
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _stickers.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'لا توجد ملصقات بعد. استورد صورًا أو GIF من جهازك.',
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                          ),
+                      itemCount: _stickers.length,
+                      itemBuilder: (context, index) {
+                        final sticker = _stickers[index];
+                        return InkWell(
+                          onTap: () => Navigator.of(context).pop(sticker),
+                          onLongPress: () => _remove(sticker),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Tooltip(
+                            message: sticker.name,
+                            child: Image.memory(
+                              sticker.bytes,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

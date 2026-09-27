@@ -1139,27 +1139,27 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     // For now we'll just show a simple snackbar or implement tenor API if requested.
     // Given the prompt "GIFs: دمج أداة بحث سريعة لإرسال الـ GIFs (عبر Giphy)", we should build a simple GifPicker.
     // Let's call a widget:
-    final gifUrl = await showModalBottomSheet<String>(
+    final sticker = await showModalBottomSheet<LocalSticker>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => const GifPickerPanel(),
     );
 
-    if (gifUrl != null && mounted) {
-      await ref
-          .read(
-            conversationMessagesControllerProvider(
-              widget.conversation.id,
-            ).notifier,
-          )
-          .sendMessage(
-            content: '',
-            messageType: 'gif',
-            fileUrl: gifUrl,
-            replyToMessageId: _replyingTo?.id,
-          );
-      setState(() => _replyingTo = null);
+    if (sticker != null && mounted) {
+      final stickerFile = File(
+        p.join(
+          Directory.systemTemp.path,
+          'sticker_${sticker.id}_${sticker.name}',
+        ),
+      );
+      await stickerFile.writeAsBytes(sticker.bytes, flush: true);
+      await _sendPreparedFile(
+        sendPath: stickerFile.path,
+        displayName: sticker.name,
+        restrictForwardAndDownload: false,
+        extraMetadata: const {'sticker': true},
+      );
     }
   }
 
@@ -2122,6 +2122,30 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
     await sourceFile.copy(destinationPath);
     return p.dirname(destinationPath);
+  }
+
+  Future<void> _saveReceivedSticker(ChatMessage message) async {
+    if (!message.attachmentDownloadAllowed) return;
+    try {
+      final path = await ref
+          .read(chatRepositoryProvider)
+          .downloadAttachment(message);
+      await saveLocalSticker(
+        name: message.fileName ?? 'sticker.png',
+        bytes: await File(path).readAsBytes(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حفظ الملصق في مكتبتك.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حفظ الملصق حاليًا.')),
+        );
+      }
+    }
   }
 
   Future<Directory> _resolveMobileFallbackDirectory() async {
@@ -4933,6 +4957,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       onTap: () => _openAttachment(
                                                                                         message,
                                                                                       ),
+                                                                                      onLongPress: message.isStickerMessage
+                                                                                          ? () => _saveReceivedSticker(
+                                                                                              message,
+                                                                                            )
+                                                                                          : null,
                                                                                       borderRadius: BorderRadius.circular(
                                                                                         14,
                                                                                       ),

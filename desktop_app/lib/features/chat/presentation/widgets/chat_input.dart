@@ -179,8 +179,12 @@ class _ChatInputState extends State<ChatInput> {
                   onSelected: (action) => action(),
                   icon: const Icon(Icons.attach_file_rounded),
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-                    foregroundColor: Theme.of(context).colorScheme.onSecondaryContainer,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.secondaryContainer,
+                    foregroundColor: Theme.of(
+                      context,
+                    ).colorScheme.onSecondaryContainer,
                   ),
                   offset: const Offset(0, -250),
                   shape: RoundedRectangleBorder(
@@ -190,46 +194,70 @@ class _ChatInputState extends State<ChatInput> {
                     PopupMenuItem(
                       value: widget.onPickImage,
                       child: const Row(
-                        children: [Icon(Icons.image_rounded), SizedBox(width: 12), Text('صور')],
+                        children: [
+                          Icon(Icons.image_rounded),
+                          SizedBox(width: 12),
+                          Text('صور'),
+                        ],
                       ),
                     ),
                     PopupMenuItem(
                       value: widget.onAttachFile,
                       child: const Row(
-                        children: [Icon(Icons.insert_drive_file_rounded), SizedBox(width: 12), Text('ملفات')],
+                        children: [
+                          Icon(Icons.insert_drive_file_rounded),
+                          SizedBox(width: 12),
+                          Text('ملفات'),
+                        ],
                       ),
                     ),
                     PopupMenuItem(
                       value: widget.onSendScreenshot,
                       child: const Row(
-                        children: [Icon(Icons.screenshot_monitor_rounded), SizedBox(width: 12), Text('لقطة شاشة')],
+                        children: [
+                          Icon(Icons.screenshot_monitor_rounded),
+                          SizedBox(width: 12),
+                          Text('لقطة شاشة'),
+                        ],
                       ),
                     ),
-                    PopupMenuItem(
-                      value: widget.onOpenReactionPicker,
-                      child: const Row(
-                        children: [Icon(Icons.add_reaction_rounded), SizedBox(width: 12), Text('رياكت')],
-                      ),
-                    ),
+                    // PopupMenuItem(
+                    //   value: widget.onOpenReactionPicker,
+                    //   child: const Row(
+                    //     children: [Icon(Icons.add_reaction_rounded), SizedBox(width: 12), Text('رياكت')],
+                    //   ),
+                    // ),
                     if (widget.onSendPoll != null)
                       PopupMenuItem(
                         value: widget.onSendPoll,
                         child: const Row(
-                          children: [Icon(Icons.poll_rounded), SizedBox(width: 12), Text('استطلاع رأي')],
+                          children: [
+                            Icon(Icons.poll_rounded),
+                            SizedBox(width: 12),
+                            Text('استطلاع رأي'),
+                          ],
                         ),
                       ),
                     if (widget.onSendChecklist != null)
                       PopupMenuItem(
                         value: widget.onSendChecklist,
                         child: const Row(
-                          children: [Icon(Icons.checklist_rounded), SizedBox(width: 12), Text('قائمة مهام')],
+                          children: [
+                            Icon(Icons.checklist_rounded),
+                            SizedBox(width: 12),
+                            Text('قائمة مهام'),
+                          ],
                         ),
                       ),
                     if (widget.onSendGif != null)
                       PopupMenuItem(
                         value: widget.onSendGif,
                         child: const Row(
-                          children: [Icon(Icons.gif_box_rounded), SizedBox(width: 12), Text('GIF')],
+                          children: [
+                            Icon(Icons.sticky_note_2_rounded),
+                            SizedBox(width: 12),
+                            Text('ملصقات'),
+                          ],
                         ),
                       ),
                   ],
@@ -250,16 +278,25 @@ class _ChatInputState extends State<ChatInput> {
                                 child: EmojiPickerPanel(
                                   onEmojiSelected: (emoji) {
                                     final text = widget.controller.text;
-                                    final selection = widget.controller.selection;
+                                    final selection =
+                                        widget.controller.selection;
                                     final newText = text.replaceRange(
-                                      selection.start > -1 ? selection.start : text.length,
-                                      selection.end > -1 ? selection.end : text.length,
+                                      selection.start > -1
+                                          ? selection.start
+                                          : text.length,
+                                      selection.end > -1
+                                          ? selection.end
+                                          : text.length,
                                       emoji.emoji,
                                     );
                                     widget.controller.value = TextEditingValue(
                                       text: newText,
                                       selection: TextSelection.collapsed(
-                                        offset: (selection.start > -1 ? selection.start : text.length) + emoji.emoji.length,
+                                        offset:
+                                            (selection.start > -1
+                                                ? selection.start
+                                                : text.length) +
+                                            emoji.emoji.length,
                                       ),
                                     );
                                     Navigator.pop(context);
@@ -308,34 +345,34 @@ class _ChatInputState extends State<ChatInput> {
                     ),
                   ),
                 ),
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: widget.controller,
-                    builder: (context, value, _) {
-                      final canSend =
-                          widget.enabled &&
-                          !widget.isUploading &&
-                          value.text.trim().isNotEmpty;
-                      return GestureDetector(
-                        onSecondaryTap: canSend && !widget.isEditing
-                            ? widget.onSendOptions
-                            : null,
-                        child: FilledButton(
-                          onPressed: canSend ? widget.onSend : null,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(44, 44),
-                            shape: const CircleBorder(),
-                            padding: EdgeInsets.zero,
-                          ),
-                          child: Icon(
-                            widget.isEditing
-                                ? Icons.check_rounded
-                                : Icons.send_rounded,
-                            size: 18,
-                          ),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.controller,
+                  builder: (context, value, _) {
+                    final canSend =
+                        widget.enabled &&
+                        !widget.isUploading &&
+                        value.text.trim().isNotEmpty;
+                    return GestureDetector(
+                      onSecondaryTap: canSend && !widget.isEditing
+                          ? widget.onSendOptions
+                          : null,
+                      child: FilledButton(
+                        onPressed: canSend ? widget.onSend : null,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(44, 44),
+                          shape: const CircleBorder(),
+                          padding: EdgeInsets.zero,
                         ),
-                      );
-                    },
-                  ),
+                        child: Icon(
+                          widget.isEditing
+                              ? Icons.check_rounded
+                              : Icons.send_rounded,
+                          size: 18,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ],
