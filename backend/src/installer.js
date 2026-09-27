@@ -452,8 +452,16 @@ async function installMongoWindows() {
 async function installMongoLinux() {
   log(`\n  ${C.cyan}Installing MongoDB via apt...${C.reset}`);
   const lsb = run("lsb_release -sc");
-  const codename = lsb.ok ? lsb.stdout.trim() : "focal";
-  info(`Ubuntu codename: ${codename}`);
+  let codename = lsb.ok ? lsb.stdout.trim() : "jammy";
+  
+  const supported = ["focal", "jammy", "noble"];
+  if (!supported.includes(codename)) {
+    info(`Ubuntu codename '${codename}' is not officially supported by MongoDB 7.0 repo. Falling back to 'jammy'.`);
+    codename = "jammy";
+  } else {
+    info(`Ubuntu codename: ${codename}`);
+  }
+
   const steps = [
     "apt-get install -y gnupg curl",
     `curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg`,
