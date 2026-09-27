@@ -19,6 +19,8 @@ import '../features/auth/presentation/auth_controller.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/presentation/chat_home_screen.dart';
 import '../features/chat/presentation/conversation_screen.dart';
+import '../features/chat/models/chat_models.dart';
+import '../features/chat/presentation/widgets/chat_avatar.dart';
 import '../features/tickets/presentation/tickets_screen.dart';
 import '../shared/models/update_models.dart';
 import '../shared/providers/providers.dart';
@@ -99,6 +101,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   StreamSubscription<AndroidSharedContent>? _androidShareSubscription;
   AndroidSharedContent? _pendingAndroidShare;
   bool _shareSheetOpen = false;
+  String? _directShareTargetsSignature;
 
   // Event-driven connection flag.
   // True while the app is still establishing/re-establishing its connection to
@@ -449,128 +452,116 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
     _shareSheetOpen = true;
     _pendingAndroidShare = null;
+    final directConversation = content.conversationId == null
+        ? null
+        : conversations
+              .where((entry) => entry.id == content.conversationId)
+              .firstOrNull;
+    if (directConversation != null) {
+      await _sendSharedContentToConversation(content, directConversation);
+      _shareSheetOpen = false;
+      return;
+    }
+
+    final currentUserId = ref.read(currentUserProvider)?.id ?? '';
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (sheetContext) {
-        var query = '';
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final items = conversations
-                .where(
-                  (c) => c.name.toLowerCase().contains(query.toLowerCase()),
-                )
-                .toList();
-            return SafeArea(
-              child: SizedBox(
-                height: MediaQuery.sizeOf(context).height * .72,
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            content.paths.isEmpty
-                                ? 'إرسال نص'
-                                : 'إرسال ${content.paths.length} صورة',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          if (content.paths.isNotEmpty)
-                            SizedBox(
-                              height: 74,
-                              child: ListView.builder(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: content.paths.length,
-                                itemBuilder: (_, index) => Padding(
-                                  padding: const EdgeInsetsDirectional.only(
-                                    end: 8,
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(10),
-                                    child: AspectRatio(
-                                      aspectRatio: 1,
-                                      child: Image.file(
-                                        File(content.paths[index]),
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (content.paths.isNotEmpty)
-                            const SizedBox(height: 10),
-                          TextField(
-                            onChanged: (v) => setSheetState(() => query = v),
-                            decoration: const InputDecoration(
-                              prefixIcon: Icon(Icons.search),
-                              hintText: 'البحث عن محادثة',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: items.length,
-                        itemBuilder: (_, index) {
-                          final conversation = items[index];
-                          return ListTile(
-                            leading: const CircleAvatar(
-                              child: Icon(Icons.person_outline),
-                            ),
-                            title: Text(conversation.name),
-                            subtitle: Text(
-                              content.paths.isEmpty
-                                  ? content.text
-                                  : '${content.paths.length} مرفق',
-                            ),
-                            onTap: () async {
-                              Navigator.pop(sheetContext);
-                              final controller = ref.read(
-                                conversationMessagesControllerProvider(
-                                  conversation.id,
-                                ).notifier,
-                              );
-                              final mediaGroupId = content.paths.length > 1
-                                  ? 'album_${DateTime.now().microsecondsSinceEpoch}'
-                                  : null;
-                              if (content.text.trim().isNotEmpty)
-                                await controller.sendMessage(
-                                  content: content.text.trim(),
-                                );
-                              for (final path in content.paths) {
-                                await controller.sendFile(
-                                  path,
-                                  metadata: mediaGroupId == null
-                                      ? null
-                                      : {
-                                          'mediaGroupId': mediaGroupId,
-                                          'mediaGroupSize':
-                                              content.paths.length,
-                                        },
-                                );
-                              }
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => _ShareBottomSheet(
+        content: content,
+        conversations: conversations,
+        currentUserId: currentUserId,
+        onSelected: (conversation) async {
+          Navigator.pop(sheetContext);
+          await _sendSharedContentToConversation(content, conversation);
+        },
+      ),
     );
     _shareSheetOpen = false;
+  }
+
+  // ── Share-sheet helpers ────────────────────────────────────────────────────
+
+  static String _getConversationTitle(
+    ChatConversation conversation,
+    String currentUserId,
+  ) => conversation.displayTitle(currentUserId);
+
+  static String? _getConversationAvatarUrl(
+    ChatConversation conversation,
+    String currentUserId,
+  ) {
+    if (conversation.type == 'direct') {
+      final other = conversation.members
+          .where((m) => m.id != currentUserId)
+          .firstOrNull;
+      return other?.avatarUrl;
+    }
+    return null;
+  }
+
+  static String _avatarLetter(
+    ChatConversation conversation,
+    String currentUserId,
+  ) {
+    final title = conversation.displayTitle(currentUserId);
+    return title.trim().isEmpty
+        ? '?'
+        : title.trim().characters.first.toUpperCase();
+  }
+
+  static String _getConversationSubtitle(ChatConversation conversation) {
+    final last = conversation.lastMessage;
+    if (last == null) return 'لا توجد رسائل';
+    final type = last.messageType;
+    if (type == 'image') return '🖼️ صورة';
+    if (type == 'file') return '📎 مرفق';
+    final text = last.content.trim();
+    return text.isEmpty ? '...' : text;
+  }
+
+  Future<void> _sendSharedContentToConversation(
+    AndroidSharedContent content,
+    ChatConversation conversation,
+  ) async {
+    final controller = ref.read(
+      conversationMessagesControllerProvider(conversation.id).notifier,
+    );
+    final mediaGroupId = content.paths.length > 1
+        ? 'album_${DateTime.now().microsecondsSinceEpoch}'
+        : null;
+    if (content.text.trim().isNotEmpty)
+      await controller.sendMessage(content: content.text.trim());
+    for (final path in content.paths) {
+      await controller.sendFile(
+        path,
+        metadata: mediaGroupId == null
+            ? null
+            : {
+                'mediaGroupId': mediaGroupId,
+                'mediaGroupSize': content.paths.length,
+              },
+      );
+    }
+  }
+
+  void _publishDirectShareTargets(List<ChatConversation> conversations) {
+    final targets = conversations
+        .where((c) => c.isActive)
+        .take(8)
+        .map(
+          (c) => {
+            'id': c.id,
+            'label': c.name.trim().isEmpty ? 'محادثة' : c.name.trim(),
+          },
+        )
+        .toList();
+    final signature = targets.map((e) => '${e['id']}:${e['label']}').join('|');
+    if (signature == _directShareTargetsSignature) return;
+    _directShareTargetsSignature = signature;
+    AndroidShareReceiver.updateDirectShareTargets(targets).catchError((_) {});
   }
 
   void _listenToNotificationNavigation() {
@@ -1217,6 +1208,10 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return const LoginScreen();
       case AuthStatus.authenticated:
         final user = authState.user!;
+        _publishDirectShareTargets(
+          ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
+              const [],
+        );
         ref.watch(chatSocketConnectionProvider);
         ref.watch(chatRealtimeControllerProvider);
         final serverConnection = serverState.valueOrNull;
@@ -1730,6 +1725,257 @@ class _GlobalAnnouncementOverlayState
                 ],
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Telegram-style share bottom sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ShareBottomSheet extends StatefulWidget {
+  const _ShareBottomSheet({
+    required this.content,
+    required this.conversations,
+    required this.currentUserId,
+    required this.onSelected,
+  });
+
+  final AndroidSharedContent content;
+  final List<ChatConversation> conversations;
+  final String currentUserId;
+  final Future<void> Function(ChatConversation) onSelected;
+
+  @override
+  State<_ShareBottomSheet> createState() => _ShareBottomSheetState();
+}
+
+class _ShareBottomSheetState extends State<_ShareBottomSheet> {
+  String _query = '';
+
+  List<ChatConversation> get _filtered {
+    if (_query.trim().isEmpty) return widget.conversations;
+    final q = _query.toLowerCase();
+    return widget.conversations
+        .where(
+          (c) =>
+              c.displayTitle(widget.currentUserId).toLowerCase().contains(q),
+        )
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final handleColor =
+        isDark ? Colors.white24 : Colors.black.withOpacity(0.12);
+
+    final paths = widget.content.paths;
+    final hasImages = paths.isNotEmpty;
+    final titleText = hasImages
+        ? 'إرسال ${paths.length} ${paths.length == 1 ? 'صورة' : 'صور'}'
+        : 'إرسال نص';
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // ── Drag handle ────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: handleColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // ── Header ─────────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titleText,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700, fontSize: 17),
+                    ),
+
+                    // ── Image thumbnails ──────────────────────────────────────
+                    if (hasImages) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 80,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: paths.length > 4 ? 5 : paths.length,
+                          itemBuilder: (_, i) {
+                            if (i == 4 && paths.length > 4) {
+                              // Overflow badge
+                              return Padding(
+                                padding:
+                                    const EdgeInsetsDirectional.only(end: 8),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Stack(
+                                    children: [
+                                      Image.file(
+                                        File(paths[i]),
+                                        width: 80,
+                                        height: 80,
+                                        fit: BoxFit.cover,
+                                      ),
+                                      Positioned.fill(
+                                        child: Container(
+                                          color: Colors.black54,
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            '+${paths.length - 4}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 18,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+                            return Padding(
+                              padding:
+                                  const EdgeInsetsDirectional.only(end: 8),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Image.file(
+                                  File(paths[i]),
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+
+                    // ── Search bar ────────────────────────────────────────────
+                    const SizedBox(height: 12),
+                    TextField(
+                      onChanged: (v) => setState(() => _query = v),
+                      style: const TextStyle(fontSize: 15),
+                      decoration: InputDecoration(
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                        hintText: 'البحث عن محادثة...',
+                        hintStyle: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 15,
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : Colors.black.withOpacity(0.04),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 0),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Conversation list ───────────────────────────────────────────
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  padding: const EdgeInsets.only(bottom: 24),
+                  itemCount: _filtered.length,
+                  itemBuilder: (_, index) {
+                    final conv = _filtered[index];
+                    final avatarUrl = _AuthGateState._getConversationAvatarUrl(
+                      conv,
+                      widget.currentUserId,
+                    );
+                    final letter = _AuthGateState._avatarLetter(
+                      conv,
+                      widget.currentUserId,
+                    );
+                    final title = _AuthGateState._getConversationTitle(
+                      conv,
+                      widget.currentUserId,
+                    );
+                    final subtitle =
+                        _AuthGateState._getConversationSubtitle(conv);
+
+                    return ListTile(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      leading: ChatAvatar(
+                        radius: 24,
+                        backgroundColor: colorScheme.primaryContainer,
+                        avatarUrl: avatarUrl,
+                        fallback: Text(
+                          letter,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            color: colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 13,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => widget.onSelected(conv),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },

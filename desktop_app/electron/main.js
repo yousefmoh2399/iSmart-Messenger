@@ -70,14 +70,20 @@ function titleBarPalette(mode = currentWindowTheme) {
 }
 
 function applyWindowTheme(mode = currentWindowTheme) {
-  currentWindowTheme = mode === "dark" ? "dark" : "light";
+  const newTheme = mode === "dark" ? "dark" : "light";
+  const themeChanged = newTheme !== currentWindowTheme;
+  currentWindowTheme = newTheme;
   nativeTheme.themeSource = currentWindowTheme;
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
   const palette = titleBarPalette(currentWindowTheme);
   mainWindow.setBackgroundColor(palette.color);
-  if (typeof mainWindow.setTitleBarOverlay === "function") {
+  // Only call setTitleBarOverlay when the theme actually changed.
+  // Calling it repeatedly causes Windows to destroy and recreate the native
+  // caption buttons, leaving behind stale hover states that accumulate
+  // visually each time the mouse passes over minimize/maximize/close.
+  if (themeChanged && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
       color: "rgba(0,0,0,0)",
       symbolColor: palette.symbolColor,

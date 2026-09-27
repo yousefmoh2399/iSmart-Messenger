@@ -11,6 +11,7 @@ import 'dart:typed_data';
 Timer? _titleAttentionTimer;
 String? _originalTitle;
 bool _visibilityListenerRegistered = false;
+String? _lastSentElectronTheme;
 StreamSubscription<html.Event>? _electronTrayActionSubscription;
 
 JSObject? get _electronBridgeInterop {
@@ -255,6 +256,14 @@ Future<bool> setElectronWindowTheme(String mode) async {
   }
   try {
     final normalized = mode == 'dark' ? 'dark' : 'light';
+    // Skip the IPC round-trip when the theme hasn't actually changed.
+    // This prevents setTitleBarOverlay from being called on every Flutter
+    // rebuild, which was causing cumulative hover-state corruption on the
+    // native Windows title-bar buttons.
+    if (_lastSentElectronTheme == normalized) {
+      return true;
+    }
+    _lastSentElectronTheme = normalized;
     final result = _asStringMap(
       await _callElectron('setWindowTheme', {'mode': normalized}),
     );

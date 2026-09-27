@@ -4,7 +4,11 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.Person
 import androidx.core.content.FileProvider
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -44,8 +48,11 @@ class MainActivity : FlutterActivity() {
             } catch (_: Exception) { }
         }
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+        val conversationId = intent.getStringExtra("directConversationId")
+            ?: intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)?.removePrefix("chat_")
+            ?: ""
         if (paths.isEmpty() && text.isBlank()) return
-        pendingShare = mapOf("text" to text, "paths" to paths)
+        pendingShare = mapOf("text" to text, "paths" to paths, "conversationId" to conversationId)
         shareMethodChannel?.invokeMethod("sharedContent", pendingShare)
     }
 
@@ -120,6 +127,38 @@ class MainActivity : FlutterActivity() {
         shareMethodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getInitialSharedContent" -> { result.success(pendingShare); pendingShare = null }
+                "updateDirectShareTargets" -> {
+                    val rawTargets = call.argument<List<Map<String, Any?>>>("targets") ?: emptyList()
+                    val shortcuts = rawTargets.take(8).mapIndexed { index, target ->
+                        val id = target["id"]?.toString() ?: ""
+                        val label = target["label"]?.toString()?.take(25) ?: "Chat"
+                        ShortcutInfoCompat.Builder(this, "chat_$id")
+                            .setShortLabel(label)
+                            .setLongLabel(label)
+                            .setIcon(IconCompat.createWithResource(this, applicationInfo.icon))
+                            .setPerson(
+                                Person.Builder()
+                                    .setName(label)
+                                    .setKey(id)
+                                    .build()
+                            )
+                            .setCategories(setOf(
+                                "com.example.mobile_app.share.TEXT",
+                                "com.example.mobile_app.share.IMAGE",
+                            ))
+                            .setRank(index)
+                            .setLongLived(true)
+                            .setIsConversation()
+                            .setIntent(
+                                Intent(this, MainActivity::class.java)
+                                    .setAction(Intent.ACTION_SEND)
+                                    .putExtra("directConversationId", id)
+                            )
+                            .build()
+                    }
+                    ShortcutManagerCompat.setDynamicShortcuts(this, shortcuts)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
