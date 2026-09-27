@@ -43,6 +43,8 @@ dependencies:
   http: ^1.6.0
   uuid: ^4.6.0
   timeago: ^3.7.1
+  archive: ^4.0.7
+  image: ^4.5.4
 
 dev_dependencies:
   flutter_test:

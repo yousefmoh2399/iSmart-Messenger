@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
@@ -12,15 +13,24 @@ class LocalSticker {
     required this.id,
     required this.name,
     required this.bytes,
+    this.category = 'عام',
+    this.favorite = false,
+    this.lastUsedAt,
   });
   final String id;
   final String name;
   final Uint8List bytes;
+  final String category;
+  final bool favorite;
+  final int? lastUsedAt;
 
   Map<String, String> toJson() => {
     'id': id,
     'name': name,
     'bytes': base64Encode(bytes),
+    'category': category,
+    'favorite': favorite.toString(),
+    if (lastUsedAt != null) 'lastUsedAt': lastUsedAt.toString(),
   };
   static LocalSticker? fromJson(Object? value) {
     if (value is! Map) return null;
@@ -30,10 +40,50 @@ class LocalSticker {
       final bytes = base64Decode(value['bytes']?.toString() ?? '');
       return id.isEmpty || name.isEmpty || bytes.isEmpty
           ? null
-          : LocalSticker(id: id, name: name, bytes: bytes);
+          : LocalSticker(
+              id: id,
+              name: name,
+              bytes: bytes,
+              category: value['category']?.toString() ?? 'عام',
+              favorite: value['favorite']?.toString() == 'true',
+              lastUsedAt: int.tryParse(value['lastUsedAt']?.toString() ?? ''),
+            );
     } catch (_) {
       return null;
     }
+  }
+}
+
+class LocalStickerPack {
+  const LocalStickerPack({
+    required this.id,
+    required this.name,
+    this.coverStickerId,
+    this.stickerIds = const [],
+  });
+  final String id;
+  final String name;
+  final String? coverStickerId;
+  final List<String> stickerIds;
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'coverStickerId': coverStickerId,
+    'stickerIds': stickerIds,
+  };
+  static LocalStickerPack? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['id']?.toString() ?? '';
+    final name = raw['name']?.toString() ?? '';
+    if (id.isEmpty || name.isEmpty) return null;
+    return LocalStickerPack(
+      id: id,
+      name: name,
+      coverStickerId: raw['coverStickerId']?.toString(),
+      stickerIds: (raw['stickerIds'] as List? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+    );
   }
 }
 
@@ -70,11 +120,16 @@ class GifPickerPanel extends StatefulWidget {
 
 class _GifPickerPanelState extends State<GifPickerPanel> {
   static const _prefsKey = 'offline_stickers_v1';
+  static const _packsPrefsKey = 'offline_sticker_packs_v1';
   static const _maxStickerBytes = 5 * 1024 * 1024;
   List<LocalSticker> _stickers = const [];
+  List<LocalStickerPack> _packs = const [];
+  String? _selectedPackId;
   bool _loading = true;
   bool _importing = false;
   bool _dragging = false;
+  String _filter = 'الكل';
+  final _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -84,6 +139,9 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
 
   Future<void> _load() async {
     final raw = (await SharedPreferences.getInstance()).getString(_prefsKey);
+    final packsRaw = (await SharedPreferences.getInstance()).getString(
+      _packsPrefsKey,
+    );
     try {
       final stickers = raw == null
           ? const <LocalSticker>[]
@@ -94,6 +152,12 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
       if (mounted) {
         setState(() {
           _stickers = stickers;
+          _packs = packsRaw == null
+              ? const []
+              : (jsonDecode(packsRaw) as List)
+                    .map(LocalStickerPack.fromJson)
+                    .whereType<LocalStickerPack>()
+                    .toList();
           _loading = false;
         });
       }
@@ -105,9 +169,14 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
   }
 
   Future<void> _persist() async {
-    await (await SharedPreferences.getInstance()).setString(
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
       _prefsKey,
       jsonEncode(_stickers.map((e) => e.toJson()).toList()),
+    );
+    await prefs.setString(
+      _packsPrefsKey,
+      jsonEncode(_packs.map((e) => e.toJson()).toList()),
     );
   }
 
@@ -156,6 +225,148 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
     await _persist();
   }
 
+  Future<void> _update(LocalSticker old, LocalSticker replacement) async {
+    setState(
+      () => _stickers = _stickers
+          .map((s) => s.id == old.id ? replacement : s)
+          .toList(),
+    );
+    await _persist();
+  }
+
+  List<LocalSticker> get _visible {
+    final query = _searchController.text.trim().toLowerCase();
+    var items = _stickers.where(
+      (s) => query.isEmpty || s.name.toLowerCase().contains(query),
+    );
+    if (_filter == 'المفضلة') items = items.where((s) => s.favorite);
+    if (_filter == 'حديثة') items = items.where((s) => s.lastUsedAt != null);
+    if (!const ['الكل', 'المفضلة', 'حديثة'].contains(_filter))
+      items = items.where((s) => s.category == _filter);
+    final result = items.toList();
+    if (_filter == 'حديثة')
+      result.sort((a, b) => (b.lastUsedAt ?? 0).compareTo(a.lastUsedAt ?? 0));
+    return result;
+  }
+
+  Future<void> _createPack() async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New sticker pack'),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    setState(
+      () => _packs = [
+        ..._packs,
+        LocalStickerPack(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          name: name,
+        ),
+      ],
+    );
+    await _persist();
+  }
+
+  Future<void> _exportSelectedPack() async {
+    final pack = _packs.where((p) => p.id == _selectedPackId).firstOrNull;
+    if (pack == null) return;
+    final selected = _stickers
+        .where((s) => pack.stickerIds.contains(s.id))
+        .toList();
+    final archive = Archive();
+    archive.addFile(
+      ArchiveFile.string(
+        'manifest.json',
+        jsonEncode({
+          'format': 'ismart-stickers',
+          'pack': pack.toJson(),
+          'stickers': selected.map((s) => s.toJson()).toList(),
+        }),
+      ),
+    );
+    final encoded = ZipEncoder().encodeBytes(archive);
+    await FilePicker.platform.saveFile(
+      dialogTitle: 'Export sticker pack',
+      fileName: '${pack.name}.ismartstickers.zip',
+      bytes: Uint8List.fromList(encoded),
+    );
+  }
+
+  Future<void> _importPack() async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['zip', 'ismartstickers'],
+      withData: true,
+    );
+    final bytes = picked?.files.single.bytes;
+    if (bytes == null) return;
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes, verify: true);
+      final manifest = archive.files
+          .where((f) => f.name == 'manifest.json')
+          .firstOrNull;
+      if (manifest == null) throw const FormatException();
+      final data =
+          jsonDecode(utf8.decode(manifest.content as List<int>)) as Map;
+      if (data['format'] != 'ismart-stickers') throw const FormatException();
+      final pack = LocalStickerPack.fromJson(data['pack']);
+      final stickers = (data['stickers'] as List? ?? const [])
+          .map(LocalSticker.fromJson)
+          .whereType<LocalSticker>()
+          .toList();
+      if (pack == null || stickers.isEmpty) throw const FormatException();
+      final existingIds = _stickers.map((s) => s.id).toSet();
+      final renamed = pack.id == '' || _packs.any((p) => p.id == pack.id)
+          ? LocalStickerPack(
+              id: '${pack.id}_${DateTime.now().microsecondsSinceEpoch}',
+              name: pack.name,
+              coverStickerId: pack.coverStickerId,
+              stickerIds: pack.stickerIds,
+            )
+          : pack;
+      setState(() {
+        _stickers = [
+          ..._stickers,
+          ...stickers.where((s) => !existingIds.contains(s.id)),
+        ];
+        _packs = [..._packs, renamed];
+        _selectedPackId = renamed.id;
+      });
+      await _persist();
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر استيراد ملف باقة الملصقات.')),
+        );
+    }
+  }
+
+  Future<void> _toggleFavorite(LocalSticker sticker) => _update(
+    sticker,
+    LocalSticker(
+      id: sticker.id,
+      name: sticker.name,
+      bytes: sticker.bytes,
+      category: sticker.category,
+      favorite: !sticker.favorite,
+      lastUsedAt: sticker.lastUsedAt,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => Material(
     color: Theme.of(context).colorScheme.surface,
@@ -182,6 +393,18 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
                     : const Icon(Icons.add_photo_alternate_outlined),
                 label: const Text('استيراد'),
               ),
+              IconButton(
+                onPressed: _createPack,
+                icon: const Icon(Icons.create_new_folder_outlined),
+              ),
+              IconButton(
+                onPressed: _selectedPackId == null ? null : _exportSelectedPack,
+                icon: const Icon(Icons.ios_share_outlined),
+              ),
+              IconButton(
+                onPressed: _importPack,
+                icon: const Icon(Icons.download_for_offline_outlined),
+              ),
             ],
           ),
         ),
@@ -193,6 +416,69 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
           ),
         ),
         const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              ChoiceChip(
+                label: const Text('All packs'),
+                selected: _selectedPackId == null,
+                onSelected: (_) => setState(() => _selectedPackId = null),
+              ),
+              ..._packs.map(
+                (pack) => Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 6),
+                  child: ChoiceChip(
+                    label: Text(pack.name),
+                    selected: _selectedPackId == pack.id,
+                    onSelected: (_) =>
+                        setState(() => _selectedPackId = pack.id),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'بحث في الملصقات',
+            ),
+          ),
+        ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children:
+                const [
+                      'الكل',
+                      'حديثة',
+                      'المفضلة',
+                      'مضحك',
+                      'شغل',
+                      'موافقة',
+                      'تحذير',
+                    ]
+                    .map((title) => title)
+                    .map(
+                      (title) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: ChoiceChip(
+                          label: Text(title),
+                          selected: _filter == title,
+                          onSelected: (_) => setState(() => _filter = title),
+                        ),
+                      ),
+                    )
+                    .toList(),
+          ),
+        ),
         Expanded(
           child: DropTarget(
             onDragEntered: (_) => setState(() => _dragging = true),
@@ -222,7 +508,7 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
               ),
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : _stickers.isEmpty
+                  : _visible.isEmpty
                   ? const Center(
                       child: Text(
                         'لا توجد ملصقات بعد. استورد صورًا أو GIF من جهازك.',
@@ -236,12 +522,26 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
                             crossAxisSpacing: 10,
                             mainAxisSpacing: 10,
                           ),
-                      itemCount: _stickers.length,
+                      itemCount: _visible.length,
                       itemBuilder: (context, index) {
-                        final sticker = _stickers[index];
+                        final sticker = _visible[index];
                         return InkWell(
-                          onTap: () => Navigator.of(context).pop(sticker),
-                          onLongPress: () => _remove(sticker),
+                          onTap: () async {
+                            await _update(
+                              sticker,
+                              LocalSticker(
+                                id: sticker.id,
+                                name: sticker.name,
+                                bytes: sticker.bytes,
+                                category: sticker.category,
+                                favorite: sticker.favorite,
+                                lastUsedAt:
+                                    DateTime.now().millisecondsSinceEpoch,
+                              ),
+                            );
+                            if (mounted) Navigator.of(context).pop(sticker);
+                          },
+                          onLongPress: () => _toggleFavorite(sticker),
                           borderRadius: BorderRadius.circular(12),
                           child: Tooltip(
                             message: sticker.name,
