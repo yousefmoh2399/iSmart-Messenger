@@ -892,6 +892,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     int sentCount = 0;
     int skippedCount = 0;
+    final mediaGroupId = 'album_${DateTime.now().microsecondsSinceEpoch}';
     for (final path in paths) {
       final file = File(path);
       final fileSize = await file.length();
@@ -904,6 +905,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         displayName: p.basename(path),
         restrictForwardAndDownload: restrictForwardAndDownload,
         fixedBroadcastMetadata: fixedBroadcastMetadata,
+        extraMetadata: {
+          'mediaGroupId': mediaGroupId,
+          'mediaGroupSize': paths.length,
+        },
       );
       sentCount++;
     }
@@ -2237,6 +2242,35 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       }
     }
     return dedupedReversed.reversed.toList();
+  }
+
+  List<ChatMessage> _collapseMediaAlbums(List<ChatMessage> messages) {
+    final displayed = <ChatMessage>[];
+    final seenGroups = <String>{};
+    for (final message in messages) {
+      final groupId = message.isImageMessage
+          ? (message.metadata?['mediaGroupId']?.toString())
+          : null;
+      if (groupId != null && groupId.isNotEmpty) {
+        if (!seenGroups.add(groupId)) continue;
+      }
+      displayed.add(message);
+    }
+    return displayed;
+  }
+
+  List<ChatMessage> _albumFor(ChatMessage message, List<ChatMessage> messages) {
+    final groupId = message.metadata?['mediaGroupId']?.toString();
+    if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
+      return <ChatMessage>[message];
+    }
+    return messages
+        .where(
+          (item) =>
+              item.isImageMessage &&
+              item.metadata?['mediaGroupId']?.toString() == groupId,
+        )
+        .toList();
   }
 
   void _toggleMessageSelection(String messageId) {
@@ -3806,21 +3840,47 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
+    final allMessages =
+        ref
+            .read(
+              conversationMessagesControllerProvider(widget.conversation.id),
+            )
+            .valueOrNull
+            ?.messages ??
+        const <ChatMessage>[];
+    final groupId = message.metadata?['mediaGroupId']?.toString();
+    final images = groupId == null
+        ? <ChatMessage>[message]
+        : allMessages
+              .where(
+                (m) =>
+                    m.isImageMessage &&
+                    m.metadata?['mediaGroupId']?.toString() == groupId,
+              )
+              .toList();
+    final initialIndex = images
+        .indexWhere((m) => m.id == message.id)
+        .clamp(0, images.length - 1)
+        .toInt();
     await showDialog<void>(
       context: context,
       builder: (context) => Dialog.fullscreen(
         backgroundColor: Colors.black,
         child: Stack(
           children: [
-            Center(
-              child: InteractiveViewer(
-                child: Hero(
-                  tag: 'image_${message.id}',
-                  child: _ChatAttachmentImage(
-                    message: message,
-                    fit: BoxFit.contain,
-                    height: 400,
-                    width: double.infinity,
+            PageView.builder(
+              controller: PageController(initialPage: initialIndex),
+              itemCount: images.length,
+              itemBuilder: (_, index) => Center(
+                child: InteractiveViewer(
+                  child: Hero(
+                    tag: 'image_${images[index].id}',
+                    child: _ChatAttachmentImage(
+                      message: images[index],
+                      fit: BoxFit.contain,
+                      height: 400,
+                      width: double.infinity,
+                    ),
                   ),
                 ),
               ),
@@ -4279,6 +4339,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       final messages = _deduplicateMessagesById(
                         messagesData.messages,
                       );
+                      final renderedMessages = _collapseMediaAlbums(messages);
                       final visibleIds = messages
                           .map((message) => message.id)
                           .toSet();
@@ -4350,10 +4411,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           24,
                         ),
                         itemCount:
-                            messages.length +
+                            renderedMessages.length +
                             (messagesData.isLoadingMore ? 1 : 0),
                         itemBuilder: (context, index) {
-                          if (index >= messages.length) {
+                          if (index >= renderedMessages.length) {
                             return const Padding(
                               padding: EdgeInsets.all(12),
                               child: Center(
@@ -4362,9 +4423,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             );
                           }
 
-                          final message = messages[index];
+                          final message = renderedMessages[index];
                           final previous = index > 0
-                              ? messages[index - 1]
+                              ? renderedMessages[index - 1]
                               : null;
 
                           final messageLocalDate = message.createdAt.toLocal();
@@ -4384,8 +4445,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           final isMine =
                               authUser?.id.toString() == senderId.toString();
 
-                          final next = index < messages.length - 1
-                              ? messages[index + 1]
+                          final next = index < renderedMessages.length - 1
+                              ? renderedMessages[index + 1]
                               : null;
                           final isLastInGroup =
                               next == null ||
@@ -4456,6 +4517,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             message.id,
                           );
                           final isFocused = _focusedMessageId == message.id;
+                          final albumMessages = _albumFor(message, messages);
 
                           Widget child = RepaintBoundary(
                             child: Column(
@@ -4951,6 +5013,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                               child: message.isAudioMessage
                                                                                   ? ChatAudioAttachmentPlayer(
                                                                                       message: message,
+                                                                                    )
+                                                                                  : message.isImageMessage &&
+                                                                                        albumMessages.length >
+                                                                                            1
+                                                                                  ? _ChatMediaAlbum(
+                                                                                      messages: albumMessages,
+                                                                                      width: maxBubbleWidth,
+                                                                                      onOpen: _showImagePreview,
                                                                                     )
                                                                                   : message.isImageMessage
                                                                                   ? InkWell(
@@ -5763,6 +5833,67 @@ class _TelegramActionTile extends StatelessWidget {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatMediaAlbum extends StatelessWidget {
+  const _ChatMediaAlbum({
+    required this.messages,
+    required this.width,
+    required this.onOpen,
+  });
+  final List<ChatMessage> messages;
+  final double width;
+  final ValueChanged<ChatMessage> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = messages.take(4).toList();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: width,
+        height: 210,
+        child: GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: shown.length == 1 ? 1 : 2,
+            crossAxisSpacing: 2,
+            mainAxisSpacing: 2,
+          ),
+          itemCount: shown.length,
+          itemBuilder: (context, index) => InkWell(
+            onTap: () => onOpen(shown[index]),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Hero(
+                  tag: 'image_${shown[index].id}',
+                  child: _ChatAttachmentImage(
+                    message: shown[index],
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                if (index == 3 && messages.length > 4)
+                  ColoredBox(
+                    color: Colors.black54,
+                    child: Center(
+                      child: Text(
+                        '+${messages.length - 4}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

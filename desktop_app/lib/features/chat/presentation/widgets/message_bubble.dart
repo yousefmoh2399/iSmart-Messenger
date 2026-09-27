@@ -55,6 +55,8 @@ class MessageBubble extends StatefulWidget {
     this.selectionMode = false,
     this.isActiveSearchMatch = false,
     this.chatPreferences = ChatPreferences.defaults,
+    this.albumMessages = const [],
+    this.onOpenAlbum,
   });
 
   final ChatMessage message;
@@ -89,6 +91,8 @@ class MessageBubble extends StatefulWidget {
   final bool selectionMode;
   final bool isActiveSearchMatch;
   final ChatPreferences chatPreferences;
+  final List<ChatMessage> albumMessages;
+  final ValueChanged<ChatMessage>? onOpenAlbum;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -539,7 +543,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     ),
                                   ),
                                 ),
-                              if (widget.message.hasAttachment &&
+                              if (widget.albumMessages.length > 1)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: _DesktopMediaAlbum(
+                                    messages: widget.albumMessages,
+                                    onOpen: widget.onOpenAlbum ?? (_) {},
+                                  ),
+                                )
+                              else if (widget.message.hasAttachment &&
                                   !widget.message.isGifMessage)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8),
@@ -871,6 +883,59 @@ class _AttachmentPreview extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopMediaAlbum extends StatelessWidget {
+  const _DesktopMediaAlbum({required this.messages, required this.onOpen});
+  final List<ChatMessage> messages;
+  final ValueChanged<ChatMessage> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = messages.take(4).toList();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 300,
+        height: 210,
+        child: GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: shown.length == 1 ? 1 : 2,
+            crossAxisSpacing: 2,
+            mainAxisSpacing: 2,
+          ),
+          itemCount: shown.length,
+          itemBuilder: (_, index) => InkWell(
+            onTap: () => onOpen(shown[index]),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                AuthenticatedAttachmentImage(
+                  message: shown[index],
+                  fit: BoxFit.cover,
+                ),
+                if (index == 3 && messages.length > 4)
+                  ColoredBox(
+                    color: Colors.black54,
+                    child: Center(
+                      child: Text(
+                        '+${messages.length - 4}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 28,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );

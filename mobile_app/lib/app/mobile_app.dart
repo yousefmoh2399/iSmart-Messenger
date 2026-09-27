@@ -23,6 +23,7 @@ import '../features/tickets/presentation/tickets_screen.dart';
 import '../shared/models/update_models.dart';
 import '../shared/providers/providers.dart';
 import '../shared/services/mobile_update_agent.dart';
+import '../shared/services/android_share_receiver.dart';
 import '../shared/widgets/loading_view.dart';
 import '../shared/widgets/update_dialog.dart';
 
@@ -95,6 +96,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _serverRefreshInFlight = false;
   bool _hasConfirmedServerDisconnect = false;
   bool _serverRestoreRefreshInFlight = false;
+  StreamSubscription<AndroidSharedContent>? _androidShareSubscription;
 
   // Event-driven connection flag.
   // True while the app is still establishing/re-establishing its connection to
@@ -410,6 +412,146 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _listenToNotificationNavigation();
     _listenToSocketFileRequests();
     _listenToConnectivityChanges();
+    _listenToAndroidShares();
+  }
+
+  Future<void> _listenToAndroidShares() async {
+    _androidShareSubscription = AndroidShareReceiver.events.listen(
+      _presentIncomingShare,
+    );
+    final initial = await AndroidShareReceiver.initialize();
+    if (initial != null) _presentIncomingShare(initial);
+  }
+
+  Future<void> _presentIncomingShare(AndroidSharedContent content) async {
+    if (!mounted) return;
+    final auth = ref.read(authControllerProvider);
+    if (auth.status != AuthStatus.authenticated) return;
+    final conversations =
+        ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
+        const [];
+    if (conversations.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        var query = '';
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final items = conversations
+                .where(
+                  (c) => c.name.toLowerCase().contains(query.toLowerCase()),
+                )
+                .toList();
+            return SafeArea(
+              child: SizedBox(
+                height: MediaQuery.sizeOf(context).height * .72,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            content.paths.isEmpty
+                                ? 'إرسال نص'
+                                : 'إرسال ${content.paths.length} صورة',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (content.paths.isNotEmpty)
+                            SizedBox(
+                              height: 74,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: content.paths.length,
+                                itemBuilder: (_, index) => Padding(
+                                  padding: const EdgeInsetsDirectional.only(
+                                    end: 8,
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: AspectRatio(
+                                      aspectRatio: 1,
+                                      child: Image.file(
+                                        File(content.paths[index]),
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (content.paths.isNotEmpty)
+                            const SizedBox(height: 10),
+                          TextField(
+                            onChanged: (v) => setSheetState(() => query = v),
+                            decoration: const InputDecoration(
+                              prefixIcon: Icon(Icons.search),
+                              hintText: 'البحث عن محادثة',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: items.length,
+                        itemBuilder: (_, index) {
+                          final conversation = items[index];
+                          return ListTile(
+                            leading: const CircleAvatar(
+                              child: Icon(Icons.person_outline),
+                            ),
+                            title: Text(conversation.name),
+                            subtitle: Text(
+                              content.paths.isEmpty
+                                  ? content.text
+                                  : '${content.paths.length} مرفق',
+                            ),
+                            onTap: () async {
+                              Navigator.pop(sheetContext);
+                              final controller = ref.read(
+                                conversationMessagesControllerProvider(
+                                  conversation.id,
+                                ).notifier,
+                              );
+                              final mediaGroupId = content.paths.length > 1
+                                  ? 'album_${DateTime.now().microsecondsSinceEpoch}'
+                                  : null;
+                              if (content.text.trim().isNotEmpty)
+                                await controller.sendMessage(
+                                  content: content.text.trim(),
+                                );
+                              for (final path in content.paths) {
+                                await controller.sendFile(
+                                  path,
+                                  metadata: mediaGroupId == null
+                                      ? null
+                                      : {
+                                          'mediaGroupId': mediaGroupId,
+                                          'mediaGroupSize':
+                                              content.paths.length,
+                                        },
+                                );
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _listenToNotificationNavigation() {
@@ -503,55 +645,47 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
   void _listenToSocketFileRequests() {
     _socketEventsSubscription?.cancel();
-    _socketEventsSubscription = ref
-        .read(chatSocketServiceProvider)
-        .events
-        .listen((event) {
-          if (event.type == 'file_receive_requested') {
-            unawaited(_handleIncomingFileRequest(event.payload));
-            return;
-          }
-          if (event.type == 'attachment_rehydrate_requested') {
-            unawaited(
-              ref
-                  .read(chatRepositoryProvider)
-                  .respondToAttachmentRehydrate(event.payload),
-            );
-            return;
-          }
-          if (event.type == 'socket_connected') {
-            // Socket connected — server reachable, clear establishing flag immediately.
-            _markConnectionEstablished();
-            unawaited(
-              _refreshServerConnectionState(
-                quiet: true,
-                refreshAfterRestore: true,
-              ),
-            );
-            return;
-          }
-          if (event.type == 'announcements_updated') {
-            unawaited(
-              _refreshServerConnectionState(
-                quiet: true,
-                refreshAfterRestore: true,
-              ),
-            );
-            return;
-          }
-          if (event.type == 'updates_updated') {
-            unawaited(_updateAgent.checkNow(forceEmitExistingTask: true));
-            return;
-          }
-          if (event.type == 'socket_error' ||
-              event.type == 'socket_disconnected') {
-            // Ignore while still establishing — socket will retry on its own.
-            if (_isEstablishingConnection) {
-              return;
-            }
-            unawaited(_refreshServerConnectionState());
-          }
-        });
+    _socketEventsSubscription = ref.read(chatSocketServiceProvider).events.listen((
+      event,
+    ) {
+      if (event.type == 'file_receive_requested') {
+        unawaited(_handleIncomingFileRequest(event.payload));
+        return;
+      }
+      if (event.type == 'attachment_rehydrate_requested') {
+        unawaited(
+          ref
+              .read(chatRepositoryProvider)
+              .respondToAttachmentRehydrate(event.payload),
+        );
+        return;
+      }
+      if (event.type == 'socket_connected') {
+        // Socket connected — server reachable, clear establishing flag immediately.
+        _markConnectionEstablished();
+        unawaited(
+          _refreshServerConnectionState(quiet: true, refreshAfterRestore: true),
+        );
+        return;
+      }
+      if (event.type == 'announcements_updated') {
+        unawaited(
+          _refreshServerConnectionState(quiet: true, refreshAfterRestore: true),
+        );
+        return;
+      }
+      if (event.type == 'updates_updated') {
+        unawaited(_updateAgent.checkNow(forceEmitExistingTask: true));
+        return;
+      }
+      if (event.type == 'socket_error' || event.type == 'socket_disconnected') {
+        // Ignore while still establishing — socket will retry on its own.
+        if (_isEstablishingConnection) {
+          return;
+        }
+        unawaited(_refreshServerConnectionState());
+      }
+    });
   }
 
   Future<void> _syncPendingUploadsInBackground() async {
@@ -1015,6 +1149,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _connectivitySubscription?.cancel();
     _notificationTapSubscription?.cancel();
     _pushOpenedSubscription?.cancel();
+    _androidShareSubscription?.cancel();
     _connectionEstablishTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _updateAgent.dispose();

@@ -210,7 +210,27 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
       );
     }
     if (additions.isNotEmpty) {
-      setState(() => _stickers = [..._stickers, ...additions]);
+      setState(() {
+        _stickers = [..._stickers, ...additions];
+        if (_selectedPackId != null) {
+          _packs = _packs
+              .map(
+                (pack) => pack.id != _selectedPackId
+                    ? pack
+                    : LocalStickerPack(
+                        id: pack.id,
+                        name: pack.name,
+                        coverStickerId:
+                            pack.coverStickerId ?? additions.first.id,
+                        stickerIds: [
+                          ...pack.stickerIds,
+                          ...additions.map((s) => s.id),
+                        ],
+                      ),
+              )
+              .toList();
+        }
+      });
       await _persist();
     }
     if (mounted) {
@@ -269,15 +289,14 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
       ),
     );
     if (name == null || name.isEmpty) return;
-    setState(
-      () => _packs = [
-        ..._packs,
-        LocalStickerPack(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          name: name,
-        ),
-      ],
+    final pack = LocalStickerPack(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      name: name,
     );
+    setState(() {
+      _packs = [..._packs, pack];
+      _selectedPackId = pack.id;
+    });
     await _persist();
   }
 

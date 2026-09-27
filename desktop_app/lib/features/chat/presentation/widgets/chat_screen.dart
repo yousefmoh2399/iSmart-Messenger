@@ -2655,6 +2655,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
     int sentCount = 0;
     int skippedCount = 0;
+    final mediaGroupId = 'album_${DateTime.now().microsecondsSinceEpoch}';
     for (final path in paths) {
       final success = await _sendPreparedFile(
         conversation: conversation,
@@ -2662,6 +2663,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         displayName: p.basename(path),
         restrictForwardAndDownload: restrictForwardAndDownload,
         fixedBroadcastMetadata: fixedBroadcastMetadata,
+        extraMetadata: {
+          'mediaGroupId': mediaGroupId,
+          'mediaGroupSize': paths.length,
+        },
         showFailureSnackbar: false,
       );
       if (success) {
@@ -2760,6 +2765,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
     int sentCount = 0;
     int skippedCount = 0;
+    final mediaGroupId = 'album_${DateTime.now().microsecondsSinceEpoch}';
     for (final path in paths) {
       final success = await _sendPreparedFile(
         conversation: conversation,
@@ -2768,6 +2774,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         restrictForwardAndDownload: restrictForwardAndDownload,
         fixedBroadcastMetadata: fixedBroadcastMetadata,
         showFailureSnackbar: false,
+        extraMetadata: {
+          'mediaGroupId': mediaGroupId,
+          'mediaGroupSize': paths.length,
+        },
       );
       if (success) {
         sentCount++;
@@ -3403,6 +3413,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
     int sentCount = 0;
     int skippedCount = 0;
+    final mediaGroupId = isImageBatch
+        ? 'album_${DateTime.now().microsecondsSinceEpoch}'
+        : null;
     for (final file in usableFiles) {
       final success = await _sendPreparedFile(
         conversation: conversation,
@@ -3414,6 +3427,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         knownFileSize: file.size,
         fixedBroadcastMetadata: fixedBroadcastMetadata,
         showFailureSnackbar: false,
+        extraMetadata: mediaGroupId == null
+            ? null
+            : {
+                'mediaGroupId': mediaGroupId,
+                'mediaGroupSize': usableFiles.length,
+              },
       );
       if (success) {
         sentCount++;
@@ -3447,6 +3466,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     String? sourceFileName,
     int? knownFileSize,
     Map<String, dynamic>? fixedBroadcastMetadata,
+    Map<String, dynamic>? extraMetadata,
     bool isSticker = false,
     bool showFailureSnackbar = true,
   }) async {
@@ -3477,6 +3497,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     final metadata = <String, dynamic>{
       ...?_replyMetadata(_replyingTo),
       ...?broadcastMetadata,
+      ...?extraMetadata,
       if (_extractMentions(displayName).isNotEmpty)
         'mentions': _extractMentions(displayName),
       'attachmentPolicy': {
@@ -3846,19 +3867,43 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
+    final allMessages =
+        ref
+            .read(conversationMessagesControllerProvider(_conversationId))
+            .valueOrNull
+            ?.messages ??
+        const <ChatMessage>[];
+    final groupId = message.metadata?['mediaGroupId']?.toString();
+    final images = groupId == null
+        ? <ChatMessage>[message]
+        : allMessages
+              .where(
+                (m) =>
+                    m.isImageMessage &&
+                    m.metadata?['mediaGroupId']?.toString() == groupId,
+              )
+              .toList();
+    final initialIndex = images
+        .indexWhere((m) => m.id == message.id)
+        .clamp(0, images.length - 1)
+        .toInt();
     await showDialog<void>(
       context: context,
       builder: (context) => Dialog.fullscreen(
         backgroundColor: Colors.black,
         child: Stack(
           children: [
-            Center(
-              child: InteractiveViewer(
-                child: Hero(
-                  tag: 'image_${message.id}',
-                  child: AuthenticatedAttachmentImage(
-                    message: message,
-                    fit: BoxFit.contain,
+            PageView.builder(
+              controller: PageController(initialPage: initialIndex),
+              itemCount: images.length,
+              itemBuilder: (_, index) => Center(
+                child: InteractiveViewer(
+                  child: Hero(
+                    tag: 'image_${images[index].id}',
+                    child: AuthenticatedAttachmentImage(
+                      message: images[index],
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),
@@ -3888,6 +3933,35 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       ),
     );
+  }
+
+  List<ChatMessage> _collapseMediaAlbums(List<ChatMessage> messages) {
+    final displayed = <ChatMessage>[];
+    final groups = <String>{};
+    for (final message in messages) {
+      final groupId = message.isImageMessage
+          ? (message.metadata?['mediaGroupId']?.toString())
+          : null;
+      if (groupId != null && groupId.isNotEmpty && !groups.add(groupId)) {
+        continue;
+      }
+      displayed.add(message);
+    }
+    return displayed;
+  }
+
+  List<ChatMessage> _albumFor(ChatMessage message, List<ChatMessage> messages) {
+    final groupId = message.metadata?['mediaGroupId']?.toString();
+    if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
+      return <ChatMessage>[message];
+    }
+    return messages
+        .where(
+          (item) =>
+              item.isImageMessage &&
+              item.metadata?['mediaGroupId']?.toString() == groupId,
+        )
+        .toList();
   }
 
   void _startOverlayDownload(
@@ -4648,6 +4722,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                         child: _TelegramEmptyMessages(isDark: isDark),
                       );
                     }
+                    final renderedMessages = _collapseMediaAlbums(
+                      filteredMessages,
+                    );
 
                     return Stack(
                       children: [
@@ -4663,7 +4740,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                 14,
                               ),
                               itemCount:
-                                  filteredMessages.length +
+                                  renderedMessages.length +
                                   (state.hasMore || state.isLoadingMore
                                       ? 1
                                       : 0),
@@ -4697,9 +4774,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
                                 final actualIndex =
                                     index - (prependLoader ? 1 : 0);
-                                final message = filteredMessages[actualIndex];
+                                final message = renderedMessages[actualIndex];
                                 final previous = actualIndex > 0
-                                    ? filteredMessages[actualIndex - 1]
+                                    ? renderedMessages[actualIndex - 1]
                                     : null;
                                 final isMine =
                                     message.sender?.id ==
@@ -4713,8 +4790,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                         6;
 
                                 final next =
-                                    actualIndex < filteredMessages.length - 1
-                                    ? filteredMessages[actualIndex + 1]
+                                    actualIndex < renderedMessages.length - 1
+                                    ? renderedMessages[actualIndex + 1]
                                     : null;
                                 final isLastInGroup =
                                     next == null ||
@@ -4771,6 +4848,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                     },
                                     child: MessageBubble(
                                       message: message,
+                                      albumMessages: _albumFor(
+                                        message,
+                                        filteredMessages,
+                                      ),
+                                      onOpenAlbum: _showImagePreview,
                                       isMine: isMine,
                                       showAvatar: !isMine && isLastInGroup,
                                       showSenderName:

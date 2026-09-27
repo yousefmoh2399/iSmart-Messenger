@@ -1,6 +1,6 @@
 {
     "name":  "ismart-messenger-electron",
-    "version":  "1.1.14",
+    "version":  "1.1.15",
     "private":  true,
     "description":  "Electron wrapper for iSmart Messenger web build",
     "main":  "main.js",

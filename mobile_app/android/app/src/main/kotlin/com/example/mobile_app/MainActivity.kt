@@ -12,6 +12,42 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val installerChannel = "app.installer"
+    private val shareChannel = "app.share_receiver"
+    private var shareMethodChannel: MethodChannel? = null
+    private var pendingShare: Map<String, Any?>? = null
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        captureShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureShareIntent(intent)
+    }
+
+    private fun captureShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND && intent?.action != Intent.ACTION_SEND_MULTIPLE) return
+        val paths = mutableListOf<String>()
+        val streams: List<Uri> = if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: emptyList()
+        } else {
+            listOfNotNull(intent.getParcelableExtra(Intent.EXTRA_STREAM))
+        }
+        streams.forEachIndexed { index, uri ->
+            try {
+                val extension = contentResolver.getType(uri)?.substringAfterLast('/') ?: "jpg"
+                val target = File(cacheDir, "shared_${System.currentTimeMillis()}_${index}.$extension")
+                contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+                if (target.exists()) paths.add(target.absolutePath)
+            } catch (_: Exception) { }
+        }
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+        if (paths.isEmpty() && text.isBlank()) return
+        pendingShare = mapOf("text" to text, "paths" to paths)
+        shareMethodChannel?.invokeMethod("sharedContent", pendingShare)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -79,5 +115,13 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        shareMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, shareChannel)
+        shareMethodChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getInitialSharedContent" -> { result.success(pendingShare); pendingShare = null }
+                else -> result.notImplemented()
+            }
+        }
     }
 }
