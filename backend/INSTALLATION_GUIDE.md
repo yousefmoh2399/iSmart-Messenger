@@ -12,7 +12,7 @@
 في جهازك الشخصي، افتح Terminal وانسخ الملف للسيرفر:
 
 ```bash
-scp ismart-backend-linux root@IP_ADDRESS:/tmp/
+scp ismart-backend-linux ismartmessenger@192.168.144.111:/tmp/
 ```
 
 *(استبدل IP_ADDRESS برقم الآي بي الخاص بالسيرفر)*
@@ -27,7 +27,7 @@ ssh root@IP_ADDRESS
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
-sudo ufw allow 2020/tcp
+sudo ufw allow 7070/tcp
 sudo ufw reload
 cd /tmp
 sudo chmod +x ismart-backend-linux
