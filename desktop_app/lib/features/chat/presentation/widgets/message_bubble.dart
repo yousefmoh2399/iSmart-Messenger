@@ -20,6 +20,10 @@ const List<String> _kReactionEmojiFontFallbacks = <String>[
   'Segoe UI Emoji',
 ];
 
+final RegExp _singleEmojiRegex = RegExp(
+  r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
+);
+
 class MessageBubble extends StatefulWidget {
   const MessageBubble({
     super.key,
@@ -529,12 +533,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                               if (widget.message.content.isNotEmpty)
                                 () {
                                   final text = widget.message.content.trim();
-                                  final emojiRegex = RegExp(
-                                    r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
-                                  );
                                   final isSingle =
                                       text.runes.length == 1 &&
-                                      emojiRegex.hasMatch(text);
+                                      _singleEmojiRegex.hasMatch(text);
 
                                   return ChatRichText(
                                     text: widget.message.content,
