@@ -12,7 +12,7 @@
 في جهازك الشخصي، افتح Terminal وانسخ الملف للسيرفر:
 
 ```bash
-scp ismart-backend-linux ismartmessenger@192.168.144.111:/tmp/
+scp ismart-backend-linux user@IP_ADDRESS:~/
 ```
 
 *(استبدل IP_ADDRESS برقم الآي بي الخاص بالسيرفر)*
@@ -29,7 +29,8 @@ ssh root@IP_ADDRESS
 sudo apt-get update && sudo apt-get upgrade -y
 sudo ufw allow 7070/tcp
 sudo ufw reload
-cd /tmp
+sudo mv ~/ismart-backend-linux /opt/
+cd /opt
 sudo chmod +x ismart-backend-linux
 ```
 
@@ -69,7 +70,7 @@ sudo systemctl status ismart-backend
 في جهازك الشخصي، افتح Terminal وانسخ الملف للسيرفر:
 
 ```bash
-scp ismart-backend-linux root@IP_ADDRESS:/tmp/
+scp ismart-backend-linux root@IP_ADDRESS:/opt/
 ```
 
 ادخل للسيرفر:
@@ -98,7 +99,8 @@ echo '/dev/sdb /mnt/storage ext4 defaults 0 0' | sudo tee -a /etc/fstab
 إعطاء صلاحية التشغيل للملف وبدء التثبيت:
 
 ```bash
-cd /tmp
+sudo mv ~/ismart-backend-linux /opt/
+cd /opt
 sudo chmod +x ismart-backend-linux
 sudo ./ismart-backend-linux --install
 ```
@@ -223,17 +225,17 @@ Get-Service ismart-backend
 
 ### 1. الفحص الشامل واكتشاف الأخطاء (Doctor)
 
-- **لينكس:** `sudo /tmp/ismart-backend-linux --doctor`
+- **لينكس:** `sudo /opt/ismart-backend-linux --doctor`
 - **ويندوز:** `cd C:\iSmart ; .\ismart-backend-win.exe --doctor`
 
 ### 2. النسخ الاحتياطي اليدوي فوراً (Backup)
 
-- **لينكس:** `sudo /tmp/ismart-backend-linux --backup`
+- **لينكس:** `sudo /opt/ismart-backend-linux --backup`
 - **ويندوز:** `cd C:\iSmart ; .\ismart-backend-win.exe --backup`
 
 ### 3. استعادة النظام (Restore)
 
-- **لينكس:** `sudo /tmp/ismart-backend-linux --restore`
+- **لينكس:** `sudo /opt/ismart-backend-linux --restore`
 - **ويندوز:** `cd C:\iSmart ; .\ismart-backend-win.exe --restore`
 
 ### 4. إعادة تشغيل الخدمة يدوياً

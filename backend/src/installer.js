@@ -1197,6 +1197,7 @@ async function runFreshInstall() {
     BOOTSTRAP_ADMIN_USERNAME: adminUser || "",
     BOOTSTRAP_ADMIN_PASSWORD: adminPass || "",
     CORS_ORIGIN:              "*",
+    ALLOW_UNSAFE_CORS:        "true",
   };
 
   writeConfig(configPath, config);
