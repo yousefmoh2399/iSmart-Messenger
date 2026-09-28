@@ -4663,6 +4663,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               // ── Messages ─────────────────────────────────────────────────
               Expanded(
                 child: messagesValue.when(
+                  skipLoadingOnReload: true,
                   loading: () => const _DesktopChatMessagesLoadingSkeleton(),
                   error: (error, _) => Center(child: Text(error.toString())),
                   data: (state) {

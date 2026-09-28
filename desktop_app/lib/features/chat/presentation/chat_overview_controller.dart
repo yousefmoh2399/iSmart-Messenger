@@ -60,7 +60,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   @override
   Future<ChatOverviewData> build() async {
-    ref.watch(serverRecoveryRevisionProvider);
     final hasSession = await _waitForAuthenticatedSession();
     if (!hasSession) {
       return const ChatOverviewData(
@@ -1201,7 +1200,7 @@ class ConversationMessagesController
 
   @override
   Future<ConversationMessagesState> build(String arg) async {
-    ref.watch(serverRecoveryRevisionProvider);
+    ref.keepAlive();
     final hasSession = await _waitForAuthenticatedSession();
     if (!hasSession) {
       return const ConversationMessagesState(
@@ -1497,7 +1496,23 @@ class ConversationMessagesController
         return;
       }
 
-      _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      final current = state.valueOrNull;
+      if (current != null && current.messages.isNotEmpty) {
+        final pageMap = {for (final m in page.messages) m.id: m};
+        final olderMessages = current.messages
+            .where((m) => !pageMap.containsKey(m.id))
+            .toList();
+        final mergedMessages = <ChatMessage>[...olderMessages, ...page.messages];
+        _setStateAndCache(
+          current.copyWith(
+            messages: _sortAndDedupeMessages(mergedMessages),
+            hasMore: current.hasMore || page.hasMore,
+            nextCursor: current.nextCursor ?? page.nextCursor,
+          ),
+        );
+      } else {
+        _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      }
     } catch (error, stackTrace) {
       if (_disposed) {
         return;

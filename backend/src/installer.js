@@ -479,6 +479,61 @@ async function installMongoLinux() {
   return true;
 }
 
+// ─── Redis Setup ────────────────────────────────────────────────────────────
+async function isRedisRunning(port = 6379) {
+  try {
+    return await isPortOpen("127.0.0.1", port);
+  } catch (_) { return false; }
+}
+
+async function installRedisWindows() {
+  log(`\n  ${C.cyan}Installing Redis via tporadowski/redis...${C.reset}`);
+  
+  const targetDir = "C:\\Program Files\\Redis";
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  const redisZipUrl = "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip";
+  const zipPath = path.join(os.tmpdir(), "redis.zip");
+  
+  info(`Downloading Redis (~5 MB)...`);
+  const downloaded = await downloadFile(redisZipUrl, zipPath);
+  if (!downloaded) { fail("Download failed."); return false; }
+
+  info("Extracting Redis...");
+  const psScript = `
+    Expand-Archive -Path "${zipPath}" -DestinationPath "${targetDir}" -Force
+    cd "${targetDir}"
+    .\\redis-server.exe --service-install redis.windows-service.conf --loglevel verbose
+    Start-Service redis
+  `;
+  const psFile = path.join(os.tmpdir(), "install-redis.ps1");
+  fs.writeFileSync(psFile, psScript);
+  runVisible(`powershell -ExecutionPolicy Bypass -File "${psFile}"`);
+  try { fs.unlinkSync(psFile); } catch (e) {}
+  
+  await sleep(3000);
+  ok("Redis installed and started.");
+  return true;
+}
+
+async function installRedisLinux() {
+  log(`\n  ${C.cyan}Installing Redis via apt...${C.reset}`);
+  const steps = [
+    "apt-get update -qq",
+    "apt-get install -y redis-server",
+    "systemctl enable redis-server",
+    "systemctl start redis-server",
+  ];
+  for (const cmd of steps) {
+    info(`→ ${cmd}`);
+    runVisible(cmd);
+  }
+  await sleep(3000);
+  return true;
+}
+
 // ─── Backup engine ────────────────────────────────────────────────────────────
 async function createBackup(config, backupDir) {
   const archiver = require("archiver");
@@ -788,6 +843,18 @@ async function runDoctor(config) {
     }
   }
 
+  // 1.5 Redis
+  {
+    const alive = await isRedisRunning(6379);
+    if (alive) {
+      ok("Redis: reachable");
+      results.push({ name: "Redis", ok: true });
+    } else {
+      fail("Redis: NOT reachable");
+      results.push({ name: "Redis", ok: false, fix: "Start Redis service" });
+    }
+  }
+
   // 2. Backend service
   if (IS_WIN) {
     const svc = run("sc.exe query iSmartBackend");
@@ -1011,6 +1078,34 @@ async function runFreshInstall() {
         mongoOk = await isMongoRunning();
         if (mongoOk) ok("MongoDB is running.");
         else warn("MongoDB port not responding yet — continuing.");
+      }
+    } else if (index === 2) {
+      log("  Cancelled."); process.exit(0);
+    }
+  }
+
+  log("");
+  step("2.5", TOTAL, "Checking Redis...");
+  let redisOk = await isRedisRunning();
+  if (redisOk) {
+    ok("Redis is running on port 6379.");
+  } else {
+    warn("Redis is NOT running.");
+    const { index } = await promptChoice(
+      "Redis is required for caching & real-time messaging. What would you like to do?",
+      [
+        "Install Redis automatically (recommended)",
+        "Redis is on a remote host — skip local install",
+        "Cancel",
+      ]
+    );
+    if (index === 0) {
+      if (IS_WIN)      redisOk = await installRedisWindows();
+      else if (IS_LINUX) redisOk = await installRedisLinux();
+      if (redisOk) {
+        redisOk = await isRedisRunning();
+        if (redisOk) ok("Redis is running.");
+        else warn("Redis port not responding yet — continuing.");
       }
     } else if (index === 2) {
       log("  Cancelled."); process.exit(0);

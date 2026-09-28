@@ -376,13 +376,21 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
       if (!mounted) {
         return;
+      }
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref.read(conversationMessagesControllerProvider(activeConversationId).notifier).refresh();
+        } catch (_) {}
       }
       unawaited(_ensureLanTransferServiceRunning());
     } finally {
@@ -427,11 +435,19 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   Future<void> _retryServerConnection() async {
     try {
       await ref.read(serverConnectionControllerProvider.notifier).refresh();
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref.read(conversationMessagesControllerProvider(activeConversationId).notifier).refresh();
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 
