@@ -37,12 +37,13 @@ if (typeof cleanupInterval.unref === "function") {
   cleanupInterval.unref();
 }
 
-function syncJobToRedis(jobId, job) {
+async function syncJobToRedis(jobId, job) {
+  if (!printJobs.has(jobId)) return;
   const redis = getRedisClient();
   if (!redis || redis.status !== "ready") return;
-  redis
-    .set(`ismart:printjob:${jobId}`, JSON.stringify(job), "EX", RETENTION_SECONDS)
-    .catch(() => {});
+  try {
+    await redis.set(`ismart:printjob:${jobId}`, JSON.stringify(job), "EX", RETENTION_SECONDS);
+  } catch (_) {}
 }
 
 function getRequestScopedKey(clientRequestId, userId = null) {
@@ -248,11 +249,31 @@ end
 `;
 
 /**
+ * Deletes an uncommitted or aborted job from both local memory and Redis
+ * so that it is never counted as a valid job or left dispatchable.
+ */
+async function deleteJobAsync(jobId) {
+  if (!jobId) return;
+  printJobs.delete(jobId);
+  jobOwners.delete(`print:${jobId}`);
+  const redis = getRedisClient();
+  if (redis && redis.status === "ready") {
+    try {
+      await redis.del(`ismart:printjob:${jobId}`, `ismart:jobowner:print:${jobId}`);
+    } catch (_) {}
+  }
+}
+
+/**
  * Commits a reserved print request to a confirmed jobId.
- * Returns true if commit succeeded, or false if token expired or was invalidated.
+ * Returns true if commit succeeded, or false (and deletes the job from Redis/memory)
+ * if the reservation token expired or was invalidated.
  */
 async function commitPrintRequest({ userId, clientRequestId, token, jobId }) {
-  if (!clientRequestId || !jobId) return false;
+  if (!clientRequestId || !jobId) {
+    await deleteJobAsync(jobId);
+    return false;
+  }
   const scopedKey = getRequestScopedKey(clientRequestId, userId);
   const isCluster = isClusterModeActive();
   const redis = getRedisClient();
@@ -271,12 +292,14 @@ async function commitPrintRequest({ userId, clientRequestId, token, jobId }) {
           RETENTION_SECONDS
         );
         if (Number(res) !== 1) {
-          logger.warn("print_job.commit.token_expired_or_mismatched", { scopedKey, token });
+          logger.warn("print_job.commit.token_expired_or_mismatched", { scopedKey, token, jobId });
+          await deleteJobAsync(jobId);
           return false;
         }
       } else {
         if (isCluster) {
-          logger.warn("print_job.commit.missing_token_in_cluster", { scopedKey });
+          logger.warn("print_job.commit.missing_token_in_cluster", { scopedKey, jobId });
+          await deleteJobAsync(jobId);
           return false;
         }
         await redis.set(redisKey, String(jobId), "EX", RETENTION_SECONDS);
@@ -287,12 +310,36 @@ async function commitPrintRequest({ userId, clientRequestId, token, jobId }) {
     } catch (err) {
       logger.error("print_job.commit.redis_error", { scopedKey, error: err?.message });
       if (isCluster) {
+        await deleteJobAsync(jobId);
         return false;
       }
     }
   } else if (isCluster) {
-    logger.error("print_job.commit.cluster_redis_unavailable", { scopedKey });
+    logger.error("print_job.commit.cluster_redis_unavailable", { scopedKey, jobId });
+    await deleteJobAsync(jobId);
     return false;
+  } else {
+    // Validate reservation token and expiry in local mode
+    const localEntry = clientRequestToJobId.get(scopedKey);
+    const now = Date.now();
+    const isExpired =
+      localEntry &&
+      localEntry.status === "reserved" &&
+      localEntry.expiresAt &&
+      now >= localEntry.expiresAt;
+    if (
+      !localEntry ||
+      localEntry.status !== "reserved" ||
+      (token && localEntry.token !== token) ||
+      isExpired
+    ) {
+      if (isExpired && (!token || localEntry.token === token)) {
+        clientRequestToJobId.delete(scopedKey);
+      }
+      logger.warn("print_job.commit.local_token_expired_or_mismatched", { scopedKey, token, jobId });
+      await deleteJobAsync(jobId);
+      return false;
+    }
   }
 
   // Update local map only when verified
@@ -363,6 +410,19 @@ function createJob(jobId, payload) {
   };
   printJobs.set(jobId, job);
   syncJobToRedis(jobId, job);
+  return job;
+}
+
+async function createJobAsync(jobId, payload) {
+  const job = {
+    state: "pending",
+    payload,
+    timestamp: Date.now(),
+    version: 1,
+    retryCount: 0
+  };
+  printJobs.set(jobId, job);
+  await syncJobToRedis(jobId, job);
   return job;
 }
 
@@ -512,6 +572,8 @@ module.exports = {
   commitPrintRequest,
   releasePrintReservation,
   createJob,
+  createJobAsync,
+  deleteJobAsync,
   getJob,
   getJobAsync,
   setJobOwner,

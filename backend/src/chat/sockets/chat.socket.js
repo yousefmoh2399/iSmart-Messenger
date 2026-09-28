@@ -1362,12 +1362,12 @@ async function initializeChatSocketServer(httpServer) {
           source,
           createdAt: new Date().toISOString(),
         };
-        printJobStore.createJob(jobId, printJob);
-
-        // Transition state to forwarded in Redis BEFORE committing clientRequestId
+        // Create new job and await initial persistence in Redis before transition
         try {
+          await printJobStore.createJobAsync(jobId, printJob);
           await printJobStore.validateAndTransitionAsync(jobId, "forwarded");
         } catch (err) {
+          await printJobStore.deleteJobAsync(jobId);
           if (reservationToken) {
             await printJobStore.releasePrintReservation({
               userId: currentUser.id,
@@ -1387,6 +1387,7 @@ async function initializeChatSocketServer(httpServer) {
             jobId,
           });
           if (!committed) {
+            await printJobStore.deleteJobAsync(jobId);
             socketAck(ack, {
               ok: false,
               success: false,

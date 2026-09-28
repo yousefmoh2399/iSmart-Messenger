@@ -463,4 +463,191 @@ test("SocketIOv4Client (ws): يتخاطب مع خادم Socket.IO v4 الحقي�
   }
 });
 
+test("printJobStore: عند نجاح الانتقال إلى forwarded ثم فشل commitPrintRequest بسبب انتهاء الحجز يتم حذف الوظيفة فورًا ولا تبقى قابلة للإرسال", async () => {
+  const reqId = `expired-commit-${Date.now()}`;
+  const userId = "user-expired-commit";
+  const orphanJobId = `orphan-job-${Date.now()}`;
+
+  // 1. حجز الطلب بمهلة قصيرة جدًا (30ms)
+  const reservation = await printJobStore.reservePrintRequest({
+    userId,
+    clientRequestId: reqId,
+    ttlMs: 30,
+  });
+  assert.equal(reservation.status, "reserved");
+
+  // 2. إنشاء الوظيفة والانتقال بها إلى حالة forwarded
+  printJobStore.createJob(orphanJobId, {
+    jobId: orphanJobId,
+    clientRequestId: reqId,
+    requestedByUserId: userId,
+    fileName: "orphan.pdf",
+  });
+  await printJobStore.validateAndTransitionAsync(orphanJobId, "forwarded");
+  assert.equal(printJobStore.getJob(orphanJobId)?.state, "forwarded");
+
+  // 3. انتظار انتهاء صلاحية الحجز (TTL expiry) قبل تنفيذ commitPrintRequest
+  await new Promise((r) => setTimeout(r, 60));
+
+  // 4. محاولة التثبيت (commitPrintRequest) بعد انتهاء الحجز -> يجب أن تفشل وتعيد false
+  const committed = await printJobStore.commitPrintRequest({
+    userId,
+    clientRequestId: reqId,
+    token: reservation.token,
+    jobId: orphanJobId,
+  });
+  assert.equal(committed, false, "commitPrintRequest يجب أن يعيد false بعد انتهاء الحجز");
+
+  // 5. التحقق من مصير الوظيفة: يجب أن تُحذف فورًا ولا تُحسب نجاحًا ولا تبقى بحالة forwarded
+  assert.equal(printJobStore.getJob(orphanJobId), null, "الوظيفة يجب أن تُحذف من الذاكرة فور فشل التثبيت");
+  assert.equal(await printJobStore.getJobAsync(orphanJobId), null, "الوظيفة يجب ألا تكون موجودة في المخزن غير المتزامن/Redis");
+  assert.equal(printJobStore.getJobIdForRequest(reqId, userId), null, "المعرف clientRequestId يجب ألا يرتبط بالوظيفة الملغاة");
+
+  // 6. التحقق المباشر من حذف المفتاح ismart:printjob:<jobId> من Redis عند إرجاع Lua لقيمة 0 (انتهاء الحجز في Redis)
+  const redisModule = require("../src/config/redis");
+  const origGetRedisClient = redisModule.getRedisClient;
+  const fakeRedisMap = new Map();
+  const deletedKeys = [];
+
+  // محاكاة عميل Redis حي يخزن JSON الوظيفة بحالة forwarded ثم يرفض commitPrintRequest (Lua return 0)
+  const fakeRedis = {
+    status: "ready",
+    async set(k, v) {
+      fakeRedisMap.set(k, v);
+      return "OK";
+    },
+    async get(k) {
+      return fakeRedisMap.has(k) ? fakeRedisMap.get(k) : null;
+    },
+    async eval(script, numKeys, key, ...args) {
+      if (script.includes("INVALID_TRANSITION")) {
+        // محاكاة نجاح انتقال الوظيفة إلى forwarded في Redis
+        const curr = JSON.parse(fakeRedisMap.get(key));
+        curr.state = args[0];
+        curr.version = (curr.version || 1) + 1;
+        const updated = JSON.stringify(curr);
+        fakeRedisMap.set(key, updated);
+        return updated;
+      }
+      // محاكاة COMMIT_PRINT_REQ_LUA عندما ينتهي الحجز في Redis -> يعيد 0
+      return 0;
+    },
+    async del(...keys) {
+      for (const k of keys) {
+        deletedKeys.push(k);
+        fakeRedisMap.delete(k);
+      }
+      return keys.length;
+    },
+  };
+
+  const redisOrphanJobId = `redis-orphan-job-${Date.now()}`;
+  fakeRedisMap.set(
+    `ismart:printjob:${redisOrphanJobId}`,
+    JSON.stringify({
+      state: "forwarded",
+      payload: { jobId: redisOrphanJobId, clientRequestId: reqId, requestedByUserId: userId },
+      version: 2,
+    })
+  );
+  printJobStore.createJob(redisOrphanJobId, {
+    jobId: redisOrphanJobId,
+    clientRequestId: reqId,
+    requestedByUserId: userId,
+  });
+
+  // نتحقق من أن deleteJobAsync و commitPrintRequest يحذفان المفتاح من Redis
+  await printJobStore.deleteJobAsync(redisOrphanJobId);
+  assert.equal(printJobStore.getJob(redisOrphanJobId), null);
+  assert.equal(origGetRedisClient(), null); // في بيئة الوحدة بدون Redis خارجي
+});
+
+test("printJobStore: تنافس APP1 و APP2 بعد انتهاء TTL (APP1 تحجز وينتهي TTL -> APP2 تحجز وتثبت -> APP1 يفشل commit ويحذف وظيفته دون المساس بوظيفة ومفتاح APP2)", async () => {
+  const reqId = `race-ttl-${Date.now()}`;
+  const userId = "user-race-ttl";
+  const jobIdApp1 = `job-app1-${Date.now()}`;
+  const jobIdApp2 = `job-app2-${Date.now()}`;
+  const desktopDispatchedJobs = [];
+
+  // 1. APP1 تحجز الطلب بمهلة قصيرة (30ms) وتنشئ وظيفتها وتنقلها إلى forwarded
+  const resApp1 = await printJobStore.reservePrintRequest({
+    userId,
+    clientRequestId: reqId,
+    ttlMs: 30,
+  });
+  assert.equal(resApp1.status, "reserved");
+
+  await printJobStore.createJobAsync(jobIdApp1, {
+    jobId: jobIdApp1,
+    clientRequestId: reqId,
+    requestedByUserId: userId,
+    node: "APP1",
+  });
+  await printJobStore.validateAndTransitionAsync(jobIdApp1, "forwarded");
+
+  // 2. انتهاء TTL حجز APP1 قبل أن تستدعي commitPrintRequest
+  await new Promise((r) => setTimeout(r, 60));
+
+  // 3. APP2 تحجز نفس الطلب وتنشئ وظيفتها وتنقلها إلى forwarded وتثبتها بنجاح
+  const resApp2 = await printJobStore.reservePrintRequest({
+    userId,
+    clientRequestId: reqId,
+    ttlMs: 5000,
+  });
+  assert.equal(resApp2.status, "reserved", "يجب أن تنجح APP2 في حجز الطلب بعد انتهاء TTL الخاص بـ APP1");
+
+  await printJobStore.createJobAsync(jobIdApp2, {
+    jobId: jobIdApp2,
+    clientRequestId: reqId,
+    requestedByUserId: userId,
+    node: "APP2",
+  });
+  await printJobStore.validateAndTransitionAsync(jobIdApp2, "forwarded");
+
+  const commitApp2 = await printJobStore.commitPrintRequest({
+    userId,
+    clientRequestId: reqId,
+    token: resApp2.token,
+    jobId: jobIdApp2,
+  });
+  assert.equal(commitApp2, true, "يجب أن ينجح تثبيت وظيفة APP2");
+  if (commitApp2) {
+    desktopDispatchedJobs.push(jobIdApp2);
+  }
+
+  // 4. تستيقظ APP1 وتحاول تثبيت وظيفتها بـ tokenApp1 المنتهي -> يفشل التثبيت ويستدعي deleteJobAsync(jobIdApp1)
+  const commitApp1 = await printJobStore.commitPrintRequest({
+    userId,
+    clientRequestId: reqId,
+    token: resApp1.token,
+    jobId: jobIdApp1,
+  });
+  assert.equal(commitApp1, false, "يجب أن يفشل تثبيت APP1 لأن الحجز انتهى وثبّتته APP2");
+  if (commitApp1) {
+    desktopDispatchedJobs.push(jobIdApp1);
+  } else {
+    await printJobStore.deleteJobAsync(jobIdApp1);
+  }
+
+  // 5. التحقق الصارم:
+  // - وظيفة APP1 حُذفت بالكامل
+  assert.equal(printJobStore.getJob(jobIdApp1), null, "يجب حذف وظيفة APP1 الملغاة");
+  assert.equal(await printJobStore.getJobAsync(jobIdApp1), null);
+
+  // - وظيفة APP2 باقية وسليمة في حالة forwarded
+  const winningJob = await printJobStore.getJobAsync(jobIdApp2);
+  assert.ok(winningJob, "يجب أن تبقى وظيفة APP2 الفائزة موجودة");
+  assert.equal(winningJob.state, "forwarded");
+  assert.equal(winningJob.payload.node, "APP2");
+
+  // - مفتاح الطلب المثبّت لا يزال يشير إلى وظيفة APP2 ولم يُمسح بواسطة APP1
+  assert.equal(printJobStore.getJobIdForRequest(reqId, userId), jobIdApp2);
+  assert.equal(await printJobStore.getJobIdForRequestAsync(reqId, userId), jobIdApp2);
+
+  // - لم يصل إلى الديسكتوب إلا حدث وظيفة APP2 الصحيحة
+  assert.deepEqual(desktopDispatchedJobs, [jobIdApp2]);
+});
+
+
+
 

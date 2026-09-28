@@ -250,6 +250,7 @@ function createCleanEnv(port, instanceId, storageDir) {
     TMP: process.env.TMP || "C:\\Temp",
 
     NODE_ENV: "test",
+    FORCE_REDIS_IN_TESTS: "true",
     DISABLE_DOTENV: "true",
     BOOTSTRAP_ADMIN_ENABLED: "false",
     CLUSTER_MODE: "true",
@@ -445,6 +446,7 @@ async function runIntegrationSuite() {
   const runId = `${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
   const createdSockets = [];
   const createdRedisKeys = new Set();
+  let testPassed = false;
   let testUserId = null;
   let redisClient = null;
   let app1 = null;
@@ -624,6 +626,99 @@ async function runIntegrationSuite() {
     }
     console.log(`✓ نجاح السيناريو 1: 50 طلب متزامن عبر العقدتين أنتج وظيفة واحدة فقط (${winningJobId}) وحدثًا واحدًا فقط.`);
 
+    // 5-ب. اختبار تنافس APP1 و APP2 بعد انتهاء TTL الحجز على Redis الفعلي
+    console.log("[5-ب/7] اختبار تنافس APP1 و APP2 بعد انتهاء TTL الحجز على Redis الفعلي...");
+    process.env.DISABLE_DOTENV = "true";
+    process.env.REDIS_URL = REDIS_URL;
+    process.env.FORCE_REDIS_IN_TESTS = "true";
+    process.env.CLUSTER_MODE = "true";
+    const { getRedisClient, closeRedisClient } = require("../src/config/redis");
+    const localPrintStore = require("../src/chat/services/print-job-store");
+    const storeRedis = getRedisClient();
+    if (storeRedis && storeRedis.status !== "ready") {
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("storeRedis ready timeout")), 3000);
+        storeRedis.once("ready", () => { clearTimeout(t); resolve(); });
+      });
+    }
+    try {
+      const expReqId = `req_exp_${runId}`;
+      const expJobIdApp1 = `job_exp_app1_${runId}`;
+      const expJobIdApp2 = `job_exp_app2_${runId}`;
+      createdRedisKeys.add(`ismart:printreq:${testUserId}:${expReqId}`);
+      createdRedisKeys.add(`ismart:printreq:${expReqId}`);
+      createdRedisKeys.add(`ismart:printjob:${expJobIdApp1}`);
+      createdRedisKeys.add(`ismart:printjob:${expJobIdApp2}`);
+
+      // APP1 تحجز بمهلة 40ms وتنشئ وظيفتها بالانتظار (createJobAsync) وتنقلها إلى forwarded
+      const resApp1 = await localPrintStore.reservePrintRequest({
+        userId: testUserId,
+        clientRequestId: expReqId,
+        ttlMs: 40,
+      });
+      await localPrintStore.createJobAsync(expJobIdApp1, {
+        jobId: expJobIdApp1,
+        clientRequestId: expReqId,
+        requestedByUserId: testUserId,
+        fileName: "app1_expired.pdf",
+      });
+      await localPrintStore.validateAndTransitionAsync(expJobIdApp1, "forwarded");
+
+      // انتظار انتهاء صلاحية مفتاح الحجز (PX 40ms) في Redis
+      await new Promise((r) => setTimeout(r, 80));
+
+      // APP2 تحجز نفس الطلب وتنشئ وظيفتها وتنقلها إلى forwarded وتثبتها بنجاح
+      const resApp2 = await localPrintStore.reservePrintRequest({
+        userId: testUserId,
+        clientRequestId: expReqId,
+        ttlMs: 5000,
+      });
+      await localPrintStore.createJobAsync(expJobIdApp2, {
+        jobId: expJobIdApp2,
+        clientRequestId: expReqId,
+        requestedByUserId: testUserId,
+        fileName: "app2_winner.pdf",
+      });
+      await localPrintStore.validateAndTransitionAsync(expJobIdApp2, "forwarded");
+      const commitApp2 = await localPrintStore.commitPrintRequest({
+        userId: testUserId,
+        clientRequestId: expReqId,
+        token: resApp2.token,
+        jobId: expJobIdApp2,
+      });
+
+      // APP1 تحاول التثبيت بـ tokenApp1 المنتهي -> يفشل ويحذف وظيفة APP1 فقط دون المساس بوظيفة ومفتاح APP2
+      const commitApp1 = await localPrintStore.commitPrintRequest({
+        userId: testUserId,
+        clientRequestId: expReqId,
+        token: resApp1.token,
+        jobId: expJobIdApp1,
+      });
+      if (!commitApp1) {
+        await localPrintStore.deleteJobAsync(expJobIdApp1);
+      }
+
+      const app1JobInRedis = await redisClient.get(`ismart:printjob:${expJobIdApp1}`);
+      const app2JobInRedis = await redisClient.get(`ismart:printjob:${expJobIdApp2}`);
+      const reqKeyInRedis = await redisClient.get(`ismart:printreq:${testUserId}:${expReqId}`);
+
+      if (
+        commitApp2 !== true ||
+        commitApp1 !== false ||
+        app1JobInRedis !== null ||
+        !app2JobInRedis ||
+        JSON.parse(app2JobInRedis).state !== "forwarded" ||
+        reqKeyInRedis !== expJobIdApp2
+      ) {
+        throw new Error(
+          `فشل سيناريو تنافس TTL: commitApp2=${commitApp2}, commitApp1=${commitApp1}, app1Job=${app1JobInRedis}, reqKey=${reqKeyInRedis}`
+        );
+      }
+      console.log("✓ نجاح السيناريو 1-ب: حُذفت وظيفة APP1 المنتهية وبقيت وظيفة ومفتاح APP2 المثبّت في Redis.");
+    } finally {
+      await closeRedisClient();
+    }
+
     // 6. السيناريو الثاني: انتقالات حالة الوظيفة الذرية عبر العقدتين (باستخدام GET + JSON.parse)
     console.log("[6/7] اختبار انتقالات حالة الوظيفة الذرية عبر العقد (forwarded -> processing -> submitted)...");
     const statusEventsOnApp2 = [];
@@ -690,6 +785,7 @@ async function runIntegrationSuite() {
     console.log("✓ نجاح السيناريو 3: أولوية الحضور عبر العقدتين حافظت على 'online' ثم انتقلت إلى 'meeting' عند غلق جلسة App2.");
     console.log("ℹ️ [NOT RUN] سيناريو انقطاع/عودة Redis الفعلي مفصول في خطة مستقلة بانتظار الموافقة اللاحقة.");
 
+    testPassed = true;
     console.log("\n========================================================");
     console.log(`🎉 اكتملت سيناريوهات التكامل الموزع (3/3) بنجاح (RunID: ${runId})`);
     console.log("========================================================");
@@ -703,25 +799,34 @@ async function runIntegrationSuite() {
     }
     process.exitCode = 1;
   } finally {
-    console.log("[Finally] إغلاق المقابس والعمليات وتنظيف سجلات هذا التشغيل فقط...");
+    console.log("[Finally] إغلاق المقابس والعمليتين App1 و App2...");
     for (const s of createdSockets) {
       try { s.close(); } catch (_) {}
     }
     await stopChildProcessSafely(app1);
     await stopChildProcessSafely(app2);
 
-    // تنظيف مقيد بمفاتيح Redis التي أنشأها هذا التشغيل فقط
-    if (redisClient && createdRedisKeys.size > 0) {
-      try {
-        await redisClient.del(...createdRedisKeys);
-      } catch (_) {}
-    }
-    // تنظيف مقيد بمستخدم Mongo وجلساته التي أنشأها هذا التشغيل فقط
-    if (testUserId && mongoose.connection.readyState === 1) {
-      try {
-        await DeviceSession.deleteMany({ userId: testUserId });
-        await User.deleteOne({ _id: testUserId });
-      } catch (_) {}
+    if (testPassed) {
+      // عند النجاح فقط: تنظيف مقيد بمفاتيح Redis ومستخدم Mongo الذين أنشأهم هذا التشغيل فقط
+      if (redisClient && createdRedisKeys.size > 0) {
+        try {
+          await redisClient.del(...createdRedisKeys);
+        } catch (_) {}
+      }
+      if (testUserId && mongoose.connection.readyState === 1) {
+        try {
+          await DeviceSession.deleteMany({ userId: testUserId });
+          await User.deleteOne({ _id: testUserId });
+        } catch (_) {}
+      }
+      console.log("✓ تم حذف مستخدم ومفاتيح هذا التشغيل الناجح فقط دون المساس بأي مفاتيح أخرى.");
+    } else {
+      // عند الفشل: عدم حذف أدلة التشغيل من حاويتي الاختبار لتمكين الفحص الجنائي
+      console.error("⚠️ تم الاحتفاظ بأدلة هذا التشغيل الفاشل في حاويتي الاختبار دون حذفها:", {
+        runId,
+        testUserId,
+        preservedRedisKeys: [...createdRedisKeys],
+      });
     }
 
     if (redisClient) {
@@ -730,7 +835,7 @@ async function runIntegrationSuite() {
     if (mongoose.connection.readyState !== 0) {
       try { await mongoose.disconnect(); } catch (_) {}
     }
-    console.log("✓ تم إغلاق المقابس والعمليتين وحذف مستخدم ومفاتيح هذا التشغيل بأمان.");
+    console.log("✓ تم إغلاق المقابس والعمليتين App1 و App2 بأمان.");
   }
 }
 
