@@ -1042,9 +1042,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   String? _downloadingFileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
-  bool _pendingInitialViewportReset = true;
   bool _showScrollToBottomButton = false;
-  int _scrollToBottomToken = 0;
+  int _unreadBelowCount = 0;
   String? _lastSeenMessageId;
   BranchPeerDevice? _remotePeerDevice;
   bool _isResolvingRemotePeer = false;
@@ -1181,12 +1180,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       _lastMessageCount = 0;
       _activeSearchMatchIndex = 0;
       _focusedMessageId = null;
-      _pendingInitialViewportReset = true;
       _showScrollToBottomButton = false;
       _lastSeenMessageId = null;
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _scrollToBottom(jump: true),
-      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(activeConversationIdProvider.notifier).state = _conversationId;
@@ -1513,7 +1508,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (currentUserId == null || currentUserId.isEmpty) {
       return;
     }
-    final latestMessage = messages.last;
+    final latestMessage = messages.first;
     if (!force &&
         (latestMessage.sender?.id == currentUserId ||
             latestMessage.id == _lastSeenMessageId)) {
@@ -1630,16 +1625,28 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   // ── Scroll ─────────────────────────────────────────────────────────────────
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final shouldShowButton = !_isNearBottom();
+    final isNear = _isNearBottom();
+    final shouldShowButton = !isNear;
+    if (isNear && _unreadBelowCount > 0 && mounted) {
+      setState(() {
+        _unreadBelowCount = 0;
+      });
+    }
     if (shouldShowButton != _showScrollToBottomButton && mounted) {
       setState(() {
         _showScrollToBottomButton = shouldShowButton;
       });
     }
-    if (_pendingInitialViewportReset) {
-      return;
-    }
-    if (_scrollController.position.pixels <= 72) {
+    final messagesData = ref
+        .read(conversationMessagesControllerProvider(_conversationId))
+        .valueOrNull;
+    final canLoadMore =
+        (messagesData?.hasMore ?? false) &&
+        !(messagesData?.isLoadingMore ?? false);
+    if (!canLoadMore) return;
+
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 300) {
       ref
           .read(
             conversationMessagesControllerProvider(_conversationId).notifier,
@@ -1650,71 +1657,25 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   bool _isNearBottom() {
     if (!_scrollController.hasClients) return true;
-    return (_scrollController.position.maxScrollExtent -
-            _scrollController.offset) <
-        220;
+    return _scrollController.position.pixels < 50;
   }
 
   void _scrollToBottom({bool jump = false}) {
-    final token = ++_scrollToBottomToken;
-    if (_showScrollToBottomButton && mounted) {
+    if (!_scrollController.hasClients) return;
+    if (mounted && (_showScrollToBottomButton || _unreadBelowCount > 0)) {
       setState(() {
         _showScrollToBottomButton = false;
+        _unreadBelowCount = 0;
       });
     }
-    unawaited(_settleScrollToBottom(jump: jump, token: token));
-  }
-
-  Future<void> _settleScrollToBottom({
-    required bool jump,
-    required int token,
-    int passes = 8,
-  }) async {
-    for (var i = 0; i < 2; i++) {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
-    }
-
-    for (var i = 0; i < passes; i++) {
-      if (!mounted ||
-          !_scrollController.hasClients ||
-          token != _scrollToBottomToken) {
-        return;
-      }
-      final offset = _scrollController.position.maxScrollExtent;
-      if (jump || i > 0) {
-        _scrollController.jumpTo(offset);
-      } else {
-        await _scrollController.animateTo(
-          offset,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-        );
-      }
-      await WidgetsBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 35));
-    }
-  }
-
-  void _resetViewportAfterMessagesLoad() {
-    if (!_pendingInitialViewportReset) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      unawaited(_completeInitialViewportReset());
-    });
-  }
-
-  Future<void> _completeInitialViewportReset() async {
-    final token = ++_scrollToBottomToken;
-    await _settleScrollToBottom(jump: true, token: token, passes: 12);
-    if (!mounted) return;
-    _pendingInitialViewportReset = false;
-    if (_showScrollToBottomButton) {
-      setState(() {
-        _showScrollToBottomButton = false;
-      });
+    if (jump) {
+      _scrollController.jumpTo(0);
+    } else {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+      );
     }
   }
 
@@ -1751,13 +1712,33 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     setState(_selectedMessageIds.clear);
   }
 
-  void _scrollToMessageById(String messageId) {
-    final key = _messageKeys[messageId];
-    final targetContext = key?.currentContext;
-    if (targetContext == null) {
+  Future<void> _scrollToMessageById(String messageId) async {
+    var key = _messageKeys[messageId];
+    var targetContext = key?.currentContext;
+    if (targetContext == null && _scrollController.hasClients) {
+      final messages = ref
+          .read(conversationMessagesControllerProvider(_conversationId))
+          .valueOrNull
+          ?.messages;
+      if (messages != null && messages.isNotEmpty) {
+        final targetIndex = messages.indexWhere((m) => m.id == messageId);
+        if (targetIndex >= 0) {
+          final maxExt = _scrollController.position.maxScrollExtent;
+          if (maxExt > 0) {
+            final ratio = (targetIndex / messages.length).clamp(0.0, 1.0);
+            _scrollController.jumpTo(ratio * maxExt);
+            await WidgetsBinding.instance.endOfFrame;
+            if (!mounted) return;
+            key = _messageKeys[messageId];
+            targetContext = key?.currentContext;
+          }
+        }
+      }
+    }
+    if (targetContext == null || !targetContext.mounted) {
       return;
     }
-    Scrollable.ensureVisible(
+    await Scrollable.ensureVisible(
       targetContext,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
@@ -3791,6 +3772,28 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _retryMessage(ChatMessage message) async {
+    final clientMessageId = message.metadata?['clientMessageId']?.toString();
+    try {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              _conversationId,
+            ).notifier,
+          )
+          .sendMessage(
+            content: message.content,
+            replyToMessageId: message.replyToMessageId,
+            messageType: message.messageType,
+            fileUrl: message.fileUrl,
+            metadata: message.metadata,
+            clientMessageId: clientMessageId,
+          );
+    } catch (_) {
+      // Handled and marked as failed by ConversationMessagesController
+    }
+  }
+
   Future<void> _openAttachment(ChatMessage message) {
     if (message.isImageMessage) {
       return _showImagePreview(message);
@@ -3873,21 +3876,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
             .valueOrNull
             ?.messages ??
         const <ChatMessage>[];
-    final groupId = message.metadata?['mediaGroupId']?.toString();
-    final images = groupId == null
-        ? <ChatMessage>[message]
-        : allMessages
-              .where(
-                (m) =>
-                    m.isImageMessage &&
-                    m.metadata?['mediaGroupId']?.toString() == groupId,
-              )
-              .toList();
+    final images = _albumFor(message, allMessages);
     final initialIndex = images
         .indexWhere((m) => m.id == message.id)
         .clamp(0, images.length - 1)
         .toInt();
-        await showDialog<void>(
+    await showDialog<void>(
       context: context,
       builder: (context) => _FullscreenImageViewer(
         images: images,
@@ -3920,13 +3914,15 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
       return <ChatMessage>[message];
     }
-    return messages
+    final album = messages
         .where(
           (item) =>
               item.isImageMessage &&
               item.metadata?['mediaGroupId']?.toString() == groupId,
         )
         .toList();
+    album.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return album;
   }
 
   void _startOverlayDownload(
@@ -3938,6 +3934,20 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       if (!mounted) return;
       unawaited(_downloadAttachment(message, forceSaveAs: true));
     });
+  }
+
+  String _formatDateDivider(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final difference = today.difference(target).inDays;
+    if (difference == 0) {
+      return 'اليوم';
+    } else if (difference == 1) {
+      return 'أمس';
+    } else {
+      return DateFormat('yyyy/MM/dd').format(date);
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -4454,7 +4464,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     };
 
     if (messages.length != _lastMessageCount) {
-      final shouldScroll = _isNearBottom();
+      final isInitial = _lastMessageCount == 0;
+      final isNear = _isNearBottom();
+      final shouldScroll = !isInitial && isNear;
+      if (!isInitial && !isNear && messages.length > _lastMessageCount) {
+        _unreadBelowCount += (messages.length - _lastMessageCount);
+      }
       _lastMessageCount = messages.length;
       _markConversationSeenForLatestMessage(messages);
       if (shouldScroll) {
@@ -4667,9 +4682,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                   loading: () => const _DesktopChatMessagesLoadingSkeleton(),
                   error: (error, _) => Center(child: Text(error.toString())),
                   data: (state) {
-                    if (state.messages.isNotEmpty) {
-                      _resetViewportAfterMessagesLoad();
-                    }
                     if (filteredMessages.isEmpty &&
                         _searchController.text.isNotEmpty) {
                       return Center(
@@ -4699,6 +4711,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                           child: SelectionArea(
                             child: ListView.builder(
                               controller: _scrollController,
+                              reverse: true,
                               padding: const EdgeInsets.fromLTRB(
                                 20,
                                 14,
@@ -4711,11 +4724,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       ? 1
                                       : 0),
                               itemBuilder: (context, index) {
-                                final prependLoader =
-                                    state.hasMore || state.isLoadingMore;
-                                if (prependLoader && index == 0) {
+                                if (index >= renderedMessages.length) {
                                   return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.only(top: 10, bottom: 10),
                                     child: Center(
                                       child: state.isLoadingMore
                                           ? const SizedBox(
@@ -4738,31 +4749,28 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                   );
                                 }
 
-                                final actualIndex =
-                                    index - (prependLoader ? 1 : 0);
-                                final message = renderedMessages[actualIndex];
-                                final previous = actualIndex > 0
-                                    ? renderedMessages[actualIndex - 1]
+                                final message = renderedMessages[index];
+                                final older = index < renderedMessages.length - 1
+                                    ? renderedMessages[index + 1]
                                     : null;
                                 final isMine =
                                     message.sender?.id ==
                                     widget.currentUser?.id;
                                 final shouldBreakGroup =
-                                    previous == null ||
-                                    previous.sender?.id != message.sender?.id ||
+                                    older == null ||
+                                    older.sender?.id != message.sender?.id ||
                                     message.createdAt
-                                            .difference(previous.createdAt)
+                                            .difference(older.createdAt)
                                             .inMinutes >
                                         6;
 
-                                final next =
-                                    actualIndex < renderedMessages.length - 1
-                                    ? renderedMessages[actualIndex + 1]
+                                final newer = index > 0
+                                    ? renderedMessages[index - 1]
                                     : null;
                                 final isLastInGroup =
-                                    next == null ||
-                                    next.sender?.id != message.sender?.id ||
-                                    next.createdAt
+                                    newer == null ||
+                                    newer.sender?.id != message.sender?.id ||
+                                    newer.createdAt
                                             .difference(message.createdAt)
                                             .inMinutes >
                                         6;
@@ -4787,15 +4795,77 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                             ) ==
                                             true);
 
+                                final messageLocalDate =
+                                    message.createdAt.toLocal();
+                                final olderLocalDate =
+                                    older?.createdAt.toLocal();
+                                final showDate = olderLocalDate == null ||
+                                    olderLocalDate.day !=
+                                        messageLocalDate.day ||
+                                    olderLocalDate.month !=
+                                        messageLocalDate.month ||
+                                    olderLocalDate.year !=
+                                        messageLocalDate.year;
+
+                                final stableItemKey =
+                                    message.metadata?['clientMessageId']
+                                        ?.toString() ??
+                                    message.id;
+                                final itemGlobalKey = _messageKeys.putIfAbsent(
+                                  stableItemKey,
+                                  GlobalKey.new,
+                                );
+                                _messageKeys[message.id] = itemGlobalKey;
+
                                 return Padding(
-                                  key: _messageKeys.putIfAbsent(
-                                    message.id,
-                                    GlobalKey.new,
-                                  ),
+                                  key: itemGlobalKey,
                                   padding: EdgeInsets.only(
                                     bottom: isLastInGroup ? 10 : 2,
                                   ),
-                                  child: SwipeTo(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      if (showDate)
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 8,
+                                          ),
+                                          child: Center(
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 12,
+                                                vertical: 4,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isDark
+                                                    ? const Color(0xFF1E293B)
+                                                    : Colors.grey.shade200,
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                border: Border.all(
+                                                  color: isDark
+                                                      ? const Color(0xFF334155)
+                                                      : Colors.grey.shade300,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                _formatDateDivider(
+                                                  messageLocalDate,
+                                                ),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: isDark
+                                                      ? Colors.white70
+                                                      : Colors.black87,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      SwipeTo(
                                     onRightSwipe: (details) {
                                       if (_selectionMode) return;
                                       if (isReadOnly) return;
@@ -4889,7 +4959,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                                   message.content;
                                             })
                                           : null,
-                                      onDelete: canDelete && !message.isDeleted
+                                      onDelete: (canDelete ||
+                                              message.metadata?['status'] ==
+                                                  'failed') &&
+                                          !message.isDeleted
                                           ? () => ref
                                                 .read(
                                                   conversationMessagesControllerProvider(
@@ -4962,10 +5035,16 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               emoji: emoji,
                                             );
                                       },
+                                      onRetry: message.metadata?['status'] ==
+                                              'failed'
+                                          ? () => _retryMessage(message)
+                                          : null,
                                     ),
                                   ),
-                                );
-                              },
+                                ],
+                              ),
+                            );
+                          },
                             ),
                           ),
                         ),
@@ -4982,40 +5061,44 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                               opacity: _showScrollToBottomButton ? 1 : 0,
                               child: IgnorePointer(
                                 ignoring: !_showScrollToBottomButton,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () => _scrollToBottom(),
-                                    borderRadius: BorderRadius.circular(999),
-                                    child: Ink(
-                                      width: 46,
-                                      height: 46,
-                                      decoration: BoxDecoration(
-                                        color: isDark
-                                            ? const Color(0xFF202B36)
-                                            : Colors.white,
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: isDark ? 0.28 : 0.14,
+                                child: Badge(
+                                  isLabelVisible: _unreadBelowCount > 0,
+                                  label: Text('$_unreadBelowCount'),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => _scrollToBottom(),
+                                      borderRadius: BorderRadius.circular(999),
+                                      child: Ink(
+                                        width: 46,
+                                        height: 46,
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? const Color(0xFF202B36)
+                                              : Colors.white,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: isDark ? 0.28 : 0.14,
+                                              ),
+                                              blurRadius: 18,
+                                              offset: const Offset(0, 8),
                                             ),
-                                            blurRadius: 18,
-                                            offset: const Offset(0, 8),
+                                          ],
+                                          border: Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.outlineVariant,
                                           ),
-                                        ],
-                                        border: Border.all(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.outlineVariant,
                                         ),
-                                      ),
-                                      child: Icon(
-                                        Icons.keyboard_arrow_down_rounded,
-                                        color: isDark
-                                            ? Colors.white
-                                            : const Color(0xFF1F2937),
-                                        size: 28,
+                                        child: Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          color: isDark
+                                              ? Colors.white
+                                              : const Color(0xFF1F2937),
+                                          size: 28,
+                                        ),
                                       ),
                                     ),
                                   ),

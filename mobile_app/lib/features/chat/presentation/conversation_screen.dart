@@ -101,8 +101,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   int _lastMessageCount = 0;
   bool _isLoadingMore = false;
-  bool _didAutoScrollOnEnter = false;
   bool _showScrollToLatestButton = false;
+  int _unreadBelowCount = 0;
   DateTime? _lastLoadMoreAt;
   bool _didSendTyping = false;
   String? _focusedMessageId;
@@ -424,7 +424,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   void _onScroll() {
     if (!_scrollController.hasClients) return;
 
-    final shouldShowScrollToLatest = !_isNearBottom();
+    final isNear = _isNearBottom();
+    final shouldShowScrollToLatest = !isNear;
+    if (isNear && _unreadBelowCount > 0 && mounted) {
+      setState(() {
+        _unreadBelowCount = 0;
+      });
+    }
     if (shouldShowScrollToLatest != _showScrollToLatestButton) {
       setState(() {
         _showScrollToLatestButton = shouldShowScrollToLatest;
@@ -443,7 +449,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    if (_scrollController.position.pixels <= 120) {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 300) {
       final now = DateTime.now();
       if (_lastLoadMoreAt != null &&
           now.difference(_lastLoadMoreAt!) <
@@ -459,8 +466,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (_isLoadingMore || !_scrollController.hasClients) return;
 
     _isLoadingMore = true;
-    final previousMaxExtent = _scrollController.position.maxScrollExtent;
-
     try {
       await ref
           .read(
@@ -469,26 +474,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ).notifier,
           )
           .loadMore();
-
-      if (!mounted || !_scrollController.hasClients) return;
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
-
-        final newMaxExtent = _scrollController.position.maxScrollExtent;
-        final delta = newMaxExtent - previousMaxExtent;
-        if (delta <= 0) {
-          return;
-        }
-        final targetOffset = _scrollController.offset + delta;
-
-        _scrollController.jumpTo(
-          targetOffset.clamp(
-            _scrollController.position.minScrollExtent,
-            _scrollController.position.maxScrollExtent,
-          ),
-        );
-      });
     } finally {
       _isLoadingMore = false;
     }
@@ -2189,43 +2174,27 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   void _scrollToBottom({bool animated = false}) {
-    unawaited(_settleScrollToBottom(animated: animated));
-  }
-
-  Future<void> _settleScrollToBottom({required bool animated}) async {
-    for (var i = 0; i < 2; i++) {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
+    if (!_scrollController.hasClients) return;
+    if (_showScrollToLatestButton || _unreadBelowCount > 0) {
+      setState(() {
+        _showScrollToLatestButton = false;
+        _unreadBelowCount = 0;
+      });
     }
-
-    final target = _scrollController.position.maxScrollExtent;
     if (animated) {
-      await _scrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 220),
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
       );
     } else {
-      _scrollController.jumpTo(target);
-    }
-
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || !_scrollController.hasClients) {
-      return;
-    }
-    final correctedTarget = _scrollController.position.maxScrollExtent;
-    if ((_scrollController.offset - correctedTarget).abs() > 1) {
-      _scrollController.jumpTo(correctedTarget);
+      _scrollController.jumpTo(0);
     }
   }
 
   bool _isNearBottom() {
     if (!_scrollController.hasClients) return true;
-    return (_scrollController.position.maxScrollExtent -
-            _scrollController.position.pixels) <=
-        120;
+    return _scrollController.position.pixels < 50;
   }
 
   List<ChatMessage> _deduplicateMessagesById(List<ChatMessage> input) {
@@ -2233,13 +2202,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return input;
     }
     final seen = <String>{};
-    final dedupedReversed = <ChatMessage>[];
-    for (final message in input.reversed) {
+    final deduped = <ChatMessage>[];
+    for (final message in input) {
       if (seen.add(message.id)) {
-        dedupedReversed.add(message);
+        deduped.add(message);
       }
     }
-    return dedupedReversed.reversed.toList();
+    return deduped;
   }
 
   List<ChatMessage> _collapseMediaAlbums(List<ChatMessage> messages) {
@@ -2262,13 +2231,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
       return <ChatMessage>[message];
     }
-    return messages
+    final album = messages
         .where(
           (item) =>
               item.isImageMessage &&
               item.metadata?['mediaGroupId']?.toString() == groupId,
         )
         .toList();
+    album.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return album;
+  }
+
+  String _formatDateDivider(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final difference = today.difference(target).inDays;
+    if (difference == 0) {
+      return 'اليوم';
+    } else if (difference == 1) {
+      return 'أمس';
+    } else {
+      return DateFormat('yyyy/MM/dd').format(date);
+    }
   }
 
   void _toggleMessageSelection(String messageId) {
@@ -2294,9 +2279,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _scrollToMessageById(String messageId) async {
-    final key = _messageKeys[messageId];
-    final targetContext = key?.currentContext;
-    if (targetContext == null) {
+    var key = _messageKeys[messageId];
+    var targetContext = key?.currentContext;
+    if (targetContext == null && _scrollController.hasClients) {
+      final messages = ref
+          .read(conversationMessagesControllerProvider(widget.conversation.id))
+          .valueOrNull
+          ?.messages;
+      if (messages != null && messages.isNotEmpty) {
+        final targetIndex = messages.indexWhere((m) => m.id == messageId);
+        if (targetIndex >= 0) {
+          final maxExt = _scrollController.position.maxScrollExtent;
+          if (maxExt > 0) {
+            final ratio = (targetIndex / messages.length).clamp(0.0, 1.0);
+            _scrollController.jumpTo(ratio * maxExt);
+            await WidgetsBinding.instance.endOfFrame;
+            if (!mounted) return;
+            key = _messageKeys[messageId];
+            targetContext = key?.currentContext;
+          }
+        }
+      }
+    }
+    if (targetContext == null || !targetContext.mounted) {
       return;
     }
     await Scrollable.ensureVisible(
@@ -2733,6 +2738,28 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
   }
 
+  Future<void> _retryMessage(ChatMessage message) async {
+    final clientMessageId = message.metadata?['clientMessageId']?.toString();
+    try {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
+          .sendMessage(
+            content: message.content,
+            replyToMessageId: message.replyToMessageId,
+            messageType: message.messageType,
+            fileUrl: message.fileUrl,
+            metadata: message.metadata,
+            clientMessageId: clientMessageId,
+          );
+    } catch (_) {
+      // Handled and marked as failed by ConversationMessagesController
+    }
+  }
+
   Future<void> _showActions(ChatMessage message) async {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) {
@@ -2757,6 +2784,108 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final previewText = message.content.isNotEmpty
         ? message.content
         : (message.fileName ?? 'مرفق');
+
+    final isFailed = message.metadata?['status'] == 'failed';
+    if (isFailed) {
+      await showModalBottomSheet<void>(
+        isScrollControlled: true,
+        context: context,
+        backgroundColor: Colors.transparent,
+        showDragHandle: true,
+        builder: (context) => SafeArea(
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.84,
+            ),
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 22,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          message.sender?.displayName ??
+                              (isMine ? 'أنت' : 'مستخدم'),
+                          style: const TextStyle(
+                            color: Color(0xFF3390EC),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          previewText,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _TelegramActionTile(
+                    icon: Icons.refresh_rounded,
+                    label: 'إعادة المحاولة',
+                    color: const Color(0xFFE53935),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _retryMessage(message);
+                    },
+                  ),
+                  _TelegramActionTile(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'حذف',
+                    color: const Color(0xFFE53935),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await ref
+                          .read(
+                            conversationMessagesControllerProvider(
+                              widget.conversation.id,
+                            ).notifier,
+                          )
+                          .deleteMessage(message.id);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
 
     final quickReactionRow = await buildQuickReactionUnicodeRow();
     if (!mounted) {
@@ -2868,6 +2997,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                if (message.metadata?['status'] == 'failed')
+                  _TelegramActionTile(
+                    icon: Icons.refresh_rounded,
+                    label: 'إعادة إرسال',
+                    color: const Color(0xFFE53935),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _retryMessage(message);
+                    },
+                  ),
                 _TelegramActionTile(
                   icon: Icons.reply_rounded,
                   label: 'رد',
@@ -4350,7 +4489,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       if (messages.isEmpty) {
                         _lastMessageCount = 0;
-                        _didAutoScrollOnEnter = false;
                         return Center(
                           child: Text(
                             'لا توجد رسائل بعد',
@@ -4367,26 +4505,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       final hasNewMessages =
                           messages.length > _lastMessageCount;
-                      if (!_didAutoScrollOnEnter) {
-                        _didAutoScrollOnEnter = true;
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted || !_scrollController.hasClients) {
-                            return;
-                          }
-                          _scrollController.jumpTo(
-                            _scrollController.position.maxScrollExtent,
-                          );
-                          _scrollToBottom();
-                        });
-                      }
                       final shouldAutoScroll =
-                          _lastMessageCount == 0 ||
-                          (_isNearBottom() && !_isLoadingMore);
+                          _isNearBottom() && !_isLoadingMore;
 
-                      if (hasNewMessages && shouldAutoScroll) {
+                      if (hasNewMessages && shouldAutoScroll && _lastMessageCount > 0) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
-                          _scrollToBottom();
+                          _scrollToBottom(animated: true);
                         });
+                      } else if (hasNewMessages && !shouldAutoScroll && _lastMessageCount > 0) {
+                        _unreadBelowCount += (messages.length - _lastMessageCount);
                       }
 
                       _lastMessageCount = messages.length;
@@ -4398,6 +4525,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       return ListView.builder(
                         controller: _scrollController,
+                        reverse: true,
                         padding: EdgeInsets.fromLTRB(
                           16,
                           hasTopBanner
@@ -4422,20 +4550,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           }
 
                           final message = renderedMessages[index];
-                          final previous = index > 0
+                          final older = index < renderedMessages.length - 1
+                              ? renderedMessages[index + 1]
+                              : null;
+                          final newer = index > 0
                               ? renderedMessages[index - 1]
                               : null;
 
                           final messageLocalDate = message.createdAt.toLocal();
-                          final previousLocalDate = previous?.createdAt
+                          final olderLocalDate = older?.createdAt
                               .toLocal();
 
                           final showDate =
-                              previousLocalDate == null ||
-                              previousLocalDate.day != messageLocalDate.day ||
-                              previousLocalDate.month !=
+                              olderLocalDate == null ||
+                              olderLocalDate.day != messageLocalDate.day ||
+                              olderLocalDate.month !=
                                   messageLocalDate.month ||
-                              previousLocalDate.year != messageLocalDate.year;
+                              olderLocalDate.year != messageLocalDate.year;
 
                           final senderId =
                               message.sender?.id ?? message.senderId;
@@ -4443,13 +4574,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           final isMine =
                               authUser?.id.toString() == senderId.toString();
 
-                          final next = index < renderedMessages.length - 1
-                              ? renderedMessages[index + 1]
-                              : null;
                           final isLastInGroup =
-                              next == null ||
-                              next.sender?.id != message.sender?.id ||
-                              next.createdAt
+                              newer == null ||
+                              newer.sender?.id != message.sender?.id ||
+                              newer.createdAt
                                       .difference(message.createdAt)
                                       .inMinutes >
                                   6;
@@ -4516,8 +4644,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           );
                           final isFocused = _focusedMessageId == message.id;
                           final albumMessages = _albumFor(message, messages);
+                          final stableItemKey =
+                              message.metadata?['clientMessageId']
+                                  ?.toString() ??
+                              message.id;
+                          final messageGlobalKey = _messageKeys.putIfAbsent(
+                            stableItemKey,
+                            GlobalKey.new,
+                          );
+                          _messageKeys[message.id] = messageGlobalKey;
 
                           Widget child = RepaintBoundary(
+                            key: ValueKey(stableItemKey),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -4539,9 +4677,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                         ),
                                       ),
                                       child: Text(
-                                        DateFormat(
-                                          'yyyy/MM/dd',
-                                        ).format(messageLocalDate),
+                                        _formatDateDivider(messageLocalDate),
                                         style: TextStyle(
                                           color: colorScheme.onSurfaceVariant,
                                         ),
@@ -4575,10 +4711,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                         children: [
                                           Flexible(
                                             child: ConstrainedBox(
-                                              key: _messageKeys.putIfAbsent(
-                                                message.id,
-                                                GlobalKey.new,
-                                              ),
+                                              key: messageGlobalKey,
                                               constraints: BoxConstraints(
                                                 maxWidth: maxBubbleWidth
                                                     .clamp(200.0, 480.0)
@@ -4908,7 +5041,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                         .isDeleted
                                                                     ? Container(
                                                                         key: ValueKey(
-                                                                          'deleted_${message.id}',
+                                                                          'deleted_$stableItemKey',
                                                                         ),
                                                                         alignment:
                                                                             Alignment.centerLeft,
@@ -4924,7 +5057,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       )
                                                                     : Column(
                                                                         key: ValueKey(
-                                                                          'content_${message.id}',
+                                                                          'content_$stableItemKey',
                                                                         ),
                                                                         crossAxisAlignment:
                                                                             CrossAxisAlignment.stretch,
@@ -5175,13 +5308,21 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                     const SizedBox(
                                                                       width: 6,
                                                                     ),
-                                                                    Icon(
-                                                                      status
-                                                                          .icon,
-                                                                      size: 16,
-                                                                      color: status
-                                                                          .color,
-                                                                    ),
+                                                                    if (message.metadata?['status'] == 'failed')
+                                                                      GestureDetector(
+                                                                        onTap: () => _showActions(message),
+                                                                        child: Icon(
+                                                                          status.icon,
+                                                                          size: 16,
+                                                                          color: status.color,
+                                                                        ),
+                                                                      )
+                                                                    else
+                                                                      Icon(
+                                                                        status.icon,
+                                                                        size: 16,
+                                                                        color: status.color,
+                                                                      ),
                                                                   ],
                                                                 ],
                                                               ),
@@ -5574,11 +5715,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   opacity: _showScrollToLatestButton ? 1 : 0,
                   child: IgnorePointer(
                     ignoring: !_showScrollToLatestButton,
-                    child: FloatingActionButton.small(
-                      heroTag: 'scroll_to_latest_btn',
-                      tooltip: 'آخر رسالة',
-                      onPressed: () => _scrollToBottom(animated: true),
-                      child: const Icon(Icons.keyboard_arrow_down_rounded),
+                    child: Badge(
+                      isLabelVisible: _unreadBelowCount > 0,
+                      label: Text('$_unreadBelowCount'),
+                      child: FloatingActionButton.small(
+                        heroTag: 'scroll_to_latest_btn',
+                        tooltip: 'آخر رسالة',
+                        onPressed: () => _scrollToBottom(animated: true),
+                        child: const Icon(Icons.keyboard_arrow_down_rounded),
+                      ),
                     ),
                   ),
                 ),
@@ -5863,7 +6008,7 @@ class _ChatMediaAlbum extends StatelessWidget {
               color: Colors.black54,
               child: Center(
                 child: Text(
-                  '+${overflowCount}',
+                  '+$overflowCount',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -7149,6 +7294,14 @@ Color _presenceColor(String status) => switch (status) {
 };
 
 _MessageStatus _status(ChatMessage message, String currentUserId) {
+  final msgStatus = message.metadata?['status']?.toString();
+  if (msgStatus == 'failed') {
+    return const _MessageStatus(Icons.error_outline_rounded, Color(0xFFEF4444));
+  }
+  if (msgStatus == 'pending' || message.id.startsWith('temp_')) {
+    return const _MessageStatus(Icons.access_time_rounded, Color(0xFF94A3B8));
+  }
+
   if (message.seenBy.any((entry) => entry.userId != currentUserId)) {
     return const _MessageStatus(Icons.done_all_rounded, Color(0xFF16A34A));
   }

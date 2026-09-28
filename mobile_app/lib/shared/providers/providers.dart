@@ -13,6 +13,7 @@ import '../../features/admin/data/announcement_repository.dart';
 import '../../features/admin/presentation/announcements_controller.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/chat/data/chat_local_cache.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -390,6 +391,10 @@ final announcementRepositoryProvider = Provider<AnnouncementRepository>((ref) {
   return AnnouncementRepository(ref.watch(authenticatedApiClientProvider));
 });
 
+final chatLocalCacheProvider = Provider<ChatLocalCache>((ref) {
+  return ChatLocalCache();
+});
+
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
   return ChatRepository(
     ref.watch(authenticatedApiClientProvider),
@@ -397,6 +402,7 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
     authRepository: ref.watch(authRepositoryProvider),
+    cache: ref.watch(chatLocalCacheProvider),
   );
 });
 
