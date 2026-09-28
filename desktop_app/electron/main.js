@@ -85,7 +85,7 @@ function applyWindowTheme(mode = currentWindowTheme) {
   // visually each time the mouse passes over minimize/maximize/close.
   if (themeChanged && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
-      color: "rgba(0,0,0,0)",
+      color: palette.color,
       symbolColor: palette.symbolColor,
       height: 34,
     });
@@ -845,7 +845,7 @@ function createWindow(startUrl) {
     backgroundColor: titleBarPalette().color,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      ...titleBarPalette(), color: "rgba(0,0,0,0)",
+      ...titleBarPalette(),
       height: 34,
     },
     webPreferences: {
