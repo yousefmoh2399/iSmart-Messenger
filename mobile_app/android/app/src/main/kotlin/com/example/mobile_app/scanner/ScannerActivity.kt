@@ -29,6 +29,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -39,10 +40,12 @@ import org.opencv.core.Size
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc
 import java.io.File
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.hypot
 
 class ScannerActivity : ComponentActivity() {
@@ -65,8 +68,10 @@ class ScannerActivity : ComponentActivity() {
 
     private var destinationDir: String? = null
     private var isTorchOn = false
-    private var isCapturing = false
+    private val isCapturing = AtomicBoolean(false)
+    @Volatile
     private var lastShutterTime = 0L
+    @Volatile
     private var shutterTapTime = 0L
 
     // Analyzer timing metrics
@@ -104,7 +109,9 @@ class ScannerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        cameraExecutor.shutdown()
+        if (::cameraExecutor.isInitialized) {
+            cameraExecutor.shutdown()
+        }
     }
 
     private fun buildUi() {
@@ -317,6 +324,7 @@ class ScannerActivity : ComponentActivity() {
                 missedFrameCount++
                 if (missedFrameCount > 5) {
                     latestNormalizedQuad = null
+                    previousQuad = null
                     runOnUiThread {
                         overlayView?.setPolygon(null)
                     }
@@ -375,15 +383,17 @@ class ScannerActivity : ComponentActivity() {
 
     private fun takeShutterPicture() {
         val now = SystemClock.elapsedRealtime()
-        if (isCapturing || now - lastShutterTime < 1000) {
-            return // Shutter debounce
+        if (now - lastShutterTime < 600) {
+            return // Shutter debounce 600ms
         }
-        isCapturing = true
+        if (!isCapturing.compareAndSet(false, true)) {
+            return // Already capturing
+        }
         lastShutterTime = now
         shutterTapTime = now
 
         val capture = imageCapture ?: run {
-            isCapturing = false
+            isCapturing.set(false)
             return
         }
 
@@ -400,7 +410,7 @@ class ScannerActivity : ComponentActivity() {
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(TAG, "Capture failed: ${exception.message}", exception)
-                    isCapturing = false
+                    isCapturing.set(false)
                 }
             }
         )
@@ -417,66 +427,30 @@ class ScannerActivity : ComponentActivity() {
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
             val plane = imageProxy.planes[0]
             val buffer = plane.buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
+            val rawBytes = ByteArray(buffer.remaining())
+            buffer.get(rawBytes)
 
-            val rawMat = Mat(1, bytes.size, CvType.CV_8UC1)
-            rawMat.put(0, 0, bytes)
-            val decoded = Imgcodecs.imdecode(rawMat, Imgcodecs.IMREAD_COLOR or Imgcodecs.IMREAD_IGNORE_ORIENTATION)
-            rawMat.release()
-
-            if (decoded.empty()) {
-                Log.e(TAG, "Failed to decode captured photo")
-                isCapturing = false
-                return
-            }
-
-            // Rotate manually by rotationDegrees
-            val oriented = Mat()
-            when (rotationDegrees) {
-                90 -> Core.rotate(decoded, oriented, Core.ROTATE_90_CLOCKWISE)
-                180 -> Core.rotate(decoded, oriented, Core.ROTATE_180)
-                270 -> Core.rotate(decoded, oriented, Core.ROTATE_90_COUNTERCLOCKWISE)
-                else -> decoded.copyTo(oriented)
-            }
-            decoded.release()
-
-            val photoW = oriented.cols().toDouble()
-            val photoH = oriented.rows().toDouble()
-
-            // Resolve final corners (normalized 0.0..1.0)
-            val finalNormalizedCorners: List<Point> = if (liveNormalizedQuad != null) {
-                liveNormalizedQuad
-            } else {
-                // If live quad was absent, run detector once on downscaled photo
-                val gray = Mat()
-                Imgproc.cvtColor(oriented, gray, Imgproc.COLOR_BGR2GRAY)
-                val detected = DocumentDetector.findQuad(gray)
-                gray.release()
-
-                if (detected != null) {
-                    detected.map { Point(it.x / photoW, it.y / photoH) }
-                } else {
-                    // Fallback to 5% inset rectangle
-                    listOf(
-                        Point(0.05, 0.05),
-                        Point(0.95, 0.05),
-                        Point(0.95, 0.95),
-                        Point(0.05, 0.95)
-                    )
-                }
-            }
-
-            // Write original oriented JPEG directly into destination directory
+            // Direct zero-decode write to disk
             val destFolder = File(destinationDir!!)
             destFolder.mkdirs()
             val fileName = "raw_${UUID.randomUUID()}.jpg"
             val outputFile = File(destFolder, fileName)
 
-            val writeParams = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 95)
-            Imgcodecs.imwrite(outputFile.absolutePath, oriented, writeParams)
-            writeParams.release()
-            oriented.release()
+            FileOutputStream(outputFile).use { fos ->
+                fos.write(rawBytes)
+                fos.flush()
+            }
+
+            // Write EXIF orientation tag so any reader (including imread) reads it upright
+            val exif = ExifInterface(outputFile.absolutePath)
+            val exifOrientation = when (rotationDegrees) {
+                90 -> ExifInterface.ORIENTATION_ROTATE_90
+                180 -> ExifInterface.ORIENTATION_ROTATE_180
+                270 -> ExifInterface.ORIENTATION_ROTATE_270
+                else -> ExifInterface.ORIENTATION_NORMAL
+            }
+            exif.setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
+            exif.saveAttributes()
 
             val fileWrittenTime = SystemClock.elapsedRealtime()
             val tapToCaptureMs = captureSuccessTime - tapTime
@@ -486,6 +460,36 @@ class ScannerActivity : ComponentActivity() {
                 TAG,
                 "Shutter timeline: tap->capture=${tapToCaptureMs}ms, capture->written=${captureToWriteMs}ms, total tap->setResult=${totalLatencyMs}ms"
             )
+
+            // Raw sensor dimensions vs upright image dimensions
+            val rawWidth = imageProxy.width
+            val rawHeight = imageProxy.height
+            val uprightWidth = if (rotationDegrees == 90 || rotationDegrees == 270) rawHeight else rawWidth
+            val uprightHeight = if (rotationDegrees == 90 || rotationDegrees == 270) rawWidth else rawHeight
+
+            // Resolve final corners (normalized 0.0..1.0 relative to upright image)
+            val finalNormalizedCorners: List<Point> = if (liveNormalizedQuad != null) {
+                liveNormalizedQuad
+            } else {
+                // If live quad was absent, imread will read upright due to EXIF
+                val src = Imgcodecs.imread(outputFile.absolutePath, Imgcodecs.IMREAD_COLOR)
+                val detected = if (!src.empty()) {
+                    val gray = Mat()
+                    Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY)
+                    val quad = DocumentDetector.findQuad(gray)
+                    gray.release()
+                    src.release()
+                    quad?.map { Point(it.x / uprightWidth.toDouble(), it.y / uprightHeight.toDouble()) }
+                } else {
+                    null
+                }
+                detected ?: listOf(
+                    Point(0.05, 0.05),
+                    Point(0.95, 0.05),
+                    Point(0.95, 0.95),
+                    Point(0.05, 0.95)
+                )
+            }
 
             // Format corners array [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
             val cornersArray = DoubleArray(8)
@@ -501,8 +505,8 @@ class ScannerActivity : ComponentActivity() {
             val resultIntent = Intent().apply {
                 putExtra(RESULT_PATH, outputFile.absolutePath)
                 putExtra(RESULT_CORNERS, cornersArray)
-                putExtra(RESULT_WIDTH, photoW.toInt())
-                putExtra(RESULT_HEIGHT, photoH.toInt())
+                putExtra(RESULT_WIDTH, uprightWidth)
+                putExtra(RESULT_HEIGHT, uprightHeight)
             }
 
             runOnUiThread {
@@ -511,7 +515,7 @@ class ScannerActivity : ComponentActivity() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error processing captured photo", e)
-            isCapturing = false
+            isCapturing.set(false)
         } finally {
             imageProxy.close()
         }

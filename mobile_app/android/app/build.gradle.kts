@@ -80,4 +80,5 @@ dependencies {
     // Guava & Futures for CameraX ListenableFuture
     implementation("com.google.guava:guava:31.1-android")
     implementation("androidx.concurrent:concurrent-futures-ktx:1.1.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }

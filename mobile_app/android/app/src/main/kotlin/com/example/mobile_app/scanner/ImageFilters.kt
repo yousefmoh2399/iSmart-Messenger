@@ -192,14 +192,13 @@ object ImageFilters {
         val black = 35.0
         val white = 225.0
         val gamma = 1.1
-        val invGamma = 1.0 / gamma
 
         for (i in 0..255) {
             val v = i.toDouble()
             val mapped = when {
                 v <= black -> 0.0
                 v >= white -> 255.0
-                else -> 255.0 * ((v - black) / (white - black)).pow(invGamma)
+                else -> 255.0 * ((v - black) / (white - black)).pow(gamma)
             }
             lutData[i] = mapped.toInt().coerceIn(0, 255).toByte()
         }
