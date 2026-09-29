@@ -13,6 +13,15 @@ import '../../../shared/models/document_paper_size.dart';
 export '../../../shared/models/document_paper_size.dart';
 
 class PdfBuilderService {
+  /// Fast header check (<0.1ms): returns true if the JPEG needs rotation or downscaling (>2048px).
+  static bool needsNormalization(Uint8List bytes) {
+    final info = _peekJpegInfo(bytes);
+    if (info == null) return true;
+    return info.orientation != 1 ||
+        info.width > _maxDimension ||
+        info.height > _maxDimension;
+  }
+
   Future<Uint8List> buildPdf({
     required List<String> imagePaths,
     required List<DocumentPaperSize> paperSizes,

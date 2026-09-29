@@ -48,17 +48,31 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
   }
 
   Future<void> _loadImageSize() async {
-    final bytes = await File(widget.pageImagePath).readAsBytes();
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
-    if (mounted) {
-      setState(() {
-        _imageNaturalSize = Size(
-          image.width.toDouble(),
-          image.height.toDouble(),
-        );
-      });
+    try {
+      final buffer = await ui.ImmutableBuffer.fromFilePath(widget.pageImagePath);
+      final descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final w = descriptor.width.toDouble();
+      final h = descriptor.height.toDouble();
+      descriptor.dispose();
+      buffer.dispose();
+      if (mounted) {
+        setState(() {
+          _imageNaturalSize = Size(w, h);
+        });
+      }
+    } catch (_) {
+      final bytes = await File(widget.pageImagePath).readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      if (mounted) {
+        setState(() {
+          _imageNaturalSize = Size(
+            image.width.toDouble(),
+            image.height.toDouble(),
+          );
+        });
+      }
     }
   }
 
@@ -91,10 +105,9 @@ class _SignaturePlacementScreenState extends State<SignaturePlacementScreen> {
     setState(() => _applying = true);
 
     try {
-      final pageBytes = await File(widget.pageImagePath).readAsBytes();
       final composer = SignatureComposerService();
       final result = await composer.compositeSignatureOnImage(
-        pageImageBytes: pageBytes,
+        pageImagePath: widget.pageImagePath,
         signatureBytes: widget.signatureBytes,
         relativeX: _relX,
         relativeY: _relY,

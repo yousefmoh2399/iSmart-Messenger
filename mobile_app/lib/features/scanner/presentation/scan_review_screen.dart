@@ -220,19 +220,22 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       final fullFilteredPath = '${draftsDir.path}/full_filtered_$pageId.jpg';
       intermediateFiles.addAll([fullWarpPath, fullFilteredPath]);
 
-      // 1. Full-resolution hardware-accelerated warp (+ in-memory rotation before single encode)
+      // 1. Hardware-accelerated warp (+ in-memory rotation before single encode)
+      // Capped at 2048px (200 DPI A4) so PdfBuilderService hits its 0ms fast path directly!
       await NativeScannerBridge.warp(
         path: widget.rawImagePath,
         corners: _corners,
         outPath: fullWarpPath,
+        maxSide: 2048,
         quarterTurns: _quarterRotations,
       ).timeout(const Duration(seconds: 20));
 
-      // 2. Full-resolution native OpenCV filter directly on the rotated warped document
+      // 2. Native OpenCV filter directly on the rotated warped document
       await NativeScannerBridge.applyFilter(
         path: fullWarpPath,
         filter: _selectedFilter,
         outPath: fullFilteredPath,
+        maxSide: 2048,
       ).timeout(const Duration(seconds: 20));
 
       // 3. Save directly into session files without memory overhead

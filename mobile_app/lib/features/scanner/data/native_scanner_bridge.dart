@@ -199,4 +199,33 @@ class NativeScannerBridge {
       rethrow;
     }
   }
+
+  /// Composites a PNG signature natively onto a page JPEG using platform Canvas/Bitmap,
+  /// capping the output at [maxSide] (default 2048px) so PdfBuilderService hits its 0ms fast path.
+  static Future<Uint8List?> compositeSignature({
+    required String pagePath,
+    required Uint8List signatureBytes,
+    required double relativeX,
+    required double relativeY,
+    required double relativeWidth,
+    int maxSide = 2048,
+  }) async {
+    final sw = Stopwatch()..start();
+    try {
+      final result = await _channel.invokeMethod<Uint8List>('compositeSignature', {
+        'pagePath': pagePath,
+        'signatureBytes': signatureBytes,
+        'relX': relativeX,
+        'relY': relativeY,
+        'relW': relativeWidth,
+        'maxSide': maxSide,
+      }).timeout(const Duration(seconds: 15));
+      debugPrint('[NativeScannerBridge] compositeSignature completed in ${sw.elapsedMilliseconds}ms');
+      return result;
+    } catch (e) {
+      debugPrint('[NativeScannerBridge] compositeSignature fallback to Dart isolate ($e)');
+      return null;
+    }
+  }
 }
+

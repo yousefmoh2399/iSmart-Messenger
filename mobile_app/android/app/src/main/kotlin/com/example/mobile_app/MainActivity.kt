@@ -353,6 +353,113 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "compositeSignature" -> {
+                        val pagePath = call.argument<String>("pagePath")
+                        val sigBytes = call.argument<ByteArray>("signatureBytes")
+                        val relX = call.argument<Double>("relX") ?: 0.05
+                        val relY = call.argument<Double>("relY") ?: 0.70
+                        val relW = call.argument<Double>("relW") ?: 0.40
+                        val maxSide = call.argument<Int>("maxSide") ?: 2048
+                        if (pagePath.isNullOrBlank() || sigBytes == null || sigBytes.isEmpty()) {
+                            result.error("INVALID_ARGS", "pagePath and signatureBytes are required", null)
+                            return@setMethodCallHandler
+                        }
+                        mainScope.launch(Dispatchers.Default) {
+                            val startMs = SystemClock.elapsedRealtime()
+                            try {
+                                val rawPage = BitmapFactory.decodeFile(pagePath)
+                                if (rawPage == null) {
+                                    withContext(Dispatchers.Main) {
+                                        result.error("DECODE_PAGE_FAILED", "Failed to decode page image", null)
+                                    }
+                                    return@launch
+                                }
+                                // Respect EXIF orientation if present
+                                val exif = androidx.exifinterface.media.ExifInterface(pagePath)
+                                val orientation = exif.getAttributeInt(
+                                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                                )
+                                val rotationDegrees = when (orientation) {
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                                    else -> 0f
+                                }
+                                var orientedPage = if (rotationDegrees != 0f) {
+                                    val m = android.graphics.Matrix().apply { postRotate(rotationDegrees) }
+                                    val rotated = android.graphics.Bitmap.createBitmap(
+                                        rawPage, 0, 0, rawPage.width, rawPage.height, m, true
+                                    )
+                                    if (rotated !== rawPage) rawPage.recycle()
+                                    rotated
+                                } else {
+                                    rawPage
+                                }
+
+                                // Cap longer side to maxSide (2048px) so PdfBuilderService hits the 0ms fast path
+                                val longerSide = max(orientedPage.width, orientedPage.height)
+                                if (maxSide > 0 && longerSide > maxSide) {
+                                    val scale = maxSide.toFloat() / longerSide.toFloat()
+                                    val newW = (orientedPage.width * scale).toInt().coerceAtLeast(1)
+                                    val newH = (orientedPage.height * scale).toInt().coerceAtLeast(1)
+                                    val scaled = android.graphics.Bitmap.createScaledBitmap(orientedPage, newW, newH, true)
+                                    if (scaled !== orientedPage) orientedPage.recycle()
+                                    orientedPage = scaled
+                                }
+
+                                val mutablePage = if (orientedPage.isMutable && orientedPage.config == android.graphics.Bitmap.Config.ARGB_8888) {
+                                    orientedPage
+                                } else {
+                                    val copy = orientedPage.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+                                    if (copy !== orientedPage) orientedPage.recycle()
+                                    copy
+                                }
+
+                                val sigBitmap = BitmapFactory.decodeByteArray(sigBytes, 0, sigBytes.size)
+                                if (sigBitmap == null) {
+                                    mutablePage.recycle()
+                                    withContext(Dispatchers.Main) {
+                                        result.error("DECODE_SIG_FAILED", "Failed to decode signature PNG", null)
+                                    }
+                                    return@launch
+                                }
+
+                                val targetWidth = (mutablePage.width * relW).toInt().coerceIn(10, mutablePage.width)
+                                val aspectRatio = sigBitmap.height.toFloat() / sigBitmap.width.toFloat().coerceAtLeast(1f)
+                                val targetHeight = (targetWidth * aspectRatio).toInt().coerceIn(1, mutablePage.height)
+                                val offsetX = (mutablePage.width * relX).toInt().coerceIn(0, (mutablePage.width - targetWidth).coerceAtLeast(0))
+                                val offsetY = (mutablePage.height * relY).toInt().coerceIn(0, (mutablePage.height - targetHeight).coerceAtLeast(0))
+
+                                val canvas = android.graphics.Canvas(mutablePage)
+                                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+                                val dstRect = android.graphics.RectF(
+                                    offsetX.toFloat(),
+                                    offsetY.toFloat(),
+                                    (offsetX + targetWidth).toFloat(),
+                                    (offsetY + targetHeight).toFloat()
+                                )
+                                canvas.drawBitmap(sigBitmap, null, dstRect, paint)
+                                sigBitmap.recycle()
+
+                                val baos = java.io.ByteArrayOutputStream(mutablePage.width * mutablePage.height / 4)
+                                mutablePage.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, baos)
+                                mutablePage.recycle()
+                                val outBytes = baos.toByteArray()
+
+                                val elapsed = SystemClock.elapsedRealtime() - startMs
+                                android.util.Log.d("DocScan", "compositeSignature completed in ${elapsed}ms (${outBytes.size} bytes)")
+
+                                withContext(Dispatchers.Main) {
+                                    result.success(outBytes)
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    result.error("COMPOSITE_ERROR", e.message, null)
+                                }
+                            }
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
