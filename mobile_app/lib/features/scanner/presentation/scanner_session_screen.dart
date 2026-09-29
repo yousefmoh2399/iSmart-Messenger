@@ -408,97 +408,201 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
   Future<({String name, bool applyEnhancement})?> _askFileName() async {
     final controller = TextEditingController(text: _generatedDefaultFileName());
     final palette = context.appThemePalette;
-    bool applyEnhancement = false;
+    final pageCount =
+        ref.read(scanSessionControllerProvider).valueOrNull?.pages.length ?? 1;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return showDialog<({String name, bool applyEnhancement})>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          icon: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: palette.accent.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.picture_as_pdf_rounded,
-              color: palette.accent,
-              size: 40,
+        builder: (context, setDialogState) => Dialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+            side: BorderSide(
+              color: Theme.of(
+                context,
+              ).colorScheme.outlineVariant.withValues(alpha: 0.35),
             ),
           ),
-          title: const Text(
-            'حفظ ملف PDF جديد',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontWeight: FontWeight.bold),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
           ),
-          content: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'أدخل اسماً للمستند. حدّد نوع الورقة لكل صفحة من قائمة الصفحات قبل الحفظ:',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.4,
-                    color: Colors.grey,
+                Center(
+                  child: Container(
+                    width: 68,
+                    height: 68,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          palette.accent.withValues(alpha: 0.18),
+                          palette.accent.withValues(alpha: 0.06),
+                        ],
+                      ),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: palette.accent.withValues(alpha: 0.28),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: palette.accent,
+                      size: 34,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+                Text(
+                  'حفظ وإنهاء المستند',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 19,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.accent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      pageCount == 1
+                          ? 'سيتم تصدير صفحة واحدة كملف PDF'
+                          : 'سيتم دمج $pageCount صفحات في ملف PDF واحد',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: palette.accent,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
                 TextField(
                   controller: controller,
                   autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'اسم الملف',
-                    hintText: 'مثال: مستند ممسوح',
-                    prefixIcon: Icon(Icons.description_outlined),
+                  onChanged: (_) => setDialogState(() {}),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: 'اسم ملف الـ PDF',
+                    hintText: 'مثال: عقد_عمل_2026',
+                    filled: true,
+                    fillColor: isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : const Color(0xFFF8FAFC),
+                    prefixIcon: Icon(
+                      Icons.description_outlined,
+                      color: palette.accent,
+                    ),
+                    suffixIcon: controller.text.isEmpty
+                        ? null
+                        : IconButton(
+                            onPressed: () {
+                              controller.clear();
+                              setDialogState(() {});
+                            },
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            tooltip: 'مسح الاسم',
+                          ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.outlineVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide(
+                        color: palette.accent,
+                        width: 1.8,
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  value: applyEnhancement,
-                  onChanged: (val) =>
-                      setDialogState(() => applyEnhancement = val),
-                  title: const Text('تفعيل التحسين الاحترافي'),
-                  subtitle: const Text(
-                    'إزالة الظلال وتوضيح النصوص (قد يبطئ الحفظ)',
-                    style: TextStyle(fontSize: 11),
-                  ),
-                  contentPadding: EdgeInsets.zero,
-                  activeColor: palette.accent,
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text(
+                          'إلغاء',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        onPressed: controller.text.trim().isEmpty
+                            ? null
+                            : () {
+                                final val = controller.text.trim();
+                                Navigator.pop(
+                                  context,
+                                  val.isNotEmpty
+                                      ? (name: val, applyEnhancement: false)
+                                      : null,
+                                );
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: palette.accent,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.check_circle_rounded, size: 18),
+                        label: const Text(
+                          'حفظ وتصدير PDF',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          actionsPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 12,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final val = controller.text.trim();
-                Navigator.pop(
-                  context,
-                  val.isNotEmpty
-                      ? (name: val, applyEnhancement: applyEnhancement)
-                      : null,
-                );
-              },
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(120, 46),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: const Text('متابعة وحفظ'),
-            ),
-          ],
         ),
       ),
     );
@@ -913,94 +1017,129 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
 
               return Column(
                 children: [
+                  // ── Modern Top Summary Banner ──
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                     child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? Theme.of(context).colorScheme.surfaceContainer
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(20),
+                        gradient: LinearGradient(
+                          begin: Alignment.topRight,
+                          end: Alignment.bottomLeft,
+                          colors: isDark
+                              ? [
+                                  const Color(0xFF1E293B),
+                                  const Color(0xFF1C1C1E),
+                                ]
+                              : [
+                                  palette.accent.withValues(alpha: 0.08),
+                                  Colors.white,
+                                ],
+                        ),
+                        borderRadius: BorderRadius.circular(22),
                         border: Border.all(
-                          color: Theme.of(context).colorScheme.outlineVariant
-                              .withValues(alpha: isDark ? 0.3 : 0.6),
+                          color: palette.accent.withValues(
+                            alpha: isDark ? 0.35 : 0.25,
+                          ),
                         ),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(
-                              alpha: isDark ? 0.15 : 0.03,
+                              alpha: isDark ? 0.2 : 0.04,
                             ),
-                            blurRadius: 10,
+                            blurRadius: 12,
                             offset: const Offset(0, 4),
                           ),
                         ],
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: palette.accent.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Icon(
-                                Icons.pages_rounded,
-                                color: palette.accent,
-                                size: 24,
-                              ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: palette.accent.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(14),
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'عدد الصفحات: ${pages.length}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w800),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'اضغط واسحب الصفحات لإعادة ترتيبها',
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.color
-                                              ?.withValues(alpha: 0.65),
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            FilledButton(
-                              onPressed: _isSavingSession
-                                  ? null
-                                  : _saveAndFinish,
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(80, 40),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                            child: Center(
+                              child: Text(
+                                '${pages.length}',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  color: palette.accent,
                                 ),
                               ),
-                              child: const Text('حفظ'),
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  pages.length == 1
+                                      ? 'صفحة واحدة جاهزة للتصدير'
+                                      : '${pages.length} صفحات جاهزة للتصدير',
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'اسحب لترتيب الصفحات • اضغط على الصورة للتعديل',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        fontSize: 11.5,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            onPressed: _isSavingSession ? null : _saveAndFinish,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: palette.accent,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(0, 42),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            icon: const Icon(
+                              Icons.picture_as_pdf_rounded,
+                              size: 18,
+                            ),
+                            label: const Text(
+                              'حفظ PDF',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
+
+                  // ── Clean Reorderable Page Cards ──
                   Expanded(
                     child: ReorderableListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                      padding: const EdgeInsets.fromLTRB(16, 2, 16, 104),
                       itemCount: pages.length,
                       onReorder: _isSavingSession
                           ? (_, _) {}
@@ -1009,87 +1148,254 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                 .reorderPages(oldIndex, newIndex),
                       itemBuilder: (context, index) {
                         final page = pages[index];
-                        return Card(
+                        return Container(
                           key: ValueKey(page.id),
-                          color: isDark
-                              ? Theme.of(context).colorScheme.surfaceContainer
-                              : Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF1C1C1E)
+                                : Colors.white,
                             borderRadius: BorderRadius.circular(20),
-                            side: BorderSide(
+                            border: Border.all(
                               color: Theme.of(context)
                                   .colorScheme
                                   .outlineVariant
-                                  .withValues(alpha: isDark ? 0.3 : 0.6),
+                                  .withValues(alpha: isDark ? 0.3 : 0.65),
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: isDark ? 0.16 : 0.03,
+                                ),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
-                          margin: const EdgeInsets.only(bottom: 12),
                           child: Padding(
                             padding: const EdgeInsets.all(12),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                // Thumbnail with page number badge
                                 GestureDetector(
-                                  onTap: _isSavingSession ? null : () => _editPage(page),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .outlineVariant
-                                            .withValues(alpha: 0.5),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(11),
-                                      child: Image.file(
-                                        File(page.imagePath),
-                                        cacheWidth: 200,
-                                        cacheHeight: 260,
-                                        key: ValueKey(
-                                          File(page.imagePath).existsSync()
-                                              ? File(page.imagePath)
-                                                    .lastModifiedSync()
-                                                    .millisecondsSinceEpoch
-                                              : 0,
+                                  onTap: _isSavingSession
+                                      ? null
+                                      : () => _editPage(page),
+                                  child: Stack(
+                                    children: [
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          border: Border.all(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outlineVariant
+                                                .withValues(alpha: 0.5),
+                                          ),
                                         ),
-                                        width: 86,
-                                        height: 114,
-                                        fit: BoxFit.cover,
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            13,
+                                          ),
+                                          child: Image.file(
+                                            File(page.imagePath),
+                                            cacheWidth: 220,
+                                            cacheHeight: 290,
+                                            key: ValueKey(
+                                              File(page.imagePath).existsSync()
+                                                  ? File(page.imagePath)
+                                                        .lastModifiedSync()
+                                                        .millisecondsSinceEpoch
+                                                  : 0,
+                                            ),
+                                            width: 90,
+                                            height: 122,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        ),
                                       ),
-                                    ),
+                                      Positioned(
+                                        top: 6,
+                                        right: 6,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 7,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.72,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            '${index + 1}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        bottom: 6,
+                                        left: 6,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: palette.accent.withValues(
+                                              alpha: 0.88,
+                                            ),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.tune_rounded,
+                                            size: 12,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(width: 14),
+                                const SizedBox(width: 12),
+
+                                // Right Details + Compact Controls
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        'الصفحة ${index + 1}',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 16,
+                                      // Row 1: Title + Paper size pill + Drag indicator
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              'الصفحة ${index + 1}',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w800,
+                                                    fontSize: 15.5,
+                                                  ),
                                             ),
+                                          ),
+                                          // Compact Paper Size Selector Pill
+                                          PopupMenuButton<DocumentPaperSize>(
+                                            enabled: !_isSavingSession,
+                                            tooltip: 'تغيير مقاس الورقة',
+                                            onSelected: (size) {
+                                              ref
+                                                  .read(
+                                                    scanSessionControllerProvider
+                                                        .notifier,
+                                                  )
+                                                  .updatePagePaperSize(
+                                                    page.id,
+                                                    size,
+                                                  );
+                                            },
+                                            itemBuilder: (_) =>
+                                                DocumentPaperSize.values
+                                                    .map(
+                                                      (s) => PopupMenuItem(
+                                                        value: s,
+                                                        child: Row(
+                                                          children: [
+                                                            Icon(
+                                                              s ==
+                                                                      page
+                                                                          .paperSize
+                                                                  ? Icons
+                                                                        .radio_button_checked_rounded
+                                                                  : Icons
+                                                                        .radio_button_off_rounded,
+                                                              size: 18,
+                                                              color: palette
+                                                                  .accent,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 8,
+                                                            ),
+                                                            Text(s.label),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    )
+                                                    .toList(),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 9,
+                                                    vertical: 4,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: palette.accent
+                                                    .withValues(alpha: 0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: Border.all(
+                                                  color: palette.accent
+                                                      .withValues(alpha: 0.25),
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.aspect_ratio_rounded,
+                                                    size: 13,
+                                                    color: palette.accent,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    page.paperSize.label,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: palette.accent,
+                                                    ),
+                                                  ),
+                                                  Icon(
+                                                    Icons
+                                                        .arrow_drop_down_rounded,
+                                                    size: 16,
+                                                    color: palette.accent,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Icon(
+                                            Icons.drag_indicator_rounded,
+                                            size: 20,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant
+                                                .withValues(alpha: 0.45),
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(height: 6),
+                                      const SizedBox(height: 4),
+
+                                      // Row 2: Timestamp & Filter info
                                       Row(
                                         children: [
                                           Icon(
                                             Icons.schedule_rounded,
-                                            size: 14,
-                                            color: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.color
-                                                ?.withValues(alpha: 0.6),
+                                            size: 13,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
                                           ),
                                           const SizedBox(width: 4),
                                           Text(
@@ -1098,108 +1404,44 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                                 .textTheme
                                                 .bodySmall
                                                 ?.copyWith(
+                                                  fontSize: 11.5,
                                                   color: Theme.of(context)
-                                                      .textTheme
-                                                      .bodySmall
-                                                      ?.color
-                                                      ?.withValues(alpha: 0.7),
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
                                                 ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 10),
-                                      DropdownButtonFormField<
-                                        DocumentPaperSize
-                                      >(
-                                        value: page.paperSize,
-                                        isExpanded: true,
-                                        decoration: InputDecoration(
-                                          labelText: 'نوع الورقة',
-                                          prefixIcon: Icon(
-                                            Icons.aspect_ratio_rounded,
-                                            size: 18,
-                                            color: palette.accent,
-                                          ),
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 8,
-                                              ),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                          isDense: true,
-                                        ),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 12,
-                                            ),
-                                        items: DocumentPaperSize.values
-                                            .map(
-                                              (size) => DropdownMenuItem(
-                                                value: size,
-                                                child: Text(size.label),
-                                              ),
-                                            )
-                                            .toList(),
-                                        onChanged: _isSavingSession
-                                            ? null
-                                            : (size) {
-                                                if (size == null) return;
-                                                ref
-                                                    .read(
-                                                      scanSessionControllerProvider
-                                                          .notifier,
-                                                    )
-                                                    .updatePagePaperSize(
-                                                      page.id,
-                                                      size,
-                                                    );
-                                              },
-                                      ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
+
+                                      // Row 3: Organized Action Strip
                                       Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
+                                        spacing: 6,
+                                        runSpacing: 6,
                                         children: [
-                                          OutlinedButton.icon(
-                                            onPressed: _isSavingSession
+                                          _buildPageActionChip(
+                                            label: 'توقيع',
+                                            icon: Icons.draw_rounded,
+                                            color: palette.success,
+                                            filled: true,
+                                            onTap: _isSavingSession
+                                                ? null
+                                                : () =>
+                                                      _openSignatureFlow(page),
+                                          ),
+                                          _buildPageActionChip(
+                                            label: 'تعديل',
+                                            icon: Icons.tune_rounded,
+                                            color: palette.accent,
+                                            onTap: _isSavingSession
                                                 ? null
                                                 : () => _editPage(page),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: palette.accent,
-                                              side: BorderSide(
-                                                color: palette.accent
-                                                    .withValues(alpha: 0.4),
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              minimumSize: const Size(0, 34),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              textStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.tune_rounded,
-                                              size: 15,
-                                            ),
-                                            label: const Text('تعديل'),
                                           ),
-                                          OutlinedButton.icon(
-                                            onPressed: _isSavingSession
+                                          _buildPageActionChip(
+                                            label: 'تدوير',
+                                            icon: Icons.rotate_right_rounded,
+                                            color: palette.accent,
+                                            onTap: _isSavingSession
                                                 ? null
                                                 : () => ref
                                                       .read(
@@ -1207,72 +1449,24 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                                             .notifier,
                                                       )
                                                       .rotatePage(page.id),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: palette.accent,
-                                              side: BorderSide(
-                                                color: palette.accent
-                                                    .withValues(alpha: 0.4),
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              minimumSize: const Size(0, 34),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              textStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.rotate_right_rounded,
-                                              size: 15,
-                                            ),
-                                            label: const Text('تدوير'),
                                           ),
-                                          OutlinedButton.icon(
-                                            onPressed: _isSavingSession
+                                          _buildPageActionChip(
+                                            label: 'إعادة',
+                                            icon: Icons.cameraswitch_outlined,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurface,
+                                            onTap: _isSavingSession
                                                 ? null
                                                 : () => _startScan(
                                                     replacePageId: page.id,
                                                   ),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurface
-                                                  .withValues(alpha: 0.8),
-                                              side: BorderSide(
-                                                color: Theme.of(
-                                                  context,
-                                                ).colorScheme.outlineVariant,
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              minimumSize: const Size(0, 34),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              textStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.cached_rounded,
-                                              size: 15,
-                                            ),
-                                            label: const Text('إعادة مسح'),
                                           ),
-                                          OutlinedButton.icon(
-                                            onPressed: _isSavingSession
+                                          _buildPageActionChip(
+                                            label: 'حذف',
+                                            icon: Icons.delete_outline_rounded,
+                                            color: palette.danger,
+                                            onTap: _isSavingSession
                                                 ? null
                                                 : () => ref
                                                       .read(
@@ -1280,80 +1474,10 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                                             .notifier,
                                                       )
                                                       .deletePage(page.id),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: palette.danger,
-                                              side: BorderSide(
-                                                color: palette.danger
-                                                    .withValues(alpha: 0.4),
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              minimumSize: const Size(0, 34),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              textStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.delete_outline_rounded,
-                                              size: 15,
-                                            ),
-                                            label: const Text('حذف'),
-                                          ),
-                                          // ── Signature button ──
-                                          OutlinedButton.icon(
-                                            onPressed: _isSavingSession
-                                                ? null
-                                                : () => _openSignatureFlow(
-                                                      page,
-                                                    ),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: palette.success,
-                                              side: BorderSide(
-                                                color: palette.success
-                                                    .withValues(alpha: 0.5),
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              minimumSize: const Size(0, 34),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                              textStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.draw_rounded,
-                                              size: 15,
-                                            ),
-                                            label: const Text('توقيع'),
                                           ),
                                         ],
                                       ),
                                     ],
-                                  ),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Icon(
-                                    Icons.drag_indicator_rounded,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurface
-                                        .withValues(alpha: 0.4),
                                   ),
                                 ),
                               ],
@@ -1367,80 +1491,120 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
               );
             },
           ),
+
+          // ── Modern Frosted-Glass PDF Saving Modal ──
           if (_isSavingSession)
             Positioned.fill(
               child: ClipRect(
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                  filter: ImageFilter.blur(sigmaX: 12.0, sigmaY: 12.0),
                   child: Container(
-                    color: Colors.black.withValues(alpha: 0.4),
+                    color: Colors.black.withValues(alpha: 0.48),
                     child: Center(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 320),
-                        child: Card(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(28),
-                            side: BorderSide(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outlineVariant
-                                  .withValues(alpha: 0.3),
+                        constraints: const BoxConstraints(maxWidth: 310),
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(26, 28, 26, 24),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF1E1E24).withValues(
+                                    alpha: 0.94,
+                                  )
+                                : Colors.white.withValues(alpha: 0.96),
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(
+                              color: palette.accent.withValues(alpha: 0.25),
+                              width: 1.5,
                             ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.28),
+                                blurRadius: 30,
+                                offset: const Offset(0, 12),
+                              ),
+                            ],
                           ),
-                          elevation: 8,
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const SizedBox(
-                                  width: 48,
-                                  height: 48,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 4.5,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Container(
+                                    width: 72,
+                                    height: 72,
+                                    decoration: BoxDecoration(
+                                      color: palette.accent.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 66,
+                                    height: 66,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 3.5,
+                                      color: palette.accent,
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.picture_as_pdf_rounded,
+                                    size: 30,
+                                    color: palette.accent,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                'جارٍ حفظ ملف الـ PDF',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 17,
+                                    ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 6),
+                              Consumer(
+                                builder: (ctx, ref, _) {
+                                  final progress = ref.watch(
+                                    scanSaveProgressProvider,
+                                  );
+                                  return AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 220),
+                                    child: Text(
+                                      key: ValueKey(progress),
+                                      progress.isNotEmpty
+                                          ? progress
+                                          : 'يتم دمج الصفحات بأعلى جودة...',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
+                                            fontWeight: FontWeight.w600,
+                                            height: 1.4,
+                                          ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 16),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: LinearProgressIndicator(
+                                  minHeight: 5,
+                                  color: palette.accent,
+                                  backgroundColor: palette.accent.withValues(
+                                    alpha: 0.15,
                                   ),
                                 ),
-                                const SizedBox(height: 24),
-                                Consumer(
-                                  builder: (ctx, ref, _) {
-                                    final progress = ref.watch(
-                                      scanSaveProgressProvider,
-                                    );
-                                    return AnimatedSwitcher(
-                                      duration: const Duration(
-                                        milliseconds: 300,
-                                      ),
-                                      child: Text(
-                                        key: ValueKey(progress),
-                                        progress.isNotEmpty
-                                            ? progress
-                                            : 'جارٍ تجهيز الملف وحفظه...',
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleMedium?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  'انتظر لحظات حتى ينتهي إنشاء الملف بدون إغلاق الشاشة.',
-                                  style: Theme.of(context).textTheme.bodyMedium
-                                      ?.copyWith(
-                                        color: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.color
-                                            ?.withValues(alpha: 0.75),
-                                        height: 1.4,
-                                      ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -1449,37 +1613,45 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                 ),
               ),
             ),
+
           if (_isLoadingScanner)
             Positioned.fill(
-              child: Container(
-                color: Colors.black45,
-                child: Center(
+              child: ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 8.0, sigmaY: 8.0),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 24,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black26,
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
+                    color: Colors.black.withValues(alpha: 0.4),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 22,
                         ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: palette.accent),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'جارٍ تحميل الكاميرا...',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF1E1E24)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 16,
+                              offset: Offset(0, 6),
+                            ),
+                          ],
                         ),
-                      ],
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(color: palette.accent),
+                            const SizedBox(height: 14),
+                            const Text(
+                              'جارٍ فتح الكاميرا الذكية...',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1489,4 +1661,48 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
       ),
     );
   }
+
+  Widget _buildPageActionChip({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback? onTap,
+    bool filled = false,
+  }) {
+    return Material(
+      color: filled
+          ? color.withValues(alpha: 0.14)
+          : color.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: color.withValues(alpha: filled ? 0.45 : 0.25),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
+
