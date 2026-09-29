@@ -713,24 +713,114 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
         title: const Text('مسح مستند جديد'),
         actions: [
           IconButton(
-            tooltip: 'تجربة الكاميرا الأصلية (Debug)',
+            tooltip: 'تجربة الكاميرا الأصلية (Smoke Test)',
             icon: const Icon(Icons.photo_camera_rounded),
             onPressed: () async {
               try {
+                final scanSw = Stopwatch()..start();
                 final drafts = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
                 final result = await NativeScannerBridge.startScan(destDir: drafts.path);
-                if (result != null && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('✅ تم الالتقاط بنجاح!\nالمسار: ${result.path}\nالنقاط: ${result.corners.length}'),
-                      duration: const Duration(seconds: 4),
-                    ),
-                  );
+                final scanDuration = scanSw.elapsedMilliseconds;
+
+                if (result == null) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('تم إلغاء المسح أو رفض الإذن')),
+                    );
+                  }
+                  return;
                 }
+
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('جاري تصحيح المنظور وتطبيق الفلتر...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+
+                // Step 2: Warp
+                final warpSw = Stopwatch()..start();
+                final warpedPath = '${result.path}_warped.jpg';
+                await NativeScannerBridge.warp(
+                  path: result.path,
+                  corners: result.corners,
+                  outPath: warpedPath,
+                );
+                final warpDuration = warpSw.elapsedMilliseconds;
+
+                // Step 3: Enhance filter
+                final filterSw = Stopwatch()..start();
+                final filteredPath = '${result.path}_enhanced.jpg';
+                await NativeScannerBridge.applyFilter(
+                  path: warpedPath,
+                  filter: 'enhance',
+                  outPath: filteredPath,
+                  maxSide: 1600,
+                );
+                final filterDuration = filterSw.elapsedMilliseconds;
+                final totalProcessDuration = warpDuration + filterDuration;
+
+                if (!context.mounted) return;
+                await showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('اختبار السلسلة الأصلية (Smoke Test)'),
+                    content: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              File(filteredPath),
+                              fit: BoxFit.contain,
+                              height: 320,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(ctx).colorScheme.surfaceVariant.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('⚡ زمن الالتقاط: ${scanDuration}ms'),
+                                Text('📐 تصحيح المنظور (Warp): ${warpDuration}ms'),
+                                Text('🎨 فلتر Enhance (1600px): ${filterDuration}ms'),
+                                const Divider(height: 16),
+                                Text(
+                                  '⏱️ إجمالي المعالجة بعد الالتقاط: ${totalProcessDuration}ms',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                Text('📏 الأبعاد الأصلية: ${result.width} × ${result.height}'),
+                                Text(
+                                  '📍 النقاط: [${result.corners.map((e) => e.toStringAsFixed(2)).join(', ')}]',
+                                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        child: const Text('إغلاق'),
+                      ),
+                    ],
+                  ),
+                );
               } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('خطأ الكاميرا الأصلية: $e')),
+                    SnackBar(content: Text('خطأ في سلسلة الاختبار: $e')),
                   );
                 }
               }

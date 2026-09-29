@@ -17,8 +17,10 @@ import android.app.Activity
 import com.example.mobile_app.scanner.DocumentDetector
 import com.example.mobile_app.scanner.ImageFilters
 import com.example.mobile_app.scanner.ScannerActivity
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opencv.android.OpenCVLoader
@@ -195,12 +197,17 @@ class MainActivity : FlutterActivity() {
                         }
                         pendingScannerResult = result
                         val destDir = call.argument<String>("destDir")
-                        val intent = Intent(this, ScannerActivity::class.java).apply {
-                            if (!destDir.isNullOrBlank()) {
-                                putExtra(ScannerActivity.EXTRA_DEST_DIR, destDir)
+                        try {
+                            val intent = Intent(this, ScannerActivity::class.java).apply {
+                                if (!destDir.isNullOrBlank()) {
+                                    putExtra(ScannerActivity.EXTRA_DEST_DIR, destDir)
+                                }
                             }
+                            startActivityForResult(intent, REQUEST_CODE_SCANNER)
+                        } catch (e: Exception) {
+                            pendingScannerResult = null
+                            result.error("LAUNCH_FAILED", "Failed to launch ScannerActivity: ${e.message}", null)
                         }
-                        startActivityForResult(intent, REQUEST_CODE_SCANNER)
                     }
                     "warp" -> {
                         val path = call.argument<String>("path")
@@ -211,6 +218,7 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         mainScope.launch(Dispatchers.Default) {
+                            val warpStart = SystemClock.elapsedRealtime()
                             try {
                                 val src = Imgcodecs.imread(path, Imgcodecs.IMREAD_COLOR)
                                 if (src.empty()) {
@@ -234,6 +242,9 @@ class MainActivity : FlutterActivity() {
                                 val success = Imgcodecs.imwrite(outPath, warped, writeParams)
                                 writeParams.release()
                                 warped.release()
+
+                                val warpDuration = SystemClock.elapsedRealtime() - warpStart
+                                android.util.Log.d("DocScan", "Warp time (transform + write): ${warpDuration}ms -> $outPath")
 
                                 withContext(Dispatchers.Main) {
                                     if (success) result.success(outPath)
@@ -304,31 +315,47 @@ class MainActivity : FlutterActivity() {
             }
     }
 
+    private fun replyScannerResult(block: (MethodChannel.Result) -> Unit) {
+        val pending = pendingScannerResult ?: return
+        pendingScannerResult = null
+        try {
+            block(pending)
+        } catch (e: Exception) {
+            android.util.Log.e("DocScan", "Failed to reply to scanner result", e)
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE_SCANNER) {
-            val pending = pendingScannerResult
-            pendingScannerResult = null
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                val path = data.getStringExtra(ScannerActivity.RESULT_PATH)
-                val corners = data.getDoubleArrayExtra(ScannerActivity.RESULT_CORNERS)
-                val width = data.getIntExtra(ScannerActivity.RESULT_WIDTH, 0)
-                val height = data.getIntExtra(ScannerActivity.RESULT_HEIGHT, 0)
-                if (path != null && corners != null) {
-                    pending?.success(
-                        mapOf(
-                            "path" to path,
-                            "corners" to corners.toList(),
-                            "width" to width,
-                            "height" to height
+            replyScannerResult { pending ->
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    val path = data.getStringExtra(ScannerActivity.RESULT_PATH)
+                    val corners = data.getDoubleArrayExtra(ScannerActivity.RESULT_CORNERS)
+                    val width = data.getIntExtra(ScannerActivity.RESULT_WIDTH, 0)
+                    val height = data.getIntExtra(ScannerActivity.RESULT_HEIGHT, 0)
+                    if (path != null && corners != null) {
+                        pending.success(
+                            mapOf(
+                                "path" to path,
+                                "corners" to corners.toList(),
+                                "width" to width,
+                                "height" to height
+                            )
                         )
-                    )
+                    } else {
+                        pending.error("SCANNER_FAILED", "Incomplete scan result", null)
+                    }
                 } else {
-                    pending?.error("SCANNER_FAILED", "Incomplete scan result", null)
+                    pending.success(null)
                 }
-            } else {
-                pending?.success(null)
             }
         }
+    }
+
+    override fun onDestroy() {
+        replyScannerResult { it.success(null) }
+        mainScope.cancel()
+        super.onDestroy()
     }
 }

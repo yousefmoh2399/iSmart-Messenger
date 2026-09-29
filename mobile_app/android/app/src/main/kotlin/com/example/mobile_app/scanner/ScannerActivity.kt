@@ -1,8 +1,10 @@
 package com.example.mobile_app.scanner
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -46,7 +48,7 @@ import kotlin.math.hypot
 class ScannerActivity : ComponentActivity() {
 
     companion object {
-        private const val TAG = "ScannerActivity"
+        private const val TAG = "DocScan"
         const val EXTRA_DEST_DIR = "extra_dest_dir"
         const val RESULT_PATH = "result_path"
         const val RESULT_CORNERS = "result_corners" // DoubleArray of 8 normalized coords
@@ -65,6 +67,11 @@ class ScannerActivity : ComponentActivity() {
     private var isTorchOn = false
     private var isCapturing = false
     private var lastShutterTime = 0L
+    private var shutterTapTime = 0L
+
+    // Analyzer timing metrics
+    private var analyzerFrameCount = 0
+    private var analyzerTotalTimeMs = 0L
 
     // Live quad tracking state
     @Volatile
@@ -74,6 +81,15 @@ class ScannerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "Camera permission missing, finishing with RESULT_CANCELED")
+            setResult(Activity.RESULT_CANCELED)
+            finish()
+            return
+        }
 
         if (!OpenCVLoader.initLocal()) {
             Log.e(TAG, "OpenCVLoader.initLocal() failed")
@@ -242,6 +258,7 @@ class ScannerActivity : ComponentActivity() {
 
     @SuppressLint("UnsafeOptInUsageError")
     private fun analyzePreviewFrame(imageProxy: ImageProxy) {
+        val frameStartTime = SystemClock.elapsedRealtime()
         try {
             val yPlane = imageProxy.planes[0]
             val yBuffer = yPlane.buffer
@@ -308,6 +325,14 @@ class ScannerActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error analyzing preview frame", e)
         } finally {
+            val frameDuration = SystemClock.elapsedRealtime() - frameStartTime
+            analyzerTotalTimeMs += frameDuration
+            analyzerFrameCount++
+            if (analyzerFrameCount % 30 == 0) {
+                val avg = analyzerTotalTimeMs.toDouble() / 30.0
+                Log.d(TAG, "Analyzer average time per frame (last 30 frames): ${"%.2f".format(avg)}ms")
+                analyzerTotalTimeMs = 0L
+            }
             imageProxy.close()
         }
     }
@@ -355,6 +380,7 @@ class ScannerActivity : ComponentActivity() {
         }
         isCapturing = true
         lastShutterTime = now
+        shutterTapTime = now
 
         val capture = imageCapture ?: run {
             isCapturing = false
@@ -368,7 +394,8 @@ class ScannerActivity : ComponentActivity() {
             cameraExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                    processCapturedPhoto(imageProxy, liveQuad)
+                    val captureSuccessTime = SystemClock.elapsedRealtime()
+                    processCapturedPhoto(imageProxy, liveQuad, shutterTapTime, captureSuccessTime)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -380,7 +407,12 @@ class ScannerActivity : ComponentActivity() {
     }
 
     @SuppressLint("UnsafeOptInUsageError")
-    private fun processCapturedPhoto(imageProxy: ImageProxy, liveNormalizedQuad: List<Point>?) {
+    private fun processCapturedPhoto(
+        imageProxy: ImageProxy,
+        liveNormalizedQuad: List<Point>?,
+        tapTime: Long,
+        captureSuccessTime: Long
+    ) {
         try {
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
             val plane = imageProxy.planes[0]
@@ -390,7 +422,7 @@ class ScannerActivity : ComponentActivity() {
 
             val rawMat = Mat(1, bytes.size, CvType.CV_8UC1)
             rawMat.put(0, 0, bytes)
-            val decoded = Imgcodecs.imdecode(rawMat, Imgcodecs.IMREAD_COLOR)
+            val decoded = Imgcodecs.imdecode(rawMat, Imgcodecs.IMREAD_COLOR or Imgcodecs.IMREAD_IGNORE_ORIENTATION)
             rawMat.release()
 
             if (decoded.empty()) {
@@ -445,6 +477,15 @@ class ScannerActivity : ComponentActivity() {
             Imgcodecs.imwrite(outputFile.absolutePath, oriented, writeParams)
             writeParams.release()
             oriented.release()
+
+            val fileWrittenTime = SystemClock.elapsedRealtime()
+            val tapToCaptureMs = captureSuccessTime - tapTime
+            val captureToWriteMs = fileWrittenTime - captureSuccessTime
+            val totalLatencyMs = fileWrittenTime - tapTime
+            Log.d(
+                TAG,
+                "Shutter timeline: tap->capture=${tapToCaptureMs}ms, capture->written=${captureToWriteMs}ms, total tap->setResult=${totalLatencyMs}ms"
+            )
 
             // Format corners array [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
             val cornersArray = DoubleArray(8)

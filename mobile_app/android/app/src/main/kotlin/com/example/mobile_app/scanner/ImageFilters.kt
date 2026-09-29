@@ -16,7 +16,7 @@ import kotlin.math.pow
 
 object ImageFilters {
 
-    private const val TAG = "ImageFilters"
+    private const val TAG = "DocScan"
 
     /**
      * Executes the requested filter on [inPath] and saves the result to [outPath].
@@ -87,7 +87,7 @@ object ImageFilters {
             writeParams.release()
 
             val elapsed = System.currentTimeMillis() - startTime
-            Log.d(TAG, "Filter '$normalizedFilter' completed in ${elapsed}ms -> $outPath (success=$success)")
+            Log.d(TAG, "Filter '$normalizedFilter' runFile completed in ${elapsed}ms -> $outPath (success=$success)")
             return success
         } catch (e: Exception) {
             Log.e(TAG, "Error applying filter '$filter'", e)
