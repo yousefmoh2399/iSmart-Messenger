@@ -5,10 +5,12 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -19,6 +21,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -90,6 +93,22 @@ class ScannerActivity : ComponentActivity() {
     private var latestNormalizedQuad: List<Point>? = null
     private var previousQuad: List<Point>? = null
     private var missedFrameCount = 0
+
+    private val pickSingleLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            importImagesFromGallery(listOf(uri))
+        }
+    }
+
+    private val pickMultipleLauncher = registerForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            importImagesFromGallery(uris)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -224,6 +243,29 @@ class ScannerActivity : ComponentActivity() {
             setBackgroundColor(Color.parseColor("#44000000"))
         }
 
+        val galleryButton = ImageButton(this).apply {
+            val size = dp(48)
+            layoutParams = FrameLayout.LayoutParams(size, size, Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                marginStart = dp(24)
+            }
+            setImageResource(android.R.drawable.ic_menu_gallery)
+            setColorFilter(Color.WHITE)
+            val bg = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#55000000"))
+                setStroke(dp(1), Color.parseColor("#80FFFFFF"))
+            }
+            background = bg
+            setOnClickListener {
+                if (isBatchMode) {
+                    pickMultipleLauncher.launch("image/*")
+                } else {
+                    pickSingleLauncher.launch("image/*")
+                }
+            }
+        }
+        bottomBar.addView(galleryButton)
+
         val shutterButton = View(this).apply {
             val size = dp(74)
             layoutParams = FrameLayout.LayoutParams(size, size, Gravity.CENTER)
@@ -264,6 +306,121 @@ class ScannerActivity : ComponentActivity() {
         root.addView(bottomBar)
 
         setContentView(root)
+    }
+
+    private fun importImagesFromGallery(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        cameraExecutor.execute {
+            try {
+                val destFolder = File(destinationDir!!)
+                destFolder.mkdirs()
+
+                for (uri in uris) {
+                    val fileName = "raw_${UUID.randomUUID()}.jpg"
+                    val outputFile = File(destFolder, fileName)
+
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        outputFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+
+                    if (!outputFile.exists() || outputFile.length() == 0L) continue
+
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(outputFile.absolutePath, options)
+                    val rawWidth = options.outWidth
+                    val rawHeight = options.outHeight
+
+                    if (rawWidth <= 0 || rawHeight <= 0) {
+                        outputFile.delete()
+                        continue
+                    }
+
+                    val exif = ExifInterface(outputFile.absolutePath)
+                    val orientation = exif.getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL
+                    )
+
+                    val isRotated90 = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                            orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
+                            orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+                            orientation == ExifInterface.ORIENTATION_TRANSVERSE
+
+                    val uprightWidth = if (isRotated90) rawHeight else rawWidth
+                    val uprightHeight = if (isRotated90) rawWidth else rawHeight
+
+                    val src = Imgcodecs.imread(outputFile.absolutePath, Imgcodecs.IMREAD_COLOR)
+                    val detectedCorners = if (!src.empty()) {
+                        val gray = Mat()
+                        Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY)
+                        val quad = DocumentDetector.findQuad(gray)
+                        gray.release()
+                        src.release()
+                        quad?.map { Point(it.x / uprightWidth.toDouble(), it.y / uprightHeight.toDouble()) }
+                    } else {
+                        null
+                    }
+
+                    val finalCorners = detectedCorners ?: listOf(
+                        Point(0.05, 0.05),
+                        Point(0.95, 0.05),
+                        Point(0.95, 0.95),
+                        Point(0.05, 0.95)
+                    )
+
+                    val cornersArray = DoubleArray(8)
+                    cornersArray[0] = finalCorners[0].x
+                    cornersArray[1] = finalCorners[0].y
+                    cornersArray[2] = finalCorners[1].x
+                    cornersArray[3] = finalCorners[1].y
+                    cornersArray[4] = finalCorners[2].x
+                    cornersArray[5] = finalCorners[2].y
+                    cornersArray[6] = finalCorners[3].x
+                    cornersArray[7] = finalCorners[3].y
+
+                    val pageBundle = Bundle().apply {
+                        putString(RESULT_PATH, outputFile.absolutePath)
+                        putDoubleArray(RESULT_CORNERS, cornersArray)
+                        putInt(RESULT_WIDTH, uprightWidth)
+                        putInt(RESULT_HEIGHT, uprightHeight)
+                    }
+
+                    if (isBatchMode) {
+                        synchronized(batchItems) {
+                            batchItems.add(pageBundle)
+                        }
+                    } else {
+                        val resultIntent = Intent().apply {
+                            putExtra(RESULT_PATH, outputFile.absolutePath)
+                            putExtra(RESULT_CORNERS, cornersArray)
+                            putExtra(RESULT_WIDTH, uprightWidth)
+                            putExtra(RESULT_HEIGHT, uprightHeight)
+                        }
+                        runOnUiThread {
+                            setResult(Activity.RESULT_OK, resultIntent)
+                            finish()
+                        }
+                        return@execute
+                    }
+                }
+
+                if (isBatchMode) {
+                    runOnUiThread {
+                        updateDoneButtonState()
+                        overlayView?.animate()
+                            ?.alpha(0.2f)
+                            ?.setDuration(70)
+                            ?.withEndAction {
+                                overlayView?.animate()?.alpha(1.0f)?.setDuration(100)?.start()
+                            }?.start()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to import images from gallery", e)
+            }
+        }
     }
 
     private fun startCamera() {

@@ -428,56 +428,63 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
   Widget _buildCropToolbar() {
     return Container(
       color: const Color(0xFF16181F),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: [
-            OutlinedButton.icon(
-              icon: const Icon(Icons.restore_rounded, size: 18),
-              label: const Text('الحدود المكتشفة'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: const BorderSide(color: Colors.white24),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                icon: const Icon(Icons.restore_rounded, size: 18),
+                label: const Text('الحدود المكتشفة'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _corners = List<double>.from(widget.initialCorners.length == 8
+                        ? widget.initialCorners
+                        : [0.05, 0.05, 0.95, 0.05, 0.95, 0.95, 0.05, 0.95]);
+                  });
+                },
               ),
-              onPressed: () {
-                setState(() {
-                  _corners = List<double>.from(widget.initialCorners.length == 8
-                      ? widget.initialCorners
-                      : [0.05, 0.05, 0.95, 0.05, 0.95, 0.95, 0.05, 0.95]);
-                });
-              },
-            ),
-            const SizedBox(width: 12),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.fullscreen_rounded, size: 18),
-              label: const Text('كامل الصورة'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: const BorderSide(color: Colors.white24),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.fullscreen_rounded, size: 18),
+                label: const Text('كامل الصورة'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _corners = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+                  });
+                },
               ),
-              onPressed: () {
-                setState(() {
-                  _corners = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
-                });
-              },
-            ),
-            const Spacer(),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.check_rounded, size: 20),
-              label: const Text('تطبيق القص'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00E676),
-                foregroundColor: Colors.black,
-                textStyle: const TextStyle(fontWeight: FontWeight.w800),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check_rounded, size: 20),
+                label: const Text('تطبيق القص'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00E676),
+                  foregroundColor: Colors.black,
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () {
+                  setState(() => _isEditingCrop = false);
+                  _preparePreview();
+                },
               ),
-              onPressed: () {
-                setState(() => _isEditingCrop = false);
-                _preparePreview();
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -547,47 +554,51 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
             // Actions row: Rotate & Edit Crop
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  IconButton.filledTonal(
-                    tooltip: 'تدوير 90 درجة',
-                    icon: const Icon(Icons.rotate_left_rounded, size: 22),
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF222631),
-                      foregroundColor: Colors.white,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton.filledTonal(
+                      tooltip: 'تدوير 90 درجة',
+                      icon: const Icon(Icons.rotate_left_rounded, size: 22),
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFF222631),
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _isBusy ? null : _rotateLeft,
                     ),
-                    onPressed: _isBusy ? null : _rotateLeft,
-                  ),
-                  const SizedBox(width: 10),
-                  TextButton.icon(
-                    icon: const Icon(Icons.crop_free_rounded, size: 20),
-                    label: const Text('إعادة ضبط حدود القص'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.white70,
-                      backgroundColor: const Color(0xFF222631),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    const SizedBox(width: 10),
+                    TextButton.icon(
+                      icon: const Icon(Icons.crop_free_rounded, size: 20),
+                      label: const Text('إعادة ضبط حدود القص'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        backgroundColor: const Color(0xFF222631),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _isBusy
+                          ? null
+                          : () {
+                              setState(() => _isEditingCrop = true);
+                            },
                     ),
-                    onPressed: _isBusy
-                        ? null
-                        : () {
-                            setState(() => _isEditingCrop = true);
-                          },
-                  ),
-                  const Spacer(),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.done_all_rounded, size: 20),
-                    label: const Text('حفظ الصفحة'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00E676),
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.done_all_rounded, size: 20),
+                      label: const Text('حفظ الصفحة'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E676),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+                        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _isBusy ? null : _confirmAndSave,
                     ),
-                    onPressed: _isBusy ? null : _confirmAndSave,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],

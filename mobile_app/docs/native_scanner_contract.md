@@ -181,6 +181,10 @@ Rotates an image 90 degrees counter-clockwise and writes the result. (Used prima
   - Hidden when `N == 0`.
 - **Torch Toggle Button**:
   - Toggles camera torch/flashlight on and off.
+- **Gallery Import Button (Bottom Bar Start)**:
+  - Circular icon button (`48x48 dp`) at the start side of the bottom bar (`marginStart = 24dp`).
+  - **Single Mode (`batch == false`)**: Opens single-image picker (`GetContent` on Android / `PHPickerViewController(selectionLimit: 1)` on iOS), copies to `destDir/raw_<uuid>.jpg`, detects quad corners (or 5% inset fallback), and immediately returns the result.
+  - **Batch Mode (`batch == true`)**: Opens multi-image picker (`GetMultipleContents` on Android / `PHPickerViewController(selectionLimit: 0)` on iOS), imports all selected images, runs quad detection on each, appends to the batch list, and updates the `"تم (N)"` button.
 - **Close Button**:
   - If batch count == 0: Cancels and returns `null`.
   - If batch count > 0: Displays confirmation alert dialog:
