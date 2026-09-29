@@ -142,7 +142,7 @@ class NativeScannerBridge {
         'corners': corners,
         'outPath': outPath,
         if (maxSide != null && maxSide > 0) 'maxSide': maxSide,
-      });
+      }).timeout(const Duration(seconds: 20));
       debugPrint('[NativeScannerBridge] warp completed in ${sw.elapsedMilliseconds}ms -> $outPath (maxSide=$maxSide)');
       return result ?? outPath;
     } catch (e) {
@@ -167,7 +167,7 @@ class NativeScannerBridge {
         'filter': filter,
         'maxSide': maxSide,
         'outPath': outPath,
-      });
+      }).timeout(const Duration(seconds: 20));
       debugPrint('[NativeScannerBridge] applyFilter ($filter, maxSide=$maxSide) completed in ${sw.elapsedMilliseconds}ms -> $outPath');
       return result ?? outPath;
     } catch (e) {
@@ -186,7 +186,7 @@ class NativeScannerBridge {
       final result = await _channel.invokeMethod<String>('rotateLeft', {
         'path': path,
         'outPath': outPath,
-      });
+      }).timeout(const Duration(seconds: 20));
       debugPrint('[NativeScannerBridge] rotateLeft completed in ${sw.elapsedMilliseconds}ms -> $outPath');
       return result ?? outPath;
     } catch (e) {

@@ -35,17 +35,8 @@ android {
     }
 
     buildTypes {
-        debug {
-            ndk {
-                abiFilters.add("x86_64")
-                abiFilters.add("arm64-v8a")
-            }
-        }
         release {
-            ndk {
-                abiFilters.add("arm64-v8a")
-            }
-    proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")

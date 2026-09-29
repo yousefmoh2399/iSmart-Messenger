@@ -174,12 +174,7 @@ class ScannerActivity : ComponentActivity() {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             setColorFilter(Color.WHITE)
             setOnClickListener {
-                if (batchItems.isNotEmpty()) {
-                    finishWithBatch()
-                } else {
-                    setResult(Activity.RESULT_CANCELED)
-                    finish()
-                }
+                handleBackOrClose()
             }
         }
         topBar.addView(closeButton)
@@ -630,12 +625,48 @@ class ScannerActivity : ComponentActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        handleBackOrClose()
+    }
+
+    private fun handleBackOrClose() {
         if (batchItems.isNotEmpty()) {
-            finishWithBatch()
+            showDiscardBatchConfirmDialog()
         } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
+            setResult(Activity.RESULT_CANCELED)
+            finish()
         }
+    }
+
+    private fun showDiscardBatchConfirmDialog() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("صفحات غير محفوظة")
+            .setMessage("لديك ${batchItems.size} صفحة ممسوحة. هل تريد حفظها ومتابعة الجلسة أم إلغاء الكل؟")
+            .setPositiveButton("حفظ ومتابعة") { _, _ ->
+                finishWithBatch()
+            }
+            .setNegativeButton("إلغاء الكل") { _, _ ->
+                discardBatchAndFinish()
+            }
+            .setNeutralButton("البقاء في الكاميرا", null)
+            .show()
+    }
+
+    private fun discardBatchAndFinish() {
+        synchronized(batchItems) {
+            for (item in batchItems) {
+                val path = item.getString(RESULT_PATH)
+                if (path != null) {
+                    try {
+                        File(path).delete()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to delete temp batch file: $path", e)
+                    }
+                }
+            }
+            batchItems.clear()
+        }
+        setResult(Activity.RESULT_CANCELED)
+        finish()
     }
 
     private fun dp(value: Int): Int {

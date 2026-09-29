@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/pending_upload.dart';
+import '../../../shared/models/scan_page.dart';
 import '../../../shared/models/scan_session.dart';
 import '../../../shared/services/local_media_storage_service.dart';
 
@@ -203,9 +204,68 @@ class LocalDocumentStore {
     );
   }
 
+  Future<String> _toRelativePath(String fullPath) async {
+    if (fullPath.isEmpty) return fullPath;
+    final appDir = await _appDirectory();
+    final appPath = appDir.path;
+    if (fullPath.startsWith(appPath)) {
+      var relative = fullPath.substring(appPath.length);
+      if (relative.startsWith('/') || relative.startsWith('\\')) {
+        relative = relative.substring(1);
+      }
+      return relative.replaceAll('\\', '/');
+    }
+    final draftsIndex = fullPath.indexOf('drafts');
+    if (draftsIndex != -1) {
+      return fullPath.substring(draftsIndex).replaceAll('\\', '/');
+    }
+    return fullPath;
+  }
+
+  Future<String> _toAbsolutePath(String storedPath) async {
+    if (storedPath.isEmpty) return storedPath;
+    final appDir = await _appDirectory();
+
+    // 1. If storedPath exists as an absolute path as-is
+    if (File(storedPath).existsSync()) {
+      return storedPath;
+    }
+
+    // 2. If it is already a relative path, e.g. "drafts/sessionId/page.jpg"
+    final resolvedDirect = path.join(appDir.path, storedPath);
+    if (File(resolvedDirect).existsSync()) {
+      return resolvedDirect;
+    }
+
+    // 3. Transparent migration: if storedPath is an old absolute path from an earlier iOS container UUID
+    final draftsIndex = storedPath.indexOf('drafts');
+    if (draftsIndex != -1) {
+      final subPath = storedPath.substring(draftsIndex);
+      final migratedPath = path.join(appDir.path, subPath);
+      if (File(migratedPath).existsSync()) {
+        return migratedPath;
+      }
+    }
+
+    return resolvedDirect;
+  }
+
   Future<void> saveDraft(ScanSession session) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_scanDraftKey, jsonEncode(session.toJson()));
+    final relativePages = await Future.wait(
+      session.pages.map((page) async {
+        final relImage = await _toRelativePath(page.imagePath);
+        final relOrig = page.originalPath != null
+            ? await _toRelativePath(page.originalPath!)
+            : null;
+        return page.copyWith(
+          imagePath: relImage,
+          originalPath: relOrig,
+        );
+      }),
+    );
+    final relativeSession = session.copyWith(pages: relativePages);
+    await preferences.setString(_scanDraftKey, jsonEncode(relativeSession.toJson()));
   }
 
   Future<ScanSession?> loadDraft() async {
@@ -216,14 +276,40 @@ class LocalDocumentStore {
     final session = ScanSession.fromJson(
       jsonDecode(raw) as Map<String, dynamic>,
     );
-    final validPages = session.pages
-        .where((page) => File(page.imagePath).existsSync())
-        .toList();
-    if (validPages.isEmpty) {
+
+    var migrated = false;
+    final resolvedPages = <ScanPage>[];
+
+    for (final page in session.pages) {
+      final absImagePath = await _toAbsolutePath(page.imagePath);
+      final absOriginalPath = page.originalPath != null
+          ? await _toAbsolutePath(page.originalPath!)
+          : null;
+
+      if (absImagePath != page.imagePath || absOriginalPath != page.originalPath) {
+        migrated = true;
+      }
+
+      if (File(absImagePath).existsSync()) {
+        resolvedPages.add(
+          page.copyWith(
+            imagePath: absImagePath,
+            originalPath: absOriginalPath,
+          ),
+        );
+      }
+    }
+
+    if (resolvedPages.isEmpty) {
       await clearDraft();
       return null;
     }
-    return session.copyWith(pages: validPages);
+
+    final resolvedSession = session.copyWith(pages: resolvedPages);
+    if (migrated || resolvedPages.length != session.pages.length) {
+      await saveDraft(resolvedSession);
+    }
+    return resolvedSession;
   }
 
   Future<void> clearDraft() async {
