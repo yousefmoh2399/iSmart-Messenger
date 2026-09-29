@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+/// Represents the captured scan result returned from the native camera.
 class NativeScannerResult {
   const NativeScannerResult({
     required this.path,
@@ -9,9 +10,18 @@ class NativeScannerResult {
     required this.height,
   });
 
+  /// File path to the captured JPEG on disk.
   final String path;
-  final List<double> corners; // 8 normalized doubles [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
+
+  /// 8 normalized coordinates [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
+  /// in the range [0.0, 1.0], ordered Top-Left, Top-Right, Bottom-Right, Bottom-Left,
+  /// relative to the UPRIGHT portrait image.
+  final List<double> corners;
+
+  /// Upright pixel width.
   final int width;
+
+  /// Upright pixel height.
   final int height;
 
   factory NativeScannerResult.fromMap(Map<dynamic, dynamic> map) {
@@ -28,10 +38,33 @@ class NativeScannerResult {
   }
 }
 
+/// Cross-Platform Native Scanner Channel Contract: "ismart/doc_scanner"
+/// -------------------------------------------------------------------
+/// This class defines the unified API for document scanning across platforms
+/// (Android implementation active; iOS will implement this identical interface).
+///
+/// Principles & Invariants:
+/// 1. Methods:
+///    - `startScan({String? destDir})` -> returns [NativeScannerResult] or null if cancelled.
+///    - `warp({required String path, required List<double> corners, required String outPath, int? maxSide})`
+///    - `applyFilter({required String path, required String filter, required String outPath, int maxSide = 0})`
+///    - `rotateLeft({required String path, required String outPath})`
+/// 2. Data flow:
+///    - Only file paths are exchanged across the channel; image bytes and Base64 are NEVER passed.
+///    - The raw captured image file is written directly to disk and retains upright orientation
+///      when read by an EXIF-honoring reader.
+/// 3. Coordinates:
+///    - `corners` always contains exactly 8 doubles in the order:
+///      [TL.x, TL.y, TR.x, TR.y, BR.x, BR.y, BL.x, BL.y], normalized to [0.0, 1.0]
+///      relative to the upright image dimensions.
+/// 4. Performance & Scalability:
+///    - `warp` accepts optional `maxSide` to allow instant preview rectification (<=1600px)
+///      without full-resolution overhead. Full-resolution warp is executed only when saving.
+///    - Native memory is explicitly managed and released on the native side.
 class NativeScannerBridge {
   static const MethodChannel _channel = MethodChannel('ismart/doc_scanner');
 
-  /// Starts the embedded high-performance native ScannerActivity.
+  /// Starts the embedded high-performance native camera activity/view.
   /// Returns [NativeScannerResult] on successful capture, or null if cancelled.
   static Future<NativeScannerResult?> startScan({String? destDir}) async {
     final sw = Stopwatch()..start();
@@ -49,12 +82,17 @@ class NativeScannerBridge {
     }
   }
 
-  /// Warps a document region defined by 8 normalized corners [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y]
-  /// and writes the perspective-rectified image to [outPath].
+  /// Warps a document quadrilateral defined by 8 normalized corners
+  /// [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y] and writes the perspective-rectified
+  /// image to [outPath].
+  ///
+  /// Optional [maxSide] limits the destination resolution for cheap preview rendering (e.g. 1600).
+  /// Omit [maxSide] (or pass 0) for full-resolution final output.
   static Future<String> warp({
     required String path,
     required List<double> corners,
     required String outPath,
+    int? maxSide,
   }) async {
     final sw = Stopwatch()..start();
     try {
@@ -62,8 +100,9 @@ class NativeScannerBridge {
         'path': path,
         'corners': corners,
         'outPath': outPath,
+        if (maxSide != null && maxSide > 0) 'maxSide': maxSide,
       });
-      debugPrint('[NativeScannerBridge] warp completed in ${sw.elapsedMilliseconds}ms -> $outPath');
+      debugPrint('[NativeScannerBridge] warp completed in ${sw.elapsedMilliseconds}ms -> $outPath (maxSide=$maxSide)');
       return result ?? outPath;
     } catch (e) {
       debugPrint('[NativeScannerBridge] warp failed: $e');
@@ -71,9 +110,9 @@ class NativeScannerBridge {
     }
   }
 
-  /// Applies one of the OpenCV native document filters:
+  /// Applies one of the native document filters:
   /// 'enhance', 'lighten', 'gray', 'eco', 'no_handwriting', 'original'.
-  /// Optional [maxSide] resizes the image before filtering (e.g. 200 for thumbnails, 1600 for preview).
+  /// Optional [maxSide] downscales the image during filtering (e.g. 200 for thumbnails, 1600 for preview).
   static Future<String> applyFilter({
     required String path,
     required String filter,

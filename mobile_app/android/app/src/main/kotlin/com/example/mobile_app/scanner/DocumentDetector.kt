@@ -170,7 +170,7 @@ object DocumentDetector {
      * Quad points must be [TL, TR, BR, BL].
      * Insets the quad by 0.5% toward its centroid to eliminate residual dark border slivers.
      */
-    fun warp(src: Mat, quad: List<Point>): Mat {
+    fun warp(src: Mat, quad: List<Point>, maxSide: Int = 0): Mat {
         require(quad.size == 4) { "warp requires 4 points (TL, TR, BR, BL)" }
 
         val tl = quad[0]
@@ -180,11 +180,20 @@ object DocumentDetector {
 
         val widthA = hypot(br.x - bl.x, br.y - bl.y)
         val widthB = hypot(tr.x - tl.x, tr.y - tl.y)
-        val maxWidth = max(widthA, widthB).toInt().coerceAtLeast(100)
+        var maxWidth = max(widthA, widthB).toInt().coerceAtLeast(100)
 
         val heightA = hypot(tr.x - br.x, tr.y - br.y)
         val heightB = hypot(tl.x - bl.x, tl.y - bl.y)
-        val maxHeight = max(heightA, heightB).toInt().coerceAtLeast(100)
+        var maxHeight = max(heightA, heightB).toInt().coerceAtLeast(100)
+
+        if (maxSide > 0) {
+            val longer = max(maxWidth, maxHeight)
+            if (longer > maxSide) {
+                val scale = maxSide.toDouble() / longer.toDouble()
+                maxWidth = (maxWidth * scale).toInt().coerceAtLeast(50)
+                maxHeight = (maxHeight * scale).toInt().coerceAtLeast(50)
+            }
+        }
 
         // Centroid calculation
         val cx = (tl.x + tr.x + br.x + bl.x) / 4.0

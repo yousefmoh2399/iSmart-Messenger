@@ -245,6 +245,24 @@ class LocalDocumentStore {
     return filePath;
   }
 
+  Future<String> savePageFile({
+    required String sessionId,
+    required String pageId,
+    required String sourcePath,
+  }) async {
+    final draftsDirectory = await getDraftsDirectory();
+    final sessionDirectory = Directory(
+      path.join(draftsDirectory.path, sessionId),
+    );
+    await sessionDirectory.create(recursive: true);
+    final filePath = path.join(sessionDirectory.path, '$pageId.jpg');
+    final sourceFile = File(sourcePath);
+    if (sourcePath != filePath && await sourceFile.exists()) {
+      await sourceFile.copy(filePath);
+    }
+    return filePath;
+  }
+
   Future<String> importRawScanFile({
     required String sessionId,
     required String sourcePath,

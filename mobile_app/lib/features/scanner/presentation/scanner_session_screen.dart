@@ -12,11 +12,13 @@ import '../../../shared/models/document_paper_size.dart';
 import '../../../shared/models/pending_upload.dart';
 import '../../../shared/models/scan_page.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/permission_request_coordinator.dart';
 import '../../../shared/services/remote_desktop_file_service.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/upload_summary_screen.dart';
 import '../data/native_scanner_bridge.dart';
 import '../data/scanner_service.dart';
+import 'scan_review_screen.dart';
 import 'signature_bottom_sheet.dart';
 import 'signature_placement_screen.dart';
 
@@ -54,7 +56,6 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
     setState(() => _isLoadingScanner = true);
 
     final sessionController = ref.read(scanSessionControllerProvider.notifier);
-    final scannerService = ref.read(scannerServiceProvider);
 
     await sessionController.ensureSession();
     if (!mounted) return;
@@ -64,9 +65,23 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
       return;
     }
 
-    List<String>? newImages;
+    NativeScannerResult? scanResult;
     try {
-      newImages = await scannerService.scanMultiplePages();
+      final cameraStatus = await PermissionRequestCoordinator.run(
+        Permission.camera.request,
+      );
+      if (!cameraStatus.isGranted) {
+        throw ScannerPermissionDeniedException(
+          permission: 'الكاميرا',
+          permanentlyDenied:
+              cameraStatus.isPermanentlyDenied || cameraStatus.isRestricted,
+        );
+      }
+
+      final draftsDir =
+          await ref.read(localDocumentStoreProvider).getDraftsDirectory();
+      scanResult =
+          await NativeScannerBridge.startScan(destDir: draftsDir.path);
     } on ScannerPermissionDeniedException catch (error) {
       if (!mounted) return;
       setState(() => _isLoadingScanner = false);
@@ -79,33 +94,32 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(error.toString())));
       return;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingScanner = false);
+      }
     }
 
-    if (mounted) {
-      setState(() => _isLoadingScanner = false);
-    }
+    if (!mounted || scanResult == null) return;
 
-    if (!mounted || newImages == null || newImages.isEmpty) return;
+    final scanPage = await Navigator.of(context).push<ScanPage>(
+      MaterialPageRoute(
+        builder: (_) => ScanReviewScreen(
+          rawImagePath: scanResult!.path,
+          sessionId: session.id,
+          pageId: replacePageId,
+          initialCorners: scanResult.corners,
+          imageWidth: scanResult.width,
+          imageHeight: scanResult.height,
+        ),
+      ),
+    );
 
-    for (int i = 0; i < newImages.length; i++) {
-      final rawImagePath = newImages[i];
-      final resolvedImagePath = await ref
-          .read(localDocumentStoreProvider)
-          .importRawScanFile(sessionId: session.id, sourcePath: rawImagePath);
-      if (!mounted) return;
-
-      final page = ScanPage(
-        id: (i == 0 && replacePageId != null)
-            ? replacePageId
-            : DateTime.now().microsecondsSinceEpoch.toString() + i.toString(),
-        imagePath: resolvedImagePath,
-        createdAt: DateTime.now(),
-      );
-
-      if (i == 0 && replacePageId != null) {
-        await sessionController.replacePage(replacePageId, page);
+    if (scanPage != null && mounted) {
+      if (replacePageId != null) {
+        await sessionController.replacePage(replacePageId, scanPage);
       } else {
-        await sessionController.addPage(page);
+        await sessionController.addPage(scanPage);
       }
     }
   }
@@ -114,8 +128,6 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
     ScannerPermissionDeniedException error,
   ) {
     final isPermanent = error.permanentlyDenied;
-    final platformName = Platform.isIOS ? 'iOS' : 'أندرويد';
-    final deviceName = Platform.isIOS ? 'iPhone' : 'الهاتف';
     final palette = context.appThemePalette;
 
     return showDialog<void>(
@@ -143,7 +155,7 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
           children: [
             Text(
               isPermanent
-                  ? 'المسح الضوئي يحتاج إذن الوصول إلى الكاميرا (${error.permission}).\n\nتم رفض الإذن سابقاً من إعدادات نظام $platformName، يرجى فتح الإعدادات وتفعيله يدوياً.'
+                  ? 'المسح الضوئي يحتاج إذن الوصول إلى الكاميرا (${error.permission}).\n\nتم رفض الإذن سابقاً من إعدادات النظام، يرجى فتح الإعدادات وتفعيله يدوياً.'
                   : 'يحتاج التطبيق إلى إذن الوصول إلى الكاميرا (${error.permission}) لتتمكن من مسح الصفحات والمستندات واستيرادها بنجاح.',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 14, height: 1.5),

@@ -213,6 +213,7 @@ class MainActivity : FlutterActivity() {
                         val path = call.argument<String>("path")
                         val rawCorners = call.argument<List<Double>>("corners")
                         val outPath = call.argument<String>("outPath")
+                        val maxSide = call.argument<Int>("maxSide") ?: 0
                         if (path.isNullOrBlank() || rawCorners == null || rawCorners.size != 8 || outPath.isNullOrBlank()) {
                             result.error("INVALID_ARGS", "path, corners (8 items), and outPath are required", null)
                             return@setMethodCallHandler
@@ -233,7 +234,7 @@ class MainActivity : FlutterActivity() {
                                     Point(rawCorners[4] * w, rawCorners[5] * h),
                                     Point(rawCorners[6] * w, rawCorners[7] * h)
                                 )
-                                val warped = DocumentDetector.warp(src, quad)
+                                val warped = DocumentDetector.warp(src, quad, maxSide)
                                 src.release()
 
                                 val outFile = File(outPath)
