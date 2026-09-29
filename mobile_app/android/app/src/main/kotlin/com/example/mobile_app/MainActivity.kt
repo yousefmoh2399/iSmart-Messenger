@@ -30,6 +30,8 @@ import org.opencv.core.Mat
 import org.opencv.core.MatOfInt
 import org.opencv.core.Point
 import org.opencv.imgcodecs.Imgcodecs
+import android.graphics.BitmapFactory
+import kotlin.math.max
 
 class MainActivity : FlutterActivity() {
     private val installerChannel = "app.installer"
@@ -218,6 +220,7 @@ class MainActivity : FlutterActivity() {
                         val rawCorners = call.argument<List<Double>>("corners")
                         val outPath = call.argument<String>("outPath")
                         val maxSide = call.argument<Int>("maxSide") ?: 0
+                        val quarterTurns = call.argument<Int>("quarterTurns") ?: 0
                         if (path.isNullOrBlank() || rawCorners == null || rawCorners.size != 8 || outPath.isNullOrBlank()) {
                             result.error("INVALID_ARGS", "path, corners (8 items), and outPath are required", null)
                             return@setMethodCallHandler
@@ -226,7 +229,16 @@ class MainActivity : FlutterActivity() {
                             nativeOpSemaphore.acquire()
                             val warpStart = SystemClock.elapsedRealtime()
                             try {
-                                val readFlags = if (maxSide in 1..2000) Imgcodecs.IMREAD_REDUCED_COLOR_2 else Imgcodecs.IMREAD_COLOR
+                                var useReduced = false
+                                if (maxSide > 0) {
+                                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                    BitmapFactory.decodeFile(path, options)
+                                    val longerSide = max(options.outWidth, options.outHeight)
+                                    if (longerSide >= 2 * maxSide) {
+                                        useReduced = true
+                                    }
+                                }
+                                val readFlags = if (useReduced) Imgcodecs.IMREAD_REDUCED_COLOR_2 else Imgcodecs.IMREAD_COLOR
                                 val src = Imgcodecs.imread(path, readFlags)
                                 if (src.empty()) {
                                     withContext(Dispatchers.Main) { result.error("READ_FAILED", "Failed to read image", null) }
@@ -243,15 +255,29 @@ class MainActivity : FlutterActivity() {
                                 val warped = DocumentDetector.warp(src, quad, maxSide)
                                 src.release()
 
+                                val finalWarped = if (quarterTurns % 4 != 0) {
+                                    val rotated = Mat()
+                                    val turns = (quarterTurns % 4 + 4) % 4
+                                    when (turns) {
+                                        1 -> Core.rotate(warped, rotated, Core.ROTATE_90_COUNTERCLOCKWISE)
+                                        2 -> Core.rotate(warped, rotated, Core.ROTATE_180)
+                                        3 -> Core.rotate(warped, rotated, Core.ROTATE_90_CLOCKWISE)
+                                    }
+                                    warped.release()
+                                    rotated
+                                } else {
+                                    warped
+                                }
+
                                 val outFile = File(outPath)
                                 outFile.parentFile?.mkdirs()
                                 val writeParams = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 95)
-                                val success = Imgcodecs.imwrite(outPath, warped, writeParams)
+                                val success = Imgcodecs.imwrite(outPath, finalWarped, writeParams)
                                 writeParams.release()
-                                warped.release()
+                                finalWarped.release()
 
                                 val warpDuration = SystemClock.elapsedRealtime() - warpStart
-                                android.util.Log.d("DocScan", "Warp time (transform + write): ${warpDuration}ms -> $outPath (maxSide=$maxSide)")
+                                android.util.Log.d("DocScan", "Warp time (transform + write): ${warpDuration}ms -> $outPath (maxSide=$maxSide, quarterTurns=$quarterTurns, reduced=$useReduced)")
 
                                 withContext(Dispatchers.Main) {
                                     if (success) result.success(outPath)

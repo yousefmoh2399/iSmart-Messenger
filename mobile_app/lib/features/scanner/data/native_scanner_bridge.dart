@@ -129,11 +129,15 @@ class NativeScannerBridge {
   ///
   /// Optional [maxSide] limits the destination resolution for cheap preview rendering (e.g. 1600).
   /// Omit [maxSide] (or pass 0) for full-resolution final output.
+  ///
+  /// Optional [quarterTurns] (0..3, counter-clockwise) rotates the rectified Mat in-memory
+  /// before saving to [outPath], reducing save passes to warp(+rotation) -> filter.
   static Future<String> warp({
     required String path,
     required List<double> corners,
     required String outPath,
     int? maxSide,
+    int quarterTurns = 0,
   }) async {
     final sw = Stopwatch()..start();
     try {
@@ -142,8 +146,9 @@ class NativeScannerBridge {
         'corners': corners,
         'outPath': outPath,
         if (maxSide != null && maxSide > 0) 'maxSide': maxSide,
+        if (quarterTurns > 0) 'quarterTurns': quarterTurns,
       }).timeout(const Duration(seconds: 20));
-      debugPrint('[NativeScannerBridge] warp completed in ${sw.elapsedMilliseconds}ms -> $outPath (maxSide=$maxSide)');
+      debugPrint('[NativeScannerBridge] warp completed in ${sw.elapsedMilliseconds}ms -> $outPath (maxSide=$maxSide, quarterTurns=$quarterTurns)');
       return result ?? outPath;
     } catch (e) {
       debugPrint('[NativeScannerBridge] warp failed: $e');

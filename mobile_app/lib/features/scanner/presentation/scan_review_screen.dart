@@ -10,6 +10,12 @@ import '../../../shared/providers/providers.dart';
 import '../data/native_scanner_bridge.dart';
 import 'widgets/quad_crop_editor.dart';
 
+/// Screen for interactive review, manual quadrilateral cropping, filter selection, and rotation.
+///
+/// Execution pipeline:
+/// - Preview: Fast native warp (maxSide 1600 with in-memory quarterTurns) -> filter.
+/// - Rotation: Adjusts quarterTurns and re-generates preview without intermediate rotate files.
+/// - Final save: Full-resolution warp(quarterTurns) -> filter (exactly 2 encodes, 0 separate rotateLeft passes).
 class ScanReviewScreen extends ConsumerStatefulWidget {
   const ScanReviewScreen({
     super.key,
@@ -113,12 +119,13 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       final warpedPath = '${draftsDir.path}/preview_warp_$tag.jpg';
       _tempFiles.add(warpedPath);
 
-      // Fast native warp at max 1600px for instant preview
+      // Fast native warp at max 1600px for instant preview with rotation in-memory
       await NativeScannerBridge.warp(
         path: widget.rawImagePath,
         corners: _corners,
         outPath: warpedPath,
         maxSide: 1600,
+        quarterTurns: _quarterRotations,
       ).timeout(const Duration(seconds: 20));
 
       if (token != _previewToken || !mounted) return;
@@ -175,23 +182,9 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
 
       if (token != _previewToken || !mounted) return;
 
-      // If page has quarter rotations applied, rotate the preview result
-      String finalPreview = filteredPath;
-      if (_quarterRotations > 0) {
-        for (int r = 0; r < _quarterRotations; r++) {
-          final rotPath = '${draftsDir.path}/preview_rot_${filterKey}_${tag}_$r.jpg';
-          _tempFiles.add(rotPath);
-          await NativeScannerBridge.rotateLeft(path: finalPreview, outPath: rotPath)
-              .timeout(const Duration(seconds: 20));
-          finalPreview = rotPath;
-        }
-      }
-
-      if (token != _previewToken || !mounted) return;
-
-      _filterCache[filterKey] = finalPreview;
+      _filterCache[filterKey] = filteredPath;
       setState(() {
-        _currentPreviewPath = finalPreview;
+        _currentPreviewPath = filteredPath;
         _isBusy = false;
         _statusText = null;
       });
@@ -208,52 +201,9 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
   }
 
   Future<void> _rotateLeft() async {
-    final current = _currentPreviewPath;
-    final warped = _warpedPreviewPath;
-    if (current == null || warped == null) return;
-
-    final token = ++_previewToken;
-    setState(() {
-      _isBusy = true;
-      _statusText = 'جار تدوير الصفحة...';
-    });
-
-    try {
-      final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
-      final tag = DateTime.now().millisecondsSinceEpoch;
-      final rotatedCurrent = '${draftsDir.path}/rot_current_$tag.jpg';
-      final rotatedWarp = '${draftsDir.path}/rot_warp_$tag.jpg';
-      _tempFiles.addAll([rotatedCurrent, rotatedWarp]);
-
-      await Future.wait([
-        NativeScannerBridge.rotateLeft(path: current, outPath: rotatedCurrent)
-            .timeout(const Duration(seconds: 20)),
-        NativeScannerBridge.rotateLeft(path: warped, outPath: rotatedWarp)
-            .timeout(const Duration(seconds: 20)),
-      ]);
-
-      if (token != _previewToken || !mounted) return;
-
-      _quarterRotations = (_quarterRotations + 1) % 4;
-      _warpedPreviewPath = rotatedWarp;
-      _filterCache.clear();
-      _filterCache[_selectedFilter] = rotatedCurrent;
-
-      setState(() {
-        _currentPreviewPath = rotatedCurrent;
-        _isBusy = false;
-        _statusText = null;
-      });
-    } catch (e) {
-      if (token != _previewToken || !mounted) return;
-      setState(() {
-        _isBusy = false;
-        _statusText = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطأ أثناء التدوير: $e')),
-      );
-    }
+    if (_isBusy) return;
+    _quarterRotations = (_quarterRotations + 1) % 4;
+    await _preparePreview();
   }
 
   Future<void> _confirmAndSave() async {
@@ -270,37 +220,26 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       final fullFilteredPath = '${draftsDir.path}/full_filtered_$pageId.jpg';
       intermediateFiles.addAll([fullWarpPath, fullFilteredPath]);
 
-      // 1. Full-resolution hardware-accelerated warp
+      // 1. Full-resolution hardware-accelerated warp (+ in-memory rotation before single encode)
       await NativeScannerBridge.warp(
         path: widget.rawImagePath,
         corners: _corners,
         outPath: fullWarpPath,
+        quarterTurns: _quarterRotations,
       ).timeout(const Duration(seconds: 20));
 
-      // 2. Full-resolution native OpenCV filter
+      // 2. Full-resolution native OpenCV filter directly on the rotated warped document
       await NativeScannerBridge.applyFilter(
         path: fullWarpPath,
         filter: _selectedFilter,
         outPath: fullFilteredPath,
       ).timeout(const Duration(seconds: 20));
 
-      // 3. Apply quarter rotations if requested
-      String finalPagePath = fullFilteredPath;
-      if (_quarterRotations > 0) {
-        for (int r = 0; r < _quarterRotations; r++) {
-          final rotated = '${draftsDir.path}/full_rot_${pageId}_$r.jpg';
-          intermediateFiles.add(rotated);
-          await NativeScannerBridge.rotateLeft(path: finalPagePath, outPath: rotated)
-              .timeout(const Duration(seconds: 20));
-          finalPagePath = rotated;
-        }
-      }
-
-      // 4. Save directly into session files without memory overhead
+      // 3. Save directly into session files without memory overhead
       final savedPath = await ref.read(localDocumentStoreProvider).savePageFile(
         sessionId: widget.sessionId,
         pageId: pageId,
-        sourcePath: finalPagePath,
+        sourcePath: fullFilteredPath,
       );
 
       // 5. Preserve raw capture inside session directory for non-destructive re-warps
