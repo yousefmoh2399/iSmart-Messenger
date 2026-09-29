@@ -13,10 +13,28 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import android.app.Activity
+import com.example.mobile_app.scanner.DocumentDetector
+import com.example.mobile_app.scanner.ImageFilters
+import com.example.mobile_app.scanner.ScannerActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.opencv.android.OpenCVLoader
+import org.opencv.core.Core
+import org.opencv.core.Mat
+import org.opencv.core.MatOfInt
+import org.opencv.core.Point
+import org.opencv.imgcodecs.Imgcodecs
 
 class MainActivity : FlutterActivity() {
     private val installerChannel = "app.installer"
     private val shareChannel = "app.share_receiver"
+    private val docScannerChannel = "ismart/doc_scanner"
+    private val REQUEST_CODE_SCANNER = 0x534341
+    private var pendingScannerResult: MethodChannel.Result? = null
+    private val mainScope = CoroutineScope(Dispatchers.Main)
     private var shareMethodChannel: MethodChannel? = null
     private var pendingShare: Map<String, Any?>? = null
 
@@ -160,6 +178,156 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 else -> result.notImplemented()
+            }
+        }
+
+        if (!OpenCVLoader.initLocal()) {
+            android.util.Log.e("MainActivity", "OpenCV init failed")
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, docScannerChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "startScan" -> {
+                        if (pendingScannerResult != null) {
+                            result.error("SCANNER_BUSY", "A scan is already in progress", null)
+                            return@setMethodCallHandler
+                        }
+                        pendingScannerResult = result
+                        val destDir = call.argument<String>("destDir")
+                        val intent = Intent(this, ScannerActivity::class.java).apply {
+                            if (!destDir.isNullOrBlank()) {
+                                putExtra(ScannerActivity.EXTRA_DEST_DIR, destDir)
+                            }
+                        }
+                        startActivityForResult(intent, REQUEST_CODE_SCANNER)
+                    }
+                    "warp" -> {
+                        val path = call.argument<String>("path")
+                        val rawCorners = call.argument<List<Double>>("corners")
+                        val outPath = call.argument<String>("outPath")
+                        if (path.isNullOrBlank() || rawCorners == null || rawCorners.size != 8 || outPath.isNullOrBlank()) {
+                            result.error("INVALID_ARGS", "path, corners (8 items), and outPath are required", null)
+                            return@setMethodCallHandler
+                        }
+                        mainScope.launch(Dispatchers.Default) {
+                            try {
+                                val src = Imgcodecs.imread(path, Imgcodecs.IMREAD_COLOR)
+                                if (src.empty()) {
+                                    withContext(Dispatchers.Main) { result.error("READ_FAILED", "Failed to read image", null) }
+                                    return@launch
+                                }
+                                val w = src.cols().toDouble()
+                                val h = src.rows().toDouble()
+                                val quad = listOf(
+                                    Point(rawCorners[0] * w, rawCorners[1] * h),
+                                    Point(rawCorners[2] * w, rawCorners[3] * h),
+                                    Point(rawCorners[4] * w, rawCorners[5] * h),
+                                    Point(rawCorners[6] * w, rawCorners[7] * h)
+                                )
+                                val warped = DocumentDetector.warp(src, quad)
+                                src.release()
+
+                                val outFile = File(outPath)
+                                outFile.parentFile?.mkdirs()
+                                val writeParams = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 95)
+                                val success = Imgcodecs.imwrite(outPath, warped, writeParams)
+                                writeParams.release()
+                                warped.release()
+
+                                withContext(Dispatchers.Main) {
+                                    if (success) result.success(outPath)
+                                    else result.error("WRITE_FAILED", "Failed to write warped image", null)
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    result.error("WARP_ERROR", e.message, null)
+                                }
+                            }
+                        }
+                    }
+                    "applyFilter" -> {
+                        val path = call.argument<String>("path")
+                        val filter = call.argument<String>("filter") ?: "enhance"
+                        val maxSide = call.argument<Int>("maxSide") ?: 0
+                        val outPath = call.argument<String>("outPath")
+                        if (path.isNullOrBlank() || outPath.isNullOrBlank()) {
+                            result.error("INVALID_ARGS", "path and outPath are required", null)
+                            return@setMethodCallHandler
+                        }
+                        mainScope.launch(Dispatchers.Default) {
+                            val success = ImageFilters.runFile(path, outPath, filter, maxSide)
+                            withContext(Dispatchers.Main) {
+                                if (success) result.success(outPath)
+                                else result.error("FILTER_FAILED", "Failed to apply filter $filter", null)
+                            }
+                        }
+                    }
+                    "rotateLeft" -> {
+                        val path = call.argument<String>("path")
+                        val outPath = call.argument<String>("outPath")
+                        if (path.isNullOrBlank() || outPath.isNullOrBlank()) {
+                            result.error("INVALID_ARGS", "path and outPath are required", null)
+                            return@setMethodCallHandler
+                        }
+                        mainScope.launch(Dispatchers.Default) {
+                            try {
+                                val src = Imgcodecs.imread(path, Imgcodecs.IMREAD_COLOR)
+                                if (src.empty()) {
+                                    withContext(Dispatchers.Main) { result.error("READ_FAILED", "Failed to read image", null) }
+                                    return@launch
+                                }
+                                val rotated = Mat()
+                                Core.rotate(src, rotated, Core.ROTATE_90_COUNTERCLOCKWISE)
+                                src.release()
+
+                                val outFile = File(outPath)
+                                outFile.parentFile?.mkdirs()
+                                val writeParams = MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 95)
+                                val success = Imgcodecs.imwrite(outPath, rotated, writeParams)
+                                writeParams.release()
+                                rotated.release()
+
+                                withContext(Dispatchers.Main) {
+                                    if (success) result.success(outPath)
+                                    else result.error("WRITE_FAILED", "Failed to write rotated image", null)
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    result.error("ROTATE_ERROR", e.message, null)
+                                }
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_SCANNER) {
+            val pending = pendingScannerResult
+            pendingScannerResult = null
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                val path = data.getStringExtra(ScannerActivity.RESULT_PATH)
+                val corners = data.getDoubleArrayExtra(ScannerActivity.RESULT_CORNERS)
+                val width = data.getIntExtra(ScannerActivity.RESULT_WIDTH, 0)
+                val height = data.getIntExtra(ScannerActivity.RESULT_HEIGHT, 0)
+                if (path != null && corners != null) {
+                    pending?.success(
+                        mapOf(
+                            "path" to path,
+                            "corners" to corners.toList(),
+                            "width" to width,
+                            "height" to height
+                        )
+                    )
+                } else {
+                    pending?.error("SCANNER_FAILED", "Incomplete scan result", null)
+                }
+            } else {
+                pending?.success(null)
             }
         }
     }

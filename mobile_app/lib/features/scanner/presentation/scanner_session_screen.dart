@@ -15,6 +15,7 @@ import '../../../shared/providers/providers.dart';
 import '../../../shared/services/remote_desktop_file_service.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/upload_summary_screen.dart';
+import '../data/native_scanner_bridge.dart';
 import '../data/scanner_service.dart';
 import 'signature_bottom_sheet.dart';
 import 'signature_placement_screen.dart';
@@ -711,6 +712,30 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
       appBar: AppBar(
         title: const Text('مسح مستند جديد'),
         actions: [
+          IconButton(
+            tooltip: 'تجربة الكاميرا الأصلية (Debug)',
+            icon: const Icon(Icons.photo_camera_rounded),
+            onPressed: () async {
+              try {
+                final drafts = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
+                final result = await NativeScannerBridge.startScan(destDir: drafts.path);
+                if (result != null && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ تم الالتقاط بنجاح!\nالمسار: ${result.path}\nالنقاط: ${result.corners.length}'),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('خطأ الكاميرا الأصلية: $e')),
+                  );
+                }
+              }
+            },
+          ),
           if (pages.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),

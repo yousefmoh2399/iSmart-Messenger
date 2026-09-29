@@ -45,6 +45,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <activity
+            android:name=".scanner.ScannerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.App"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|density|uiMode" />
     </application>
     <queries>
         <intent>
