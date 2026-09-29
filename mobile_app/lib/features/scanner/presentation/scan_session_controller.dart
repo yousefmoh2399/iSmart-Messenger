@@ -7,6 +7,7 @@ import '../../../shared/models/pending_upload.dart';
 import '../../../shared/models/scan_page.dart';
 import '../../../shared/models/scan_session.dart';
 import '../../../shared/providers/providers.dart';
+import '../data/native_scanner_bridge.dart';
 import '../data/pdf_builder_service.dart';
 
 
@@ -43,7 +44,12 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
     if (currentPage.imagePath != newPage.imagePath) {
       await ref
           .read(localDocumentStoreProvider)
-          .deletePageFile(currentPage.imagePath);
+          .deletePageFile(
+            currentPage.imagePath,
+            originalPath: currentPage.originalPath != newPage.originalPath
+                ? currentPage.originalPath
+                : null,
+          );
     }
 
     final updated = session.copyWith(
@@ -60,10 +66,23 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
     if (session == null) return;
 
     final targetPage = session.pages.firstWhere((page) => page.id == pageId);
-    await ref
-        .read(imageProcessingServiceProvider)
-        .rotateFileInPlace(targetPage.imagePath);
-    final updated = session.copyWith(pages: [...session.pages]);
+    final tempRotated = '${targetPage.imagePath}.rot.jpg';
+    await NativeScannerBridge.rotateLeft(
+      path: targetPage.imagePath,
+      outPath: tempRotated,
+    );
+    final f = File(tempRotated);
+    if (await f.exists()) {
+      await f.rename(targetPage.imagePath);
+    }
+    final updated = session.copyWith(
+      pages: session.pages.map((p) {
+        if (p.id == pageId) {
+          return p.copyWith(quarterTurns: (p.quarterTurns + 1) % 4);
+        }
+        return p;
+      }).toList(),
+    );
     await ref.read(localDocumentStoreProvider).saveDraft(updated);
     state = AsyncData(updated);
   }

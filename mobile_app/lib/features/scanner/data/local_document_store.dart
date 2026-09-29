@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart' as path_provider;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -292,12 +293,44 @@ class LocalDocumentStore {
     if (await sessionDirectory.exists()) {
       await sessionDirectory.delete(recursive: true);
     }
+    await purgeOrphanDrafts();
   }
 
-  Future<void> deletePageFile(String imagePath) async {
+  Future<void> deletePageFile(String imagePath, {String? originalPath}) async {
     final file = File(imagePath);
     if (await file.exists()) {
       await file.delete();
+    }
+    if (originalPath != null && originalPath != imagePath) {
+      final orig = File(originalPath);
+      if (await orig.exists()) {
+        await orig.delete();
+      }
+    }
+  }
+
+  Future<void> purgeOrphanDrafts() async {
+    try {
+      final draftsDir = await getDraftsDirectory();
+      if (!await draftsDir.exists()) return;
+      final entities = draftsDir.listSync(recursive: false);
+      for (final entity in entities) {
+        if (entity is File) {
+          final name = path.basename(entity.path);
+          if (name.startsWith('preview_') ||
+              name.startsWith('full_warp_') ||
+              name.startsWith('full_filtered_') ||
+              name.startsWith('full_rot_') ||
+              name.startsWith('rot_') ||
+              name.startsWith('raw_')) {
+            try {
+              entity.deleteSync();
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[LocalDocumentStore] purgeOrphanDrafts error: $e');
     }
   }
 }

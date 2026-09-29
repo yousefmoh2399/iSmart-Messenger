@@ -354,16 +354,18 @@ Uint8List _processImageBytes(_ImageTransformRequest request) {
   transformed = _rectifyDocumentPerspective(transformed, detectedQuad);
 
   switch (filter) {
-    case ImageFilterType.document:
+    case ImageFilterType.enhance:
       transformed = _applyDocumentScanLook(transformed, quality: quality);
       break;
-    case ImageFilterType.color:
+    case ImageFilterType.original:
+    case ImageFilterType.lighten:
       transformed = _applyColorScanLook(transformed, quality: quality);
       break;
-    case ImageFilterType.grayscale:
+    case ImageFilterType.gray:
       transformed = _applyGrayscaleScanLook(transformed, quality: quality);
       break;
-    case ImageFilterType.blackWhite:
+    case ImageFilterType.eco:
+    case ImageFilterType.noHandwriting:
       transformed = _applyBlackWhiteDocumentLook(transformed, quality: quality);
       break;
   }

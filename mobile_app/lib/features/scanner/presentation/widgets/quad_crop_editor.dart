@@ -155,6 +155,7 @@ class _QuadCropEditorState extends State<QuadCropEditor> {
               height: imageRect.height,
               child: Image.file(
                 File(widget.imagePath),
+                cacheWidth: 1080,
                 fit: BoxFit.fill,
                 errorBuilder: (_, __, ___) => const Center(
                   child: Icon(Icons.broken_image_rounded, size: 48, color: Colors.white54),
@@ -228,6 +229,7 @@ class _QuadCropEditorState extends State<QuadCropEditor> {
             ),
             child: Image.file(
               File(widget.imagePath),
+              cacheWidth: 1080,
               fit: BoxFit.fill,
             ),
           ),

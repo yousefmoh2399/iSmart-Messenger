@@ -39,12 +39,45 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
   bool _isLoadingScanner = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(localDocumentStoreProvider).purgeOrphanDrafts();
+    });
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final session = ref.read(scanSessionControllerProvider).valueOrNull;
     if (!_autoStarted && (session == null || session.pages.isEmpty)) {
       _autoStarted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
+    }
+  }
+
+  Future<void> _editPage(ScanPage page) async {
+    final session = ref.read(scanSessionControllerProvider).valueOrNull;
+    if (session == null) return;
+    final sourcePath = page.originalPath ?? page.imagePath;
+
+    final updatedPage = await Navigator.of(context).push<ScanPage>(
+      MaterialPageRoute(
+        builder: (_) => ScanReviewScreen(
+          rawImagePath: sourcePath,
+          sessionId: session.id,
+          pageId: page.id,
+          initialCorners: page.corners ?? const [],
+          initialFilter: page.filter.nativeKey,
+          initialQuarterRotations: page.quarterTurns,
+        ),
+      ),
+    );
+
+    if (updatedPage != null && mounted) {
+      await ref
+          .read(scanSessionControllerProvider.notifier)
+          .replacePage(page.id, updatedPage);
     }
   }
 
@@ -1106,31 +1139,36 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outlineVariant
-                                          .withValues(alpha: 0.5),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(11),
-                                    child: Image.file(
-                                      File(page.imagePath),
-                                      key: ValueKey(
-                                        File(page.imagePath).existsSync()
-                                            ? File(page.imagePath)
-                                                  .lastModifiedSync()
-                                                  .millisecondsSinceEpoch
-                                            : 0,
+                                GestureDetector(
+                                  onTap: _isSavingSession ? null : () => _editPage(page),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .outlineVariant
+                                            .withValues(alpha: 0.5),
+                                        width: 1,
                                       ),
-                                      width: 86,
-                                      height: 114,
-                                      fit: BoxFit.cover,
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(11),
+                                      child: Image.file(
+                                        File(page.imagePath),
+                                        cacheWidth: 200,
+                                        cacheHeight: 260,
+                                        key: ValueKey(
+                                          File(page.imagePath).existsSync()
+                                              ? File(page.imagePath)
+                                                    .lastModifiedSync()
+                                                    .millisecondsSinceEpoch
+                                              : 0,
+                                        ),
+                                        width: 86,
+                                        height: 114,
+                                        fit: BoxFit.cover,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1238,6 +1276,37 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
                                         spacing: 8,
                                         runSpacing: 8,
                                         children: [
+                                          OutlinedButton.icon(
+                                            onPressed: _isSavingSession
+                                                ? null
+                                                : () => _editPage(page),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: palette.accent,
+                                              side: BorderSide(
+                                                color: palette.accent
+                                                    .withValues(alpha: 0.4),
+                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                              minimumSize: const Size(0, 34),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              textStyle: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            icon: const Icon(
+                                              Icons.tune_rounded,
+                                              size: 15,
+                                            ),
+                                            label: const Text('تعديل'),
+                                          ),
                                           OutlinedButton.icon(
                                             onPressed: _isSavingSession
                                                 ? null

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../shared/models/image_filter_type.dart';
 import '../../../shared/models/scan_page.dart';
 import '../../../shared/providers/providers.dart';
 import '../data/native_scanner_bridge.dart';
@@ -16,6 +17,8 @@ class ScanReviewScreen extends ConsumerStatefulWidget {
     required this.sessionId,
     this.pageId,
     this.initialCorners = const [],
+    this.initialFilter = 'enhance',
+    this.initialQuarterRotations = 0,
     this.imageWidth = 0,
     this.imageHeight = 0,
   });
@@ -24,6 +27,8 @@ class ScanReviewScreen extends ConsumerStatefulWidget {
   final String sessionId;
   final String? pageId;
   final List<double> initialCorners; // 8 normalized coordinates
+  final String initialFilter;
+  final int initialQuarterRotations;
   final int imageWidth;
   final int imageHeight;
 
@@ -34,8 +39,8 @@ class ScanReviewScreen extends ConsumerStatefulWidget {
 class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
   late List<double> _corners;
   bool _isEditingCrop = false;
-  String _selectedFilter = 'enhance';
-  int _quarterRotations = 0;
+  late String _selectedFilter;
+  late int _quarterRotations;
 
   bool _isBusy = false;
   String? _statusText;
@@ -43,6 +48,9 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
   String? _warpedPreviewPath;
   String? _currentPreviewPath;
   final Map<String, String> _filterCache = {};
+
+  final Set<String> _tempFiles = {};
+  int _previewToken = 0;
 
   final GlobalKey<State<QuadCropEditor>> _cropEditorKey = GlobalKey();
 
@@ -58,6 +66,9 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedFilter = widget.initialFilter;
+    _quarterRotations = widget.initialQuarterRotations % 4;
+
     if (widget.initialCorners.length == 8) {
       _corners = List<double>.from(widget.initialCorners);
       _isEditingCrop = false;
@@ -69,7 +80,28 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
     _preparePreview();
   }
 
+  @override
+  void dispose() {
+    _cleanupTempFiles();
+    super.dispose();
+  }
+
+  void _cleanupTempFiles() {
+    for (final path in _tempFiles) {
+      try {
+        final f = File(path);
+        if (f.existsSync()) {
+          f.deleteSync();
+        }
+      } catch (e) {
+        debugPrint('[ScanReviewScreen] Error deleting temp file $path: $e');
+      }
+    }
+    _tempFiles.clear();
+  }
+
   Future<void> _preparePreview() async {
+    final token = ++_previewToken;
     setState(() {
       _isBusy = true;
       _statusText = 'جار تصحيح المنظور...';
@@ -79,6 +111,7 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
       final tag = DateTime.now().millisecondsSinceEpoch;
       final warpedPath = '${draftsDir.path}/preview_warp_$tag.jpg';
+      _tempFiles.add(warpedPath);
 
       // Fast native warp at max 1600px for instant preview
       await NativeScannerBridge.warp(
@@ -86,14 +119,16 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
         corners: _corners,
         outPath: warpedPath,
         maxSide: 1600,
-      );
+      ).timeout(const Duration(seconds: 20));
+
+      if (token != _previewToken || !mounted) return;
 
       _warpedPreviewPath = warpedPath;
       _filterCache.clear();
 
-      await _applyFilter(_selectedFilter);
+      await _applyFilter(_selectedFilter, parentToken: token);
     } catch (e) {
-      if (!mounted) return;
+      if (token != _previewToken || !mounted) return;
       setState(() {
         _isBusy = false;
         _statusText = null;
@@ -104,7 +139,7 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
     }
   }
 
-  Future<void> _applyFilter(String filterKey) async {
+  Future<void> _applyFilter(String filterKey, {int? parentToken}) async {
     final warped = _warpedPreviewPath;
     if (warped == null) return;
 
@@ -118,6 +153,7 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       return;
     }
 
+    final token = parentToken ?? ++_previewToken;
     setState(() {
       _isBusy = true;
       _statusText = 'جار تطبيق الفلتر...';
@@ -128,23 +164,39 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
       final tag = DateTime.now().millisecondsSinceEpoch;
       final filteredPath = '${draftsDir.path}/preview_${filterKey}_$tag.jpg';
+      _tempFiles.add(filteredPath);
 
       await NativeScannerBridge.applyFilter(
         path: warped,
         filter: filterKey,
         outPath: filteredPath,
         maxSide: 1600,
-      );
+      ).timeout(const Duration(seconds: 20));
 
-      if (!mounted) return;
-      _filterCache[filterKey] = filteredPath;
+      if (token != _previewToken || !mounted) return;
+
+      // If page has quarter rotations applied, rotate the preview result
+      String finalPreview = filteredPath;
+      if (_quarterRotations > 0) {
+        for (int r = 0; r < _quarterRotations; r++) {
+          final rotPath = '${draftsDir.path}/preview_rot_${filterKey}_${tag}_$r.jpg';
+          _tempFiles.add(rotPath);
+          await NativeScannerBridge.rotateLeft(path: finalPreview, outPath: rotPath)
+              .timeout(const Duration(seconds: 20));
+          finalPreview = rotPath;
+        }
+      }
+
+      if (token != _previewToken || !mounted) return;
+
+      _filterCache[filterKey] = finalPreview;
       setState(() {
-        _currentPreviewPath = filteredPath;
+        _currentPreviewPath = finalPreview;
         _isBusy = false;
         _statusText = null;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (token != _previewToken || !mounted) return;
       setState(() {
         _isBusy = false;
         _statusText = null;
@@ -160,6 +212,7 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
     final warped = _warpedPreviewPath;
     if (current == null || warped == null) return;
 
+    final token = ++_previewToken;
     setState(() {
       _isBusy = true;
       _statusText = 'جار تدوير الصفحة...';
@@ -170,25 +223,29 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       final tag = DateTime.now().millisecondsSinceEpoch;
       final rotatedCurrent = '${draftsDir.path}/rot_current_$tag.jpg';
       final rotatedWarp = '${draftsDir.path}/rot_warp_$tag.jpg';
+      _tempFiles.addAll([rotatedCurrent, rotatedWarp]);
 
       await Future.wait([
-        NativeScannerBridge.rotateLeft(path: current, outPath: rotatedCurrent),
-        NativeScannerBridge.rotateLeft(path: warped, outPath: rotatedWarp),
+        NativeScannerBridge.rotateLeft(path: current, outPath: rotatedCurrent)
+            .timeout(const Duration(seconds: 20)),
+        NativeScannerBridge.rotateLeft(path: warped, outPath: rotatedWarp)
+            .timeout(const Duration(seconds: 20)),
       ]);
+
+      if (token != _previewToken || !mounted) return;
 
       _quarterRotations = (_quarterRotations + 1) % 4;
       _warpedPreviewPath = rotatedWarp;
       _filterCache.clear();
       _filterCache[_selectedFilter] = rotatedCurrent;
 
-      if (!mounted) return;
       setState(() {
         _currentPreviewPath = rotatedCurrent;
         _isBusy = false;
         _statusText = null;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (token != _previewToken || !mounted) return;
       setState(() {
         _isBusy = false;
         _statusText = null;
@@ -205,32 +262,36 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
       _statusText = 'جار حفظ المستند بجودة كاملة...';
     });
 
+    final intermediateFiles = <String>[];
     try {
       final pageId = widget.pageId ?? const Uuid().v4();
       final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
       final fullWarpPath = '${draftsDir.path}/full_warp_$pageId.jpg';
       final fullFilteredPath = '${draftsDir.path}/full_filtered_$pageId.jpg';
+      intermediateFiles.addAll([fullWarpPath, fullFilteredPath]);
 
       // 1. Full-resolution hardware-accelerated warp
       await NativeScannerBridge.warp(
         path: widget.rawImagePath,
         corners: _corners,
         outPath: fullWarpPath,
-      );
+      ).timeout(const Duration(seconds: 20));
 
       // 2. Full-resolution native OpenCV filter
       await NativeScannerBridge.applyFilter(
         path: fullWarpPath,
         filter: _selectedFilter,
         outPath: fullFilteredPath,
-      );
+      ).timeout(const Duration(seconds: 20));
 
       // 3. Apply quarter rotations if requested
       String finalPagePath = fullFilteredPath;
       if (_quarterRotations > 0) {
         for (int r = 0; r < _quarterRotations; r++) {
           final rotated = '${draftsDir.path}/full_rot_${pageId}_$r.jpg';
-          await NativeScannerBridge.rotateLeft(path: finalPagePath, outPath: rotated);
+          intermediateFiles.add(rotated);
+          await NativeScannerBridge.rotateLeft(path: finalPagePath, outPath: rotated)
+              .timeout(const Duration(seconds: 20));
           finalPagePath = rotated;
         }
       }
@@ -242,12 +303,24 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
         sourcePath: finalPagePath,
       );
 
+      // Clean up intermediate full-res files immediately
+      for (final p in intermediateFiles) {
+        try {
+          final f = File(p);
+          if (f.existsSync()) f.deleteSync();
+        } catch (_) {}
+      }
+
       if (!mounted) return;
       Navigator.of(context).pop(
         ScanPage(
           id: pageId,
           imagePath: savedPath,
           createdAt: DateTime.now(),
+          originalPath: widget.rawImagePath,
+          corners: _corners,
+          filter: ImageFilterType.fromKey(_selectedFilter),
+          quarterTurns: _quarterRotations,
         ),
       );
     } catch (e) {

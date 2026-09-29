@@ -37,6 +37,7 @@ class MainActivity : FlutterActivity() {
     private val REQUEST_CODE_SCANNER = 0x534341
     private var pendingScannerResult: MethodChannel.Result? = null
     private val mainScope = CoroutineScope(Dispatchers.Main)
+    private val nativeOpSemaphore = java.util.concurrent.Semaphore(2)
     private var shareMethodChannel: MethodChannel? = null
     private var pendingShare: Map<String, Any?>? = null
 
@@ -219,9 +220,11 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         mainScope.launch(Dispatchers.Default) {
+                            nativeOpSemaphore.acquire()
                             val warpStart = SystemClock.elapsedRealtime()
                             try {
-                                val src = Imgcodecs.imread(path, Imgcodecs.IMREAD_COLOR)
+                                val readFlags = if (maxSide in 1..2000) Imgcodecs.IMREAD_REDUCED_COLOR_2 else Imgcodecs.IMREAD_COLOR
+                                val src = Imgcodecs.imread(path, readFlags)
                                 if (src.empty()) {
                                     withContext(Dispatchers.Main) { result.error("READ_FAILED", "Failed to read image", null) }
                                     return@launch
@@ -245,7 +248,7 @@ class MainActivity : FlutterActivity() {
                                 warped.release()
 
                                 val warpDuration = SystemClock.elapsedRealtime() - warpStart
-                                android.util.Log.d("DocScan", "Warp time (transform + write): ${warpDuration}ms -> $outPath")
+                                android.util.Log.d("DocScan", "Warp time (transform + write): ${warpDuration}ms -> $outPath (maxSide=$maxSide)")
 
                                 withContext(Dispatchers.Main) {
                                     if (success) result.success(outPath)
@@ -255,6 +258,8 @@ class MainActivity : FlutterActivity() {
                                 withContext(Dispatchers.Main) {
                                     result.error("WARP_ERROR", e.message, null)
                                 }
+                            } finally {
+                                nativeOpSemaphore.release()
                             }
                         }
                     }
@@ -268,10 +273,15 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         mainScope.launch(Dispatchers.Default) {
-                            val success = ImageFilters.runFile(path, outPath, filter, maxSide)
-                            withContext(Dispatchers.Main) {
-                                if (success) result.success(outPath)
-                                else result.error("FILTER_FAILED", "Failed to apply filter $filter", null)
+                            nativeOpSemaphore.acquire()
+                            try {
+                                val success = ImageFilters.runFile(path, outPath, filter, maxSide)
+                                withContext(Dispatchers.Main) {
+                                    if (success) result.success(outPath)
+                                    else result.error("FILTER_FAILED", "Failed to apply filter $filter", null)
+                                }
+                            } finally {
+                                nativeOpSemaphore.release()
                             }
                         }
                     }
@@ -283,6 +293,7 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         mainScope.launch(Dispatchers.Default) {
+                            nativeOpSemaphore.acquire()
                             try {
                                 val src = Imgcodecs.imread(path, Imgcodecs.IMREAD_COLOR)
                                 if (src.empty()) {
@@ -308,6 +319,8 @@ class MainActivity : FlutterActivity() {
                                 withContext(Dispatchers.Main) {
                                     result.error("ROTATE_ERROR", e.message, null)
                                 }
+                            } finally {
+                                nativeOpSemaphore.release()
                             }
                         }
                     }
