@@ -17,7 +17,6 @@ import '../../../shared/services/remote_desktop_file_service.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/upload_summary_screen.dart';
 import '../data/native_scanner_bridge.dart';
-import '../data/scanner_service.dart';
 import 'scan_review_screen.dart';
 import 'signature_bottom_sheet.dart';
 import 'signature_placement_screen.dart';
@@ -98,7 +97,7 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
       return;
     }
 
-    NativeScannerResult? scanResult;
+    List<NativeScannerResult> scanResults = const [];
     try {
       final cameraStatus = await PermissionRequestCoordinator.run(
         Permission.camera.request,
@@ -113,8 +112,10 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
 
       final draftsDir =
           await ref.read(localDocumentStoreProvider).getDraftsDirectory();
-      scanResult =
-          await NativeScannerBridge.startScan(destDir: draftsDir.path);
+      scanResults = await NativeScannerBridge.startScan(
+        destDir: draftsDir.path,
+        batch: replacePageId == null,
+      );
     } on ScannerPermissionDeniedException catch (error) {
       if (!mounted) return;
       setState(() => _isLoadingScanner = false);
@@ -133,26 +134,30 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
       }
     }
 
-    if (!mounted || scanResult == null) return;
+    if (!mounted || scanResults.isEmpty) return;
 
-    final scanPage = await Navigator.of(context).push<ScanPage>(
-      MaterialPageRoute(
-        builder: (_) => ScanReviewScreen(
-          rawImagePath: scanResult!.path,
-          sessionId: session.id,
-          pageId: replacePageId,
-          initialCorners: scanResult.corners,
-          imageWidth: scanResult.width,
-          imageHeight: scanResult.height,
+    for (final result in scanResults) {
+      if (!mounted) break;
+      final scanPage = await Navigator.of(context).push<ScanPage>(
+        MaterialPageRoute(
+          builder: (_) => ScanReviewScreen(
+            rawImagePath: result.path,
+            sessionId: session.id,
+            pageId: replacePageId,
+            initialCorners: result.corners,
+            imageWidth: result.width,
+            imageHeight: result.height,
+          ),
         ),
-      ),
-    );
+      );
 
-    if (scanPage != null && mounted) {
-      if (replacePageId != null) {
-        await sessionController.replacePage(replacePageId, scanPage);
-      } else {
-        await sessionController.addPage(scanPage);
+      if (scanPage != null && mounted) {
+        if (replacePageId != null) {
+          await sessionController.replacePage(replacePageId, scanPage);
+          break;
+        } else {
+          await sessionController.addPage(scanPage);
+        }
       }
     }
   }
@@ -757,120 +762,6 @@ class _ScannerSessionScreenState extends ConsumerState<ScannerSessionScreen> {
       appBar: AppBar(
         title: const Text('مسح مستند جديد'),
         actions: [
-          IconButton(
-            tooltip: 'تجربة الكاميرا الأصلية (Smoke Test)',
-            icon: const Icon(Icons.photo_camera_rounded),
-            onPressed: () async {
-              try {
-                final scanSw = Stopwatch()..start();
-                final drafts = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
-                final result = await NativeScannerBridge.startScan(destDir: drafts.path);
-                final scanDuration = scanSw.elapsedMilliseconds;
-
-                if (result == null) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('تم إلغاء المسح أو رفض الإذن')),
-                    );
-                  }
-                  return;
-                }
-
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('جاري تصحيح المنظور وتطبيق الفلتر...'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-
-                // Step 2: Warp
-                final warpSw = Stopwatch()..start();
-                final warpedPath = '${result.path}_warped.jpg';
-                await NativeScannerBridge.warp(
-                  path: result.path,
-                  corners: result.corners,
-                  outPath: warpedPath,
-                );
-                final warpDuration = warpSw.elapsedMilliseconds;
-
-                // Step 3: Enhance filter
-                final filterSw = Stopwatch()..start();
-                final filteredPath = '${result.path}_enhanced.jpg';
-                await NativeScannerBridge.applyFilter(
-                  path: warpedPath,
-                  filter: 'enhance',
-                  outPath: filteredPath,
-                  maxSide: 1600,
-                );
-                final filterDuration = filterSw.elapsedMilliseconds;
-                final totalProcessDuration = warpDuration + filterDuration;
-
-                if (!context.mounted) return;
-                await showDialog<void>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('اختبار السلسلة الأصلية (Smoke Test)'),
-                    content: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.file(
-                              File(filteredPath),
-                              fit: BoxFit.contain,
-                              height: 320,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Theme.of(ctx).colorScheme.surfaceVariant.withOpacity(0.5),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('⚡ زمن الالتقاط: ${scanDuration}ms'),
-                                Text('📐 تصحيح المنظور (Warp): ${warpDuration}ms'),
-                                Text('🎨 فلتر Enhance (1600px): ${filterDuration}ms'),
-                                const Divider(height: 16),
-                                Text(
-                                  '⏱️ إجمالي المعالجة بعد الالتقاط: ${totalProcessDuration}ms',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 4),
-                                Text('📏 الأبعاد الأصلية: ${result.width} × ${result.height}'),
-                                Text(
-                                  '📍 النقاط: [${result.corners.map((e) => e.toStringAsFixed(2)).join(', ')}]',
-                                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        child: const Text('إغلاق'),
-                      ),
-                    ],
-                  ),
-                );
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('خطأ في سلسلة الاختبار: $e')),
-                  );
-                }
-              }
-            },
-          ),
           if (pages.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),

@@ -3,6 +3,7 @@ package com.example.mobile_app
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import androidx.core.app.Person
 import androidx.core.content.FileProvider
@@ -198,11 +199,13 @@ class MainActivity : FlutterActivity() {
                         }
                         pendingScannerResult = result
                         val destDir = call.argument<String>("destDir")
+                        val batch = call.argument<Boolean>("batch") ?: false
                         try {
                             val intent = Intent(this, ScannerActivity::class.java).apply {
                                 if (!destDir.isNullOrBlank()) {
                                     putExtra(ScannerActivity.EXTRA_DEST_DIR, destDir)
                                 }
+                                putExtra(ScannerActivity.EXTRA_BATCH_MODE, batch)
                             }
                             startActivityForResult(intent, REQUEST_CODE_SCANNER)
                         } catch (e: Exception) {
@@ -344,21 +347,35 @@ class MainActivity : FlutterActivity() {
         if (requestCode == REQUEST_CODE_SCANNER) {
             replyScannerResult { pending ->
                 if (resultCode == Activity.RESULT_OK && data != null) {
-                    val path = data.getStringExtra(ScannerActivity.RESULT_PATH)
-                    val corners = data.getDoubleArrayExtra(ScannerActivity.RESULT_CORNERS)
-                    val width = data.getIntExtra(ScannerActivity.RESULT_WIDTH, 0)
-                    val height = data.getIntExtra(ScannerActivity.RESULT_HEIGHT, 0)
-                    if (path != null && corners != null) {
-                        pending.success(
+                    val batchList = data.getParcelableArrayListExtra<Bundle>(ScannerActivity.RESULT_BATCH_LIST)
+                    if (batchList != null && batchList.isNotEmpty()) {
+                        val results = batchList.map { b ->
                             mapOf(
-                                "path" to path,
-                                "corners" to corners.toList(),
-                                "width" to width,
-                                "height" to height
+                                "path" to (b.getString(ScannerActivity.RESULT_PATH) ?: ""),
+                                "corners" to (b.getDoubleArray(ScannerActivity.RESULT_CORNERS)?.toList() ?: emptyList<Double>()),
+                                "width" to b.getInt(ScannerActivity.RESULT_WIDTH, 0),
+                                "height" to b.getInt(ScannerActivity.RESULT_HEIGHT, 0)
                             )
-                        )
+                        }
+                        pending.success(mapOf("batch" to true, "items" to results))
                     } else {
-                        pending.error("SCANNER_FAILED", "Incomplete scan result", null)
+                        val path = data.getStringExtra(ScannerActivity.RESULT_PATH)
+                        val corners = data.getDoubleArrayExtra(ScannerActivity.RESULT_CORNERS)
+                        val width = data.getIntExtra(ScannerActivity.RESULT_WIDTH, 0)
+                        val height = data.getIntExtra(ScannerActivity.RESULT_HEIGHT, 0)
+                        if (path != null && corners != null) {
+                            pending.success(
+                                mapOf(
+                                    "batch" to false,
+                                    "path" to path,
+                                    "corners" to corners.toList(),
+                                    "width" to width,
+                                    "height" to height
+                                )
+                            )
+                        } else {
+                            pending.error("SCANNER_FAILED", "Incomplete scan result", null)
+                        }
                     }
                 } else {
                     pending.success(null)

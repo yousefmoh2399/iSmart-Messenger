@@ -303,6 +303,15 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
         sourcePath: finalPagePath,
       );
 
+      // 5. Preserve raw capture inside session directory for non-destructive re-warps
+      String preservedRawPath = widget.rawImagePath;
+      if (!preservedRawPath.contains(widget.sessionId)) {
+        preservedRawPath = await ref.read(localDocumentStoreProvider).importRawScanFile(
+          sessionId: widget.sessionId,
+          sourcePath: widget.rawImagePath,
+        );
+      }
+
       // Clean up intermediate full-res files immediately
       for (final p in intermediateFiles) {
         try {
@@ -317,7 +326,7 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
           id: pageId,
           imagePath: savedPath,
           createdAt: DateTime.now(),
-          originalPath: widget.rawImagePath,
+          originalPath: preservedRawPath,
           corners: _corners,
           filter: ImageFilterType.fromKey(_selectedFilter),
           quarterTurns: _quarterRotations,

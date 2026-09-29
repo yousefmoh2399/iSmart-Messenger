@@ -9,7 +9,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../../shared/models/document_paper_size.dart';
-import 'image_processing_service.dart';
 
 export '../../../shared/models/document_paper_size.dart';
 
@@ -265,35 +264,24 @@ Future<_PreparedPdfImage> _safePrepareImage(
   );
 
   // ── FAST PATH ─────────────────────────────────────────────────────────────
-  // Skip the expensive decode+re-encode cycle when the image is already a
-  // valid JPEG with correct orientation and acceptable dimensions.
-  // This is ~100-1000× faster than the full decode path.
-  if (!applyEnhancement) {
-    final info = _peekJpegInfo(originalBytes);
-    if (info != null &&
-        info.orientation == 1 &&
-        info.width <= _maxDimension &&
-        info.height <= _maxDimension) {
-      debugPrint(
-        '[PdfBuilder] ✅ FAST PATH: ${info.width}x${info.height}, orientation=1 — skipping decode/re-encode. '
-        '(${prepareStopwatch.elapsedMilliseconds}ms)',
-      );
-      return _PreparedPdfImage(
-        bytes: originalBytes,
-        width: info.width,
-        height: info.height,
-      );
-    }
-    if (info != null) {
-      debugPrint(
-        '[PdfBuilder] Fast path skipped: orientation=${info.orientation}, '
-        'size=${info.width}x${info.height} — falling back to full decode.',
-      );
-    }
+  // Skip decode+re-encode when the image is already a valid JPEG
+  // with correct orientation and acceptable dimensions (<= 2048px).
+  final info = _peekJpegInfo(originalBytes);
+  if (info != null &&
+      info.orientation == 1 &&
+      info.width <= _maxDimension &&
+      info.height <= _maxDimension) {
+    debugPrint(
+      '[PdfBuilder] ✅ FAST PATH: ${info.width}x${info.height} — direct pass-through (${prepareStopwatch.elapsedMilliseconds}ms)',
+    );
+    return _PreparedPdfImage(
+      bytes: originalBytes,
+      width: info.width,
+      height: info.height,
+    );
   }
 
-  // ── SLOW PATH ─────────────────────────────────────────────────────────────
-  // Used when: applyEnhancement=true, orientation≠1, or dimensions>2048.
+  // ── DOWNSCALE PATH (Only if image > 2048px or orientation != 1) ───────────
   img.Image? decoded;
   try {
     decoded = img.decodeImage(originalBytes);
@@ -303,40 +291,17 @@ Future<_PreparedPdfImage> _safePrepareImage(
   }
 
   if (decoded == null) {
-    debugPrint('[PdfBuilder] Decoded image is null for $imagePath');
     throw Exception('الصورة فارغة أو غير مدعومة.');
   }
 
   final orientation = decoded.exif.imageIfd.orientation ?? 1;
   if (orientation != 1) {
-    debugPrint('[PdfBuilder] Baking EXIF orientation ($orientation)...');
     decoded = img.bakeOrientation(decoded);
-  }
-
-  if (decoded.numChannels == 4) {
-    debugPrint('[PdfBuilder] Removing alpha channel...');
-    final whiteBg = img.Image(
-      width: decoded.width,
-      height: decoded.height,
-      numChannels: 3,
-    );
-    img.fill(whiteBg, color: img.ColorRgb8(255, 255, 255));
-    img.compositeImage(whiteBg, decoded);
-    decoded = whiteBg;
-  } else if (decoded.numChannels != 3) {
-    final rgb = img.Image(
-      width: decoded.width,
-      height: decoded.height,
-      numChannels: 3,
-    );
-    img.fill(rgb, color: img.ColorRgb8(255, 255, 255));
-    img.compositeImage(rgb, decoded);
-    decoded = rgb;
   }
 
   if (decoded.width > _maxDimension || decoded.height > _maxDimension) {
     debugPrint(
-      '[PdfBuilder] Resizing ${decoded.width}x${decoded.height} to max $_maxDimension...',
+      '[PdfBuilder] Downscaling ${decoded.width}x${decoded.height} to max $_maxDimension...',
     );
     decoded = img.copyResize(
       decoded,
@@ -346,29 +311,15 @@ Future<_PreparedPdfImage> _safePrepareImage(
     );
   }
 
-  var finalBytes = Uint8List.fromList(img.encodeJpg(decoded, quality: 85));
-
-  if (applyEnhancement) {
-    try {
-      debugPrint('[PdfBuilder] Applying enhancement pipeline...');
-      final enhancedBytes = processEnhancementOnly(finalBytes);
-      final enhancedDecoded = img.decodeImage(enhancedBytes);
-      if (enhancedDecoded != null) {
-        finalBytes = enhancedBytes;
-        decoded = enhancedDecoded;
-      }
-    } catch (e) {
-      debugPrint('[PdfBuilder] Enhancement failed: $e');
-    }
-  }
+  final finalBytes = Uint8List.fromList(img.encodeJpg(decoded, quality: 85));
 
   debugPrint(
-    '[PdfBuilder] ⚠️ SLOW PATH done in ${prepareStopwatch.elapsedMilliseconds}ms',
+    '[PdfBuilder] Normalized in ${prepareStopwatch.elapsedMilliseconds}ms (${decoded.width}x${decoded.height})',
   );
 
   return _PreparedPdfImage(
     bytes: finalBytes,
-    width: decoded!.width,
+    width: decoded.width,
     height: decoded.height,
   );
 }

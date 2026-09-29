@@ -17,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
@@ -53,10 +54,12 @@ class ScannerActivity : ComponentActivity() {
     companion object {
         private const val TAG = "DocScan"
         const val EXTRA_DEST_DIR = "extra_dest_dir"
+        const val EXTRA_BATCH_MODE = "extra_batch_mode"
         const val RESULT_PATH = "result_path"
         const val RESULT_CORNERS = "result_corners" // DoubleArray of 8 normalized coords
         const val RESULT_WIDTH = "result_width"
         const val RESULT_HEIGHT = "result_height"
+        const val RESULT_BATCH_LIST = "result_batch_list"
     }
 
     private lateinit var cameraExecutor: ExecutorService
@@ -65,9 +68,13 @@ class ScannerActivity : ComponentActivity() {
     private var previewView: PreviewView? = null
     private var overlayView: PolygonOverlayView? = null
     private var flashButton: ImageButton? = null
+    private var modeToggleButton: TextView? = null
+    private var doneButton: TextView? = null
 
     private var destinationDir: String? = null
     private var isTorchOn = false
+    private var isBatchMode = false
+    private val batchItems = ArrayList<Bundle>()
     private val isCapturing = AtomicBoolean(false)
     @Volatile
     private var lastShutterTime = 0L
@@ -101,6 +108,7 @@ class ScannerActivity : ComponentActivity() {
         }
 
         destinationDir = intent.getStringExtra(EXTRA_DEST_DIR) ?: cacheDir.absolutePath
+        isBatchMode = intent.getBooleanExtra(EXTRA_BATCH_MODE, false)
         cameraExecutor = Executors.newSingleThreadExecutor()
 
         buildUi()
@@ -166,11 +174,40 @@ class ScannerActivity : ComponentActivity() {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             setColorFilter(Color.WHITE)
             setOnClickListener {
-                setResult(Activity.RESULT_CANCELED)
-                finish()
+                if (batchItems.isNotEmpty()) {
+                    finishWithBatch()
+                } else {
+                    setResult(Activity.RESULT_CANCELED)
+                    finish()
+                }
             }
         }
         topBar.addView(closeButton)
+
+        modeToggleButton = TextView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(36),
+                Gravity.CENTER
+            )
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+            text = if (isBatchMode) "دفعة" else "مفرد"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            val bg = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(Color.parseColor("#80000000"))
+                setStroke(dp(1), Color.parseColor("#80FFFFFF"))
+            }
+            background = bg
+            setOnClickListener {
+                isBatchMode = !isBatchMode
+                text = if (isBatchMode) "دفعة" else "مفرد"
+                updateDoneButtonState()
+            }
+        }
+        topBar.addView(modeToggleButton)
 
         flashButton = ImageButton(this).apply {
             layoutParams = FrameLayout.LayoutParams(dp(44), dp(44), Gravity.END or Gravity.CENTER_VERTICAL)
@@ -204,6 +241,31 @@ class ScannerActivity : ComponentActivity() {
             setOnClickListener { takeShutterPicture() }
         }
         bottomBar.addView(shutterButton)
+
+        doneButton = TextView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(44),
+                Gravity.END or Gravity.CENTER_VERTICAL
+            ).apply {
+                marginEnd = dp(20)
+            }
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            text = "تم (${batchItems.size})"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            val bg = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = dp(22).toFloat()
+                setColor(Color.parseColor("#00C853"))
+            }
+            background = bg
+            visibility = if (isBatchMode && batchItems.isNotEmpty()) View.VISIBLE else View.GONE
+            setOnClickListener {
+                finishWithBatch()
+            }
+        }
+        bottomBar.addView(doneButton)
         root.addView(bottomBar)
 
         setContentView(root)
@@ -502,22 +564,77 @@ class ScannerActivity : ComponentActivity() {
             cornersArray[6] = finalNormalizedCorners[3].x
             cornersArray[7] = finalNormalizedCorners[3].y
 
-            val resultIntent = Intent().apply {
-                putExtra(RESULT_PATH, outputFile.absolutePath)
-                putExtra(RESULT_CORNERS, cornersArray)
-                putExtra(RESULT_WIDTH, uprightWidth)
-                putExtra(RESULT_HEIGHT, uprightHeight)
+            val pageBundle = Bundle().apply {
+                putString(RESULT_PATH, outputFile.absolutePath)
+                putDoubleArray(RESULT_CORNERS, cornersArray)
+                putInt(RESULT_WIDTH, uprightWidth)
+                putInt(RESULT_HEIGHT, uprightHeight)
             }
 
-            runOnUiThread {
-                setResult(Activity.RESULT_OK, resultIntent)
-                finish()
+            if (isBatchMode) {
+                synchronized(batchItems) {
+                    batchItems.add(pageBundle)
+                }
+                runOnUiThread {
+                    updateDoneButtonState()
+                    overlayView?.animate()
+                        ?.alpha(0.2f)
+                        ?.setDuration(70)
+                        ?.withEndAction {
+                            overlayView?.animate()?.alpha(1.0f)?.setDuration(100)?.start()
+                        }?.start()
+                }
+                isCapturing.set(false)
+            } else {
+                val resultIntent = Intent().apply {
+                    putExtra(RESULT_PATH, outputFile.absolutePath)
+                    putExtra(RESULT_CORNERS, cornersArray)
+                    putExtra(RESULT_WIDTH, uprightWidth)
+                    putExtra(RESULT_HEIGHT, uprightHeight)
+                }
+
+                runOnUiThread {
+                    setResult(Activity.RESULT_OK, resultIntent)
+                    finish()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error processing captured photo", e)
             isCapturing.set(false)
         } finally {
             imageProxy.close()
+        }
+    }
+
+    private fun updateDoneButtonState() {
+        runOnUiThread {
+            doneButton?.apply {
+                text = "تم (${batchItems.size})"
+                visibility = if (batchItems.isNotEmpty()) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun finishWithBatch() {
+        if (batchItems.isEmpty()) {
+            setResult(Activity.RESULT_CANCELED)
+            finish()
+            return
+        }
+        val resultIntent = Intent().apply {
+            putParcelableArrayListExtra(RESULT_BATCH_LIST, batchItems)
+        }
+        setResult(Activity.RESULT_OK, resultIntent)
+        finish()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (batchItems.isNotEmpty()) {
+            finishWithBatch()
+        } else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
         }
     }
 

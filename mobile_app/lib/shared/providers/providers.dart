@@ -29,7 +29,6 @@ import '../../features/printers/presentation/printer_controller.dart';
 import '../../features/scanner/data/image_processing_service.dart';
 import '../../features/scanner/data/local_document_store.dart';
 import '../../features/scanner/data/pdf_builder_service.dart';
-import '../../features/scanner/data/scanner_service.dart';
 import '../../features/scanner/data/signature_composer_service.dart';
 import '../../features/scanner/data/signature_storage_service.dart';
 import '../../features/scanner/presentation/scan_session_controller.dart';
@@ -328,10 +327,6 @@ final imageProcessingServiceProvider = Provider<ImageProcessingService>(
 
 final pdfBuilderServiceProvider = Provider<PdfBuilderService>(
   (ref) => PdfBuilderService(),
-);
-
-final scannerServiceProvider = Provider<ScannerService>(
-  (ref) => ScannerService(),
 );
 
 final signatureStorageServiceProvider = Provider<SignatureStorageService>(

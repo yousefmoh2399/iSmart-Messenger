@@ -38,6 +38,24 @@ class NativeScannerResult {
   }
 }
 
+class ScannerPermissionDeniedException implements Exception {
+  const ScannerPermissionDeniedException({
+    required this.permission,
+    this.permanentlyDenied = false,
+  });
+
+  final String permission;
+  final bool permanentlyDenied;
+
+  @override
+  String toString() {
+    if (permanentlyDenied) {
+      return 'تم رفض إذن $permission نهائيًا. افتح إعدادات التطبيق واسمح به.';
+    }
+    return 'لم يتم منح إذن $permission.';
+  }
+}
+
 /// Cross-Platform Native Scanner Channel Contract: "ismart/doc_scanner"
 /// -------------------------------------------------------------------
 /// This class defines the unified API for document scanning across platforms
@@ -45,7 +63,8 @@ class NativeScannerResult {
 ///
 /// Principles & Invariants:
 /// 1. Methods:
-///    - `startScan({String? destDir})` -> returns [NativeScannerResult] or null if cancelled.
+///    - `startScan({String? destDir, bool batch = false})` -> returns list of [NativeScannerResult] (empty if cancelled).
+///    - `startSingleScan({String? destDir})` -> returns single [NativeScannerResult] or null if cancelled.
 ///    - `warp({required String path, required List<double> corners, required String outPath, int? maxSide})`
 ///    - `applyFilter({required String path, required String filter, required String outPath, int maxSide = 0})`
 ///    - `rotateLeft({required String path, required String outPath})`
@@ -65,21 +84,43 @@ class NativeScannerBridge {
   static const MethodChannel _channel = MethodChannel('ismart/doc_scanner');
 
   /// Starts the embedded high-performance native camera activity/view.
-  /// Returns [NativeScannerResult] on successful capture, or null if cancelled.
-  static Future<NativeScannerResult?> startScan({String? destDir}) async {
+  /// When [batch] is true, camera remains open for sequential captures.
+  /// Returns a list of [NativeScannerResult] (empty if cancelled).
+  static Future<List<NativeScannerResult>> startScan({
+    String? destDir,
+    bool batch = false,
+  }) async {
     final sw = Stopwatch()..start();
     try {
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
         'startScan',
-        {'destDir': destDir},
+        {
+          'destDir': destDir,
+          'batch': batch,
+        },
       );
       debugPrint('[NativeScannerBridge] startScan completed in ${sw.elapsedMilliseconds}ms');
-      if (result == null) return null;
-      return NativeScannerResult.fromMap(result);
+      if (result == null) return const [];
+
+      final isBatch = result['batch'] == true;
+      if (isBatch) {
+        final items = result['items'] as List<dynamic>? ?? const [];
+        return items
+            .map((item) => NativeScannerResult.fromMap(item as Map<dynamic, dynamic>))
+            .toList();
+      } else {
+        return [NativeScannerResult.fromMap(result)];
+      }
     } catch (e) {
       debugPrint('[NativeScannerBridge] startScan failed: $e');
       rethrow;
     }
+  }
+
+  /// Convenience method for single document capture.
+  static Future<NativeScannerResult?> startSingleScan({String? destDir}) async {
+    final results = await startScan(destDir: destDir, batch: false);
+    return results.isNotEmpty ? results.first : null;
   }
 
   /// Warps a document quadrilateral defined by 8 normalized corners
