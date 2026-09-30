@@ -110,9 +110,10 @@ object DocumentDetector {
             // Sensitive Canny on CLAHE image for distant/soft-lit papers
             Imgproc.Canny(claheGray, cannySensitive, 35.0, 105.0)
 
-            // Build 5x5 dilated edge support mask for verifying candidate quad sides
+            // Build 7x7 dilated edge support mask for verifying candidate quad sides.
+            // 7x7 dilation bridges soft/blurry edges from diffuse lighting or slight camera shake.
             Core.bitwise_or(cannyClosed, cannySensitive, combinedEdges)
-            Imgproc.dilate(combinedEdges, edgeSupportMask, kernel5)
+            Imgproc.dilate(combinedEdges, edgeSupportMask, kernelClose7)
 
             // Pass 1: Closed Canny edges (works at any distance: far, medium, close)
             val passCannyClosed = Mat()
@@ -183,8 +184,8 @@ object DocumentDetector {
             kernel3.release()
         }
 
-        // Scale-independent quality threshold (0.58) so both distant (5%) and close (95%) papers pass!
-        if (bestQuad == null || bestScore < 0.58) return null
+        // Scale-independent quality threshold — accept papers with moderate edge+contrast evidence
+        if (bestQuad == null || bestScore < 0.38) return null
 
         val invScale = 1.0 / scale
         val scaledQuad = bestQuad.map {
@@ -332,7 +333,7 @@ object DocumentDetector {
 
         // 1. Physical Canny edge support along all 4 sides (rejects imaginary convexHull lines)
         val edgeSupport = measureEdgeSupport(ordered, edgeMask)
-        if (edgeSupport < 0.70) return 0.0
+        if (edgeSupport < 0.55) return 0.0
 
         // 2. Interior vs exterior paper brightness / contrast verification
         val contrastScore = measureInteriorVsExteriorBrightness(ordered, gray)
@@ -369,8 +370,8 @@ object DocumentDetector {
 
     /**
      * Samples 20 points along each of the 4 sides of [ordered] in [edgeMask].
-     * Every single side must have real edge pixels along >= 58% of its length,
-     * and the average across all 4 sides must be >= 70%.
+     * Every single side must have real edge pixels along >= 45% of its length
+     * (one side may be partially shadowed), and the average across all 4 sides must be >= 55%.
      */
     private fun measureEdgeSupport(ordered: List<Point>, edgeMask: Mat): Double {
         val cols = edgeMask.cols()
@@ -395,16 +396,19 @@ object DocumentDetector {
             }
 
             val sideRatio = hits.toDouble() / samplesPerSide.toDouble()
-            if (sideRatio < 0.58) return 0.0
+            if (sideRatio < 0.45) return 0.0
             totalSupport += sideRatio
         }
 
-        return totalSupport / 4.0
+        val avgSupport = totalSupport / 4.0
+        if (avgSupport < 0.55) return 0.0
+        return avgSupport
     }
 
     /**
-     * Verifies that the interior of the candidate quad looks like a document/paper
-     * compared to its immediate outer background.
+     * Verifies that the interior of the candidate quad looks visually distinct from the
+     * surrounding background. Accepts white paper on dark desks, white paper on light desks,
+     * receipts, colored paper, and dim lighting.
      */
     private fun measureInteriorVsExteriorBrightness(ordered: List<Point>, gray: Mat): Double {
         val cols = gray.cols()
@@ -446,17 +450,18 @@ object DocumentDetector {
 
         if (count == 0) return 0.0
         val meanIn = insideSum / count
-        val meanOut = outsideSum / count
         val meanAbsDiff = absDiffSum / count
+        val diff = meanIn - (outsideSum / count)
 
-        // Document interior should not be pitch-dark
-        if (meanIn < 80.0) return 0.0
-
-        val diff = meanIn - meanOut
+        // Any visible brightness difference between inside and outside confirms a real boundary.
+        // Accept: white paper on dark desk (diff >> 0), white paper on light desk (small diff but
+        // some contrast), colored/kraft paper (meanIn moderate, abs diff visible), dim lighting
+        // (lower meanIn but still distinct from background).
         return when {
-            diff >= 14.0 -> 1.15
-            diff >= 6.0 -> 1.00
-            meanIn >= 135.0 && meanAbsDiff >= 8.0 -> 0.95
+            meanAbsDiff >= 12.0 -> 1.15  // Strong contrast boundary
+            diff >= 4.0 -> 1.05          // Paper is brighter than background
+            meanAbsDiff >= 5.0 -> 0.92   // Moderate contrast (light desk, similar tones)
+            meanIn >= 110.0 && meanAbsDiff >= 3.0 -> 0.88  // Bright paper with slight contrast
             else -> 0.0
         }
     }
