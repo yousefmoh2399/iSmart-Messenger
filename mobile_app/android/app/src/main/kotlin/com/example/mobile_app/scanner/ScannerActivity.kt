@@ -483,8 +483,8 @@ class ScannerActivity : ComponentActivity() {
     @SuppressLint("UnsafeOptInUsageError")
     private fun analyzePreviewFrame(imageProxy: ImageProxy) {
         val frameStartTime = SystemClock.elapsedRealtime()
-        // Throttle analysis to ~15 FPS (65ms interval) for calm, accurate tracking
-        if (frameStartTime - lastAnalysisTimestamp < 65L) {
+        // 25 FPS (40ms interval) for instant response while keeping CPU cool
+        if (frameStartTime - lastAnalysisTimestamp < 40L) {
             imageProxy.close()
             return
         }
@@ -540,17 +540,16 @@ class ScannerActivity : ComponentActivity() {
                 val locked = previousQuad
 
                 if (locked == null) {
-                    // Not yet locked onto a document: require 3 consecutive consistent frames
-                    // before showing the green overlay so random background edges are ignored.
-                    if (isQuadConsistentWith(normalized, candidateQuad, 0.06)) {
+                    // Instant 2-frame (~40ms) confirmation with 12% hand-motion tolerance
+                    if (isSamePaperOrZooming(normalized, candidateQuad, 0.12)) {
                         candidateConfirmCount++
-                        candidateQuad = blendQuads(candidateQuad!!, normalized, 0.40)
+                        candidateQuad = blendQuads(candidateQuad!!, normalized, 0.55)
                     } else {
                         candidateQuad = normalized
                         candidateConfirmCount = 1
                     }
 
-                    if (candidateConfirmCount >= 3) {
+                    if (candidateConfirmCount >= 2) {
                         val confirmed = candidateQuad ?: normalized
                         previousQuad = confirmed
                         latestNormalizedQuad = confirmed
@@ -560,10 +559,10 @@ class ScannerActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                    // Already locked onto a document: check if new detection is the same paper
-                    if (isQuadConsistentWith(normalized, locked, 0.09)) {
-                        // Same paper: smoothly track it with anti-jitter deadband
-                        val smoothed = smoothLockedQuad(locked, normalized)
+                    // Already locked onto a document:
+                    // Check if new detection is the same paper (including moving closer/further!)
+                    if (isSamePaperOrZooming(normalized, locked, 0.13)) {
+                        val smoothed = smoothLockedQuadAdaptive(locked, normalized)
                         previousQuad = smoothed
                         latestNormalizedQuad = smoothed
                         missedFrameCount = 0
@@ -573,17 +572,17 @@ class ScannerActivity : ComponentActivity() {
                             overlayView?.setPolygon(smoothed)
                         }
                     } else {
-                        // Detected a different quad far from the locked paper:
-                        // Do NOT abandon the locked paper unless the new quad stays consistent for 5 frames!
-                        if (isQuadConsistentWith(normalized, candidateQuad, 0.05)) {
+                        // Detected a different quad far from the locked paper's center:
+                        // Require 3 consistent frames before switching to the new location
+                        if (isSamePaperOrZooming(normalized, candidateQuad, 0.08)) {
                             candidateConfirmCount++
-                            candidateQuad = blendQuads(candidateQuad!!, normalized, 0.40)
+                            candidateQuad = blendQuads(candidateQuad!!, normalized, 0.50)
                         } else {
                             candidateQuad = normalized
                             candidateConfirmCount = 1
                         }
 
-                        if (candidateConfirmCount >= 5) {
+                        if (candidateConfirmCount >= 3) {
                             val confirmedNew = candidateQuad ?: normalized
                             previousQuad = confirmedNew
                             latestNormalizedQuad = confirmedNew
@@ -594,7 +593,6 @@ class ScannerActivity : ComponentActivity() {
                                 overlayView?.setPolygon(confirmedNew)
                             }
                         } else {
-                            // Hold current paper lock while waiting to see if the user truly moved to another paper
                             missedFrameCount++
                             if (missedFrameCount > 12) {
                                 latestNormalizedQuad = null
@@ -635,11 +633,25 @@ class ScannerActivity : ComponentActivity() {
         }
     }
 
-    private fun isQuadConsistentWith(q1: List<Point>, q2: List<Point>?, maxCornerDist: Double): Boolean {
+    /**
+     * Returns true if [q1] and [q2] represent the same physical paper, including when the user
+     * moves the camera closer to or further from the paper (radial expansion/contraction around
+     * the same centroid).
+     */
+    private fun isSamePaperOrZooming(q1: List<Point>, q2: List<Point>?, maxCenterDist: Double): Boolean {
         if (q2 == null || q1.size != 4 || q2.size != 4) return false
+
+        val c1x = (q1[0].x + q1[1].x + q1[2].x + q1[3].x) * 0.25
+        val c1y = (q1[0].y + q1[1].y + q1[2].y + q1[3].y) * 0.25
+        val c2x = (q2[0].x + q2[1].x + q2[2].x + q2[3].x) * 0.25
+        val c2y = (q2[0].y + q2[1].y + q2[2].y + q2[3].y) * 0.25
+
+        val centerDist = hypot(c1x - c2x, c1y - c2y)
+        if (centerDist > maxCenterDist) return false
+
         for (i in 0..3) {
-            val d = hypot(q1[i].x - q2[i].x, q1[i].y - q2[i].y)
-            if (d > maxCornerDist) return false
+            val cornerDist = hypot(q1[i].x - q2[i].x, q1[i].y - q2[i].y)
+            if (cornerDist > 0.22) return false
         }
         return true
     }
@@ -655,23 +667,38 @@ class ScannerActivity : ComponentActivity() {
     }
 
     /**
-     * Calm, rock-solid smoothing (75% previous, 25% new) with a 0.4% micro-tremor deadband
-     * so the green outline stays pinned to the paper edges without shaking.
+     * Velocity-adaptive smoothing:
+     * - When moving closer/further or panning (`dist >= 0.025`), uses fast 58% responsiveness so the
+     *   border follows distance changes immediately without lag.
+     * - When holding steady (`dist < 0.025`), uses calm 26% smoothing + 0.4% micro-tremor deadband
+     *   so the green outline stays pinned motionless on the paper edges.
      */
-    private fun smoothLockedQuad(prev: List<Point>, newQuad: List<Point>): List<Point> {
+    private fun smoothLockedQuadAdaptive(prev: List<Point>, newQuad: List<Point>): List<Point> {
         val smoothed = ArrayList<Point>(4)
         for (i in 0..3) {
             val dist = hypot(newQuad[i].x - prev[i].x, newQuad[i].y - prev[i].y)
-            if (dist < 0.0045) {
-                // Ignore tiny camera sensor / hand tremor (< 0.45% of screen)
-                smoothed.add(prev[i])
-            } else {
-                smoothed.add(
-                    Point(
-                        prev[i].x * 0.72 + newQuad[i].x * 0.28,
-                        prev[i].y * 0.72 + newQuad[i].y * 0.28
+            when {
+                dist < 0.004 -> {
+                    smoothed.add(prev[i])
+                }
+                dist >= 0.025 -> {
+                    // Camera is moving closer/further: follow smoothly & quickly
+                    smoothed.add(
+                        Point(
+                            prev[i].x * 0.42 + newQuad[i].x * 0.58,
+                            prev[i].y * 0.42 + newQuad[i].y * 0.58
+                        )
                     )
-                )
+                }
+                else -> {
+                    // Camera is held steady: rock-solid precision lock
+                    smoothed.add(
+                        Point(
+                            prev[i].x * 0.74 + newQuad[i].x * 0.26,
+                            prev[i].y * 0.74 + newQuad[i].y * 0.26
+                        )
+                    )
+                }
             }
         }
         return smoothed

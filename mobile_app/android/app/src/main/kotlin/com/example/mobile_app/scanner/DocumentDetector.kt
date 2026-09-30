@@ -3,6 +3,7 @@ package com.example.mobile_app.scanner
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfInt
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
@@ -14,20 +15,19 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 object DocumentDetector {
 
-    private val EPSILONS = doubleArrayOf(0.018, 0.025, 0.035)
+    private val EPSILONS = doubleArrayOf(0.015, 0.022, 0.032, 0.045)
 
     /**
-     * Finds a precise 4-corner document quad in a single-channel grayscale Mat.
+     * Finds a 4-corner document quad in a single-channel grayscale Mat across any normal
+     * shooting distance (from 5% of the camera frame up to 98% close-up).
      *
-     * Optional [priorNormalizedQuad] (in [0..1] upright coordinates) provides spatial hysteresis
-     * so that once a paper is locked, the detector strongly prefers keeping that paper rather
-     * than jumping to another object in the scene.
-     *
-     * Orders points: [TL, TR, BR, BL] in original source coordinates.
-     * Returns null if no high-confidence document quad is detected.
+     * Uses scale-independent quality scoring (4-side physical edge support + interior paper
+     * contrast + perspective rectangle geometry) so distant papers and close-up papers are
+     * detected equally fast while random non-paper objects are rejected.
      */
     fun findQuad(gray: Mat, priorNormalizedQuad: List<Point>? = null): List<Point>? {
         if (gray.empty() || gray.cols() <= 0 || gray.rows() <= 0) return null
@@ -35,7 +35,7 @@ object DocumentDetector {
         val originalWidth = gray.cols().toDouble()
         val originalHeight = gray.rows().toDouble()
         val longerSide = max(originalWidth, originalHeight)
-        val targetLongSide = 420.0
+        val targetLongSide = 400.0
         val scale = if (longerSide > targetLongSide) targetLongSide / longerSide else 1.0
 
         val downscaled = Mat()
@@ -56,11 +56,11 @@ object DocumentDetector {
         val h = downscaled.rows().toDouble()
         val downscaledArea = w * h
 
-        // A real document being scanned occupies at least 10% of the viewport and at most 95%
-        val minArea = downscaledArea * 0.10
-        val maxAreaAllowed = downscaledArea * 0.95
+        // Distance-independent area range:
+        // 4.5% (distant sheet / receipt / ID card) up to 98% (very close sheet)
+        val minArea = downscaledArea * 0.045
+        val maxAreaAllowed = downscaledArea * 0.98
 
-        // Convert priorNormalizedQuad to downscaled pixel coordinates if available
         val priorDownscaled = if (priorNormalizedQuad != null && priorNormalizedQuad.size == 4) {
             priorNormalizedQuad.map { Point(it.x * w, it.y * h) }
         } else {
@@ -69,64 +69,61 @@ object DocumentDetector {
 
         val blurred = Mat()
         val morphClosedGray = Mat()
+        val claheGray = Mat()
         val cannyClosed = Mat()
-        val cannyStandard = Mat()
+        val cannySensitive = Mat()
         val otsuBinary = Mat()
         val combinedEdges = Mat()
         val edgeSupportMask = Mat()
 
-        val kernelCloseGray = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0))
-        val kernel3 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+        val kernelClose7 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(7.0, 7.0))
         val kernel5 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
+        val kernel3 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
 
         var bestQuad: List<Point>? = null
         var bestScore = 0.0
 
         try {
-            // 1. Smooth noise while keeping outer boundaries
             Imgproc.GaussianBlur(downscaled, blurred, Size(5.0, 5.0), 0.0)
 
-            // 2. Morphological closing (9x9) on grayscale erases dark text/lines INSIDE the paper
-            // while preserving the bright rectangular body of the document against the background.
-            Imgproc.morphologyEx(blurred, morphClosedGray, Imgproc.MORPH_CLOSE, kernelCloseGray)
-            Imgproc.GaussianBlur(morphClosedGray, morphClosedGray, Size(5.0, 5.0), 0.0)
+            // Suppress internal dark text/lines inside the paper while keeping outer boundaries
+            Imgproc.morphologyEx(blurred, morphClosedGray, Imgproc.MORPH_CLOSE, kernelClose7)
+            Imgproc.GaussianBlur(morphClosedGray, morphClosedGray, Size(3.0, 3.0), 0.0)
 
-            // Compute Otsu threshold on the text-suppressed grayscale image
+            // Enhance local contrast so distant or low-contrast papers stand out clearly
+            val clahe = Imgproc.createCLAHE(2.0, Size(8.0, 8.0))
+            clahe.apply(morphClosedGray, claheGray)
+
             val otsuVal = Imgproc.threshold(
                 morphClosedGray,
                 otsuBinary,
                 0.0,
                 255.0,
                 Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU
-            ).coerceIn(55.0, 215.0)
+            ).coerceIn(50.0, 210.0)
 
-            // Clean up Otsu binary mask so internal holes are filled
             Imgproc.morphologyEx(otsuBinary, otsuBinary, Imgproc.MORPH_CLOSE, kernel5)
 
-            // Canny on text-suppressed image (primary clean document edge map)
-            Imgproc.Canny(morphClosedGray, cannyClosed, 0.45 * otsuVal, otsuVal)
+            // Primary Canny on text-suppressed grayscale
+            Imgproc.Canny(morphClosedGray, cannyClosed, 0.40 * otsuVal, otsuVal)
 
-            // Standard Canny on blurred image (for sharper contrast edges)
-            Imgproc.Canny(blurred, cannyStandard, 55.0, 145.0)
+            // Sensitive Canny on CLAHE image for distant/soft-lit papers
+            Imgproc.Canny(claheGray, cannySensitive, 35.0, 105.0)
 
-            // Build a unified 3px dilated edge support mask to verify that candidate quad sides
-            // actually lie on true physical edges in the image.
-            Core.bitwise_or(cannyClosed, cannyStandard, combinedEdges)
-            Imgproc.dilate(combinedEdges, edgeSupportMask, kernel3)
+            // Build 5x5 dilated edge support mask for verifying candidate quad sides
+            Core.bitwise_or(cannyClosed, cannySensitive, combinedEdges)
+            Imgproc.dilate(combinedEdges, edgeSupportMask, kernel5)
 
-            // Prepare contour passes:
-            // Pass A: Canny on text-suppressed image (dilated slightly to bridge 1-2px corner gaps)
-            val passA = Mat()
-            Imgproc.dilate(cannyClosed, passA, kernel3)
+            // Pass 1: Closed Canny edges (works at any distance: far, medium, close)
+            val passCannyClosed = Mat()
+            Imgproc.morphologyEx(cannyClosed, passCannyClosed, Imgproc.MORPH_CLOSE, kernel5)
 
-            // Pass B: Otsu binary document body mask
-            val passB = otsuBinary
+            // Pass 2: Combined Canny + MORPH_CLOSE 5x5 (catches distant/low-contrast sheets)
+            val passCombinedClosed = Mat()
+            Imgproc.morphologyEx(combinedEdges, passCombinedClosed, Imgproc.MORPH_CLOSE, kernel5)
 
-            // Pass C: Combined Canny + 5x5 close
-            val passC = Mat()
-            Imgproc.morphologyEx(combinedEdges, passC, Imgproc.MORPH_CLOSE, kernel5)
-
-            val passes = listOf(passA, passB, passC)
+            // Pass 3: Otsu binary body mask
+            val passes = listOf(passCannyClosed, passCombinedClosed, otsuBinary)
 
             try {
                 for (passMat in passes) {
@@ -142,22 +139,19 @@ object DocumentDetector {
                     hierarchy.release()
 
                     contours.sortByDescending { Imgproc.contourArea(it) }
-                    val candidates = contours.take(6)
+                    val candidates = contours.take(8)
 
                     for (contour in candidates) {
-                        val contourArea = Imgproc.contourArea(contour)
-                        if (contourArea < minArea || contourArea > maxAreaAllowed) continue
-
-                        val candidatePts = extractStrictQuad(contour, contourArea, minArea, maxAreaAllowed)
+                        val candidatePts = extractCandidateQuad(contour, minArea, maxAreaAllowed)
                         if (candidatePts != null) {
-                            val score = evaluateDocumentConfidence(
+                            val score = evaluateDocumentQuality(
                                 ordered = candidatePts,
-                                contourArea = contourArea,
                                 gray = morphClosedGray,
                                 edgeMask = edgeSupportMask,
                                 priorQuad = priorDownscaled,
                                 frameW = w,
-                                frameH = h
+                                frameH = h,
+                                downscaledArea = downscaledArea
                             )
                             if (score > bestScore) {
                                 bestScore = score
@@ -171,31 +165,29 @@ object DocumentDetector {
                     }
                 }
             } finally {
-                passA.release()
-                passC.release()
+                passCannyClosed.release()
+                passCombinedClosed.release()
             }
         } finally {
             downscaled.release()
             blurred.release()
             morphClosedGray.release()
+            claheGray.release()
             cannyClosed.release()
-            cannyStandard.release()
+            cannySensitive.release()
             otsuBinary.release()
             combinedEdges.release()
             edgeSupportMask.release()
-            kernelCloseGray.release()
-            kernel3.release()
+            kernelClose7.release()
             kernel5.release()
+            kernel3.release()
         }
 
-        // Minimum confidence threshold required to accept a quad as a real document
-        val minConfidenceScore = downscaledArea * 0.085
-        val finalBest = if (bestScore >= minConfidenceScore) bestQuad else null
-        if (finalBest == null) return null
+        // Scale-independent quality threshold (0.58) so both distant (5%) and close (95%) papers pass!
+        if (bestQuad == null || bestScore < 0.58) return null
 
-        // Scale back to original coordinates
         val invScale = 1.0 / scale
-        val scaledQuad = finalBest.map {
+        val scaledQuad = bestQuad.map {
             Point(
                 (it.x * invScale).coerceIn(0.0, originalWidth),
                 (it.y * invScale).coerceIn(0.0, originalHeight)
@@ -206,61 +198,73 @@ object DocumentDetector {
     }
 
     /**
-     * Extracts a 4-corner polygon ONLY if the contour genuinely approximates to 4 straight sides
-     * whose polygon area matches the raw contour area within 12% (rejecting random blobs/wires).
+     * Extracts a 4-corner polygon from either the raw contour or its convex hull (to bridge small
+     * shadow/finger breaks along an edge), then verifies that the polygon has valid perspective
+     * paper geometry. False hulls from random objects will be filtered out by [evaluateDocumentQuality]
+     * which checks physical edge support along all 4 sides.
      */
-    private fun extractStrictQuad(
+    private fun extractCandidateQuad(
         contour: MatOfPoint,
-        contourArea: Double,
         minArea: Double,
         maxAreaAllowed: Double
     ): List<Point>? {
-        val c2f = MatOfPoint2f(*contour.toArray())
-        val peri = Imgproc.arcLength(c2f, true)
-
+        val hullIndices = MatOfInt()
+        var hullContour: MatOfPoint? = null
         try {
-            for (eps in EPSILONS) {
-                val approx = MatOfPoint2f()
-                Imgproc.approxPolyDP(c2f, approx, eps * peri, true)
-                val total = approx.total()
-                if (total == 4L) {
-                    val pts = approx.toArray().toList()
-                    approx.release()
-                    val ordered = orderPoints(pts)
+            Imgproc.convexHull(contour, hullIndices)
+            val contourPts = contour.toArray()
+            val indices = hullIndices.toArray()
+            if (indices.size >= 4) {
+                val hullPts = Array(indices.size) { idx -> contourPts[indices[idx]] }
+                hullContour = MatOfPoint(*hullPts)
+            }
 
-                    val quadMat = MatOfPoint(*ordered.toTypedArray())
-                    val isConvex = Imgproc.isContourConvex(quadMat)
-                    val quadArea = Imgproc.contourArea(quadMat)
-                    quadMat.release()
+            // Check raw contour first (most accurate), then convex hull (bridges small edge gaps)
+            val shapes = listOfNotNull(contour, hullContour)
+            for (shape in shapes) {
+                val shapeArea = Imgproc.contourArea(shape)
+                if (shapeArea < minArea || shapeArea > maxAreaAllowed) continue
 
-                    if (!isConvex || quadArea < minArea || quadArea > maxAreaAllowed) {
-                        continue
+                val c2f = MatOfPoint2f(*shape.toArray())
+                val peri = Imgproc.arcLength(c2f, true)
+
+                for (eps in EPSILONS) {
+                    val approx = MatOfPoint2f()
+                    Imgproc.approxPolyDP(c2f, approx, eps * peri, true)
+                    if (approx.total() == 4L) {
+                        val pts = approx.toArray().toList()
+                        approx.release()
+                        val ordered = orderPoints(pts)
+
+                        val quadMat = MatOfPoint(*ordered.toTypedArray())
+                        val isConvex = Imgproc.isContourConvex(quadMat)
+                        val quadArea = Imgproc.contourArea(quadMat)
+                        quadMat.release()
+
+                        // The 4-point polygon must closely match the shape's area (85%..115%)
+                        val fitRatio = shapeArea / quadArea.coerceAtLeast(1.0)
+                        if (isConvex && quadArea in minArea..maxAreaAllowed && fitRatio in 0.85..1.15) {
+                            if (isValidPaperGeometry(ordered)) {
+                                c2f.release()
+                                return ordered
+                            }
+                        }
+                    } else {
+                        approx.release()
                     }
-
-                    // The raw contour must tightly match the 4-point polygon area (no random blobs)
-                    val areaRatio = contourArea / quadArea
-                    if (areaRatio < 0.88 || areaRatio > 1.12) {
-                        continue
-                    }
-
-                    if (isValidPaperGeometry(ordered)) {
-                        return ordered
-                    }
-                } else {
-                    approx.release()
                 }
+                c2f.release()
             }
         } finally {
-            c2f.release()
+            hullIndices.release()
+            hullContour?.release()
         }
         return null
     }
 
     /**
-     * Checks that the 4 ordered points [TL, TR, BR, BL] have realistic perspective-paper proportions:
-     * - Interior angles in [62°, 118°]
-     * - Opposite side length ratios <= 1.55 (no extreme trapezoids)
-     * - Aspect ratio in [0.38, 2.6]
+     * Checks that the 4 ordered points [TL, TR, BR, BL] have realistic perspective-paper proportions
+     * at any distance (near or far).
      */
     private fun isValidPaperGeometry(ordered: List<Point>): Boolean {
         if (ordered.size != 4) return false
@@ -270,100 +274,108 @@ object DocumentDetector {
         val bottomW = hypot(ordered[2].x - ordered[3].x, ordered[2].y - ordered[3].y)
         val leftH = hypot(ordered[3].x - ordered[0].x, ordered[3].y - ordered[0].y)
 
+        // Allow smaller minSide (20px on 400px image = 5% of frame) so distant papers are accepted
         val minSide = min(min(topW, bottomW), min(leftH, rightH))
-        if (minSide < 32.0) return false
+        if (minSide < 20.0) return false
 
-        // Opposite sides on a rectangular sheet under normal camera perspective cannot differ > 1.55x
+        // Opposite sides under perspective cannot differ by more than 1.65x
         val widthRatio = max(topW, bottomW) / min(topW, bottomW).coerceAtLeast(1.0)
         val heightRatio = max(leftH, rightH) / min(leftH, rightH).coerceAtLeast(1.0)
-        if (widthRatio > 1.55 || heightRatio > 1.55) return false
+        if (widthRatio > 1.65 || heightRatio > 1.65) return false
 
         val avgW = (topW + bottomW) * 0.5
         val avgH = (leftH + rightH) * 0.5
         val aspect = avgW / avgH.coerceAtLeast(1.0)
-        if (aspect < 0.38 || aspect > 2.60) return false
+        if (aspect < 0.35 || aspect > 2.85) return false
 
-        // Interior angles must be close to 90° (allow 62°..118° for camera tilt)
+        // Interior angles in [55°, 125°] to support angled/tilted camera holds
         for (i in 0..3) {
             val prev = ordered[(i + 3) % 4]
             val curr = ordered[i]
             val next = ordered[(i + 1) % 4]
             val angle = angleBetweenDegrees(prev, curr, next)
-            if (angle < 62.0 || angle > 118.0) return false
+            if (angle < 55.0 || angle > 125.0) return false
         }
 
         return true
     }
 
     /**
-     * Evaluates physical evidence that [ordered] is an actual paper sheet:
-     * 1. All 4 boundary segments must lie on strong Canny edges (`edgeSupportMask`).
-     * 2. The interior along the 4 edges must be brighter/cleaner than the exterior background.
-     * 3. Rectangularity and viewport-border penalty.
-     * 4. Spatial lock bonus if [ordered] matches [priorQuad].
+     * Computes a scale-independent document confidence score (typically 0.0 .. 1.5+).
+     * Because the score is NOT multiplied by raw pixel area, a small distant paper (5% of frame)
+     * and a large close-up paper (90% of frame) both achieve ~0.80..1.20 when their edges and
+     * contrast are valid!
      */
-    private fun evaluateDocumentConfidence(
+    private fun evaluateDocumentQuality(
         ordered: List<Point>,
-        contourArea: Double,
         gray: Mat,
         edgeMask: Mat,
         priorQuad: List<Point>?,
         frameW: Double,
-        frameH: Double
+        frameH: Double,
+        downscaledArea: Double
     ): Double {
-        // Reject quads that hug >= 3 edges of the camera sensor viewport
-        val marginX = frameW * 0.02
-        val marginY = frameH * 0.02
+        // Only reject if ALL 4 corners sit on the extreme 1% edge of the camera viewport
+        val marginX = frameW * 0.01
+        val marginY = frameH * 0.01
         var borderCorners = 0
         for (p in ordered) {
             if (p.x <= marginX || p.x >= frameW - marginX || p.y <= marginY || p.y >= frameH - marginY) {
                 borderCorners++
             }
         }
-        if (borderCorners >= 3) return 0.0
+        if (borderCorners == 4) return 0.0
 
-        // 1. Verify Canny edge support along each of the 4 sides
+        val quadMat = MatOfPoint(*ordered.toTypedArray())
+        val quadArea = Imgproc.contourArea(quadMat)
+        quadMat.release()
+
+        // 1. Physical Canny edge support along all 4 sides (rejects imaginary convexHull lines)
         val edgeSupport = measureEdgeSupport(ordered, edgeMask)
-        if (edgeSupport < 0.76) return 0.0
+        if (edgeSupport < 0.70) return 0.0
 
-        // 2. Verify that the inside of the quad is paper-like (brighter than outside border)
-        val contrastFactor = measureInteriorVsExteriorBrightness(ordered, gray)
-        if (contrastFactor <= 0.0) return 0.0
+        // 2. Interior vs exterior paper brightness / contrast verification
+        val contrastScore = measureInteriorVsExteriorBrightness(ordered, gray)
+        if (contrastScore <= 0.0) return 0.0
 
         // 3. Rectangularity check
         val matPt2f = MatOfPoint2f(*ordered.toTypedArray())
         val minRect = Imgproc.minAreaRect(matPt2f)
         matPt2f.release()
         val rectArea = (minRect.size.width * minRect.size.height).coerceAtLeast(1.0)
-        val rectangularity = (contourArea / rectArea).coerceIn(0.0, 1.0)
-        if (rectangularity < 0.72) return 0.0
+        val rectangularity = (quadArea / rectArea).coerceIn(0.0, 1.0)
+        if (rectangularity < 0.70) return 0.0
 
-        // 4. Spatial hysteresis bonus if this quad matches the previously locked paper
+        // Gentle preference for larger paper when two real papers are in view (0.85 .. 1.15 factor)
+        val areaFraction = (quadArea / downscaledArea).coerceIn(0.045, 0.98)
+        val sizeWeight = 0.85 + 0.30 * sqrt(areaFraction)
+
+        // 4. Sticky lock bonus if this quad is the same paper (or zoomed version) as priorQuad
         var lockBonus = 1.0
         if (priorQuad != null && priorQuad.size == 4) {
             val diag = hypot(frameW, frameH)
-            var maxCornerDist = 0.0
-            for (i in 0..3) {
-                val d = hypot(ordered[i].x - priorQuad[i].x, ordered[i].y - priorQuad[i].y) / diag
-                if (d > maxCornerDist) maxCornerDist = d
-            }
-            if (maxCornerDist < 0.08) {
-                // Strong bonus to keep the current paper locked rather than switching to another object
-                lockBonus = 1.45
+            val cPriorX = (priorQuad[0].x + priorQuad[1].x + priorQuad[2].x + priorQuad[3].x) * 0.25
+            val cPriorY = (priorQuad[0].y + priorQuad[1].y + priorQuad[2].y + priorQuad[3].y) * 0.25
+            val cNewX = (ordered[0].x + ordered[1].x + ordered[2].x + ordered[3].x) * 0.25
+            val cNewY = (ordered[0].y + ordered[1].y + ordered[2].y + ordered[3].y) * 0.25
+            val centerDist = hypot(cNewX - cPriorX, cNewY - cPriorY) / diag
+            if (centerDist < 0.12) {
+                lockBonus = 1.35
             }
         }
 
-        return contourArea * rectangularity * edgeSupport * contrastFactor * lockBonus
+        return edgeSupport * rectangularity * contrastScore * sizeWeight * lockBonus
     }
 
     /**
-     * Samples points along each of the 4 sides of [ordered] in [edgeMask].
-     * Returns 0.0 if any single side has < 65% edge support; otherwise returns the average support.
+     * Samples 20 points along each of the 4 sides of [ordered] in [edgeMask].
+     * Every single side must have real edge pixels along >= 58% of its length,
+     * and the average across all 4 sides must be >= 70%.
      */
     private fun measureEdgeSupport(ordered: List<Point>, edgeMask: Mat): Double {
         val cols = edgeMask.cols()
         val rows = edgeMask.rows()
-        val samplesPerSide = 24
+        val samplesPerSide = 20
         var totalSupport = 0.0
 
         for (side in 0..3) {
@@ -371,7 +383,6 @@ object DocumentDetector {
             val p2 = ordered[(side + 1) % 4]
             var hits = 0
 
-            // Sample from 8% to 92% along the side (avoiding corner rounding artifacts)
             for (s in 1..samplesPerSide) {
                 val t = 0.08 + 0.84 * (s.toDouble() / (samplesPerSide + 1).toDouble())
                 val x = (p1.x + t * (p2.x - p1.x)).roundToInt().coerceIn(0, cols - 1)
@@ -384,8 +395,7 @@ object DocumentDetector {
             }
 
             val sideRatio = hits.toDouble() / samplesPerSide.toDouble()
-            // Every single side of the paper must have real edge pixels along >= 65% of its length
-            if (sideRatio < 0.65) return 0.0
+            if (sideRatio < 0.58) return 0.0
             totalSupport += sideRatio
         }
 
@@ -393,8 +403,8 @@ object DocumentDetector {
     }
 
     /**
-     * Compares pixel brightness slightly inside the quad vs slightly outside the quad,
-     * and checks that the interior of the document is reasonably bright (> 95 gray level).
+     * Verifies that the interior of the candidate quad looks like a document/paper
+     * compared to its immediate outer background.
      */
     private fun measureInteriorVsExteriorBrightness(ordered: List<Point>, gray: Mat): Double {
         val cols = gray.cols()
@@ -404,33 +414,32 @@ object DocumentDetector {
 
         var insideSum = 0.0
         var outsideSum = 0.0
+        var absDiffSum = 0.0
         var count = 0
 
         for (side in 0..3) {
             val p1 = ordered[side]
             val p2 = ordered[(side + 1) % 4]
-            for (s in 1..10) {
-                val t = s.toDouble() / 11.0
+            for (s in 1..8) {
+                val t = s.toDouble() / 9.0
                 val bx = p1.x + t * (p2.x - p1.x)
                 val by = p1.y + t * (p2.y - p1.y)
 
-                // Vector from centroid to border point
                 val vx = bx - cx
                 val vy = by - cy
 
-                // 8% inward toward centroid (inside the paper margin)
-                val inX = (bx - 0.08 * vx).roundToInt().coerceIn(0, cols - 1)
-                val inY = (by - 0.08 * vy).roundToInt().coerceIn(0, rows - 1)
+                val inX = (bx - 0.09 * vx).roundToInt().coerceIn(0, cols - 1)
+                val inY = (by - 0.09 * vy).roundToInt().coerceIn(0, rows - 1)
 
-                // 8% outward away from centroid (background just outside the paper)
-                val outX = (bx + 0.08 * vx).roundToInt().coerceIn(0, cols - 1)
-                val outY = (by + 0.08 * vy).roundToInt().coerceIn(0, rows - 1)
+                val outX = (bx + 0.09 * vx).roundToInt().coerceIn(0, cols - 1)
+                val outY = (by + 0.09 * vy).roundToInt().coerceIn(0, rows - 1)
 
                 val inVal = gray.get(inY, inX)?.get(0) ?: 0.0
                 val outVal = gray.get(outY, outX)?.get(0) ?: 0.0
 
                 insideSum += inVal
                 outsideSum += outVal
+                absDiffSum += abs(inVal - outVal)
                 count++
             }
         }
@@ -438,17 +447,16 @@ object DocumentDetector {
         if (count == 0) return 0.0
         val meanIn = insideSum / count
         val meanOut = outsideSum / count
+        val meanAbsDiff = absDiffSum / count
 
-        // A real sheet of paper has a relatively light interior (at least > 90 luminance)
-        if (meanIn < 90.0) return 0.0
+        // Document interior should not be pitch-dark
+        if (meanIn < 80.0) return 0.0
 
         val diff = meanIn - meanOut
-        // Paper should either be noticeably brighter than the background (diff >= 8)
-        // or be a very bright sheet (meanIn >= 155) with clear edge contrast (abs(diff) >= 6)
         return when {
-            diff >= 18.0 -> 1.25
-            diff >= 8.0 -> 1.05
-            meanIn >= 155.0 && abs(diff) >= 6.0 -> 0.95
+            diff >= 14.0 -> 1.15
+            diff >= 6.0 -> 1.00
+            meanIn >= 135.0 && meanAbsDiff >= 8.0 -> 0.95
             else -> 0.0
         }
     }
@@ -471,11 +479,9 @@ object DocumentDetector {
     fun orderPoints(pts: List<Point>): List<Point> {
         require(pts.size == 4) { "orderPoints requires exactly 4 points" }
 
-        // TL: min(x + y), BR: max(x + y)
         val tl = pts.minByOrNull { it.x + it.y } ?: pts[0]
         val br = pts.maxByOrNull { it.x + it.y } ?: pts[2]
 
-        // TR: min(y - x), BL: max(y - x)
         val remaining = pts.filter { it !== tl && it !== br }
         val tr: Point
         val bl: Point
@@ -483,7 +489,6 @@ object DocumentDetector {
             tr = remaining.minByOrNull { it.y - it.x } ?: remaining[0]
             bl = remaining.maxByOrNull { it.y - it.x } ?: remaining[1]
         } else {
-            // Fallback in degenerate coordinate cases
             tr = pts.minByOrNull { it.y - it.x } ?: pts[1]
             bl = pts.maxByOrNull { it.y - it.x } ?: pts[3]
         }
@@ -521,11 +526,9 @@ object DocumentDetector {
             }
         }
 
-        // Centroid calculation
         val cx = (tl.x + tr.x + br.x + bl.x) / 4.0
         val cy = (tl.y + tr.y + br.y + bl.y) / 4.0
 
-        // Inset ~0.5% toward centroid to remove dark edge slivers
         val insetFactor = 0.005
         fun shrink(p: Point): Point {
             return Point(
