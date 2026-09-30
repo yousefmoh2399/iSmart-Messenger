@@ -13,6 +13,7 @@ import '../../features/admin/data/announcement_repository.dart';
 import '../../features/admin/presentation/announcements_controller.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/chat/data/chat_local_cache.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -28,7 +29,6 @@ import '../../features/printers/presentation/printer_controller.dart';
 import '../../features/scanner/data/image_processing_service.dart';
 import '../../features/scanner/data/local_document_store.dart';
 import '../../features/scanner/data/pdf_builder_service.dart';
-import '../../features/scanner/data/scanner_service.dart';
 import '../../features/scanner/data/signature_composer_service.dart';
 import '../../features/scanner/data/signature_storage_service.dart';
 import '../../features/scanner/presentation/scan_session_controller.dart';
@@ -329,10 +329,6 @@ final pdfBuilderServiceProvider = Provider<PdfBuilderService>(
   (ref) => PdfBuilderService(),
 );
 
-final scannerServiceProvider = Provider<ScannerService>(
-  (ref) => ScannerService(),
-);
-
 final signatureStorageServiceProvider = Provider<SignatureStorageService>(
   (ref) => SignatureStorageService(),
 );
@@ -390,6 +386,10 @@ final announcementRepositoryProvider = Provider<AnnouncementRepository>((ref) {
   return AnnouncementRepository(ref.watch(authenticatedApiClientProvider));
 });
 
+final chatLocalCacheProvider = Provider<ChatLocalCache>((ref) {
+  return ChatLocalCache();
+});
+
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
   return ChatRepository(
     ref.watch(authenticatedApiClientProvider),
@@ -397,6 +397,7 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
     authRepository: ref.watch(authRepositoryProvider),
+    cache: ref.watch(chatLocalCacheProvider),
   );
 });
 

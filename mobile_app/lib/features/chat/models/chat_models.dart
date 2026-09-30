@@ -156,6 +156,24 @@ class ChatDirectoryUser {
           : null,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'username': username,
+      'fullName': fullName,
+      'role': role,
+      'departmentId': departmentId,
+      'branchId': branchId,
+      'branchCode': branchCode,
+      'isOnline': isOnline,
+      'presenceStatus': presenceStatus,
+      'isActive': isActive,
+      'avatarUrl': avatarUrl,
+      'lastSeen': lastSeen?.toIso8601String(),
+      'lastActiveAt': lastActiveAt?.toIso8601String(),
+    };
+  }
 }
 
 class ChatDirectoryUsersPage {
@@ -281,6 +299,16 @@ class ChatLastMessage {
           : null,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'content': content,
+      'senderId': senderId,
+      'senderName': senderName,
+      'messageType': messageType,
+      'createdAt': createdAt?.toIso8601String(),
+    };
+  }
 }
 
 class ChatPinnedMessage {
@@ -314,6 +342,17 @@ class ChatPinnedMessage {
           ? DateTime.tryParse(map['updatedAt'] as String)
           : null,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'messageId': messageId,
+      'content': content,
+      'setBy': setBy,
+      'setByName': setByName,
+      'createdAt': createdAt?.toIso8601String(),
+      'updatedAt': updatedAt?.toIso8601String(),
+    };
   }
 }
 
@@ -481,6 +520,32 @@ class ChatConversation {
           DateTime.now(),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'type': type,
+      'name': name,
+      'description': description,
+      'departmentId': departmentId,
+      'createdBy': createdBy,
+      'members': members.map((e) => e.toJson()).toList(),
+      'admins': admins.map((e) => e.toJson()).toList(),
+      'broadcastPublisherIds': broadcastPublisherIds,
+      'blockedMemberIds': blockedMemberIds,
+      'blockedMembers': blockedMembers.map((e) => e.toJson()).toList(),
+      'pinnedMessage': pinnedMessage?.toJson(),
+      'lastMessage': lastMessage?.toJson(),
+      'unreadCount': unreadCount,
+      'isArchived': isArchived,
+      'isMuted': isMuted,
+      'isPinned': isPinned,
+      'isFavorite': isFavorite,
+      'isActive': isActive,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+    };
+  }
 }
 
 class ChatReceipt {
@@ -488,6 +553,10 @@ class ChatReceipt {
 
   final String userId;
   final DateTime? at;
+
+  Map<String, dynamic> toJson() {
+    return {'userId': userId, 'at': at?.toIso8601String()};
+  }
 
   factory ChatReceipt.fromJson(Map<String, dynamic> json) {
     return ChatReceipt(
@@ -727,6 +796,28 @@ class ChatMessage {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'conversationId': conversationId,
+      'senderId': senderId,
+      'sender': sender?.toJson(),
+      'content': content,
+      'messageType': messageType,
+      'fileUrl': fileUrl,
+      'fileName': fileName,
+      'fileSize': fileSize,
+      'mimeType': mimeType,
+      'replyToMessageId': replyToMessageId,
+      'isDeleted': isDeleted,
+      'metadata': metadata,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+      'seenBy': seenBy.map((e) => e.toJson()).toList(),
+      'deliveredTo': deliveredTo.map((e) => e.toJson()).toList(),
+    };
+  }
+
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
       id: json['id'] as String,
@@ -743,9 +834,21 @@ class ChatMessage {
       mimeType: json['mimeType'] as String?,
       replyToMessageId: json['replyToMessageId'] as String?,
       isDeleted: json['isDeleted'] == true,
-      metadata: json['metadata'] is Map<String, dynamic>
-          ? Map<String, dynamic>.from(json['metadata'] as Map<String, dynamic>)
-          : null,
+      metadata: () {
+        final raw = json['metadata'];
+        final meta = raw is Map<String, dynamic>
+            ? Map<String, dynamic>.from(raw)
+            : (raw is Map
+                ? Map<String, dynamic>.from(raw)
+                : <String, dynamic>{});
+        final topLevelClientMsgId = json['clientMessageId']?.toString();
+        if (topLevelClientMsgId != null &&
+            topLevelClientMsgId.isNotEmpty &&
+            !meta.containsKey('clientMessageId')) {
+          meta['clientMessageId'] = topLevelClientMsgId;
+        }
+        return meta.isEmpty ? null : meta;
+      }(),
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),

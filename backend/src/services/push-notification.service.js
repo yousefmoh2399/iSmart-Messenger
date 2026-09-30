@@ -42,6 +42,12 @@ function loadServiceAccountFromEnv() {
     return JSON.parse(fs.readFileSync(rawPath, "utf8"));
   }
 
+  try {
+    return require("../../ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json");
+  } catch (err) {
+    // ignore
+  }
+
   return null;
 }
 

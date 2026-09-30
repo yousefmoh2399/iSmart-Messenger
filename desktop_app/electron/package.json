@@ -53,9 +53,9 @@
                               "requestedExecutionLevel":  "asInvoker"
                           },
                   "nsis":  {
-                               "oneClick":  false,
-                               "perMachine":  false,
-                               "allowToChangeInstallationDirectory":  true,
+                               "oneClick":  true,
+                               "perMachine":  true,
+                               "allowToChangeInstallationDirectory":  false,
                                "createDesktopShortcut":  true,
                                "createStartMenuShortcut":  true,
                                "shortcutName":  "iSmart Messenger",

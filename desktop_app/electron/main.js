@@ -46,7 +46,7 @@ let lanReceiveReminderTimer = null;
 let currentWindowTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
 const pendingLanTransfers = new Map();
 const pendingLanReceiveRequests = new Map();
-const MAX_ELECTRON_FETCH_BYTES = 80 * 1024 * 1024;
+const MAX_ELECTRON_FETCH_BYTES = 512 * 1024 * 1024;
 const LAN_DISCOVERY_TIMEOUT_MS = 750;
 const LAN_DISCOVERY_BATCH_SIZE = 96;
 const DEFAULT_TRANSFER_POLICY = {
@@ -85,7 +85,7 @@ function applyWindowTheme(mode = currentWindowTheme) {
   // visually each time the mouse passes over minimize/maximize/close.
   if (themeChanged && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
-      color: "rgba(0,0,0,0)",
+      color: palette.color,
       symbolColor: palette.symbolColor,
       height: 34,
     });
@@ -845,7 +845,7 @@ function createWindow(startUrl) {
     backgroundColor: titleBarPalette().color,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      ...titleBarPalette(), color: "rgba(0,0,0,0)",
+      ...titleBarPalette(),
       height: 34,
     },
     webPreferences: {

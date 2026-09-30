@@ -1,12 +1,14 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/document_paper_size.dart';
 import '../../../shared/models/pending_upload.dart';
 import '../../../shared/models/scan_page.dart';
 import '../../../shared/models/scan_session.dart';
 import '../../../shared/providers/providers.dart';
+import '../data/native_scanner_bridge.dart';
 import '../data/pdf_builder_service.dart';
 
 
@@ -43,7 +45,12 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
     if (currentPage.imagePath != newPage.imagePath) {
       await ref
           .read(localDocumentStoreProvider)
-          .deletePageFile(currentPage.imagePath);
+          .deletePageFile(
+            currentPage.imagePath,
+            originalPath: currentPage.originalPath != newPage.originalPath
+                ? currentPage.originalPath
+                : null,
+          );
     }
 
     final updated = session.copyWith(
@@ -60,10 +67,24 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
     if (session == null) return;
 
     final targetPage = session.pages.firstWhere((page) => page.id == pageId);
-    await ref
-        .read(imageProcessingServiceProvider)
-        .rotateFileInPlace(targetPage.imagePath);
-    final updated = session.copyWith(pages: [...session.pages]);
+    final tempRotated = '${targetPage.imagePath}.rot.jpg';
+    await NativeScannerBridge.rotateLeft(
+      path: targetPage.imagePath,
+      outPath: tempRotated,
+    );
+    final f = File(tempRotated);
+    if (await f.exists()) {
+      await f.rename(targetPage.imagePath);
+    }
+    await FileImage(File(targetPage.imagePath)).evict();
+    final updated = session.copyWith(
+      pages: session.pages.map((p) {
+        if (p.id == pageId) {
+          return p.copyWith(quarterTurns: (p.quarterTurns + 1) % 4);
+        }
+        return p;
+      }).toList(),
+    );
     await ref.read(localDocumentStoreProvider).saveDraft(updated);
     state = AsyncData(updated);
   }
@@ -142,12 +163,33 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
         ? 'جارٍ تجهيز الصفحة وبناء الملف...'
         : 'جارٍ تجهيز $pageCount صفحات وبناء الملف...';
 
+    // Ensure all pages are <= 2048px and orientation == 1 via C++ OpenCV (~15ms)
+    // so PdfBuilderService always hits its 0ms zero-decode fast path.
+    for (final page in session.pages) {
+      try {
+        final file = File(page.imagePath);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          if (applyEnhancement || PdfBuilderService.needsNormalization(bytes)) {
+            await NativeScannerBridge.applyFilter(
+              path: page.imagePath,
+              filter: applyEnhancement ? 'enhance' : 'original',
+              outPath: page.imagePath,
+              maxSide: 2048,
+            );
+          }
+        }
+      } catch (_) {
+        // Fallback inside PdfBuilderService will handle if native call fails
+      }
+    }
+
     final pdfBytes = await ref
         .read(pdfBuilderServiceProvider)
         .buildPdf(
           imagePaths: session.pages.map((page) => page.imagePath).toList(),
           paperSizes: session.pages.map((page) => page.paperSize).toList(),
-          applyEnhancement: applyEnhancement,
+          applyEnhancement: false,
         );
 
     // ── Step 2: Write to disk ──
@@ -186,6 +228,7 @@ class ScanSessionController extends AsyncNotifier<ScanSession?> {
 
     // Overwrite the existing file in-place — no new path needed
     await File(targetPage.imagePath).writeAsBytes(newImageBytes, flush: true);
+    await FileImage(File(targetPage.imagePath)).evict();
 
     // Force a state refresh so Image.file widgets rebuild with the new content
     state = AsyncData(session.copyWith(pages: [...session.pages]));

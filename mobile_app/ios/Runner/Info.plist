@@ -25,7 +25,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>يحتاج التطبيق إلى الكاميرا لمسح المستندات وأكواد QR وBarcode الخاصة بأصول IT والجرد.</string>
+	<string>يحتاج التطبيق إلى الكاميرا لمسح المستندات ضوئيًا وأكواد QR والجرد. / The app requires camera access to scan documents and QR codes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>يحتاج التطبيق إلى الوصول للصور حتى تتمكن من استيراد مستند من المعرض أثناء المسح.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -43,6 +43,36 @@ class ChatInput extends StatefulWidget {
   final bool enabled;
   final bool enterSendsMessage;
 
+  static TextEditingValue insertTextAtSelection(
+    TextEditingValue value,
+    String textToInsert,
+  ) {
+    final text = value.text;
+    final selection = value.selection;
+
+    int start = selection.isValid ? selection.baseOffset : -1;
+    int end = selection.isValid ? selection.extentOffset : -1;
+
+    if (start > end) {
+      final temp = start;
+      start = end;
+      end = temp;
+    }
+
+    if (start == -1 || end == -1) {
+      start = text.length;
+      end = text.length;
+    }
+
+    final newText = text.replaceRange(start, end, textToInsert);
+    return TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: start + textToInsert.length,
+      ),
+    );
+  }
+
   @override
   State<ChatInput> createState() => _ChatInputState();
 }
@@ -277,29 +307,10 @@ class _ChatInputState extends State<ChatInput> {
                                 height: 400,
                                 child: EmojiPickerPanel(
                                   onEmojiSelected: (emoji) {
-                                    final text = widget.controller.text;
-                                    final selection =
-                                        widget.controller.selection;
-                                    final newText = text.replaceRange(
-                                      selection.start > -1
-                                          ? selection.start
-                                          : text.length,
-                                      selection.end > -1
-                                          ? selection.end
-                                          : text.length,
+                                    widget.controller.value = ChatInput.insertTextAtSelection(
+                                      widget.controller.value,
                                       emoji.emoji,
                                     );
-                                    widget.controller.value = TextEditingValue(
-                                      text: newText,
-                                      selection: TextSelection.collapsed(
-                                        offset:
-                                            (selection.start > -1
-                                                ? selection.start
-                                                : text.length) +
-                                            emoji.emoji.length,
-                                      ),
-                                    );
-                                    Navigator.pop(context);
                                   },
                                 ),
                               ),

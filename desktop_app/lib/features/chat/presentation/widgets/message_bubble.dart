@@ -20,6 +20,10 @@ const List<String> _kReactionEmojiFontFallbacks = <String>[
   'Segoe UI Emoji',
 ];
 
+final RegExp _singleEmojiRegex = RegExp(
+  r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
+);
+
 class MessageBubble extends StatefulWidget {
   const MessageBubble({
     super.key,
@@ -57,6 +61,7 @@ class MessageBubble extends StatefulWidget {
     this.chatPreferences = ChatPreferences.defaults,
     this.albumMessages = const [],
     this.onOpenAlbum,
+    this.onRetry,
   });
 
   final ChatMessage message;
@@ -93,6 +98,7 @@ class MessageBubble extends StatefulWidget {
   final ChatPreferences chatPreferences;
   final List<ChatMessage> albumMessages;
   final ValueChanged<ChatMessage>? onOpenAlbum;
+  final VoidCallback? onRetry;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -138,96 +144,130 @@ class _MessageBubbleState extends State<MessageBubble> {
       case _BubbleMenuAction.pin:
         widget.onPin?.call();
         break;
+      case _BubbleMenuAction.retry:
+        widget.onRetry?.call();
+        break;
     }
   }
 
   Future<void> _showContextMenuAt(Offset position) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final isFailed = widget.message.metadata?['status'] == 'failed';
     final selected = await showMenu<_BubbleMenuAction>(
       context: context,
       position: RelativeRect.fromRect(
         Rect.fromLTWH(position.dx, position.dy, 1, 1),
         Offset.zero & overlay.size,
       ),
-      items: [
-        const PopupMenuItem(
-          value: _BubbleMenuAction.react,
-          child: _PopupActionRow(
-            icon: Icons.add_reaction_outlined,
-            label: 'إضافة تفاعل',
-            color: Color(0xFF3390EC),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _BubbleMenuAction.reply,
-          child: _PopupActionRow(
-            icon: Icons.reply_rounded,
-            label: 'رد',
-            color: Color(0xFF3390EC),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _BubbleMenuAction.favorite,
-          child: _PopupActionRow(
-            icon: Icons.star_outline_rounded,
-            label: 'تبديل المفضلة',
-            color: Color(0xFFF59E0B),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _BubbleMenuAction.copy,
-          child: _PopupActionRow(
-            icon: Icons.content_copy_rounded,
-            label: 'نسخ',
-            color: Color(0xFF708499),
-          ),
-        ),
-        if (widget.message.hasAttachment && widget.onSaveAttachment != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.saveAttachment,
-            child: _PopupActionRow(
-              icon: Icons.save_alt_rounded,
-              label: 'حفظ الملف',
-              color: Color(0xFF2E7D32),
-            ),
-          ),
-        if (widget.message.isStickerMessage && widget.onSaveSticker != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.saveSticker,
-            child: _PopupActionRow(
-              icon: Icons.sticky_note_2_outlined,
-              label: 'حفظ ضمن الملصقات',
-              color: Color(0xFF7B61FF),
-            ),
-          ),
-        if (widget.onEdit != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.edit,
-            child: _PopupActionRow(
-              icon: Icons.edit_outlined,
-              label: 'تعديل',
-              color: Color(0xFFF59E0B),
-            ),
-          ),
-        if (widget.onPin != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.pin,
-            child: _PopupActionRow(
-              icon: Icons.push_pin_outlined,
-              label: 'تثبيت',
-              color: Color(0xFF9A6400),
-            ),
-          ),
-        if (widget.onDelete != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.delete,
-            child: _PopupActionRow(
-              icon: Icons.delete_outline_rounded,
-              label: 'حذف',
-              color: Color(0xFFE53935),
-            ),
-          ),
-      ],
+      items: isFailed
+          ? [
+              if (widget.onRetry != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.retry,
+                  child: _PopupActionRow(
+                    icon: Icons.refresh_rounded,
+                    label: 'إعادة المحاولة',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+              if (widget.onDelete != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.delete,
+                  child: _PopupActionRow(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'حذف',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+            ]
+          : [
+              if (widget.onRetry != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.retry,
+                  child: _PopupActionRow(
+                    icon: Icons.refresh_rounded,
+                    label: 'إعادة المحاولة',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.react,
+                child: _PopupActionRow(
+                  icon: Icons.add_reaction_outlined,
+                  label: 'إضافة تفاعل',
+                  color: Color(0xFF3390EC),
+                ),
+              ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.reply,
+                child: _PopupActionRow(
+                  icon: Icons.reply_rounded,
+                  label: 'رد',
+                  color: Color(0xFF3390EC),
+                ),
+              ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.favorite,
+                child: _PopupActionRow(
+                  icon: Icons.star_outline_rounded,
+                  label: 'تبديل المفضلة',
+                  color: Color(0xFFF59E0B),
+                ),
+              ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.copy,
+                child: _PopupActionRow(
+                  icon: Icons.content_copy_rounded,
+                  label: 'نسخ',
+                  color: Color(0xFF708499),
+                ),
+              ),
+              if (widget.message.hasAttachment && widget.onSaveAttachment != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.saveAttachment,
+                  child: _PopupActionRow(
+                    icon: Icons.save_alt_rounded,
+                    label: 'حفظ الملف',
+                    color: Color(0xFF2E7D32),
+                  ),
+                ),
+              if (widget.message.isStickerMessage && widget.onSaveSticker != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.saveSticker,
+                  child: _PopupActionRow(
+                    icon: Icons.sticky_note_2_outlined,
+                    label: 'حفظ ضمن الملصقات',
+                    color: Color(0xFF7B61FF),
+                  ),
+                ),
+              if (widget.onEdit != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.edit,
+                  child: _PopupActionRow(
+                    icon: Icons.edit_outlined,
+                    label: 'تعديل',
+                    color: Color(0xFFF59E0B),
+                  ),
+                ),
+              if (widget.onPin != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.pin,
+                  child: _PopupActionRow(
+                    icon: Icons.push_pin_outlined,
+                    label: 'تثبيت',
+                    color: Color(0xFF9A6400),
+                  ),
+                ),
+              if (widget.onDelete != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.delete,
+                  child: _PopupActionRow(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'حذف',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+            ],
     );
     if (selected != null) {
       await _handleMenuAction(selected);
@@ -475,26 +515,27 @@ class _MessageBubbleState extends State<MessageBubble> {
                     child: widget.message.isDeleted
                         ? Text(
                             'تم حذف هذه الرسالة',
-                            key: ValueKey('deleted_${widget.message.id}'),
+                            key: ValueKey(
+                              'deleted_${widget.message.metadata?['clientMessageId']?.toString() ?? widget.message.id}',
+                            ),
                             style: TextStyle(
                               color: subColor,
                               fontStyle: FontStyle.italic,
                             ),
                           )
                         : Column(
-                            key: ValueKey('message_${widget.message.id}'),
+                            key: ValueKey(
+                              'message_${widget.message.metadata?['clientMessageId']?.toString() ?? widget.message.id}',
+                            ),
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (widget.message.content.isNotEmpty)
                                 () {
                                   final text = widget.message.content.trim();
-                                  final emojiRegex = RegExp(
-                                    r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
-                                  );
                                   final isSingle =
                                       text.runes.length == 1 &&
-                                      emojiRegex.hasMatch(text);
+                                      _singleEmojiRegex.hasMatch(text);
 
                                   return ChatRichText(
                                     text: widget.message.content,
@@ -592,7 +633,25 @@ class _MessageBubbleState extends State<MessageBubble> {
                       ],
                       if (status != null) ...[
                         const SizedBox(width: 6),
-                        Icon(status.icon, size: 15, color: status.color),
+                        if (widget.message.metadata?['status'] == 'failed')
+                          Tooltip(
+                            message: 'خيارات الرسالة (إعادة المحاولة / حذف)',
+                            child: InkWell(
+                              onTapDown: (details) =>
+                                  _showContextMenuAt(details.globalPosition),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Icon(
+                                  status.icon,
+                                  size: 15,
+                                  color: status.color,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Icon(status.icon, size: 15, color: status.color),
                       ],
                     ],
                   ),
@@ -909,7 +968,7 @@ class _DesktopMediaAlbum extends StatelessWidget {
               color: Colors.black54,
               child: Center(
                 child: Text(
-                  '+${overflowCount}',
+                  '+$overflowCount',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -1058,6 +1117,7 @@ enum _BubbleMenuAction {
   edit,
   delete,
   pin,
+  retry,
 }
 
 class _PopupActionRow extends StatelessWidget {
@@ -1219,6 +1279,13 @@ class _MessageStatus {
 _MessageStatus? _messageStatus(ChatMessage message, String currentUserId) {
   if (message.sender?.id != currentUserId) {
     return null;
+  }
+  final msgStatus = message.metadata?['status']?.toString();
+  if (msgStatus == 'failed') {
+    return const _MessageStatus(Icons.error_outline_rounded, Color(0xFFEF4444));
+  }
+  if (msgStatus == 'pending' || message.id.startsWith('temp_')) {
+    return const _MessageStatus(Icons.access_time_rounded, Color(0xFF94A3B8));
   }
   if (message.seenBy.any((entry) => entry.userId != currentUserId)) {
     return const _MessageStatus(Icons.done_all_rounded, Color(0xFF4FC3F7));

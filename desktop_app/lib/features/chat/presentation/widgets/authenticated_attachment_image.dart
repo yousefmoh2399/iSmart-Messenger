@@ -110,6 +110,7 @@ class _AuthenticatedAttachmentImageState
           width: widget.width,
           height: widget.height,
           fit: widget.fit,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => SizedBox(
             width: widget.width,
             height: widget.height,
