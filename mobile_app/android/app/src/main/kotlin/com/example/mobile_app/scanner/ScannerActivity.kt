@@ -88,11 +88,14 @@ class ScannerActivity : ComponentActivity() {
     private var analyzerFrameCount = 0
     private var analyzerTotalTimeMs = 0L
 
-    // Live quad tracking state
+    // Live quad tracking state (with multi-frame confirmation & sticky lock)
     @Volatile
     private var latestNormalizedQuad: List<Point>? = null
     private var previousQuad: List<Point>? = null
+    private var candidateQuad: List<Point>? = null
+    private var candidateConfirmCount = 0
     private var missedFrameCount = 0
+    private var lastAnalysisTimestamp = 0L
 
     private val pickSingleLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -480,6 +483,13 @@ class ScannerActivity : ComponentActivity() {
     @SuppressLint("UnsafeOptInUsageError")
     private fun analyzePreviewFrame(imageProxy: ImageProxy) {
         val frameStartTime = SystemClock.elapsedRealtime()
+        // Throttle analysis to ~15 FPS (65ms interval) for calm, accurate tracking
+        if (frameStartTime - lastAnalysisTimestamp < 65L) {
+            imageProxy.close()
+            return
+        }
+        lastAnalysisTimestamp = frameStartTime
+
         try {
             val yPlane = imageProxy.planes[0]
             val yBuffer = yPlane.buffer
@@ -519,24 +529,90 @@ class ScannerActivity : ComponentActivity() {
             }
             yMat.release()
 
-            val detectedQuad = DocumentDetector.findQuad(rotated)
+            val currentLocked = latestNormalizedQuad
+            val detectedQuad = DocumentDetector.findQuad(rotated, currentLocked)
             val rotW = rotated.cols().toDouble()
             val rotH = rotated.rows().toDouble()
             rotated.release()
 
             if (detectedQuad != null) {
-                // Normalize points to [0.0, 1.0]
                 val normalized = detectedQuad.map { Point(it.x / rotW, it.y / rotH) }
-                val smoothed = smoothQuad(normalized)
-                latestNormalizedQuad = smoothed
-                missedFrameCount = 0
+                val locked = previousQuad
 
-                runOnUiThread {
-                    overlayView?.setPolygon(smoothed)
+                if (locked == null) {
+                    // Not yet locked onto a document: require 3 consecutive consistent frames
+                    // before showing the green overlay so random background edges are ignored.
+                    if (isQuadConsistentWith(normalized, candidateQuad, 0.06)) {
+                        candidateConfirmCount++
+                        candidateQuad = blendQuads(candidateQuad!!, normalized, 0.40)
+                    } else {
+                        candidateQuad = normalized
+                        candidateConfirmCount = 1
+                    }
+
+                    if (candidateConfirmCount >= 3) {
+                        val confirmed = candidateQuad ?: normalized
+                        previousQuad = confirmed
+                        latestNormalizedQuad = confirmed
+                        missedFrameCount = 0
+                        runOnUiThread {
+                            overlayView?.setPolygon(confirmed)
+                        }
+                    }
+                } else {
+                    // Already locked onto a document: check if new detection is the same paper
+                    if (isQuadConsistentWith(normalized, locked, 0.09)) {
+                        // Same paper: smoothly track it with anti-jitter deadband
+                        val smoothed = smoothLockedQuad(locked, normalized)
+                        previousQuad = smoothed
+                        latestNormalizedQuad = smoothed
+                        missedFrameCount = 0
+                        candidateConfirmCount = 0
+                        candidateQuad = null
+                        runOnUiThread {
+                            overlayView?.setPolygon(smoothed)
+                        }
+                    } else {
+                        // Detected a different quad far from the locked paper:
+                        // Do NOT abandon the locked paper unless the new quad stays consistent for 5 frames!
+                        if (isQuadConsistentWith(normalized, candidateQuad, 0.05)) {
+                            candidateConfirmCount++
+                            candidateQuad = blendQuads(candidateQuad!!, normalized, 0.40)
+                        } else {
+                            candidateQuad = normalized
+                            candidateConfirmCount = 1
+                        }
+
+                        if (candidateConfirmCount >= 5) {
+                            val confirmedNew = candidateQuad ?: normalized
+                            previousQuad = confirmedNew
+                            latestNormalizedQuad = confirmedNew
+                            missedFrameCount = 0
+                            candidateConfirmCount = 0
+                            candidateQuad = null
+                            runOnUiThread {
+                                overlayView?.setPolygon(confirmedNew)
+                            }
+                        } else {
+                            // Hold current paper lock while waiting to see if the user truly moved to another paper
+                            missedFrameCount++
+                            if (missedFrameCount > 12) {
+                                latestNormalizedQuad = null
+                                previousQuad = null
+                                candidateQuad = null
+                                candidateConfirmCount = 0
+                                runOnUiThread {
+                                    overlayView?.setPolygon(null)
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
+                candidateConfirmCount = 0
+                candidateQuad = null
                 missedFrameCount++
-                if (missedFrameCount > 10) {
+                if (missedFrameCount > 12) {
                     latestNormalizedQuad = null
                     previousQuad = null
                     runOnUiThread {
@@ -559,39 +635,45 @@ class ScannerActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Fast temporal smoothing (62% new, 38% previous) with >12% jump instant lock.
-     */
-    private fun smoothQuad(newQuad: List<Point>): List<Point> {
-        val prev = previousQuad
-        if (prev == null || prev.size != 4) {
-            previousQuad = newQuad
-            return newQuad
-        }
-
-        // Check if any corner jumped > 12% (0.12 normalized distance)
-        var maxJump = 0.0
+    private fun isQuadConsistentWith(q1: List<Point>, q2: List<Point>?, maxCornerDist: Double): Boolean {
+        if (q2 == null || q1.size != 4 || q2.size != 4) return false
         for (i in 0..3) {
-            val dist = hypot(newQuad[i].x - prev[i].x, newQuad[i].y - prev[i].y)
-            if (dist > maxJump) maxJump = dist
+            val d = hypot(q1[i].x - q2[i].x, q1[i].y - q2[i].y)
+            if (d > maxCornerDist) return false
         }
+        return true
+    }
 
-        if (maxJump > 0.12) {
-            // Document moved significantly: lock immediately onto new coordinates
-            previousQuad = newQuad
-            return newQuad
-        }
-
-        val smoothed = ArrayList<Point>(4)
-        for (i in 0..3) {
-            smoothed.add(
-                Point(
-                    prev[i].x * 0.38 + newQuad[i].x * 0.62,
-                    prev[i].y * 0.38 + newQuad[i].y * 0.62
-                )
+    private fun blendQuads(prev: List<Point>, next: List<Point>, nextWeight: Double): List<Point> {
+        val prevWeight = 1.0 - nextWeight
+        return List(4) { i ->
+            Point(
+                prev[i].x * prevWeight + next[i].x * nextWeight,
+                prev[i].y * prevWeight + next[i].y * nextWeight
             )
         }
-        previousQuad = smoothed
+    }
+
+    /**
+     * Calm, rock-solid smoothing (75% previous, 25% new) with a 0.4% micro-tremor deadband
+     * so the green outline stays pinned to the paper edges without shaking.
+     */
+    private fun smoothLockedQuad(prev: List<Point>, newQuad: List<Point>): List<Point> {
+        val smoothed = ArrayList<Point>(4)
+        for (i in 0..3) {
+            val dist = hypot(newQuad[i].x - prev[i].x, newQuad[i].y - prev[i].y)
+            if (dist < 0.0045) {
+                // Ignore tiny camera sensor / hand tremor (< 0.45% of screen)
+                smoothed.add(prev[i])
+            } else {
+                smoothed.add(
+                    Point(
+                        prev[i].x * 0.72 + newQuad[i].x * 0.28,
+                        prev[i].y * 0.72 + newQuad[i].y * 0.28
+                    )
+                )
+            }
+        }
         return smoothed
     }
 
