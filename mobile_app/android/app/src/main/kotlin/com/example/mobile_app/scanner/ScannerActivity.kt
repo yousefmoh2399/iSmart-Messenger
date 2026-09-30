@@ -69,7 +69,7 @@ class ScannerActivity : ComponentActivity() {
     private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
     private var previewView: PreviewView? = null
-    private var overlayView: PolygonOverlayView? = null
+    private var overlayView: QuadOverlayView? = null
     private var flashButton: ImageButton? = null
     private var modeToggleButton: TextView? = null
     private var doneButton: TextView? = null
@@ -168,7 +168,7 @@ class ScannerActivity : ComponentActivity() {
         }
         aspectContainer.addView(previewView)
 
-        overlayView = PolygonOverlayView(this).apply {
+        overlayView = QuadOverlayView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -536,7 +536,7 @@ class ScannerActivity : ComponentActivity() {
                 }
             } else {
                 missedFrameCount++
-                if (missedFrameCount > 5) {
+                if (missedFrameCount > 10) {
                     latestNormalizedQuad = null
                     previousQuad = null
                     runOnUiThread {
@@ -560,7 +560,7 @@ class ScannerActivity : ComponentActivity() {
     }
 
     /**
-     * Temporal smoothing with LERP 0.5 and >15% jump reset.
+     * Fast temporal smoothing (62% new, 38% previous) with >12% jump instant lock.
      */
     private fun smoothQuad(newQuad: List<Point>): List<Point> {
         val prev = previousQuad
@@ -569,15 +569,15 @@ class ScannerActivity : ComponentActivity() {
             return newQuad
         }
 
-        // Check if any corner jumped > 15% (0.15 normalized distance)
+        // Check if any corner jumped > 12% (0.12 normalized distance)
         var maxJump = 0.0
         for (i in 0..3) {
             val dist = hypot(newQuad[i].x - prev[i].x, newQuad[i].y - prev[i].y)
             if (dist > maxJump) maxJump = dist
         }
 
-        if (maxJump > 0.15) {
-            // Document moved significantly: reset immediately to new coordinates
+        if (maxJump > 0.12) {
+            // Document moved significantly: lock immediately onto new coordinates
             previousQuad = newQuad
             return newQuad
         }
@@ -586,8 +586,8 @@ class ScannerActivity : ComponentActivity() {
         for (i in 0..3) {
             smoothed.add(
                 Point(
-                    prev[i].x * 0.5 + newQuad[i].x * 0.5,
-                    prev[i].y * 0.5 + newQuad[i].y * 0.5
+                    prev[i].x * 0.38 + newQuad[i].x * 0.62,
+                    prev[i].y * 0.38 + newQuad[i].y * 0.62
                 )
             )
         }
@@ -829,83 +829,5 @@ class ScannerActivity : ComponentActivity() {
     private fun dp(value: Int): Int {
         val density = resources.displayMetrics.density
         return (value * density).toInt()
-    }
-}
-
-/**
- * Custom FrameLayout that enforces a strict target aspect ratio (width / height).
- */
-class AspectRatioFrameLayout(
-    context: android.content.Context,
-    private val targetRatio: Float
-) : FrameLayout(context) {
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val originalWidth = MeasureSpec.getSize(widthMeasureSpec)
-        val originalHeight = MeasureSpec.getSize(heightMeasureSpec)
-
-        var finalWidth = originalWidth
-        var finalHeight = originalHeight
-
-        if (originalWidth > 0 && originalHeight > 0) {
-            val currentRatio = originalWidth.toFloat() / originalHeight.toFloat()
-            if (currentRatio > targetRatio) {
-                // Too wide: constrain width
-                finalWidth = (originalHeight * targetRatio).toInt()
-            } else {
-                // Too tall: constrain height
-                finalHeight = (originalWidth / targetRatio).toInt()
-            }
-        }
-
-        val exactWidth = MeasureSpec.makeMeasureSpec(finalWidth, MeasureSpec.EXACTLY)
-        val exactHeight = MeasureSpec.makeMeasureSpec(finalHeight, MeasureSpec.EXACTLY)
-        super.onMeasure(exactWidth, exactHeight)
-    }
-}
-
-/**
- * Overlay view that draws a translucent polygon and smooth borders over detected document quad.
- */
-class PolygonOverlayView(context: android.content.Context) : View(context) {
-
-    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = Color.parseColor("#3300E676") // Translucent light green
-    }
-
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        color = Color.parseColor("#FF00E676") // Vibrant green
-        strokeWidth = 3f * resources.displayMetrics.density
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-
-    private var normalizedPoints: List<Point>? = null
-    private val path = Path()
-
-    fun setPolygon(pts: List<Point>?) {
-        normalizedPoints = pts
-        invalidate()
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val pts = normalizedPoints ?: return
-        if (pts.size != 4) return
-
-        val w = width.toFloat()
-        val h = height.toFloat()
-
-        path.reset()
-        path.moveTo((pts[0].x * w).toFloat(), (pts[0].y * h).toFloat())
-        path.lineTo((pts[1].x * w).toFloat(), (pts[1].y * h).toFloat())
-        path.lineTo((pts[2].x * w).toFloat(), (pts[2].y * h).toFloat())
-        path.lineTo((pts[3].x * w).toFloat(), (pts[3].y * h).toFloat())
-        path.close()
-
-        canvas.drawPath(path, fillPaint)
-        canvas.drawPath(path, strokePaint)
     }
 }
