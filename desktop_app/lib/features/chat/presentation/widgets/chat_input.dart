@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'chat_text_field_paste_menu.dart';
 import 'emoji_picker_panel.dart';
@@ -7,6 +8,7 @@ class ChatInput extends StatefulWidget {
   const ChatInput({
     super.key,
     required this.controller,
+    this.focusNode,
     required this.onChanged,
     required this.onSend,
     required this.onSendOptions,
@@ -26,6 +28,7 @@ class ChatInput extends StatefulWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final ValueChanged<String> onChanged;
   final VoidCallback onSend;
   final VoidCallback onSendOptions;
@@ -78,7 +81,28 @@ class ChatInput extends StatefulWidget {
 }
 
 class _ChatInputState extends State<ChatInput> {
+  FocusNode? _internalFocusNode;
+  final FocusNode _sendButtonFocusNode =
+      FocusNode(canRequestFocus: false, skipTraversal: true);
   bool _actionsExpanded = false;
+
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ?? (_internalFocusNode ??= FocusNode());
+
+  @override
+  void dispose() {
+    _internalFocusNode?.dispose();
+    _sendButtonFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _submitMessage() {
+    if (!widget.enabled || widget.isUploading) return;
+    final text = widget.controller.text.trim();
+    if (text.isEmpty) return;
+    widget.onSend();
+    _effectiveFocusNode.requestFocus();
+  }
 
   void _toggleActions() {
     if (!widget.enabled) {
@@ -327,29 +351,53 @@ class _ChatInputState extends State<ChatInput> {
                     child: ChatTextFieldPasteMenu(
                       controller: widget.controller,
                       enabled: widget.enabled,
-                      child: TextField(
-                        controller: widget.controller,
-                        enabled: widget.enabled,
-                        onChanged: widget.onChanged,
-                        keyboardType: TextInputType.multiline,
-                        maxLines: null,
-                        textAlignVertical: TextAlignVertical.center,
-                        textInputAction: widget.enterSendsMessage
-                            ? TextInputAction.send
-                            : TextInputAction.newline,
-                        onSubmitted: widget.enterSendsMessage && widget.enabled
-                            ? (_) => widget.onSend()
-                            : null,
-                        decoration: InputDecoration(
-                          hintText: widget.enabled
-                              ? (widget.isEditing
-                                    ? 'عدّل الرسالة...'
-                                    : 'اكتب رسالة...')
-                              : 'هذه المحادثة للقراءة فقط',
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
+                      child: Focus(
+                        onKeyEvent: (node, event) {
+                          if (event is KeyDownEvent) {
+                            final isEnter =
+                                event.logicalKey == LogicalKeyboardKey.enter ||
+                                event.logicalKey == LogicalKeyboardKey.numpadEnter;
+                            if (isEnter) {
+                              final isShift = HardwareKeyboard.instance.isShiftPressed;
+                              if (isShift) {
+                                final val = widget.controller.value;
+                                widget.controller.value =
+                                    ChatInput.insertTextAtSelection(val, '\n');
+                                widget.onChanged(widget.controller.text);
+                                return KeyEventResult.handled;
+                              } else if (widget.enterSendsMessage && widget.enabled) {
+                                _submitMessage();
+                                return KeyEventResult.handled;
+                              }
+                            }
+                          }
+                          return KeyEventResult.ignored;
+                        },
+                        child: TextField(
+                          controller: widget.controller,
+                          focusNode: _effectiveFocusNode,
+                          enabled: widget.enabled,
+                          onChanged: widget.onChanged,
+                          keyboardType: TextInputType.multiline,
+                          maxLines: null,
+                          textAlignVertical: TextAlignVertical.center,
+                          textInputAction: widget.enterSendsMessage
+                              ? TextInputAction.send
+                              : TextInputAction.newline,
+                          onSubmitted: widget.enterSendsMessage && widget.enabled
+                              ? (_) => _submitMessage()
+                              : null,
+                          decoration: InputDecoration(
+                            hintText: widget.enabled
+                                ? (widget.isEditing
+                                      ? 'عدّل الرسالة...'
+                                      : 'اكتب رسالة...')
+                                : 'هذه المحادثة للقراءة فقط',
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                           ),
                         ),
                       ),
@@ -368,7 +416,8 @@ class _ChatInputState extends State<ChatInput> {
                           ? widget.onSendOptions
                           : null,
                       child: FilledButton(
-                        onPressed: canSend ? widget.onSend : null,
+                        focusNode: _sendButtonFocusNode,
+                        onPressed: canSend ? _submitMessage : null,
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(44, 44),
                           shape: const CircleBorder(),

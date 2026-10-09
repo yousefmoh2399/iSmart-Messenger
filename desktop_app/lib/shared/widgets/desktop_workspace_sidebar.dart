@@ -247,8 +247,6 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                const _SidebarConnectionStatus(),
               ],
             ),
           ),

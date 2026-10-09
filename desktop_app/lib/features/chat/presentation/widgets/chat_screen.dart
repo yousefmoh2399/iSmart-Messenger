@@ -1017,6 +1017,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _messageFocusNode = FocusNode();
   final Set<String> _typingUsers = <String>{};
   final Map<String, String> _typingUsersById = <String, String>{};
   final Map<String, Timer> _typingUserTimersById = <String, Timer>{};
@@ -1148,6 +1149,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
             conversationMessagesControllerProvider(_conversationId).notifier,
           )
           .markSeen();
+      _messageFocusNode.requestFocus();
     });
   }
 
@@ -1190,6 +1192,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               conversationMessagesControllerProvider(_conversationId).notifier,
             )
             .markSeen();
+        _messageFocusNode.requestFocus();
       });
       unawaited(_refreshRemotePeerDevice());
     }
@@ -1226,6 +1229,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _messageFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -2363,6 +2367,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         _editingMessage = null;
       });
       _scrollToBottom();
+      _messageFocusNode.requestFocus();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4679,6 +4684,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               Expanded(
                 child: messagesValue.when(
                   skipLoadingOnReload: true,
+                  skipLoadingOnRefresh: true,
                   loading: () => const _DesktopChatMessagesLoadingSkeleton(),
                   error: (error, _) => Center(child: Text(error.toString())),
                   data: (state) {
@@ -5267,6 +5273,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               // ── Input ────────────────────────────────────────────────────
               ChatInput(
                 controller: _messageController,
+                focusNode: _messageFocusNode,
                 isEditing: _editingMessage != null,
                 isUploading: _isUploadingAttachment,
                 uploadProgress: _uploadProgress,

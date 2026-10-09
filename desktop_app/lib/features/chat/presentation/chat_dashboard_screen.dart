@@ -1484,48 +1484,57 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
               child: Column(
                 children: [
                   Expanded(
-                    child: chatState.when(
-                loading: () => const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ShimmerSkeleton(width: 180, height: 14),
-                        SizedBox(height: 10),
-                        ShimmerSkeleton(width: 240, height: 12),
-                      ],
+                    child: Builder(
+                      builder: (context) {
+                        final overview = chatState.valueOrNull;
+                        if (overview != null) {
+                          final allConversations = sortConversationsForSidebar(
+                            overview.conversations,
+                          );
+                          final visibleConversations = _visibleConversations(
+                            allConversations,
+                            authUser?.id ?? '',
+                          );
+                          _ensureSelection(allConversations: allConversations);
+                          final selectedConversation = _selectedConversation(
+                            allConversations,
+                          );
+
+                          return _buildTelegramShell(
+                            authUser: authUser,
+                            authToken: authToken,
+                            usersState: usersState,
+                            overview: overview,
+                            appearance: appearance,
+                            themeMode: themeMode,
+                            isDark: isDark,
+                            visibleConversations: visibleConversations,
+                            selectedConversation: selectedConversation,
+                          );
+                        }
+
+                        if (chatState.hasError) {
+                          return Center(
+                            child: Text(chatState.error.toString()),
+                          );
+                        }
+
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ShimmerSkeleton(width: 180, height: 14),
+                                SizedBox(height: 10),
+                                ShimmerSkeleton(width: 240, height: 12),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ),
-                error: (error, _) => Center(child: Text(error.toString())),
-                data: (overview) {
-                  final allConversations = sortConversationsForSidebar(
-                    overview.conversations,
-                  );
-                  final visibleConversations = _visibleConversations(
-                    allConversations,
-                    authUser?.id ?? '',
-                  );
-                  _ensureSelection(allConversations: allConversations);
-                  final selectedConversation = _selectedConversation(
-                    allConversations,
-                  );
-
-                  return _buildTelegramShell(
-                    authUser: authUser,
-                    authToken: authToken,
-                    usersState: usersState,
-                    overview: overview,
-                    appearance: appearance,
-                    themeMode: themeMode,
-                    isDark: isDark,
-                    visibleConversations: visibleConversations,
-                    selectedConversation: selectedConversation,
-                  );
-                },
-              ),
-            ),
           ],
         ),
       ),

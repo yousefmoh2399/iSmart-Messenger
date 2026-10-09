@@ -458,6 +458,9 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
 
 // Windows 7 (NT 6.1) struggles with modern Chromium hardware acceleration,
 // and forcing WebGL causes severe lag, stuttering, and high response times.
