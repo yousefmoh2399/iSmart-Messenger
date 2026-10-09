@@ -154,6 +154,19 @@ $bootstrapPath = Join-Path $desktopRoot "build\web\flutter_bootstrap.js"
   -replace '(?s)_flutter\.loader\.load\(\{\s*serviceWorkerSettings:\s*\{\s*serviceWorkerVersion:\s*"[^"]*".*?\}\s*\}\);', '_flutter.loader.load();' |
   Set-Content -LiteralPath $bootstrapPath -Encoding UTF8
 
+Write-Host "Pruning unused CanvasKit variants and debug symbols to reduce package size..."
+$canvaskitDir = Join-Path $desktopRoot "build\web\canvaskit"
+if (Test-Path -LiteralPath $canvaskitDir) {
+  Get-ChildItem -LiteralPath $canvaskitDir -Recurse -File |
+    Where-Object {
+      $_.Name -like "*.symbols" -or
+      $_.Name -like "skwasm*" -or
+      $_.Name -like "wimp*" -or
+      $_.FullName -like "*experimental_webparagraph*"
+    } |
+    Remove-Item -Force
+}
+
 Set-Location -LiteralPath $electronRoot
 if (-not $SkipNpmInstall -or -not (Test-Path "node_modules")) {
   Write-Host "Installing Electron dependencies..."
