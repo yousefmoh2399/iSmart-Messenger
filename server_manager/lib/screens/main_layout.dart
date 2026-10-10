@@ -1,9 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'dashboard_screen.dart';
 import 'general_screen.dart';
+import 'security_screen.dart';
 import 'services_screen.dart';
 import 'departments_screen.dart';
 import 'users_screen.dart';
+import 'chat_rooms_screen.dart';
+import 'policies_screen.dart';
+import 'updates_screen.dart';
 import 'backup_screen.dart';
 import 'logs_screen.dart';
 
@@ -20,10 +25,15 @@ class _MainLayoutState extends State<MainLayout> {
   bool _isChecking = false;
 
   final List<Widget> _screens = [
+    const DashboardScreen(),
     const GeneralScreen(),
+    const SecurityScreen(),
     const ServicesScreen(),
     const DepartmentsScreen(),
     const UsersScreen(),
+    const ChatRoomsScreen(),
+    const PoliciesScreen(),
+    const UpdatesScreen(),
     const BackupScreen(),
     const LogsScreen(),
   ];
@@ -100,12 +110,17 @@ class _MainLayoutState extends State<MainLayout> {
             color: const Color(0xFF333333),
             child: ListView(
               children: [
-                _buildNavItem(0, Icons.settings, 'General'),
-                _buildNavItem(1, Icons.computer, 'Services'),
-                _buildNavItem(2, Icons.business, 'Departments'),
-                _buildNavItem(3, Icons.people, 'Users'),
-                _buildNavItem(4, Icons.backup, 'Backup'),
-                _buildNavItem(5, Icons.terminal, 'Logs'),
+                _buildNavItem(0, Icons.dashboard, 'Dashboard'),
+                _buildNavItem(1, Icons.settings, 'General'),
+                _buildNavItem(2, Icons.security, 'Security'),
+                _buildNavItem(3, Icons.computer, 'Services'),
+                _buildNavItem(4, Icons.business, 'Departments'),
+                _buildNavItem(5, Icons.people, 'Users'),
+                _buildNavItem(6, Icons.forum, 'Rooms'),
+                _buildNavItem(7, Icons.policy, 'Policies'),
+                _buildNavItem(8, Icons.system_update, 'Updates'),
+                _buildNavItem(9, Icons.backup, 'Backup'),
+                _buildNavItem(10, Icons.terminal, 'Logs'),
               ],
             ),
           ),
