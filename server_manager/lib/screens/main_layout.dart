@@ -151,45 +151,4 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 }
-          // Main Area
-          Expanded(
-            child: Container(
-              color: Colors.grey.shade50,
-              child: _screens[_selectedIndex],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    final isSelected = _selectedIndex == index;
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedIndex = index;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16.0),
-        color: isSelected ? Colors.grey.shade800 : Colors.transparent,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: isSelected ? Colors.white : Colors.grey, size: 28),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? Colors.white : Colors.grey,
-                fontSize: 12,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
