@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>دليل تطبيق الموبايل (Android) | iSmart Messenger</title>
+  <meta name="description" content="الدليل الإرشادي الكامل لتثبيت وضبط تطبيق iSmart Messenger على هواتف الأندرويد لموظفي ومديري الفروع.">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/png" href="assets/images/logo.png">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-inner">
+        <a href="index.html" class="brand-logo">
+          <img src="assets/images/logo.png" alt="iSmart Messenger Logo" onerror="this.src='assets/images/server-online.png'">
+          <div>
+            <div class="brand-title">iSmart Messenger</div>
+            <span class="brand-subtitle">نظام المراسلات الداخلي الموحد</span>
+          </div>
+        </a>
+
+        <ul class="nav-menu" id="navMenu">
+          <li><a href="index.html" class="nav-link">الرئيسية والتحميل</a></li>
+          <li><a href="windows.html" class="nav-link">دليل الكمبيوتر (Windows)</a></li>
+          <li><a href="mobile.html" class="nav-link active">دليل الموبايل (Android)</a></li>
+          <li><a href="faq.html" class="nav-link">الدعم والأسئلة الشائعة</a></li>
+        </ul>
+
+        <div class="nav-actions">
+          <a href="downloads/iSmart-Messenger.apk" class="btn-header-cta" style="background: var(--accent-green);" download>
+            <span>تحميل التطبيق (.apk)</span>
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+          </a>
+          <button class="mobile-toggle" id="mobileToggle" aria-label="القائمة">
+            &#9776;
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Guide Hero -->
+  <section class="guide-hero" style="background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);">
+    <div class="container">
+      <h1>دليل تثبيت وتشغيل تطبيق الموبايل (Android)</h1>
+      <p>
+        شرح كامل بالصوت والصورة لتثبيت ملف الـ APK وتفعيل إشعارات الخلفية لضمان استلام جميع الرسائل والتنبيهات فورياً على هاتفك.
+      </p>
+      <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+        <a href="downloads/iSmart-Messenger.apk" class="btn-header-cta" download style="padding: 14px 30px; font-size: 1.1rem; background: var(--accent-green);">
+          ⬇ تحميل تطبيق الأندرويد الآن (56.9 MB)
+        </a>
+        <a href="#video-mobile-tutorial" class="btn-header-cta" style="padding: 14px 26px; font-size: 1.05rem; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);">
+          ▶ مشاهدة فيديو شرح الموبايل
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <main class="guide-content">
+    <div class="container">
+
+      <!-- VIDEO SECTION -->
+      <section id="video-mobile-tutorial" style="margin-bottom: 60px;">
+        <div class="section-header" style="margin-bottom: 24px; text-align: right;">
+          <span class="section-tag" style="background: var(--accent-green-light); color: var(--accent-green);">فيديو التدريب المعتمد للهواتف</span>
+          <h2 class="section-title">فيديو شرح تثبيت وضبط تطبيق الأندرويد</h2>
+          <p class="section-desc">شاهد هذا الفيديو لتتعلم كيفية تثبيت ملف APK وتجاوز رسائل الأمان وتفعيل الإشعارات بنجاح.</p>
+        </div>
+
+        <div class="video-card mobile-video" style="max-width: 960px; margin: 0 auto;">
+          <div class="video-wrapper">
+            <video id="videoMobilePage" controls preload="metadata" poster="assets/images/logo.png">
+              <source src="downloads/iSmart Messenger Mobile.mp4" type="video/mp4">
+              متصفحك لا يدعم تشغيل الفيديو مباشرة. يرجى تحميله.
+            </video>
+          </div>
+          <div class="video-info">
+            <div class="video-timeline">
+              <div class="video-timeline-title">⏱️ محاور الفيديو (اضغط للقفز المباشر للنقطة المطلوبة):</div>
+              <div class="timeline-items">
+                <span class="timeline-chip" data-video="videoMobilePage" data-time="0">00:00 تحميل ملف APK وتثبيته</span>
+                <span class="timeline-chip" data-video="videoMobilePage" data-time="25">00:25 السماح بالتثبيت الخارجي</span>
+                <span class="timeline-chip" data-video="videoMobilePage" data-time="50">00:50 كتابة عنوان السيرفر والدخول</span>
+                <span class="timeline-chip" data-video="videoMobilePage" data-time="90">01:30 استثناء البطارية ووصول الإشعارات</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP BY STEP CARDS -->
+      <section>
+        <div class="section-header" style="text-align: right; margin-bottom: 30px;">
+          <span class="section-tag" style="background: var(--accent-green-light); color: var(--accent-green);">دليل الخطوات المصور للموبايل</span>
+          <h2 class="section-title">خطوات تثبيت وتشغيل التطبيق على هواتف الأندرويد</h2>
+        </div>
+
+        <!-- Step 1 -->
+        <div class="guide-step-card">
+          <div class="step-badge" style="background: var(--accent-green);">1</div>
+          <h3>تحميل ملف الـ APK على هاتفك</h3>
+          <p>
+            اضغط على زر التحميل الأخضر أعلاه لتحميل ملف التطبيق <code>iSmart-Messenger.apk</code>.
+          </p>
+          <div class="step-alert info">
+            📲 <strong>تنبيه الأمان في الأندرويد:</strong> قد يُظهر متصفحك (Chrome أو Samsung Internet) رسالة تحذير: <em>"قد يكون هذا الملف ضاراً" (File might be harmful)</em>. هذه رسالة قياسية يظهرها الأندرويد لأي تطبيق يتم تثبيته من خارج متجر Google Play. اضغط على <strong>"تنزيل على أي حال" (Download anyway)</strong>.
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="guide-step-card">
+          <div class="step-badge" style="background: var(--accent-green);">2</div>
+          <h3>السماح بتثبيت التطبيقات من هذا المصدر</h3>
+          <p>
+            بعد انتهاء التحميل، افتح الملف لبدء التثبيت. إذا ظهرت لك شاشة تطالبك بالسماح:
+          </p>
+          <ol style="margin-right: 24px; color: var(--text-muted); margin-bottom: 16px;">
+            <li>اضغط على <strong>الإعدادات (Settings)</strong> في النافذة المنبثقة.</li>
+            <li>قم بتفعيل خيار <strong>السماح بتثبيت التطبيقات من هذا المصدر (Allow from this source)</strong>.</li>
+            <li>ارجع خطوة للخلف واضغط على <strong>تثبيت (Install)</strong>.</li>
+          </ol>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="guide-step-card">
+          <div class="step-badge" style="background: var(--accent-green);">3</div>
+          <h3>ضبط عنوان خادم الشركة وتسجيل الدخول</h3>
+          <p>
+            افتح التطبيق، وستظهر شاشة تطلب عنوان السيرفر. أدخل عنوان السيرفر الموحد:
+          </p>
+          <div class="server-ip-badge" style="display: inline-flex; margin-bottom: 12px;">
+            <code id="serverIpCode">http://192.168.1.100:7070</code>
+            <button class="btn-copy" id="copyServerBtn">📋 نسخ العنوان</button>
+          </div>
+          <p>
+            ثم اكتب اسم المستخدم (Username) وكلمة المرور (Password) المسلمة لك، واضغط <strong>دخول (Login)</strong>.
+          </p>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="guide-step-card">
+          <div class="step-badge" style="background: var(--accent-green);">4</div>
+          <h3>الخطوة الأهم: ضبط الإشعارات واستثناء البطارية (مهم جداً!)</h3>
+          <div class="step-alert" style="background: #fef2f2; border-right-color: #ef4444; color: #991b1b;">
+            ⚠️ <strong>لتصلك إشعارات الرسائل فوراً حتى لو كان الموبايل مغلقاً أو التطبيق مقفولاً:</strong>
+            <ul style="margin-right: 20px; margin-top: 10px;">
+              <li>ادخل إلى <strong>إعدادات الهاتف (Settings) -> التطبيقات (Apps) -> iSmart Messenger</strong>.</li>
+              <li>اختر <strong>البطارية (Battery)</strong> وحدد الخيار: <strong>غير مقيد (Unrestricted)</strong> أو إلغاء تحسين استهلاك البطارية.</li>
+              <li>تأكد من تفعيل خيار <strong>السماح بالإشعارات في شاشة القفل (Allow Notifications on Lock screen)</strong>.</li>
+              <li>تأكد من تفعيل صلاحية <strong>التشغيل في الخلفية (Allow Background Activity)</strong>.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Step 5 -->
+        <div class="guide-step-card">
+          <div class="step-badge" style="background: var(--accent-green);">5</div>
+          <h3>مميزات تطبيق الموبايل الحصرية</h3>
+          <ul style="margin-right: 24px; color: var(--text-muted); line-height: 2;">
+            <li>🎙️ <strong>الرسائل الصوتية الفورية:</strong> اضغط مع الاستمرار على أيقونة الميكروفون للتسجيل والتحدث مع الزملاء بوضوح.</li>
+            <li>📷 <strong>التقاط الصور المباشرة:</strong> إرسال صور المعاملات، الفواتير، ومخزون الفرع فورياً بالكاميرا.</li>
+            <li>📂 <strong>مشاركة المستندات:</strong> إرسال ملفات الـ PDF وجداول العمل مباشرة من هاتفك.</li>
+            <li>🔄 <strong>مزامنة دائمة:</strong> تواصل مستمر مع نسخة الكمبيوتر الخاصة بك داخل الفرع.</li>
+          </ul>
+        </div>
+
+      </section>
+
+      <!-- Bottom CTA Banner -->
+      <div style="background: linear-gradient(135deg, var(--accent-green-light), #ffffff); border: 2px solid #a7f3d0; border-radius: var(--radius-lg); padding: 40px; text-align: center; margin-top: 50px;">
+        <h3 style="font-size: 1.8rem; font-weight: 800; margin-bottom: 12px; color: var(--secondary);">حمل تطبيق الموبايل الآن على هاتفك</h3>
+        <p style="color: var(--text-muted); font-size: 1.05rem; margin-bottom: 24px;">ملف APK معتمد وآمن 100% مخصص لربط موظفي ومديري فروع الشركة.</p>
+        <a href="downloads/iSmart-Messenger.apk" class="btn-download-massive" style="max-width: 380px; margin: 0 auto; background: var(--accent-green);" download>
+          <span>تنزيل تطبيق الموبايل (1.0.2)</span>
+        </a>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom">
+        جميع الحقوق محفوظة &copy; 2026 iSmart Messenger Network — دليل تطبيق الموبايل المعتمد.
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
