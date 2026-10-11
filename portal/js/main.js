@@ -1,84 +1,107 @@
 /**
- * iSmart Messenger - Official Branch Portal JS
- * High-performance, vanilla JavaScript for interactive portal features
+ * iSmart Messenger - Official Branch Portal JS (Apple Minimalist Standard)
+ * Ultra-fast vanilla JavaScript for navigation, chapter seek, and toast notifications
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   // Mobile Navigation Toggle
   const mobileToggle = document.getElementById('mobileToggle');
-  const navMenu = document.getElementById('navMenu');
+  const navLinks = document.getElementById('navLinks') || document.getElementById('navMenu');
 
-  if (mobileToggle && navMenu) {
+  if (mobileToggle && navLinks) {
     mobileToggle.addEventListener('click', () => {
-      navMenu.classList.toggle('open');
-      const isOpen = navMenu.classList.contains('open');
+      navLinks.classList.toggle('open');
+      const isOpen = navLinks.classList.contains('open');
       mobileToggle.innerHTML = isOpen ? '&#10005;' : '&#9776;';
     });
   }
 
-  // Copy Server Address Feature
-  const copyBtn = document.getElementById('copyServerBtn');
-  const serverIpCode = document.getElementById('serverIpCode');
+  // Copy Server IP Address Feature
+  const copyButtons = [
+    document.getElementById('btnCopyIp'),
+    document.getElementById('btnCopyIp2'),
+    document.getElementById('copyServerBtn')
+  ].filter(Boolean);
 
-  if (copyBtn && serverIpCode) {
-    copyBtn.addEventListener('click', () => {
-      const textToCopy = serverIpCode.innerText.trim();
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        showToast('تم نسخ عنوان السيرفر بنجاح!');
-      }).catch(() => {
-        showToast('تعذر النسخ تلقائياً، يرجى نسخه يدوياً');
-      });
+  copyButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ipBox = document.getElementById('serverIpBox') || document.getElementById('serverIpCode');
+      const textToCopy = ipBox ? ipBox.innerText.trim() : 'http://192.168.1.100:7070';
+      
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          showAppleToast('تم نسخ عنوان السيرفر بنجاح!');
+        }).catch(() => {
+          fallbackCopy(textToCopy);
+        });
+      } else {
+        fallbackCopy(textToCopy);
+      }
     });
+  });
+
+  function fallbackCopy(text) {
+    const input = document.createElement('input');
+    input.value = text;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+    showAppleToast('تم نسخ عنوان السيرفر بنجاح!');
   }
 
-  // Video Chapter Seeking
-  document.querySelectorAll('.timeline-chip').forEach(chip => {
-    chip.addEventListener('click', (e) => {
-      const targetTime = parseFloat(chip.getAttribute('data-time'));
-      const videoId = chip.getAttribute('data-video');
-      const videoElement = document.getElementById(videoId);
+  // Video Chapter Seeking (Pills)
+  const chapterButtons = document.querySelectorAll('.chapter-btn, .timeline-chip');
+  chapterButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetTime = parseFloat(btn.getAttribute('data-time'));
+      const videoId = btn.getAttribute('data-video');
+      const video = document.getElementById(videoId);
 
-      if (videoElement && !isNaN(targetTime)) {
-        videoElement.currentTime = targetTime;
-        videoElement.play();
-        videoElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        showToast(`تم الانتقال إلى الدقيقة ${chip.innerText}`);
+      if (video && !isNaN(targetTime)) {
+        video.currentTime = targetTime;
+        video.play();
+        video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        showAppleToast(`تم الانتقال إلى الدقيقة ${btn.innerText.trim()}`);
       }
     });
   });
 
   // FAQ Accordion Behavior
-  document.querySelectorAll('.faq-question').forEach(question => {
-    question.addEventListener('click', () => {
-      const parent = question.closest('.faq-item');
-      const isActive = parent.classList.contains('active');
+  const faqQuestions = document.querySelectorAll('.faq-q, .faq-question');
+  faqQuestions.forEach(q => {
+    q.addEventListener('click', () => {
+      const parentRow = q.closest('.faq-row, .faq-item');
+      if (!parentRow) return;
 
-      // Close other items
-      document.querySelectorAll('.faq-item').forEach(item => {
-        item.classList.remove('active');
+      const isActive = parentRow.classList.contains('active');
+
+      // Close all others
+      document.querySelectorAll('.faq-row, .faq-item').forEach(row => {
+        row.classList.remove('active');
       });
 
       if (!isActive) {
-        parent.classList.add('active');
+        parentRow.classList.add('active');
       }
     });
   });
 
-  // Global Toast Function
-  window.showToast = function(message) {
-    let toast = document.getElementById('globalToast');
+  // Toast Function
+  window.showAppleToast = function(message) {
+    let toast = document.getElementById('appleToast') || document.getElementById('globalToast');
     if (!toast) {
       toast = document.createElement('div');
-      toast.id = 'globalToast';
-      toast.className = 'toast-msg';
+      toast.id = 'appleToast';
+      toast.className = 'apple-toast';
       document.body.appendChild(toast);
     }
 
-    toast.innerHTML = `<span>✓</span> <span>${message}</span>`;
+    toast.innerText = message;
     toast.classList.add('show');
 
     setTimeout(() => {
       toast.classList.remove('show');
-    }, 3200);
+    }, 2800);
   };
 });

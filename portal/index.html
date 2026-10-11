@@ -3,281 +3,245 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>iSmart Messenger | البوابة الرسمية لتوزيع البرنامج على الفروع</title>
+  <title>iSmart Messenger | بوابة التوزيع وشروحات الفروع</title>
   <meta name="description" content="البوابة الرسمية المعتمدة لتحميل وتثبيت برنامج iSmart Messenger لنسختي الكمبيوتر والموبايل لجميع فروع الشركة (50 فرعاً).">
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" type="image/png" href="assets/images/logo.png">
 </head>
 <body>
 
-  <!-- Top Announcement Bar -->
-  <div class="top-bar">
-    <div class="container">
-      📢 <strong>تنبيه لجميع موظفي الفروع (50 فرع):</strong> يرجى تحميل وتثبيت برنامج iSmart Messenger فوراً لربط الاتصالات الداخلية والمراسلات بين الفروع.
-      <span class="badge-branch">معتمد رسمياً</span>
+  <!-- Top Strip -->
+  <div class="top-strip">
+    <div class="container top-strip-inner">
+      <span>شبكة المراسلات المؤسسية الداخلية الموحدة</span>
+      <span class="branch-pill">مخصص لربط 50 فرعاً</span>
     </div>
   </div>
 
-  <!-- Header -->
-  <header class="site-header">
-    <div class="container">
-      <div class="header-inner">
-        <a href="index.html" class="brand-logo">
-          <img src="assets/images/logo.png" alt="iSmart Messenger Logo" onerror="this.src='assets/images/server-online.png'">
-          <div>
-            <div class="brand-title">iSmart Messenger</div>
-            <span class="brand-subtitle">نظام المراسلات الداخلي الموحد</span>
-          </div>
-        </a>
-
-        <ul class="nav-menu" id="navMenu">
-          <li><a href="index.html" class="nav-link active">الرئيسية والتحميل</a></li>
-          <li><a href="windows.html" class="nav-link">دليل الكمبيوتر (Windows)</a></li>
-          <li><a href="mobile.html" class="nav-link">دليل الموبايل (Android)</a></li>
-          <li><a href="#videos-section" class="nav-link">فيديوهات الشرح</a></li>
-          <li><a href="faq.html" class="nav-link">الدعم والأسئلة الشائعة</a></li>
-        </ul>
-
-        <div class="nav-actions">
-          <a href="#downloads-section" class="btn-header-cta">
-            <span>تحميل البرنامج</span>
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-          </a>
-          <button class="mobile-toggle" id="mobileToggle" aria-label="القائمة">
-            &#9776;
-          </button>
+  <!-- Apple Minimalist Navigation -->
+  <header class="site-nav">
+    <div class="container nav-container">
+      <a href="index.html" class="nav-brand">
+        <img src="assets/images/logo.png" alt="iSmart Logo" onerror="this.src='assets/images/server-online.png'">
+        <div class="nav-brand-text">
+          <h1>iSmart Messenger</h1>
+          <span>نظام الاتصال الموحد للفروع</span>
         </div>
+      </a>
+
+      <ul class="nav-links" id="navLinks">
+        <li class="nav-item"><a href="index.html" class="active">الرئيسية والتحميل</a></li>
+        <li class="nav-item"><a href="windows.html">دليل الكمبيوتر (Windows)</a></li>
+        <li class="nav-item"><a href="mobile.html">دليل الموبايل (Android)</a></li>
+        <li class="nav-item"><a href="#videos-section">فيديوهات التدريب</a></li>
+        <li class="nav-item"><a href="deploy.html">دليل النشر بالسيرفر</a></li>
+        <li class="nav-item"><a href="faq.html">الدعم الفني</a></li>
+      </ul>
+
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <a href="#downloads" class="nav-cta-btn">
+          <span>تنزيل البرنامج</span>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+        </a>
+        <button class="mobile-toggle" id="mobileToggle" aria-label="القائمة">&#9776;</button>
       </div>
     </div>
   </header>
 
   <!-- Hero Section -->
-  <section class="hero-section" id="downloads-section">
+  <section class="hero-wrapper" id="downloads">
     <div class="container">
-      <div class="hero-content">
-        <div class="hero-badge">
-          🏢 شبكة المراسلات الموحدة لجميع الفروع
-        </div>
-        <h1 class="hero-title">
-          تواصل فوري، مشفر، وآمن <br>
-          بين <span>جميع فروع الشركة</span>
-        </h1>
-        <p class="hero-subtitle">
-          حمل النسخة المخصصة لجهازك الآن وابدأ التواصل مع الزملاء، الإدارات، والمقر الرئيسي بكل سهولة وسرعة. اختر منصتك للتحميل المباشر أدناه.
-        </p>
+      <div class="hero-tag">
+        🏢 منظومة الربط المباشر بين المقر الرئيسي وفروع المحافظات
+      </div>
+      <h2 class="hero-headline">
+        منظومة المراسلات الآمنة والموحدة <br>
+        <span>لكافة فروع الشركة</span>
+      </h2>
+      <p class="hero-lead">
+        حمل النسخة المعتمدة الخاصة بك وابدأ التواصل مع الإدارات والزملاء فوراً. يدعم المحادثات الفورية، المكالمات، وإرسال المستندات بأمان تام.
+      </p>
 
-        <!-- THE 2 BIG DOWNLOAD BUTTONS -->
-        <div class="download-grid">
-          
-          <!-- WINDOWS CARD -->
-          <div class="download-card windows-card">
-            <div class="download-card-badge">موصى به للمكاتب</div>
-            <div class="download-header">
-              <div class="download-icon">
-                💻
-              </div>
-              <div class="download-title">
-                <h3>نسخة الكمبيوتر (Windows)</h3>
-                <p>للأجهزة المكتبية واللابتوب في الفروع</p>
-              </div>
-            </div>
-
-            <div class="download-meta">
-              <span class="meta-item">الإصدار: <strong>1.1.15</strong></span>
-              <span class="meta-item">الحجم: <strong>66.3 ميجابايت</strong></span>
-              <span class="meta-item">النظام: <strong>Windows 10 / 11 (64-Bit)</strong></span>
-            </div>
-
-            <ul class="download-features-list">
-              <li>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                </svg>
-                مراسلة سريعة وإرسال مستندات وملفات بالحجم الكامل
-              </li>
-              <li>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                </svg>
-                تنبيهات صوتية فورية وإشعارات سطح المكتب
-              </li>
-              <li>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                </svg>
-                تثبيت تلقائي وتشغيل مع بدء تشغيل الويندوز
-              </li>
-            </ul>
-
-            <a href="downloads/iSmart Messenger Setup 1.1.15.exe" class="btn-download-massive" download>
-              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-              </svg>
-              <span>تنزيل برنامج الكمبيوتر (.exe)</span>
-            </a>
-
-            <a href="windows.html" class="card-guide-link">
-              عرض دليل التثبيت المفصل لبرنامج الكمبيوتر ←
-            </a>
+      <!-- THE 2 BIG APPLE DOWNLOAD CARDS -->
+      <div class="download-section-grid">
+        
+        <!-- WINDOWS DESKTOP CARD -->
+        <div class="apple-card">
+          <div class="card-top">
+            <span class="card-badge">أجهزة المكاتب واللابتوب</span>
+            <span style="font-size: 0.78rem; color: var(--apple-blue); font-weight: 600;">Windows 10 / 11</span>
           </div>
 
-          <!-- MOBILE CARD -->
-          <div class="download-card mobile-card">
-            <div class="download-card-badge">للموظفين والمديرين</div>
-            <div class="download-header">
-              <div class="download-icon">
-                📱
-              </div>
-              <div class="download-title">
-                <h3>نسخة الموبايل (Android)</h3>
-                <p>للهواتف الذكية والأجهزة اللوحية</p>
-              </div>
+          <div class="card-icon-title">
+            <div class="app-icon-squircle win-icon">💻</div>
+            <div class="card-heading">
+              <h3>نسخة الكمبيوتر (Desktop)</h3>
+              <p>تطبيق سطح المكتب المتكامل للموظفين</p>
             </div>
-
-            <div class="download-meta">
-              <span class="meta-item">الإصدار: <strong>1.0.2</strong></span>
-              <span class="meta-item">الحجم: <strong>56.9 ميجابايت</strong></span>
-              <span class="meta-item">النظام: <strong>Android 8.0 فما فوق</strong></span>
-            </div>
-
-            <ul class="download-features-list">
-              <li>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                </svg>
-                إشعارات فورية في الخلفية حتى مع إغلاق الشاشة
-              </li>
-              <li>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                </svg>
-                تسجيلات صوتية ومكالمات واضحة وعالية الجودة
-              </li>
-              <li>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
-                </svg>
-                مزامنة كاملة مع حسابك على الكمبيوتر لحظياً
-              </li>
-            </ul>
-
-            <a href="downloads/iSmart-Messenger.apk" class="btn-download-massive" download>
-              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-              </svg>
-              <span>تنزيل تطبيق الموبايل (.apk)</span>
-            </a>
-
-            <a href="mobile.html" class="card-guide-link">
-              عرض دليل التثبيت المفصل لتطبيق الموبايل ←
-            </a>
           </div>
 
+          <div class="spec-row">
+            <span class="spec-pill">الإصدار: <strong>1.1.15</strong></span>
+            <span class="spec-pill">الحجم: <strong>66.3 MB</strong></span>
+            <span class="spec-pill">النوع: <strong>Setup EXE</strong></span>
+          </div>
+
+          <ul class="feature-check-list">
+            <li>إرسال واستقبال ملفات وفواتير إكسيل وPDF بالحجم الأصلي</li>
+            <li>تنبيهات صوتية وإشعارات سطح المكتب للرسائل العاجلة</li>
+            <li>أخذ لقطات شاشة (Screenshots) ومشاركتها فورياً</li>
+            <li>بدء تشغيل تلقائي مع تشغيل نظام الويندوز</li>
+          </ul>
+
+          <a href="downloads/iSmart Messenger Setup 1.1.15.exe" class="btn-apple-download windows-download" download>
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            <span>تحميل برنامج الكمبيوتر (EXE)</span>
+          </a>
+
+          <a href="windows.html" class="sub-link">
+            عرض الدليل التوضيحي المفصل لنسخة الكمبيوتر ←
+          </a>
         </div>
 
-        <!-- Branch Server IP Box -->
-        <div class="server-ip-box">
-          <div class="server-ip-info">
-            <div class="server-ip-icon">🌐</div>
-            <div class="server-ip-text">
-              <h4>عنوان خادم المراسلات الموحد (Server Host)</h4>
-              <p>استخدم هذا العنوان عند إعداد البرنامج لأول مرة للاتصال بشبكة الشركة</p>
+        <!-- ANDROID MOBILE CARD -->
+        <div class="apple-card mobile-card">
+          <div class="card-top">
+            <span class="card-badge">الهواتف والأجهزة اللوحية</span>
+            <span style="font-size: 0.78rem; color: var(--apple-green); font-weight: 600;">Android 8.0+</span>
+          </div>
+
+          <div class="card-icon-title">
+            <div class="app-icon-squircle mob-icon">📱</div>
+            <div class="card-heading">
+              <h3>نسخة الموبايل (Android)</h3>
+              <p>تطبيق الهاتف الذكي للاتصال المتنقل</p>
             </div>
           </div>
-          <div class="server-ip-badge">
-            <code id="serverIpCode">http://192.168.1.100:7070</code>
-            <button class="btn-copy" id="copyServerBtn" title="نسخ إلى الحافظة">
-              📋 نسخ العنوان
-            </button>
+
+          <div class="spec-row">
+            <span class="spec-pill">الإصدار: <strong>1.0.2</strong></span>
+            <span class="spec-pill">الحجم: <strong>56.9 MB</strong></span>
+            <span class="spec-pill">النوع: <strong>Android APK</strong></span>
           </div>
+
+          <ul class="feature-check-list">
+            <li>إشعارات فورية في الخلفية حتى مع إغلاق الشاشة تماماً</li>
+            <li>تسجيلات صوتية واضحة ومكالمات مشفرة بدون تقطيع</li>
+            <li>إرسال صور المعاملات مباشرة عبر الكاميرا</li>
+            <li>مزامنة سريعة ولحظية مع حساب الكمبيوتر المكتبي</li>
+          </ul>
+
+          <a href="downloads/iSmart-Messenger.apk" class="btn-apple-download mobile-download" download>
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            <span>تحميل تطبيق الموبايل (APK)</span>
+          </a>
+
+          <a href="mobile.html" class="sub-link" style="color: var(--apple-green);">
+            عرض الدليل التوضيحي المفصل لتطبيق الموبايل ←
+          </a>
         </div>
 
       </div>
+
+      <!-- Inset Server Configuration Bar -->
+      <div class="server-bar">
+        <div class="server-bar-info">
+          <div class="server-dot"></div>
+          <div class="server-bar-text">
+            <h4>عنوان خادم المراسلات المعتمد (Server Host)</h4>
+            <p>أدخل هذا العنوان في إعدادات الاتصال بالبرنامج للربط بالشبكة الداخلية</p>
+          </div>
+        </div>
+
+        <div class="server-input-group">
+          <div class="server-code-box" id="serverIpBox">http://192.168.1.100:7070</div>
+          <button class="btn-mini-copy" id="btnCopyIp">نسخ العنوان</button>
+        </div>
+      </div>
+
     </div>
   </section>
 
-  <!-- VIDEOS SECTION (THE 2 TUTORIAL VIDEOS) -->
-  <section class="section-videos" id="videos-section">
+  <!-- Video Training Section (2 Interactive Video Players) -->
+  <section class="section-wrapper" id="videos-section" style="background: var(--bg-card); border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);">
     <div class="container">
-      <div class="section-header">
-        <span class="section-tag">فيديوهات تدريبية شاملة</span>
-        <h2 class="section-title">شرح تفصيلي بالصوت والصورة لبرنامج الكمبيوتر والموبايل</h2>
-        <p class="section-desc">
-          شاهد الفيديوهات التدريبية لتتعلم كيفية تثبيت البرنامج، تسجيل الدخول، واستخدام كافة المميزات في دقائق معدودة.
-        </p>
+      <div class="section-title-wrap">
+        <span class="section-small-tag">الفيديوهات الإرشادية</span>
+        <h3 class="section-main-heading">شرح بالفيديو لكل من الكمبيوتر والموبايل</h3>
+        <p class="section-sub-heading">شاهد خطوات التثبيت وضبط الاتصال بالسيرفر في مقاطع فيديو سريعة ومباشرة.</p>
       </div>
 
-      <div class="videos-grid">
-
-        <!-- VIDEO 1: WINDOWS -->
-        <div class="video-card win-video">
-          <div class="video-wrapper">
-            <video id="videoWindows" controls preload="metadata" poster="assets/images/logo.png">
+      <div class="video-grid-apple">
+        
+        <!-- Video 1: Windows -->
+        <div class="video-apple-card">
+          <div class="video-screen">
+            <video id="vidWindows" controls preload="metadata" poster="assets/images/logo.png">
               <source src="downloads/iSmart Messenger Windows.mp4" type="video/mp4">
-              متصفحك لا يدعم تشغيل الفيديو مباشرة. يمكنك تحميل الفيديو لمشاهدته.
+              متصفحك لا يدعم تشغيل الفيديو مباشرة.
             </video>
           </div>
-          <div class="video-info">
-            <span class="video-badge">🖥️ فيديو شرح الكمبيوتر</span>
-            <h3>دليل تثبيت واستخدام برنامج الويندوز (Desktop)</h3>
-            <p>
-              شرح كامل لخطوات تنصيب ملف Setup، ضبط إعدادات الاتصال بالسيرفر، إنشاء المحادثات، إرسال المرفقات والملفات، واستخدام غرف العمل الجماعية.
-            </p>
+          <div class="video-details">
+            <span class="video-tag-pill tag-win">💻 شرح الكمبيوتر</span>
+            <h4>دليل تثبيت وضبط برنامج الويندوز</h4>
+            <p>يشرح خطوة بخطوة فتح ملف التثبيت، ضبط خادم الشركة، تسجيل الدخول، واستخدام المحادثات والملفات.</p>
 
-            <div class="video-timeline">
-              <div class="video-timeline-title">⏱️ محاور الفيديو (اضغط للقفز المباشر):</div>
-              <div class="timeline-items">
-                <span class="timeline-chip" data-video="videoWindows" data-time="0">00:00 البدء والتثبيت</span>
-                <span class="timeline-chip" data-video="videoWindows" data-time="30">00:30 إعداد السيرفر</span>
-                <span class="timeline-chip" data-video="videoWindows" data-time="65">01:05 تسجيل الدخول</span>
-                <span class="timeline-chip" data-video="videoWindows" data-time="120">02:00 المحادثات والملفات</span>
+            <div class="chapter-box">
+              <div class="chapter-title">⏱️ محاور الفيديو (اضغط للقفز للدقيقة):</div>
+              <div class="chapter-pills">
+                <span class="chapter-btn" data-video="vidWindows" data-time="0">00:00 التثبيت</span>
+                <span class="chapter-btn" data-video="vidWindows" data-time="30">00:30 السيرفر</span>
+                <span class="chapter-btn" data-video="vidWindows" data-time="65">01:05 تسجيل الدخول</span>
+                <span class="chapter-btn" data-video="vidWindows" data-time="120">02:00 المحادثات</span>
               </div>
             </div>
 
-            <div class="video-footer">
-              <a href="windows.html" class="btn-video-guide">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--hairline-subtle); padding-top: 12px;">
+              <a href="windows.html" style="font-size: 0.82rem; font-weight: 700; color: var(--apple-blue);">
                 قراءة الدليل المكتوب لنسخة الكمبيوتر ←
               </a>
-              <a href="downloads/iSmart Messenger Setup 1.1.15.exe" class="btn-copy" download>
-                ⬇ تحميل الـ EXE
+              <a href="downloads/iSmart Messenger Setup 1.1.15.exe" style="font-size: 0.8rem; color: var(--label-secondary); text-decoration: underline;" download>
+                تنزيل الملف (EXE)
               </a>
             </div>
           </div>
         </div>
 
-        <!-- VIDEO 2: MOBILE -->
-        <div class="video-card mobile-video">
-          <div class="video-wrapper">
-            <video id="videoMobile" controls preload="metadata" poster="assets/images/logo.png">
+        <!-- Video 2: Mobile -->
+        <div class="video-apple-card">
+          <div class="video-screen">
+            <video id="vidMobile" controls preload="metadata" poster="assets/images/logo.png">
               <source src="downloads/iSmart Messenger Mobile.mp4" type="video/mp4">
-              متصفحك لا يدعم تشغيل الفيديو مباشرة. يمكنك تحميل الفيديو لمشاهدته.
+              متصفحك لا يدعم تشغيل الفيديو مباشرة.
             </video>
           </div>
-          <div class="video-info">
-            <span class="video-badge">📱 فيديو شرح الموبايل</span>
-            <h3>دليل تثبيت وتفعيل تطبيق الأندرويد (Mobile App)</h3>
-            <p>
-              خطوات تثبيت ملف الـ APK على هواتف الأندرويد، تفعيل السماح بالتثبيت من مصادر موثوقة، ضبط استهلاك البطارية لضمان وصول الإشعارات الفورية، واستخدام المراسلة الصوتية.
-            </p>
+          <div class="video-details">
+            <span class="video-tag-pill tag-mob">📱 شرح الموبايل</span>
+            <h4>دليل تثبيت وضبط تطبيق الأندرويد</h4>
+            <p>يشرح تثبيت ملف APK، السماح بالمصادر الخارجية، تسجيل الدخول، وأهم خطوة لتفعيل الإشعارات بالخلفية.</p>
 
-            <div class="video-timeline">
-              <div class="video-timeline-title">⏱️ محاور الفيديو (اضغط للقفز المباشر):</div>
-              <div class="timeline-items">
-                <span class="timeline-chip" data-video="videoMobile" data-time="0">00:00 تثبيت ملف APK</span>
-                <span class="timeline-chip" data-video="videoMobile" data-time="25">00:25 أذونات الأمان</span>
-                <span class="timeline-chip" data-video="videoMobile" data-time="50">00:50 تسجيل الدخول</span>
-                <span class="timeline-chip" data-video="videoMobile" data-time="90">01:30 تفعيل الإشعارات</span>
+            <div class="chapter-box">
+              <div class="chapter-title">⏱️ محاور الفيديو (اضغط للقفز للدقيقة):</div>
+              <div class="chapter-pills">
+                <span class="chapter-btn" data-video="vidMobile" data-time="0">00:00 فتح الـ APK</span>
+                <span class="chapter-btn" data-video="vidMobile" data-time="25">00:25 أمان الأندرويد</span>
+                <span class="chapter-btn" data-video="vidMobile" data-time="50">00:50 تسجيل الدخول</span>
+                <span class="chapter-btn" data-video="vidMobile" data-time="90">01:30 استثناء البطارية</span>
               </div>
             </div>
 
-            <div class="video-footer">
-              <a href="mobile.html" class="btn-video-guide">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--hairline-subtle); padding-top: 12px;">
+              <a href="mobile.html" style="font-size: 0.82rem; font-weight: 700; color: var(--apple-green);">
                 قراءة الدليل المكتوب لنسخة الموبايل ←
               </a>
-              <a href="downloads/iSmart-Messenger.apk" class="btn-copy" download>
-                ⬇ تحميل الـ APK
+              <a href="downloads/iSmart-Messenger.apk" style="font-size: 0.8rem; color: var(--label-secondary); text-decoration: underline;" download>
+                تنزيل الملف (APK)
               </a>
             </div>
           </div>
@@ -287,133 +251,77 @@
     </div>
   </section>
 
-  <!-- FEATURES HIGHLIGHTS -->
-  <section class="section-features">
+  <!-- Inset Grouped Enterprise Features -->
+  <section class="section-wrapper">
     <div class="container">
-      <div class="section-header">
-        <span class="section-tag">مميزات منظومة iSmart</span>
-        <h2 class="section-title">لماذا تم اختيار هذا النظام لربط الـ 50 فرعاً؟</h2>
-        <p class="section-desc">
-          صُمم النظام لتوفير أعلى مستويات الأمان والسرية التامة للبيانات الداخلية دون الاعتماد على تطبيقات خارجية.
-        </p>
+      <div class="section-title-wrap">
+        <span class="section-small-tag">الأمان والاعتمادية</span>
+        <h3 class="section-main-heading">مميزات بيئة العمل الموحدة بالفروع</h3>
       </div>
 
-      <div class="features-grid">
-        <div class="feature-box">
-          <div class="feature-icon">🔒</div>
-          <h4>خوادم داخلية مؤمنة 100%</h4>
-          <p>جميع الرسائل، التسجيلات الصوتية، والمستندات مخزنة محلياً على خوادم الشركة الداخلية دون تدخل أي طرف خارجي.</p>
-        </div>
-
-        <div class="feature-box">
-          <div class="feature-icon">⚡</div>
-          <h4>سرعة فائقة ومزامنة فورية</h4>
-          <p>مزامنة لحظية للرسائل والمحادثات بين تطبيق الكمبيوتر وتطبيق الموبايل، لتتابع عملك من أي مكان وفي أي وقت.</p>
-        </div>
-
-        <div class="feature-box">
-          <div class="feature-icon">📁</div>
-          <h4>تبادل ملفات ضخمة بلا قيود</h4>
-          <p>إمكانية إرسال الفواتير، جداول الإكسيل، ملفات الـ PDF، والتقارير المالية دون تقليص جودتها أو حجمها.</p>
-        </div>
-
-        <div class="feature-box">
-          <div class="feature-icon">👥</div>
-          <h4>مجموعات عمل متخصصة</h4>
-          <p>إنشاء غرف دردشة مخصصة لكل قسم (المبيعات، الحسابات، الدعم الفني، مديري الفروع) مع صلاحيات إدارية مرنة.</p>
-        </div>
-
-        <div class="feature-box">
-          <div class="feature-icon">🔔</div>
-          <h4>إشعارات فورية متقدمة</h4>
-          <p>نظام إشعارات ذكي يضمن وصول التنبيهات في الخلفية مع نغمات مخصصة لتمييز الرسائل الإدارية العاجلة.</p>
-        </div>
-
-        <div class="feature-box">
-          <div class="feature-icon">🛠️</div>
-          <h4>دعم فني وتحديثات مستمرة</h4>
-          <p>فريق تكنولوجيا المعلومات جاهز لمساعدة موظفي الفروع على مدار الساعة مع دعم التحديث التلقائي لكافة الأجهزة.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- QUICK FAQ TEASER -->
-  <section style="padding: 70px 0; background: #ffffff;">
-    <div class="container">
-      <div class="section-header">
-        <span class="section-tag">استفسارات سريعة</span>
-        <h2 class="section-title">الأسئلة الأكثر تكراراً بين الفروع</h2>
-      </div>
-
-      <div class="faq-list">
-        <div class="faq-item">
-          <div class="faq-question">ما هو اسم المستخدم وكلمة المرور الخاصة بي؟</div>
-          <div class="faq-answer">
-            تقوم إدارة تكنولوجيا المعلومات (IT) في المقر الرئيسي بإنشاء وتوزيع حسابات الموظفين لكل فرع بشكل مسبق. إذا لم تستلم بيانات دخولك حتى الآن، يرجى التواصل مع مدير الفرع أو مسؤول الـ IT لطلب حسابك المعتمد.
+      <div class="inset-group">
+        <div class="inset-row">
+          <div class="inset-icon icon-blue">🔒</div>
+          <div class="inset-content">
+            <h5>تشفير كامل وحفظ محلي للبيانات</h5>
+            <p>كافة الرسائل والمستندات مخزنة داخل خوادم الشركة المحلية دون خروج أي معلومة لخوادم خارجية.</p>
           </div>
         </div>
 
-        <div class="faq-item">
-          <div class="faq-question">هل يمكنني فتح حسابي على الكمبيوتر والموبايل معاً؟</div>
-          <div class="faq-answer">
-            نعم بالتأكيد! يمكنك تسجيل الدخول بنفس الحساب على جهاز الكمبيوتر في الفرع وهاتفك المحمول في نفس الوقت، وسيتم مزامنة جميع المحادثات والملفات تلقائياً بين الجهازين فوراً.
+        <div class="inset-row">
+          <div class="inset-icon icon-green">⚡</div>
+          <div class="inset-content">
+            <h5>تزامن لحظي متعدد الأجهزة</h5>
+            <p>يمكنك فتح حسابك على كمبيوتر المكتب والموبايل بالتوازي مع تحديث المحادثات لحظياً.</p>
           </div>
         </div>
 
-        <div class="faq-item">
-          <div class="faq-question">ماذا أفعل إذا ظهرت رسالة "خطأ في الاتصال بالخادم"؟</div>
-          <div class="faq-answer">
-            تأكد أولاً من اتصال جهازك بالإنترنت أو بالشبكة الداخلية للفرع (VPN)، ثم تأكد من كتابة عنوان السيرفر بالصيغة الصحيحة (مثل <code>http://192.168.1.100:7070</code>) دون وجود مسافات إضافية. إذا استمرت المشكلة راجع قسم الدعم الفني.
+        <div class="inset-row">
+          <div class="inset-icon icon-indigo">📁</div>
+          <div class="inset-content">
+            <h5>مشاركة غير مقيدة للمستندات</h5>
+            <p>إرسال مستندات الـ PDF وجداول الـ Excel والفواتير بحجمها الكامل دون تشويه أو ضغط.</p>
+          </div>
+        </div>
+
+        <div class="inset-row">
+          <div class="inset-icon icon-orange">🔔</div>
+          <div class="inset-content">
+            <h5>إشعارات وتنبيهات فورية في الخلفية</h5>
+            <p>تنبيهات صوتية فورية على الكمبيوتر وإشعارات فورية على الموبايل حتى مع قفل الشاشة.</p>
           </div>
         </div>
       </div>
 
-      <div style="text-align: center; margin-top: 36px;">
-        <a href="faq.html" class="btn-header-cta" style="display: inline-flex;">
-          عرض كافة الأسئلة الشائعة وتفاصيل الدعم الفني للفروع ←
+      <!-- Quick Server Deployment Banner -->
+      <div style="background: var(--bg-card); border: 1px solid var(--hairline); border-radius: var(--r-lg); padding: 22px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+        <div>
+          <h4 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 2px;">هل أنت مسؤول النظام (System Admin) وتريد نشر هذه البوابة على السيرفر؟</h4>
+          <p style="font-size: 0.85rem; color: var(--label-secondary);">وفرنا دليلاً تقنياً شاملاً لنشر الموقع على Nginx أو Windows IIS أو Docker في دقيقتين.</p>
+        </div>
+        <a href="deploy.html" class="nav-cta-btn" style="background: #1c1c1e;">
+          قراءة دليل نشر الموقع على السيرفر ←
         </a>
       </div>
+
     </div>
   </section>
 
-  <!-- Footer -->
-  <footer class="site-footer">
+  <!-- Apple Clean Footer -->
+  <footer class="site-footer-apple">
     <div class="container">
-      <div class="footer-inner">
-        <div class="footer-brand">
-          <h4>iSmart Messenger Portal</h4>
-          <p>
-            البوابة الرسمية لتوزيع وإدارة برنامج المراسلات المؤسسي الداخلي المعتمد لشبكة الـ 50 فرعاً لشركتنا في الجمهورية.
-          </p>
-        </div>
-
-        <div class="footer-links">
-          <h5>روابط سريعة</h5>
-          <ul>
-            <li><a href="index.html">الصفحة الرئيسية والتحميل</a></li>
-            <li><a href="windows.html">دليل برنامج الكمبيوتر (Windows)</a></li>
-            <li><a href="mobile.html">دليل تطبيق الموبايل (Android)</a></li>
-            <li><a href="faq.html">مركز المساعدة والدعم الفني</a></li>
-          </ul>
-        </div>
-
-        <div class="footer-links">
-          <h5>ملفات التثبيت المباشرة</h5>
-          <ul>
-            <li><a href="downloads/iSmart Messenger Setup 1.1.15.exe" download>تحميل نسخة الويندوز (EXE)</a></li>
-            <li><a href="downloads/iSmart-Messenger.apk" download>تحميل نسخة الأندرويد (APK)</a></li>
-            <li><a href="downloads/iSmart Messenger Windows.mp4" download>تحميل فيديو شرح الكمبيوتر</a></li>
-            <li><a href="downloads/iSmart Messenger Mobile.mp4" download>تحميل فيديو شرح الموبايل</a></li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="footer-bottom">
-        جميع الحقوق محفوظة &copy; 2026 iSmart Messenger Network — نظام المراسلات الموحد للفروع.
-      </div>
+      <ul class="footer-nav">
+        <li><a href="index.html">الرئيسية والتحميل</a></li>
+        <li><a href="windows.html">دليل الكمبيوتر</a></li>
+        <li><a href="mobile.html">دليل الموبايل</a></li>
+        <li><a href="deploy.html">دليل النشر بالسيرفر</a></li>
+        <li><a href="faq.html">الدعم الفني</a></li>
+      </ul>
+      <p>جميع الحقوق محفوظة &copy; 2026 iSmart Messenger Network — منظومة المراسلات المعتمدة لشبكة الفروع.</p>
     </div>
   </footer>
+
+  <div class="apple-toast" id="appleToast">تم نسخ عنوان السيرفر بنجاح!</div>
 
   <script src="js/main.js"></script>
 </body>
