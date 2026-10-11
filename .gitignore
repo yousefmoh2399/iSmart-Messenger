@@ -39,3 +39,4 @@ backend/*firebase-adminsdk*.json
 # Binaries and video distributions (>100MB)
 apk-&-exe-&-videos/
 portal/downloads/
+iSmart-Server-Package/
