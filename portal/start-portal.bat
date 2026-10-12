@@ -1,26 +1,33 @@
 @echo off
-chcp 65001 > nul
+setlocal
+cd /d "%~dp0"
+title iSmart Messenger Portal - Next.js
+
 echo ========================================================
-echo   iSmart Messenger - تشغيل البوابة الرسمية للفروع
+echo   iSmart Messenger - Official Branch Portal (Next.js)
 echo ========================================================
 echo.
 
 where node >nul 2>nul
-if %ERRORLEVEL% equ 0 (
-    echo تم العثور على Node.js، جاري تشغيل الخادم مع دعم بث الفيديو الكامل...
-    node "%~dp0server.js"
-    goto :end
+if %errorlevel% neq 0 (
+    echo [ERROR] Node.js is not found. Please install Node.js 18+ first.
+    pause
+    exit /b 1
 )
 
-where python >nul 2>nul
-if %ERRORLEVEL% equ 0 (
-    echo جاري تشغيل الخادم عبر Python...
-    start http://localhost:8080/index.html
-    python -m http.server 8080
-    goto :end
+if not exist ".next" (
+    echo [.next folder not found, running build first...]
+    call npm run build
 )
 
-echo جاري فتح الموقع في المتصفح مباشرة...
-start "" "%~dp0index.html"
+echo.
+echo Starting Next.js Portal on port 8080...
+echo Portal URL: http://localhost:8080
+echo.
 
-:end
+:: Open browser automatically
+start http://localhost:8080
+
+call npm start
+
+pause
