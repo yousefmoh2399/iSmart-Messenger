@@ -1,4 +1,4 @@
-package com.example.mobile_app.scanner
+package com.ismart.messenger.scanner
 
 import android.util.Log
 import org.opencv.core.Core

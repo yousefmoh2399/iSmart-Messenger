@@ -1,6 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../../core/config/app_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/settings/user_preferences.dart';
@@ -432,6 +434,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     ],
                   ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: Icon(
+                        Icons.privacy_tip_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      title: const Text('سياسة الخصوصية'),
+                      subtitle: const Text('Privacy Policy & Data Safety'),
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                      onTap: () async {
+                        final baseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ?? AppConfig.defaultApiBaseUrl;
+                        final uri = Uri.parse(baseUrl.endsWith('/') ? '${baseUrl}privacy-policy' : '$baseUrl/privacy-policy');
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: Icon(
+                        Icons.info_outline_rounded,
+                        color: Theme.of(context).colorScheme.secondary,
+                      ),
+                      title: const Text('عن التطبيق'),
+                      subtitle: const Text('iSmart Messenger • الإصدار 1.1.3'),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 32),

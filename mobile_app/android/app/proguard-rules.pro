@@ -11,6 +11,25 @@
 -keepclassmembers class org.opencv.** { *; }
 -dontwarn org.opencv.**
 
-# Scanner activity, views, and native processing
--keep class com.example.mobile_app.scanner.** { *; }
--keepclassmembers class com.example.mobile_app.scanner.** { *; }
+# Native application code & scanner
+-keep class com.ismart.messenger.** { *; }
+-keepclassmembers class com.ismart.messenger.** { *; }
+
+# Keep native methods across all classes
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Flutter & plugins
+-keep class io.flutter.** { *; }
+-keep class io.flutter.plugins.** { *; }
+-keep class io.flutter.plugin.** { *; }
+-dontwarn io.flutter.**
+
+# CameraX
+-keep class androidx.camera.** { *; }
+-dontwarn androidx.camera.**
+
+# Firebase
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**

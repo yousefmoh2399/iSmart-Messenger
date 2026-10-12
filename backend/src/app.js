@@ -5,6 +5,7 @@ global.TextDecoder = TextDecoder;
 util.TextEncoder = TextEncoder;
 util.TextDecoder = TextDecoder;
 
+const path = require("path");
 const express = require("express");
 const compression = require("compression");
 const cors = require("cors");
@@ -138,6 +139,10 @@ app.get("/", (req, res) => {
     status: "ok",
     service: "workplace-document-backend",
   });
+});
+
+app.get("/privacy-policy", (req, res) => {
+  res.sendFile(path.join(__dirname, "assets", "privacy-policy.html"));
 });
 
 app.get("/health", (req, res) => {

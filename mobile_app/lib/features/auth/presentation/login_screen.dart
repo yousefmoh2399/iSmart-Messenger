@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/app_config.dart';
@@ -622,6 +623,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ),
                       ),
                     ),
+
+                  // Privacy Policy Link
+                  Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: TextButton(
+                      onPressed: () async {
+                        final url = currentBaseUrl.isNotEmpty ? currentBaseUrl : AppConfig.defaultApiBaseUrl;
+                        final uri = Uri.parse(url.endsWith('/') ? '${url}privacy-policy' : '$url/privacy-policy');
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      child: Text(
+                        'سياسة الخصوصية • Privacy Policy',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: subtitleColor.withOpacity(0.85),
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

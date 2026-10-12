@@ -1,4 +1,4 @@
-package com.example.mobile_app
+package com.ismart.messenger
 
 import android.content.Intent
 import android.net.Uri
@@ -15,9 +15,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import android.app.Activity
-import com.example.mobile_app.scanner.DocumentDetector
-import com.example.mobile_app.scanner.ImageFilters
-import com.example.mobile_app.scanner.ScannerActivity
+import com.ismart.messenger.scanner.DocumentDetector
+import com.ismart.messenger.scanner.ImageFilters
+import com.ismart.messenger.scanner.ScannerActivity
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -167,8 +167,8 @@ class MainActivity : FlutterActivity() {
                                     .build()
                             )
                             .setCategories(setOf(
-                                "com.example.mobile_app.share.TEXT",
-                                "com.example.mobile_app.share.IMAGE",
+                                "com.ismart.messenger.share.TEXT",
+                                "com.ismart.messenger.share.IMAGE",
                             ))
                             .setRank(index)
                             .setLongLived(true)

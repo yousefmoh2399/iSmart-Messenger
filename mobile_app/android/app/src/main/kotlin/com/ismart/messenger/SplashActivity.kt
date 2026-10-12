@@ -1,4 +1,4 @@
-package com.example.mobile_app
+package com.ismart.messenger
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
