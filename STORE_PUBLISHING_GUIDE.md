@@ -120,6 +120,7 @@ storeFile=../upload-keystore.jks
 - **Photos and videos (الصور والفيديوهات)**:
   - حدد: **Photos** و **Videos**.
   - Collected: Yes | Shared: No | Ephemeral: No | Purpose: App functionality (Document scanning & Chat attachments).
+  - **ملاحظة هامة حول سياسة أذونات الصور والفيديوهات**: التطبيق يعتمد كلياً على أداة النظام الرسمية **Android Photo Picker** لاختيار الصور والفيديوهات دون الحاجة لأي أذونات موسعة (`READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO`). تم حذف هذه الأذونات تماماً من الحزمة، لذلك لن يطالبك المتجر بنموذج تبرير الأذونات الموسعة.
 - **Audio files (الملفات الصوتية)**:
   - حدد: **Voice or sound recordings**.
   - Collected: Yes | Shared: No | Ephemeral: No | Purpose: App functionality (Chat voice notes).
