@@ -1,7 +1,7 @@
 name: mobile_app
 description: Workplace document scanner mobile app
 publish_to: "none"
-version: 1.1.3+1
+version: 1.1.4+2
 
 environment:
   sdk: ^3.9.2

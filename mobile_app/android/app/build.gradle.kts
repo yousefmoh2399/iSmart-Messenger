@@ -76,8 +76,8 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.12.0")
 
-    // OpenCV 4.9.0
-    implementation("org.opencv:opencv:4.9.0")
+    // OpenCV 4.14.0 (16 KB page size compatible)
+    implementation("org.opencv:opencv:4.14.0")
 
     // CameraX 1.3.4
     val cameraxVersion = "1.3.4"
