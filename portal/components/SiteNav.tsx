@@ -12,6 +12,7 @@ export default function SiteNav() {
 
   const navItems = [
     { href: '/', label: 'الرئيسية' },
+    { href: '/#core-features', label: 'إمكانيات النظام' },
     { href: '/windows', label: 'دليل الكمبيوتر' },
     { href: '/mobile', label: 'دليل الموبايل' },
     { href: '/#videos-section', label: 'فيديوهات الشرح' },

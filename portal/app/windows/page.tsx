@@ -33,14 +33,14 @@ export default function WindowsGuidePage() {
 
   return (
     <>
-      <TopStrip text="الدليل الإرشادي المعتمد لإدارة وتشغيل برنامج سطح المكتب" />
+      <TopStrip text="الدليل الإرشادي المعتمد لإدارة وتشغيل برنامج سطح المكتب لكافة الفروع" />
 
       {/* Doc Hero */}
       <section className="doc-hero">
         <div className="container">
           <h2>دليل تثبيت وتشغيل برنامج الكمبيوتر (Windows)</h2>
           <p>
-            شرح تنفيذي خطوة بخطوة بالصور والفيديو لضبط البرنامج، وتفادي أخطاء الشبكة، وبدء المراسلات المؤسسية.
+            شرح تنفيذي خطوة بخطوة بالصور والفيديو لكافة إمكانيات البرنامج: الماسح الضوئي المباشر، نظام التذاكر، إدارة الملفات والمجلدات، والمراسلات المؤسسية بين الفروع والإدارة.
           </p>
         </div>
       </section>
@@ -129,7 +129,7 @@ export default function WindowsGuidePage() {
             </div>
           </div>
 
-          {/* Step 1 */}
+          {/* Step 1: Installation */}
           <div className="step-card-apple">
             <div className="step-header">
               <div className="step-num-pill">1</div>
@@ -139,11 +139,11 @@ export default function WindowsGuidePage() {
               قم بالنقر المزدوج على ملف <code>iSmart Messenger Setup 1.1.15.exe</code>. ستبدأ عملية التثبيت الصامتة والسريعة، وسيتم إنشاء اختصار مباشر للبرنامج على سطح المكتب وفي قائمة Start.
             </p>
             <div className="callout-box warn">
-              ⚠️ <strong>تنبيه شاشة الأمان (Windows SmartScreen):</strong> في حال ظهرت لك نافذة زرقاء تذكر &quot;Windows protected your PC&quot;، اضغط على رابط <strong>More info</strong>، ثم اضغط على زر <strong>Run anyway</strong> للمتابعة.
+              ⚠️ <strong>تنبيه شاشة الأمان (Windows SmartScreen):</strong> في حال ظهرت لك نافذة زرقاء تذكر &quot;Windows protected your PC&quot;، اضغط على رابط <strong>More info</strong>، ثم اضغط على زر <strong>Run anyway</strong> للمتابعة لأن الملف آمن ومعتمد داخلياً من الشركة.
             </div>
           </div>
 
-          {/* Step 2 */}
+          {/* Step 2: Server Connection */}
           <div className="step-card-apple">
             <div className="step-header">
               <div className="step-num-pill">2</div>
@@ -182,7 +182,7 @@ export default function WindowsGuidePage() {
             </p>
           </div>
 
-          {/* Step 3 */}
+          {/* Step 3: Login */}
           <div className="step-card-apple">
             <div className="step-header">
               <div className="step-num-pill">3</div>
@@ -191,6 +191,84 @@ export default function WindowsGuidePage() {
             <p>
               أدخل اسم المستخدم (Username) وكلمة المرور المسلمة لك من إدارة الفرع أو قسم تكنولوجيا المعلومات، وضع علامة على <strong>Remember Me</strong> لحفظ الجلسة تلقائياً.
             </p>
+          </div>
+
+          {/* Step 4: Native Document Scanner */}
+          <div className="step-card-apple">
+            <div className="step-header">
+              <div className="step-num-pill" style={{ background: 'var(--apple-blue)' }}>4</div>
+              <h4>استخدام الماسح الضوئي المباشر (Native Scanner) للفواتير والأوراق</h4>
+            </div>
+            <p>
+              يوفر البرنامج ميزة فريدة تتيح سحب الفواتير والمستندات الورقية من أي جهاز سكانر متصل بجهاز الكمبيوتر مباشرة بدون الحاجة لفتح برامج خارجية:
+            </p>
+            <ol style={{ marginRight: '20px', lineHeight: 1.8, color: 'var(--label-secondary)', marginBottom: '14px' }}>
+              <li>تأكد من توصيل جهاز الماسح الضوئي (Scanner) بجهاز الكمبيوتر عبر كابل USB أو الشبكة وتشغيله.</li>
+              <li>من داخل أي محادثة أو من قسم المستندات، اضغط على أيقونة <strong>الماسح الضوئي (Scanner 🖨️)</strong>.</li>
+              <li>سيتعرف البرنامج تلقائياً على الماسح الضوئي الخاص بك؛ حدد وضع السحب (ملون أو رمادي) ودقة المسح (DPI) ثم اضغط <strong>بدء المسح (Scan Document)</strong>.</li>
+              <li>تظهر معاينة فورية للصفحة؛ يمكنك تدويرها أو إضافة صفحات أخرى لتكوين مستند متعدد الصفحات.</li>
+              <li>اضغط <strong>"إرسال كـ PDF"</strong>؛ سيتم تحويل الصفحات لمستند PDF أصلي وإرساله فوراً للمستلم أو الحسابات مع توثيق لحظة الإرسال.</li>
+            </ol>
+            <div className="callout-box">
+              💡 <strong>فائدة هامة للفرع:</strong> لن تحتاج بعد اليوم لحفظ الأوراق على سطح المكتب ثم إعادة رفعها، أو إرسال فواتير مصورة بالموبايل مشوهة أو غير واضحة.
+            </div>
+          </div>
+
+          {/* Step 5: Ticketing & Issues System */}
+          <div className="step-card-apple">
+            <div className="step-header">
+              <div className="step-num-pill" style={{ background: 'var(--apple-orange)' }}>5</div>
+              <h4>فتح ومتابعة تذاكر الدعم والأعطال (Ticketing System)</h4>
+            </div>
+            <p>
+              لضمان عدم ضياع أي عطل أو طلب في فرعك، تم تضمين نظام تذاكر رسمي متكامل:
+            </p>
+            <ol style={{ marginRight: '20px', lineHeight: 1.8, color: 'var(--label-secondary)', marginBottom: '14px' }}>
+              <li>من القائمة الجانبية في البرنامج، اضغط على قسم <strong>"التذاكر" (Tickets 🎫)</strong>.</li>
+              <li>اضغط على زر <strong>"إنشاء تذكرة جديدة" (New Ticket)</strong>.</li>
+              <li>اختر القسم المسؤول عن الطلب (دعم تكنولوجيا المعلومات IT، إدارة الصيانة والتشغيل، الحسابات والماليات، أو المشتريات).</li>
+              <li>اكتب عنواناً واضحاً وموجزاً، واشرح التفاصيل بدقة، مع تحديد الأولوية (عادي، متوسط، عاجل جداً).</li>
+              <li>يمكنك إرفاق صور المشكلة أو الفواتير المسحوبة بالسكانر بضغطة زر واحدة.</li>
+              <li>بمجرد الإرسال، تحصل التذكرة على رقم مرجعي رسمي (مثل <code>#TK-2041</code>)، وسيتم إشعارك فور قيام الإدارة بالرد أو تغيير الحالة إلى "قيد المعالجة" أو "مكتملة".</li>
+            </ol>
+            <div className="callout-box">
+              🎯 <strong>توثيق رسمي:</strong> كل تذكرة تعتبر مستنداً رسمياً يثبت وقت الإبلاغ ووقت الاستجابة وتفاصيل الحل من قبل الإدارة.
+            </div>
+          </div>
+
+          {/* Step 6: File & Folder Management */}
+          <div className="step-card-apple">
+            <div className="step-header">
+              <div className="step-num-pill" style={{ background: 'var(--apple-indigo)' }}>6</div>
+              <h4>إدارة وتنظيم المستندات في مجلدات (Files & Folders)</h4>
+            </div>
+            <p>
+              يمتلك البرنامج مستودع ملفات رقمياً ذكياً يساعدك على أرشفة كافة المعاملات الورقية والإلكترونية:
+            </p>
+            <ol style={{ marginRight: '20px', lineHeight: 1.8, color: 'var(--label-secondary)', marginBottom: '14px' }}>
+              <li>افتح قسم <strong>"الملفات" (Files 📁)</strong> من القائمة الجانبية.</li>
+              <li>اضغط على <strong>"إنشاء مجلد جديد"</strong> وقسم ملفاتك (مثل: مجلد "فواتير شهر أكتوبر"، مجلد "كشوف المرتبات"، مجلد "أذونات الاستلام").</li>
+              <li>يدعم النظام <strong>السحب والإفلات (Drag & Drop)</strong>؛ اسحب أي ملف من الكمبيوتر وضعه في المجلد المطلوب مباشرة.</li>
+              <li>استخدم خيار التبديل بين <strong>عرض الشبكة (Grid View)</strong> أو <strong>عرض القائمة (List View)</strong> حسب رغبتك.</li>
+              <li>للبحث عن أي فاتورة قديمة، اكتب اسم الفاتورة في شريط البحث الذكي لتظهر أمامك في لحظتها.</li>
+              <li>اضغط كليك يمين على أي ملف لاختيار <strong>"طباعة مباشرة"</strong> لإرساله إلى طابعة الفرع بضغطة واحدة.</li>
+            </ol>
+          </div>
+
+          {/* Step 7: Screen Capture Tool */}
+          <div className="step-card-apple">
+            <div className="step-header">
+              <div className="step-num-pill" style={{ background: 'var(--apple-red)' }}>7</div>
+              <h4>أداة لقطات الشاشة السريعة (Instant Screen Capture)</h4>
+            </div>
+            <p>
+              عند مواجهة أي رسالة خطأ في النظام المحاسبي أو طلب استفسار سريع:
+            </p>
+            <ul style={{ marginRight: '20px', lineHeight: 1.8, color: 'var(--label-secondary);' }}>
+              <li>اضغط على أيقونة <strong>الكاميرا / لقطة الشاشة (📸)</strong> في شريط كتابة الرسائل.</li>
+              <li>سيتم تجميد الشاشة مؤقتاً؛ حدد بالماوس المستطيل أو الجزء المطلوب تصويره من الشاشة.</li>
+              <li>يمكنك استخدام أدوات التظليل أو الأسهم لتحديد موضع الخطأ، ثم الضغط على علامة الصح الخضراء لتنزل لقطة الشاشة فوراً داخل المحادثة.</li>
+            </ul>
           </div>
 
           {/* Shortcuts & Best Practices */}
@@ -218,11 +296,15 @@ export default function WindowsGuidePage() {
                   </tr>
                   <tr>
                     <td><code>Ctrl + F</code></td>
-                    <td>البحث السريع في الرسائل أو جهات الاتصال</td>
+                    <td>البحث السريع في الرسائل أو جهات الاتصال أو الملفات</td>
                   </tr>
                   <tr>
                     <td><code>Ctrl + V</code></td>
                     <td>لصق صورة من الحافظة مباشرة في صندوق المحادثة لإرسالها</td>
+                  </tr>
+                  <tr>
+                    <td><code>Esc</code></td>
+                    <td>إلغاء لقطة الشاشة أو إغلاق نوافذ المعاينة المنبثقة</td>
                   </tr>
                 </tbody>
               </table>
