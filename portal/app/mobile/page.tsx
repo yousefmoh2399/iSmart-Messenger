@@ -3,6 +3,7 @@
 import React, { useRef } from 'react';
 import TopStrip from '../../components/TopStrip';
 import { useToast } from '../../components/Toast';
+import GooglePlayIcon from '../../components/GooglePlayIcon';
 import { Download } from 'lucide-react';
 
 export default function MobileGuidePage() {
@@ -80,13 +81,34 @@ export default function MobileGuidePage() {
           <div className="step-card-apple">
             <div className="step-header">
               <div className="step-num-pill" style={{ background: 'var(--apple-green)' }}>1</div>
-              <h4>تنزيل وتثبيت ملف الـ APK</h4>
+              <h4>اختيار طريقة التثبيت (Google Play أو ملف APK)</h4>
             </div>
             <p>
-              قم بالنقر على زر التحميل لتحميل ملف <code>iSmart-Messenger.apk</code> على هاتفك.
+              يمكنك تثبيت التطبيق مباشرة وبأسهل طريقة عبر <strong>متجر Google Play</strong> الرسمي، أو تحميل ملف <code>iSmart-Messenger.apk</code> المباشر وتثبيته يدوياً:
             </p>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '16px 0' }}>
+              <a
+                href="https://play.google.com/store/apps/details?id=com.ismart.messenger"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-apple-download playstore-download"
+                style={{ width: 'auto', padding: '11px 22px', fontSize: '0.9rem' }}
+              >
+                <GooglePlayIcon size={19} />
+                <span>تثبيت من Google Play</span>
+              </a>
+              <a
+                href="/downloads/iSmart-Messenger.apk"
+                className="btn-apple-download mobile-download"
+                style={{ width: 'auto', padding: '11px 22px', fontSize: '0.9rem' }}
+                download
+              >
+                <Download size={18} />
+                <span>تنزيل ملف APK المباشر</span>
+              </a>
+            </div>
             <div className="callout-box">
-              📲 <strong>تنبيه المتصفح في الأندرويد:</strong> قد تظهر رسالة تفيد بأن <em>&quot;الملف قد يكون ضاراً&quot; (File might be harmful)</em>. اضغط على <strong>&quot;تنزيل على أي حال&quot; (Download anyway)</strong> لأن الملف آمن ومعتمد داخلياً من الشركة.
+              📲 <strong>في حال التثبيت عبر ملف APK يدوياً:</strong> قد تظهر رسالة تفيد بأن <em>&quot;الملف قد يكون ضاراً&quot; (File might be harmful)</em>. اضغط على <strong>&quot;تنزيل على أي حال&quot; (Download anyway)</strong> لأن الملف آمن ومعتمد داخلياً من الشركة.
             </div>
           </div>
 
@@ -147,15 +169,25 @@ export default function MobileGuidePage() {
           </div>
 
           {/* Download Bottom Box */}
-          <div style={{ textAlign: 'center', marginTop: '34px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '14px', flexWrap: 'wrap', marginTop: '34px' }}>
+            <a
+              href="https://play.google.com/store/apps/details?id=com.ismart.messenger"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-apple-download playstore-download"
+              style={{ width: 'auto', padding: '13px 28px', fontSize: '0.96rem' }}
+            >
+              <GooglePlayIcon size={19} />
+              <span>تثبيت من Google Play</span>
+            </a>
             <a
               href="/downloads/iSmart-Messenger.apk"
-              className="nav-cta-btn"
-              style={{ padding: '13px 32px', fontSize: '0.96rem', background: 'var(--apple-green)' }}
+              className="btn-apple-download mobile-download"
+              style={{ width: 'auto', padding: '13px 28px', fontSize: '0.96rem' }}
               download
             >
               <Download size={18} />
-              <span>تحميل تطبيق الموبايل الآن (1.0.2 APK)</span>
+              <span>تحميل مباشر (1.0.2 APK)</span>
             </a>
           </div>
         </div>

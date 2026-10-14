@@ -519,6 +519,43 @@ img, video {
   box-shadow: 0 6px 16px rgba(52, 199, 89, 0.3);
 }
 
+.download-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.btn-apple-download.playstore-download {
+  background: #1c1c1e;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="light"] .btn-apple-download.playstore-download {
+  background: #1c1c1e;
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] .btn-apple-download.playstore-download {
+  background: #2c2c2e;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.btn-apple-download.playstore-download:hover {
+  background: #000000;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .btn-apple-download.playstore-download:hover {
+  background: #3a3a3c;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
 .sub-link {
   display: block;
   text-align: center;

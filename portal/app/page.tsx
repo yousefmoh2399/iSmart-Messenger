@@ -3,6 +3,7 @@ import Link from 'next/link';
 import TopStrip from '../components/TopStrip';
 import ServerIpBar from '../components/ServerIpBar';
 import VideoPlayer from '../components/VideoPlayer';
+import GooglePlayIcon from '../components/GooglePlayIcon';
 import { Download } from 'lucide-react';
 
 export default function HomePage() {
@@ -85,7 +86,7 @@ export default function HomePage() {
               <div className="spec-row">
                 <span className="spec-pill">الإصدار: <strong>1.0.2</strong></span>
                 <span className="spec-pill">الحجم: <strong>56.9 MB</strong></span>
-                <span className="spec-pill">النوع: <strong>Android APK</strong></span>
+                <span className="spec-pill">النوع: <strong>Google Play & APK</strong></span>
               </div>
 
               <ul className="feature-check-list">
@@ -95,14 +96,26 @@ export default function HomePage() {
                 <li>مزامنة سريعة ولحظية مع حساب الكمبيوتر المكتبي</li>
               </ul>
 
-              <a
-                href="/downloads/iSmart-Messenger.apk"
-                className="btn-apple-download mobile-download"
-                download
-              >
-                <Download size={18} />
-                <span>تحميل تطبيق الموبايل (APK)</span>
-              </a>
+              <div className="download-btn-group">
+                <a
+                  href="https://play.google.com/store/apps/details?id=com.ismart.messenger"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-apple-download playstore-download"
+                >
+                  <GooglePlayIcon size={19} />
+                  <span>تثبيت من Google Play</span>
+                </a>
+
+                <a
+                  href="/downloads/iSmart-Messenger.apk"
+                  className="btn-apple-download mobile-download"
+                  download
+                >
+                  <Download size={18} />
+                  <span>تحميل مباشر (ملف APK)</span>
+                </a>
+              </div>
 
               <Link href="/mobile" className="sub-link" style={{ color: 'var(--apple-green)' }}>
                 عرض الدليل التوضيحي المفصل لتطبيق الموبايل ←
