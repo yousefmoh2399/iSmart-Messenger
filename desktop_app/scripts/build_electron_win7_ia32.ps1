@@ -37,6 +37,11 @@ if (-not (Test-Path -LiteralPath $iconSource)) {
 }
 Copy-Item -LiteralPath $iconSource -Destination (Join-Path $electronBuildRoot "icon.ico") -Force
 
+$emojiFontSource = Join-Path $desktopRoot "assets\fonts\seguiemj.ttf"
+if (Test-Path -LiteralPath $emojiFontSource) {
+  Copy-Item -LiteralPath $emojiFontSource -Destination (Join-Path $electronBuildRoot "seguiemj.ttf") -Force
+}
+
 function New-InstallerBrandingBitmap {
   param(
     [Parameter(Mandatory = $true)]

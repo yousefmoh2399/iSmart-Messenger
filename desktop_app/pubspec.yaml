@@ -84,3 +84,7 @@ flutter:
           weight: 400
         - asset: assets/fonts/NotoSansArabic-Bold.ttf
           weight: 700
+    - family: Segoe UI Emoji
+      fonts:
+        - asset: assets/fonts/seguiemj.ttf
+

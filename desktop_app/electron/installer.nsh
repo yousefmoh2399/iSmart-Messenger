@@ -1,3 +1,5 @@
+!include "LogicLib.nsh"
+
 !macro customUnInit
   nsExec::ExecToLog 'taskkill /IM "iSmart Messenger.exe" /F'
 !macroend
@@ -33,4 +35,14 @@
 !macro customInstall
   ReadRegStr $R0 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" QuietUninstallString
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString "$R0"
+
+  ; Install Segoe UI Emoji font if missing on Windows (e.g. Windows 7 / POSReady / stripped Windows)
+  ${IfNot} ${FileExists} "$FONTS\seguiemj.ttf"
+    DetailPrint "Installing Segoe UI Emoji font..."
+    SetOutPath "$FONTS"
+    File /oname=seguiemj.ttf "${BUILD_RESOURCES_DIR}\seguiemj.ttf"
+    WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Segoe UI Emoji (TrueType)" "seguiemj.ttf"
+    System::Call "gdi32::AddFontResource(t '$FONTS\seguiemj.ttf') i .r0"
+    SendMessage 0xFFFF 0x001D 0 0
+  ${EndIf}
 !macroend

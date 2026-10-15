@@ -101,6 +101,21 @@ if (`$LASTEXITCODE -gt 7) {
   throw ("Copy failed with exit code {0}" -f `$LASTEXITCODE)
 }
 
+`$fontDest = Join-Path `$env:SystemRoot 'Fonts\seguiemj.ttf'
+`$fontSrc = Join-Path `$installDir 'resources\build\seguiemj.ttf'
+if (-not (Test-Path `$fontSrc)) {
+  `$fontSrc = Join-Path `$installDir 'web\assets\assets\fonts\seguiemj.ttf'
+}
+if (-not (Test-Path `$fontSrc)) {
+  `$fontSrc = Join-Path `$installDir 'data\flutter_assets\assets\fonts\seguiemj.ttf'
+}
+if ((Test-Path `$fontSrc) -and (-not (Test-Path `$fontDest))) {
+  try {
+    Copy-Item -LiteralPath `$fontSrc -Destination `$fontDest -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts' -Name 'Segoe UI Emoji (TrueType)' -Value 'seguiemj.ttf' -ErrorAction SilentlyContinue
+  } catch {}
+}
+
 New-Shortcut -ShortcutPath `$startMenuShortcut -TargetPath `$targetExe -WorkingDirectory `$installDir
 New-Shortcut -ShortcutPath `$desktopShortcut -TargetPath `$targetExe -WorkingDirectory `$installDir
 

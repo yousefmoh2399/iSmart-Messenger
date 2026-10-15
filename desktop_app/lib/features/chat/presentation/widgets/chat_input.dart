@@ -321,21 +321,51 @@ class _ChatInputState extends State<ChatInput> {
                   tooltip: 'إيموجي',
                   onPressed: widget.enabled && !widget.isUploading
                       ? () {
-                          // Note: implement opening the emoji picker overlay/dialog here
                           showDialog(
                             context: context,
-                            builder: (context) => AlertDialog(
-                              contentPadding: EdgeInsets.zero,
-                              content: SizedBox(
-                                width: 350,
-                                height: 400,
-                                child: EmojiPickerPanel(
-                                  onEmojiSelected: (emoji) {
-                                    widget.controller.value = ChatInput.insertTextAtSelection(
-                                      widget.controller.value,
-                                      emoji.emoji,
-                                    );
-                                  },
+                            builder: (dialogContext) => Dialog(
+                              clipBehavior: Clip.antiAlias,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: SizedBox(
+                                width: 380,
+                                height: 440,
+                                child: Column(
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(14, 10, 4, 4),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              'اختر إيموجي',
+                                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'إغلاق',
+                                            onPressed: () => Navigator.of(dialogContext).pop(),
+                                            icon: const Icon(Icons.close_rounded),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Divider(height: 1),
+                                    Expanded(
+                                      child: EmojiPickerPanel(
+                                        onEmojiSelected: (emoji) {
+                                          widget.controller.value = ChatInput.insertTextAtSelection(
+                                            widget.controller.value,
+                                            emoji.emoji,
+                                          );
+                                          widget.onChanged(widget.controller.text);
+                                        },
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),

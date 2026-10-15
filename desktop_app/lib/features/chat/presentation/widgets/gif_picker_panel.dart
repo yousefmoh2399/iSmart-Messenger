@@ -259,13 +259,19 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
     var items = _stickers.where(
       (s) => query.isEmpty || s.name.toLowerCase().contains(query),
     );
-    if (_filter == 'المفضلة') items = items.where((s) => s.favorite);
-    if (_filter == 'حديثة') items = items.where((s) => s.lastUsedAt != null);
-    if (!const ['الكل', 'المفضلة', 'حديثة'].contains(_filter))
+    if (_filter == 'المفضلة') {
+      items = items.where((s) => s.favorite);
+    }
+    if (_filter == 'حديثة') {
+      items = items.where((s) => s.lastUsedAt != null);
+    }
+    if (!const ['الكل', 'المفضلة', 'حديثة'].contains(_filter)) {
       items = items.where((s) => s.category == _filter);
+    }
     final result = items.toList();
-    if (_filter == 'حديثة')
+    if (_filter == 'حديثة') {
       result.sort((a, b) => (b.lastUsedAt ?? 0).compareTo(a.lastUsedAt ?? 0));
+    }
     return result;
   }
 
@@ -367,10 +373,11 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
       });
       await _persist();
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('تعذر استيراد ملف باقة الملصقات.')),
         );
+      }
     }
   }
 
@@ -546,6 +553,7 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
                         final sticker = _visible[index];
                         return InkWell(
                           onTap: () async {
+                            final navigator = Navigator.of(context);
                             await _update(
                               sticker,
                               LocalSticker(
@@ -558,7 +566,9 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
                                     DateTime.now().millisecondsSinceEpoch,
                               ),
                             );
-                            if (mounted) Navigator.of(context).pop(sticker);
+                            if (mounted) {
+                              navigator.pop(sticker);
+                            }
                           },
                           onLongPress: () => _toggleFavorite(sticker),
                           borderRadius: BorderRadius.circular(12),

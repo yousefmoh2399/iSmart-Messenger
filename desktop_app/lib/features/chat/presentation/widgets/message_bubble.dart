@@ -16,8 +16,10 @@ import 'chat_poll_bubble.dart';
 import 'chat_text_parser.dart';
 
 const List<String> _kReactionEmojiFontFallbacks = <String>[
-  'Apple Color Emoji',
   'Segoe UI Emoji',
+  'Apple Color Emoji',
+  'Noto Color Emoji',
+  'Segoe UI Symbol',
 ];
 
 final RegExp _singleEmojiRegex = RegExp(
@@ -1209,6 +1211,7 @@ class _AnimatedReactionChipState extends State<_AnimatedReactionChip>
     final emojiStyle = TextStyle(
       fontSize: 17,
       height: 1.05,
+      fontFamily: 'Segoe UI Emoji',
       fontFamilyFallback: _kReactionEmojiFontFallbacks,
     );
 
