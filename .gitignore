@@ -5,6 +5,8 @@ backend/node_modules/
 # Firebase Admin SDK credentials
 backend/*firebase-adminsdk*.json
 *.json
+!**/package.json
+!**/tsconfig.json
 deployment/
 
 # Flutter / Dart
@@ -35,3 +37,13 @@ backend/releases/**
 backend/backups/**
 backend/dist/
 backend/*firebase-adminsdk*.json
+
+# Binaries and video distributions (>100MB)
+apk-&-exe-&-videos/
+portal/downloads
+portal/downloads/
+portal/public/downloads
+portal/public/downloads/
+portal/node_modules/
+portal/.next/
+iSmart-Server-Package/

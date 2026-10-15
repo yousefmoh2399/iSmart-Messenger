@@ -60,7 +60,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   @override
   Future<ChatOverviewData> build() async {
-    ref.watch(serverRecoveryRevisionProvider);
     final hasSession = await _waitForAuthenticatedSession();
     if (!hasSession) {
       return const ChatOverviewData(
@@ -1201,7 +1200,7 @@ class ConversationMessagesController
 
   @override
   Future<ConversationMessagesState> build(String arg) async {
-    ref.watch(serverRecoveryRevisionProvider);
+    ref.keepAlive();
     final hasSession = await _waitForAuthenticatedSession();
     if (!hasSession) {
       return const ConversationMessagesState(
@@ -1229,7 +1228,9 @@ class ConversationMessagesController
     final cached = await _repository().getCachedMessages(arg);
     if (cached != null) {
       Future.microtask(() => refresh());
-      return ConversationMessagesState.initial(_dedupePage(cached));
+      return ConversationMessagesState.initial(
+        _dedupePage(_markPendingAsFailed(cached)),
+      );
     }
 
     final page = await _guardAuth(() => _repository().fetchMessages(arg));
@@ -1389,19 +1390,28 @@ class ConversationMessagesController
   }
 
   List<ChatMessage> _sortAndDedupeMessages(Iterable<ChatMessage> source) {
-    final byId = <String, ChatMessage>{};
-    for (final message in source) {
-      byId[message.id] = message;
-    }
-    final items = byId.values.toList();
-    items.sort((a, b) {
-      final byCreatedAt = a.createdAt.compareTo(b.createdAt);
-      if (byCreatedAt != 0) {
-        return byCreatedAt;
+    return sortAndDedupeChatMessages(source);
+  }
+
+  /// Converts cached messages whose status is `pending` to `failed`.
+  /// A pending message in cache means the app was killed before the server
+  /// acknowledged it — it will never auto-confirm, so treat it as failed.
+  ChatMessagesPage _markPendingAsFailed(ChatMessagesPage page) {
+    final fixed = page.messages.map((m) {
+      final msgStatus = m.metadata?['status']?.toString();
+      if (msgStatus == 'pending') {
+        final updated = Map<String, dynamic>.from(m.metadata ?? {});
+        updated['status'] = 'failed';
+        return m.copyWith(metadata: updated);
       }
-      return a.id.compareTo(b.id);
-    });
-    return items;
+      return m;
+    }).toList();
+    return ChatMessagesPage(
+      messages: fixed,
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      limit: page.limit,
+    );
   }
 
   ChatMessagesPage _dedupePage(ChatMessagesPage page) {
@@ -1497,7 +1507,23 @@ class ConversationMessagesController
         return;
       }
 
-      _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      final current = state.valueOrNull;
+      if (current != null && current.messages.isNotEmpty) {
+        final pageMap = {for (final m in page.messages) m.id: m};
+        final olderMessages = current.messages
+            .where((m) => !pageMap.containsKey(m.id))
+            .toList();
+        final mergedMessages = <ChatMessage>[...olderMessages, ...page.messages];
+        _setStateAndCache(
+          current.copyWith(
+            messages: _sortAndDedupeMessages(mergedMessages),
+            hasMore: current.hasMore || page.hasMore,
+            nextCursor: current.nextCursor ?? page.nextCursor,
+          ),
+        );
+      } else {
+        _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      }
     } catch (error, stackTrace) {
       if (_disposed) {
         return;
@@ -1592,23 +1618,27 @@ class ConversationMessagesController
     final stableClientMessageId =
         clientMessageId ??
         '${DateTime.now().microsecondsSinceEpoch}_${arg.hashCode}';
-    final result = await _guardAuth(
-      () => _repository().sendTextMessage(
-        conversationId: arg,
-        content: content,
-        clientMessageId: stableClientMessageId,
-        replyToMessageId: replyToMessageId,
-        metadata: metadata,
-        messageType: messageType,
-        fileUrl: fileUrl,
-        isSilent: isSilent,
-        isScheduled: scheduledFor != null,
-        scheduledFor: scheduledFor,
-      ),
-    );
+
+    final effectiveMetadata = <String, dynamic>{
+      ...?metadata,
+      'clientMessageId': stableClientMessageId,
+    };
 
     if (scheduledFor != null) {
-      // Do not add scheduled messages to the main chat list
+      await _guardAuth(
+        () => _repository().sendTextMessage(
+          conversationId: arg,
+          content: content,
+          clientMessageId: stableClientMessageId,
+          replyToMessageId: replyToMessageId,
+          metadata: effectiveMetadata,
+          messageType: messageType,
+          fileUrl: fileUrl,
+          isSilent: isSilent,
+          isScheduled: true,
+          scheduledFor: scheduledFor,
+        ),
+      );
       return;
     }
 
@@ -1620,11 +1650,106 @@ class ConversationMessagesController
           hasMore: false,
           isLoadingMore: false,
         );
+
+    final currentUserId =
+        ref.read(authControllerProvider).valueOrNull?.id ?? '';
+    final currentUser = ref.read(currentUserProvider);
+    final tempCreatedAt = DateTime.now();
+
+    final tempMessage = ChatMessage(
+      id: 'temp_$stableClientMessageId',
+      conversationId: arg,
+      senderId: currentUserId,
+      sender: currentUser != null
+          ? ChatDirectoryUser(
+              id: currentUser.id,
+              username: currentUser.username,
+              fullName: currentUser.fullName,
+              role: currentUser.role,
+              departmentId: currentUser.departmentId,
+              branchId: currentUser.branchId,
+              branchCode: currentUser.branchCode,
+              isOnline: currentUser.isOnline,
+              presenceStatus: currentUser.presenceStatus,
+              isActive: currentUser.isActive,
+              avatarUrl: currentUser.avatarUrl,
+              lastSeen: currentUser.lastSeen,
+              lastActiveAt: currentUser.lastActiveAt,
+            )
+          : null,
+      content: content,
+      messageType: messageType ?? 'text',
+      fileUrl: fileUrl,
+      fileName: null,
+      fileSize: null,
+      mimeType: null,
+      replyToMessageId: replyToMessageId,
+      isDeleted: false,
+      metadata: {
+        ...effectiveMetadata,
+        'status': 'pending',
+      },
+      createdAt: tempCreatedAt,
+      updatedAt: tempCreatedAt,
+      seenBy: const [],
+      deliveredTo: const [],
+    );
+
+    // Optimistic insert: appears immediately at index 0 in descending order
     _setStateAndCache(
       current.copyWith(
-        messages: _upsertMessage(current.messages, result.message),
+        messages: _upsertMessage(current.messages, tempMessage),
       ),
     );
+
+    try {
+      final result = await _guardAuth(
+        () => _repository().sendTextMessage(
+          conversationId: arg,
+          content: content,
+          clientMessageId: stableClientMessageId,
+          replyToMessageId: replyToMessageId,
+          metadata: effectiveMetadata,
+          messageType: messageType,
+          fileUrl: fileUrl,
+          isSilent: isSilent,
+          isScheduled: false,
+          scheduledFor: null,
+        ),
+      );
+
+      final confirmedMetadata = Map<String, dynamic>.from(
+        result.message.metadata ?? const {},
+      );
+      confirmedMetadata['clientMessageId'] = stableClientMessageId;
+      confirmedMetadata.remove('status');
+
+      final confirmedMessage = result.message.copyWith(
+        metadata: confirmedMetadata,
+      );
+
+      final latest = state.valueOrNull ?? current;
+      _setStateAndCache(
+        latest.copyWith(
+          messages: _upsertMessage(latest.messages, confirmedMessage),
+        ),
+      );
+    } catch (error) {
+      final failedMessage = tempMessage.copyWith(
+        metadata: {
+          ...effectiveMetadata,
+          'status': 'failed',
+          'error': error.toString(),
+        },
+      );
+      final latest = state.valueOrNull ?? current;
+      _setStateAndCache(
+        latest.copyWith(
+          messages: _upsertMessage(latest.messages, failedMessage),
+        ),
+      );
+      rethrow;
+    }
   }
 
   Future<void> sendFile(
@@ -1681,14 +1806,40 @@ class ConversationMessagesController
   }
 
   Future<void> deleteMessage(String messageId) async {
+    final current = state.valueOrNull;
+    if (current == null) {
+      return;
+    }
+    final targetIndex = current.messages.indexWhere((m) => m.id == messageId);
+    final target = targetIndex != -1 ? current.messages[targetIndex] : null;
+    final isFailedOrTemp = messageId.startsWith('temp_') ||
+        target?.metadata?['status'] == 'failed';
+
+    if (isFailedOrTemp) {
+      _setStateAndCache(
+        current.copyWith(
+          messages: current.messages.where((m) => m.id != messageId).toList(),
+        ),
+      );
+      return;
+    }
     await _guardAuth(() => _repository().removeMessage(messageId));
+    final latest = state.valueOrNull ?? current;
+    _setStateAndCache(
+      latest.copyWith(
+        messages: _markMessageDeleted(latest.messages, messageId),
+      ),
+    );
+  }
+
+  Future<void> deleteFailedMessage(String messageId) async {
     final current = state.valueOrNull;
     if (current == null) {
       return;
     }
     _setStateAndCache(
       current.copyWith(
-        messages: _markMessageDeleted(current.messages, messageId),
+        messages: current.messages.where((m) => m.id != messageId).toList(),
       ),
     );
   }
@@ -1848,4 +1999,38 @@ class ConversationMessagesController
     state = AsyncData(data);
     _saveStateToCache(data);
   }
+}
+
+List<ChatMessage> sortAndDedupeChatMessages(Iterable<ChatMessage> source) {
+  final byKey = <String, ChatMessage>{};
+  for (final message in source) {
+    final clientMsgId = message.metadata?['clientMessageId']?.toString();
+    final key = (clientMsgId != null && clientMsgId.isNotEmpty)
+        ? 'client_$clientMsgId'
+        : 'id_${message.id}';
+
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = message;
+    } else {
+      final existingIsTemp = existing.id.startsWith('temp_');
+      final messageIsTemp = message.id.startsWith('temp_');
+      if (existingIsTemp && !messageIsTemp) {
+        byKey[key] = message;
+      } else if (!existingIsTemp && messageIsTemp) {
+        // Keep confirmed server message
+      } else {
+        byKey[key] = message;
+      }
+    }
+  }
+  final items = byKey.values.toList();
+  items.sort((a, b) {
+    final byCreatedAt = b.createdAt.compareTo(a.createdAt);
+    if (byCreatedAt != 0) {
+      return byCreatedAt;
+    }
+    return b.id.compareTo(a.id);
+  });
+  return items;
 }

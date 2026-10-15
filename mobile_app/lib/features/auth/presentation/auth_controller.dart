@@ -156,6 +156,11 @@ class AuthController extends Notifier<AuthState> {
       await ref.read(pushNotificationServiceProvider).unregisterCurrentDevice();
       await ref.read(authRepositoryProvider).logout();
 
+      // Wipe cached chat data so the next user doesn't see stale messages
+      try {
+        await ref.read(chatLocalCacheProvider).clearAll();
+      } catch (_) {}
+
       state = const AuthState(status: AuthStatus.unauthenticated);
       debugPrint('[AuthController] Logged out successfully');
     } catch (e) {

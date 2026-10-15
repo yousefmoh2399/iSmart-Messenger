@@ -410,8 +410,6 @@ class RightPanel extends ConsumerWidget {
         .where(
           (m) => m.hasAttachment && !m.isDeleted && m.messageType == 'image',
         )
-        .toList()
-        .reversed
         .take(12)
         .toList();
 
@@ -419,8 +417,6 @@ class RightPanel extends ConsumerWidget {
         .where(
           (m) => m.hasAttachment && !m.isDeleted && m.messageType != 'image',
         )
-        .toList()
-        .reversed
         .toList();
     final sharedFiles = allSharedFiles.take(5).toList();
 

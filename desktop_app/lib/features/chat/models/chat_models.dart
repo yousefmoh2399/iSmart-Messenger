@@ -848,9 +848,21 @@ class ChatMessage {
       mimeType: json['mimeType'] as String?,
       replyToMessageId: json['replyToMessageId'] as String?,
       isDeleted: json['isDeleted'] == true,
-      metadata: json['metadata'] is Map<String, dynamic>
-          ? Map<String, dynamic>.from(json['metadata'] as Map<String, dynamic>)
-          : null,
+      metadata: () {
+        final raw = json['metadata'];
+        final meta = raw is Map<String, dynamic>
+            ? Map<String, dynamic>.from(raw)
+            : (raw is Map
+                ? Map<String, dynamic>.from(raw)
+                : <String, dynamic>{});
+        final topLevelClientMsgId = json['clientMessageId']?.toString();
+        if (topLevelClientMsgId != null &&
+            topLevelClientMsgId.isNotEmpty &&
+            !meta.containsKey('clientMessageId')) {
+          meta['clientMessageId'] = topLevelClientMsgId;
+        }
+        return meta.isEmpty ? null : meta;
+      }(),
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),

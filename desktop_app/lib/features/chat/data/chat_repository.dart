@@ -696,10 +696,18 @@ class ChatRepository {
     }
     final load = _fetchAttachmentPreviewBytes(message);
     _attachmentPreviewLoads[cacheKey] = load;
-    load.whenComplete(() {
+    
+    // Prevent infinite growth: max 100 items
+    if (_attachmentPreviewLoads.length > 100) {
+      final firstKey = _attachmentPreviewLoads.keys.first;
+      _attachmentPreviewLoads.remove(firstKey);
+    }
+    
+    load.catchError((e, st) {
       if (identical(_attachmentPreviewLoads[cacheKey], load)) {
         _attachmentPreviewLoads.remove(cacheKey);
       }
+      Error.throwWithStackTrace(e, st);
     });
     return load;
   }

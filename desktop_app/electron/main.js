@@ -46,7 +46,7 @@ let lanReceiveReminderTimer = null;
 let currentWindowTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
 const pendingLanTransfers = new Map();
 const pendingLanReceiveRequests = new Map();
-const MAX_ELECTRON_FETCH_BYTES = 80 * 1024 * 1024;
+const MAX_ELECTRON_FETCH_BYTES = 512 * 1024 * 1024;
 const LAN_DISCOVERY_TIMEOUT_MS = 750;
 const LAN_DISCOVERY_BATCH_SIZE = 96;
 const DEFAULT_TRANSFER_POLICY = {
@@ -85,7 +85,7 @@ function applyWindowTheme(mode = currentWindowTheme) {
   // visually each time the mouse passes over minimize/maximize/close.
   if (themeChanged && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
-      color: "rgba(0,0,0,0)",
+      color: palette.color,
       symbolColor: palette.symbolColor,
       height: 34,
     });
@@ -458,6 +458,9 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
 
 // Windows 7 (NT 6.1) struggles with modern Chromium hardware acceleration,
 // and forcing WebGL causes severe lag, stuttering, and high response times.
@@ -845,7 +848,7 @@ function createWindow(startUrl) {
     backgroundColor: titleBarPalette().color,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      ...titleBarPalette(), color: "rgba(0,0,0,0)",
+      ...titleBarPalette(),
       height: 34,
     },
     webPreferences: {

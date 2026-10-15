@@ -13,6 +13,7 @@ import '../../../core/settings/user_preferences.dart';
 import '../../../features/auth/data/auth_repository.dart';
 import '../../../shared/services/local_media_storage_service.dart';
 import '../models/chat_models.dart';
+import 'chat_local_cache.dart';
 
 class ChatRepository {
   ChatRepository(
@@ -20,7 +21,9 @@ class ChatRepository {
     this._localStorage,
     this._preferences, {
     AuthRepository? authRepository,
-  }) : _authRepository = authRepository;
+    ChatLocalCache? cache,
+  })  : _authRepository = authRepository,
+        _cache = cache ?? ChatLocalCache();
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   static const int _maxConcurrentPreviewDownloads = 3;
@@ -35,6 +38,9 @@ class ChatRepository {
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
   final AuthRepository? _authRepository;
+  final ChatLocalCache _cache;
+
+  ChatLocalCache get cache => _cache;
 
   /// Dedicated Dio instance for file downloads — no timeouts so large files
   /// never get aborted mid-transfer. The auth token is copied per-request.
@@ -262,24 +268,57 @@ class ChatRepository {
     int limit = 40,
     bool isScheduled = false,
   }) async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations/$conversationId/messages',
-      queryParameters: {
-        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
-        'limit': limit,
-        if (isScheduled) 'isScheduled': 'true',
-      },
-    );
-    final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
-    return ChatMessagesPage(
-      messages: _extractList(
-        response.data,
-        'messages',
-      ).map(ChatMessage.fromJson).toList(),
-      nextCursor: meta['nextCursor'] as String?,
-      hasMore: meta['hasMore'] == true,
-      limit: meta['limit'] as int? ?? limit,
-    );
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations/$conversationId/messages',
+        queryParameters: {
+          if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+          'limit': limit,
+          if (isScheduled) 'isScheduled': 'true',
+        },
+      );
+      final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
+      if (cursor == null && !isScheduled && response.data != null) {
+        await _cache.saveRawJson('messages_$conversationId', response.data!);
+      }
+      return ChatMessagesPage(
+        messages: _extractList(
+          response.data,
+          'messages',
+        ).map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: meta['limit'] as int? ?? limit,
+      );
+    } catch (e) {
+      if (e is DioException && cursor == null && !isScheduled) {
+        final cached = await _cache.loadRawJson('messages_$conversationId');
+        if (cached != null) {
+          final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+          return ChatMessagesPage(
+            messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+            nextCursor: meta['nextCursor'] as String?,
+            hasMore: meta['hasMore'] == true,
+            limit: meta['limit'] as int? ?? limit,
+          );
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<ChatMessagesPage?> getCachedMessages(String conversationId) async {
+    final cached = await _cache.loadRawJson('messages_$conversationId');
+    if (cached != null) {
+      final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+      return ChatMessagesPage(
+        messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: (meta['limit'] as num?)?.toInt() ?? 40,
+      );
+    }
+    return null;
   }
 
   Future<ChatSearchResult> searchMessages({

@@ -21,7 +21,14 @@ class AuthRepository {
   final ApiClient _apiClient;
   final VoidCallback? onSessionCredentialsChanged;
   final VoidCallback? onSessionCleared;
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
   Future<Map<String, String>>? _tokenRefreshFuture;
   DateTime? _lastSuccessfulRefreshAt;
   String? _lastSuccessfulRefreshAccessToken;
@@ -52,16 +59,27 @@ class AuthRepository {
         return _cachedSession;
       }
     } catch (error) {
-      if (error is FormatException) {
-        // Corrupted json
-      } else {
-        // PlatformException, Keystore locked, etc
-        throw ApiException(
-          'Keystore temporarily unavailable: $error',
-          statusCode: 503,
-        );
-      }
+      debugPrint('[AuthRepository] SecureStorage read error: $error');
     }
+
+    // Persistent backup fallback: check SharedPreferences if KeyStore lost state
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final backupVal = prefs.getString(_sessionKey);
+      if (backupVal != null && backupVal.isNotEmpty) {
+        final parsed = StoredAuthSession.fromJson(
+          jsonDecode(backupVal) as Map<String, dynamic>,
+        );
+        if (parsed.accessToken.isNotEmpty || parsed.refreshToken.isNotEmpty) {
+          _cachedSession = parsed;
+          _isSessionLoaded = true;
+          try {
+            await _storage.write(key: _sessionKey, value: backupVal);
+          } catch (_) {}
+          return _cachedSession;
+        }
+      }
+    } catch (_) {}
 
     try {
       final legacyAccess = await _storage.read(key: _tokenKey);
@@ -90,8 +108,20 @@ class AuthRepository {
   }
 
   Future<void> _writeSession(StoredAuthSession session) async {
+    _cachedSession = (session.accessToken.isNotEmpty || session.refreshToken.isNotEmpty)
+        ? session
+        : null;
+    _isSessionLoaded = true;
     final jsonStr = jsonEncode(session.toJson());
     await _storage.write(key: _sessionKey, value: jsonStr);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (session.accessToken.isNotEmpty || session.refreshToken.isNotEmpty) {
+        await prefs.setString(_sessionKey, jsonStr);
+      } else {
+        await prefs.remove(_sessionKey);
+      }
+    } catch (_) {}
     await _clearLegacyTokens();
   }
 
@@ -118,6 +148,7 @@ class AuthRepository {
   }
 
   Future<void> _clearSession() async {
+    _cachedSession = null;
     await _writeSession(
       const StoredAuthSession(
         accessToken: '',
@@ -126,6 +157,10 @@ class AuthRepository {
         generation: 0,
       ),
     );
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_sessionKey);
+    } catch (_) {}
     await _clearCachedUser();
     _notifySessionCredentialsChanged();
     onSessionCleared?.call();
@@ -146,8 +181,8 @@ class AuthRepository {
       final mapped = _apiClient.mapError(error);
       if (mapped.isUnauthorized) {
         try {
-          await refreshToken();
-          final refreshedToken = await getToken();
+          final refreshed = await refreshToken();
+          final refreshedToken = refreshed['token'] ?? await getToken();
           if (refreshedToken != null && refreshedToken.isNotEmpty) {
             final newGen = await getGeneration();
             final user = await fetchCurrentUser(
@@ -169,6 +204,9 @@ class AuthRepository {
           return null;
         }
 
+        if (cachedUser != null) {
+          return cachedUser;
+        }
         await _clearSession();
         return null;
       }

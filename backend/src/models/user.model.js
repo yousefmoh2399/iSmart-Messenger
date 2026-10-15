@@ -106,6 +106,8 @@ const userSchema = new mongoose.Schema(
           {
             deviceUid: { type: String, required: true },
             nonce: { type: String, required: true },
+            previousNonce: { type: String, default: null },
+            previousNonceExpiresAt: { type: Date, default: null },
             createdAt: { type: Date, default: Date.now },
             lastUsedAt: { type: Date, default: Date.now },
           },

@@ -37,6 +37,11 @@ if (-not (Test-Path -LiteralPath $iconSource)) {
 }
 Copy-Item -LiteralPath $iconSource -Destination (Join-Path $electronBuildRoot "icon.ico") -Force
 
+$emojiFontSource = Join-Path $desktopRoot "assets\fonts\seguiemj.ttf"
+if (Test-Path -LiteralPath $emojiFontSource) {
+  Copy-Item -LiteralPath $emojiFontSource -Destination (Join-Path $electronBuildRoot "seguiemj.ttf") -Force
+}
+
 function New-InstallerBrandingBitmap {
   param(
     [Parameter(Mandatory = $true)]
@@ -153,6 +158,19 @@ $bootstrapPath = Join-Path $desktopRoot "build\web\flutter_bootstrap.js"
 (Get-Content -LiteralPath $bootstrapPath -Raw -Encoding UTF8) `
   -replace '(?s)_flutter\.loader\.load\(\{\s*serviceWorkerSettings:\s*\{\s*serviceWorkerVersion:\s*"[^"]*".*?\}\s*\}\);', '_flutter.loader.load();' |
   Set-Content -LiteralPath $bootstrapPath -Encoding UTF8
+
+Write-Host "Pruning unused CanvasKit variants and debug symbols to reduce package size..."
+$canvaskitDir = Join-Path $desktopRoot "build\web\canvaskit"
+if (Test-Path -LiteralPath $canvaskitDir) {
+  Get-ChildItem -LiteralPath $canvaskitDir -Recurse -File |
+    Where-Object {
+      $_.Name -like "*.symbols" -or
+      $_.Name -like "skwasm*" -or
+      $_.Name -like "wimp*" -or
+      $_.FullName -like "*experimental_webparagraph*"
+    } |
+    Remove-Item -Force
+}
 
 Set-Location -LiteralPath $electronRoot
 if (-not $SkipNpmInstall -or -not (Test-Path "node_modules")) {

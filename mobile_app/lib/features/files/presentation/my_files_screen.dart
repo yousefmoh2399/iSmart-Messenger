@@ -44,6 +44,7 @@ class _PrinterSelectionResult {
 }
 
 enum _DocumentMenuAction {
+  open,
   print,
   sendToDesktop,
   sendToChat,
@@ -61,6 +62,8 @@ enum _PendingMenuAction {
   sendToChat,
   share,
   open,
+  moveToFolder,
+  removeFromFolder,
   delete,
 }
 
@@ -1162,6 +1165,9 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
     RemoteDocument document,
   ) async {
     switch (action) {
+      case _DocumentMenuAction.open:
+        await _downloadAndOpen(document);
+        return;
       case _DocumentMenuAction.print:
         await _printDocument(document);
         return;
@@ -1212,6 +1218,12 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       case _PendingMenuAction.open:
         await OpenFilex.open(upload.filePath);
         return;
+      case _PendingMenuAction.moveToFolder:
+        await _showMoveFolderPicker(upload.id);
+        return;
+      case _PendingMenuAction.removeFromFolder:
+        await _removeDocumentFromFolder(upload.id);
+        return;
       case _PendingMenuAction.delete:
         await _deletePendingUpload(upload);
         return;
@@ -1246,9 +1258,125 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
     );
   }
 
-  Widget _buildPendingCard(BuildContext context, PendingUpload pendingUpload) {
+  Widget _buildDragFeedbackPill(BuildContext context, String fileName) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Material(
+      elevation: 8,
+      borderRadius: BorderRadius.circular(14),
+      color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+      child: Container(
+        width: 240,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.5),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.picture_as_pdf_rounded,
+              color: Color(0xFFDC2626),
+              size: 24,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                fileName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPendingCard(
+    BuildContext context,
+    PendingUpload pendingUpload, {
+    bool isInFolder = false,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final bodyContent = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => UploadSummaryScreen(pendingUpload: pendingUpload),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.phone_iphone_rounded,
+                  color: colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pendingUpload.fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.pages_outlined,
+                          size: 14,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            'محلي - ${pendingUpload.pageCount} صفحة • ${formatFileSize(pendingUpload.fileSize)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -1264,122 +1392,70 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
           left: BorderSide(color: colorScheme.primary, width: 4),
         ),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) =>
-                    UploadSummaryScreen(pendingUpload: pendingUpload),
-              ),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: colorScheme.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.phone_iphone_rounded,
-                    color: colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        pendingUpload.fileName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.pages_outlined,
-                            size: 14,
-                            color: colorScheme.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'محلي - ${pendingUpload.pageCount} صفحة',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          const SizedBox(width: 12),
-                          Icon(
-                            Icons.data_usage_rounded,
-                            size: 14,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            formatFileSize(pendingUpload.fileSize),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                PopupMenuButton<_PendingMenuAction>(
-                  icon: Icon(
-                    Icons.more_horiz,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  tooltip: 'الخيارات',
-                  onSelected: (action) {
-                    unawaited(_handlePendingMenuAction(action, pendingUpload));
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: _PendingMenuAction.upload,
-                      child: Text('رفع للسيرفر'),
-                    ),
-                    PopupMenuItem(
-                      value: _PendingMenuAction.print,
-                      child: Text('طباعة'),
-                    ),
-                    PopupMenuItem(
-                      value: _PendingMenuAction.sendToDesktop,
-                      child: Text('إرسال للكمبيوتر'),
-                    ),
-                    PopupMenuItem(
-                      value: _PendingMenuAction.sendToChat,
-                      child: Text('إرسال للشات'),
-                    ),
-                    PopupMenuItem(
-                      value: _PendingMenuAction.share,
-                      child: Text('مشاركة / حفظ في الهاتف'),
-                    ),
-                    PopupMenuItem(
-                      value: _PendingMenuAction.open,
-                      child: Text('فتح محليًا'),
-                    ),
-                    PopupMenuItem(
-                      value: _PendingMenuAction.delete,
-                      child: Text('حذف', style: TextStyle(color: Colors.red)),
-                    ),
-                  ],
-                ),
-              ],
+      child: Row(
+        children: [
+          Expanded(
+            child: LongPressDraggable<String>(
+              delay: const Duration(milliseconds: 450),
+              hapticFeedbackOnStart: true,
+              data: pendingUpload.id,
+              feedback: _buildDragFeedbackPill(context, pendingUpload.fileName),
+              childWhenDragging: Opacity(opacity: 0.35, child: bodyContent),
+              child: bodyContent,
             ),
           ),
-        ),
+          PopupMenuButton<_PendingMenuAction>(
+            icon: Icon(
+              Icons.more_horiz,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            tooltip: 'الخيارات',
+            onSelected: (action) {
+              unawaited(_handlePendingMenuAction(action, pendingUpload));
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: _PendingMenuAction.open,
+                child: Text('فتح محليًا'),
+              ),
+              const PopupMenuItem(
+                value: _PendingMenuAction.upload,
+                child: Text('رفع للسيرفر'),
+              ),
+              const PopupMenuItem(
+                value: _PendingMenuAction.print,
+                child: Text('طباعة'),
+              ),
+              const PopupMenuItem(
+                value: _PendingMenuAction.sendToDesktop,
+                child: Text('إرسال للكمبيوتر'),
+              ),
+              const PopupMenuItem(
+                value: _PendingMenuAction.sendToChat,
+                child: Text('إرسال للشات'),
+              ),
+              const PopupMenuItem(
+                value: _PendingMenuAction.share,
+                child: Text('مشاركة / حفظ في الهاتف'),
+              ),
+              if (isInFolder)
+                const PopupMenuItem(
+                  value: _PendingMenuAction.removeFromFolder,
+                  child: Text('إزالة من الفولدر'),
+                )
+              else
+                const PopupMenuItem(
+                  value: _PendingMenuAction.moveToFolder,
+                  child: Text('نقل إلى فولدر'),
+                ),
+              const PopupMenuItem(
+                value: _PendingMenuAction.delete,
+                child: Text('حذف', style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
     );
   }
@@ -1389,6 +1465,15 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
   List<PopupMenuEntry<_DocumentMenuAction>> _buildDocumentMenuItems(
       bool isInFolder) {
     return [
+      const PopupMenuItem(
+        value: _DocumentMenuAction.open,
+        child: ListTile(
+          dense: true,
+          leading: Icon(Icons.open_in_new_rounded, size: 20),
+          title: Text('فتح الملف'),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ),
       const PopupMenuItem(
         value: _DocumentMenuAction.print,
         child: ListTile(
@@ -1474,94 +1559,99 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
-    final card = InkWell(
-      onTap: () => _downloadAndOpen(document),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          border: Border(
-            bottom: BorderSide(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.5),
-              width: 0.5,
-            ),
+    final mainContent = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _downloadAndOpen(document),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2C2C2E)
+                      : const Color(0xFFF2F2F7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.picture_as_pdf_rounded,
+                  color: Color(0xFFDC2626),
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      document.fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${formatDate(document.createdAt)} • ${formatFileSize(document.fileSize)} • ${document.pageCount} صفحة',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF2C2C2E)
-                    : const Color(0xFFF2F2F7),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.picture_as_pdf_rounded,
-                color: Color(0xFFDC2626),
-                size: 28,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    document.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${formatDate(document.createdAt)} • ${formatFileSize(document.fileSize)} • ${document.pageCount} صفحة',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            PopupMenuButton<_DocumentMenuAction>(
-              icon: Icon(
-                Icons.more_horiz,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              tooltip: 'الخيارات',
-              onSelected: (action) {
-                unawaited(_handleDocumentMenuAction(action, document));
-              },
-              itemBuilder: (_) => _buildDocumentMenuItems(isInFolder),
-            ),
-          ],
         ),
       ),
     );
 
-    return LongPressDraggable<String>(delay: const Duration(milliseconds: 100),
-      data: document.id,
-      feedback: Material(
-        color: Colors.transparent,
-        child: Opacity(
-          opacity: 0.8,
-          child: SizedBox(
-            width: MediaQuery.of(context).size.width - 32,
-            child: card,
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+            width: 0.5,
           ),
         ),
       ),
-      childWhenDragging: Opacity(
-        opacity: 0.3,
-        child: card,
+      child: Row(
+        children: [
+          Expanded(
+            child: LongPressDraggable<String>(
+              delay: const Duration(milliseconds: 450),
+              hapticFeedbackOnStart: true,
+              data: document.id,
+              feedback: _buildDragFeedbackPill(context, document.fileName),
+              childWhenDragging: Opacity(
+                opacity: 0.3,
+                child: mainContent,
+              ),
+              child: mainContent,
+            ),
+          ),
+          PopupMenuButton<_DocumentMenuAction>(
+            icon: Icon(
+              Icons.more_horiz,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            tooltip: 'الخيارات',
+            onSelected: (action) {
+              unawaited(_handleDocumentMenuAction(action, document));
+            },
+            itemBuilder: (_) => _buildDocumentMenuItems(isInFolder),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
-      child: card,
     );
   }
 
@@ -1571,59 +1661,90 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final card = GestureDetector(
-      onTap: () => _downloadAndOpen(document),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+    final cardBody = Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.07)
+              : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.07)
-                : const Color(0xFFE2E8F0),
+          onTap: () => _downloadAndOpen(document),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 28),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.picture_as_pdf_rounded,
+                    color: Color(0xFFDC2626),
+                    size: 34,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(
+                    document.fileName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  formatFileSize(document.fileSize),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: const Color(0xFFDC2626).withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.picture_as_pdf_rounded,
-                color: Color(0xFFDC2626),
-                size: 34,
-              ),
+      ),
+    );
+
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: LongPressDraggable<String>(
+            delay: const Duration(milliseconds: 450),
+            hapticFeedbackOnStart: true,
+            data: document.id,
+            feedback: _buildDragFeedbackPill(context, document.fileName),
+            childWhenDragging: Opacity(
+              opacity: 0.3,
+              child: cardBody,
             ),
-            const SizedBox(height: 10),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text(
-                document.fileName,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              formatFileSize(document.fileSize),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontSize: 11,
-              ),
-            ),
-            const SizedBox(height: 4),
-            PopupMenuButton<_DocumentMenuAction>(
+            child: cardBody,
+          ),
+        ),
+        Positioned(
+          bottom: 2,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: PopupMenuButton<_DocumentMenuAction>(
               icon: Icon(
                 Icons.more_horiz,
                 size: 18,
@@ -1635,28 +1756,9 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
               },
               itemBuilder: (_) => _buildDocumentMenuItems(isInFolder),
             ),
-          ],
-        ),
-      ),
-    );
-
-    return LongPressDraggable<String>(delay: const Duration(milliseconds: 100),
-      data: document.id,
-      feedback: Material(
-        color: Colors.transparent,
-        child: Opacity(
-          opacity: 0.8,
-          child: SizedBox(
-            width: (MediaQuery.of(context).size.width - 32 - 10) / 2, // half screen roughly
-            child: card,
           ),
         ),
-      ),
-      childWhenDragging: Opacity(
-        opacity: 0.3,
-        child: card,
-      ),
-      child: card,
+      ],
     );
   }
 
@@ -2248,23 +2350,24 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       
       // ── UNIFIED VIEW ────────────────────────────────────────────────────────
       List<RemoteDocument> filteredRemote;
+      List<PendingUpload> filteredPending;
       List<DocumentFolder> filteredFolders;
+      final isInsideFolder = _currentFolderId != null && currentFolder != null;
 
       if (query.isNotEmpty) {
         filteredRemote = remoteDocs.where((d) => d.fileName.toLowerCase().contains(query)).toList();
+        filteredPending = pendingDocs.where((d) => d.fileName.toLowerCase().contains(query)).toList();
         filteredFolders = allFolders.where((f) => f.name.toLowerCase().contains(query)).toList();
-      } else if (_currentFolderId != null && currentFolder != null) {
+      } else if (isInsideFolder) {
         final folderDocIds = currentFolder.documentIds.toSet();
         filteredRemote = remoteDocs.where((d) => folderDocIds.contains(d.id)).toList();
+        filteredPending = pendingDocs.where((d) => folderDocIds.contains(d.id)).toList();
         filteredFolders = allFolders.where((f) => f.parentId == _currentFolderId).toList();
       } else {
         filteredRemote = remoteDocs.where((d) => !allFolderDocIds.contains(d.id)).toList();
+        filteredPending = pendingDocs.where((d) => !allFolderDocIds.contains(d.id)).toList();
         filteredFolders = allFolders.where((f) => f.parentId == null).toList();
       }
-
-      final filteredPending = (_currentFolderId == null && query.isEmpty) || query.isNotEmpty
-          ? pendingDocs.where((d) => query.isEmpty || d.fileName.toLowerCase().contains(query)).toList()
-          : <PendingUpload>[];
 
       final merged = <dynamic>[...filteredPending, ...filteredRemote];
       merged.sort((a, b) {
@@ -2301,10 +2404,17 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
                             }
                             final doc = merged[i - filteredFolders.length];
                             if (doc is PendingUpload) {
-                              return _buildPendingCard(ctx, doc);
+                              return _buildPendingCard(
+                                ctx,
+                                doc,
+                                isInFolder: isInsideFolder,
+                              );
                             }
                             return _buildDocumentGridCard(
-                                ctx, doc as RemoteDocument);
+                              ctx,
+                              doc as RemoteDocument,
+                              isInFolder: isInsideFolder,
+                            );
                           },
                           childCount: filteredFolders.length + merged.length,
                         ),
@@ -2356,10 +2466,17 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
                           ),
                           child: Column(children: merged.map((doc) {
                             if (doc is PendingUpload) {
-                              return _buildPendingCard(context, doc);
+                              return _buildPendingCard(
+                                context,
+                                doc,
+                                isInFolder: isInsideFolder,
+                              );
                             }
                             return _buildDocumentCard(
-                                context, doc as RemoteDocument);
+                              context,
+                              doc as RemoteDocument,
+                              isInFolder: isInsideFolder,
+                            );
                           }).toList()),
                         ),
                       ),
