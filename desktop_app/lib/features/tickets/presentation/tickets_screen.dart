@@ -923,6 +923,276 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
     }
   }
 
+  Widget _buildBottomInputArea(
+    BuildContext context,
+    TicketItem ticket,
+    TicketDetailsData details,
+    bool ticketClosed,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
+          ),
+        ),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 10,
+                  offset: const Offset(0, -3),
+                ),
+              ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (ticketClosed)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF2C241D)
+                    : const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.lock_outline_rounded,
+                    color: Color(0xFFD97706),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'هذا الطلب مغلق حالياً، لا يمكن إرسال تحديثات أو ردود جديدة إلا بعد إعادة فتحه.',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? const Color(0xFFFDE68A)
+                            : const Color(0xFFB45309),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            if (details.canManage)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => setState(() => _internalNote = false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: !_internalNote
+                              ? TicketsPalette.brand.withValues(alpha: 0.12)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: !_internalNote
+                                ? TicketsPalette.brand.withValues(alpha: 0.4)
+                                : theme.colorScheme.outlineVariant.withValues(
+                                    alpha: 0.3,
+                                  ),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.chat_bubble_outline_rounded,
+                              size: 14,
+                              color: !_internalNote
+                                  ? TicketsPalette.brand
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'رد عام للعميل / الموظف',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: !_internalNote
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                color: !_internalNote
+                                    ? TicketsPalette.brand
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => setState(() => _internalNote = true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _internalNote
+                              ? TicketsPalette.suggestion.withValues(alpha: 0.14)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: _internalNote
+                                ? TicketsPalette.suggestion
+                                    .withValues(alpha: 0.45)
+                                : theme.colorScheme.outlineVariant.withValues(
+                                    alpha: 0.3,
+                                  ),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.lock_rounded,
+                              size: 14,
+                              color: _internalNote
+                                  ? TicketsPalette.suggestion
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'ملاحظة داخلية خاصة',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: _internalNote
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                color: _internalNote
+                                    ? TicketsPalette.suggestion
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (_internalNote)
+                      Text(
+                        '🔒 مرئية لفريق الدعم فقط',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: TicketsPalette.suggestion,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF2C2C2E)
+                          : const Color(0xFFF4F4F6),
+                      borderRadius: BorderRadius.circular(16),
+                      border: _internalNote
+                          ? Border.all(
+                              color: TicketsPalette.suggestion
+                                  .withValues(alpha: 0.4),
+                            )
+                          : null,
+                    ),
+                    child: TextField(
+                      controller: _messageController,
+                      enabled: !ticketClosed,
+                      minLines: 1,
+                      maxLines: 5,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: _internalNote
+                            ? 'اكتب ملاحظة داخلية خاصة بفريق العمل...'
+                            : 'اكتب رداً أو تعليقاً على الطلب...',
+                        hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
+                        ),
+                        prefixIcon: Icon(
+                          _internalNote
+                              ? Icons.lock_outline_rounded
+                              : Icons.edit_note_rounded,
+                          color: _internalNote
+                              ? TicketsPalette.suggestion
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _internalNote
+                        ? TicketsPalette.suggestion
+                        : TicketsPalette.brand,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 15,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: ticketClosed ? null : () => _sendComment(details),
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: const Text(
+                    'إرسال',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailsState = ref.watch(
@@ -931,8 +1201,16 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
     final dateFormat = formatEgyptDateTime;
 
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
       appBar: AppBar(
-        title: const Text('تفاصيل التذكرة'),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(
+          widget.initialTicket != null &&
+                  widget.initialTicket!.ticketNumber.isNotEmpty
+              ? 'طلب #${widget.initialTicket!.ticketNumber}'
+              : 'تفاصيل الطلب',
+        ),
         actions: [
           IconButton(
             tooltip: 'تحديث',
@@ -946,19 +1224,16 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
       body: detailsState.when(
         loading: () {
           if (widget.initialTicket != null) {
-            return Column(
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                  child: TicketDetailsHeaderCard(
-                    ticket: widget.initialTicket!,
-                    dateFormat: dateFormat,
-                    canManage: false,
-                  ),
+                TicketDetailsHeaderCard(
+                  ticket: widget.initialTicket!,
+                  dateFormat: dateFormat,
+                  canManage: false,
                 ),
-                const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
-                ),
+                const SizedBox(height: 32),
+                const Center(child: CircularProgressIndicator()),
               ],
             );
           }
@@ -980,120 +1255,112 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
             canManage: details.canManage,
           );
           final ticketClosed = displayTicket.status == 'closed';
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final accent = TicketsPalette.typeColor(displayTicket.ticketType);
 
           return Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                child: TicketDetailsHeaderCard(
-                  ticket: displayTicket,
-                  dateFormat: dateFormat,
-                  canManage: viewData.canManage,
-                  onChangeStatus: viewData.canManage
-                      ? () => _changeStatus(viewData)
-                      : null,
-                  onAssign: viewData.canManage
-                      ? () => _assignTicket(viewData)
-                      : null,
-                ),
-              ),
               Expanded(
-                child: details.updates.isEmpty
-                    ? const _TimelineEmptyView()
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        itemCount: details.updates.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final update = details.updates[index];
-                          return TicketTimelineTile(
-                            label: _kindLabel(update.kind),
-                            message: _ticketUpdateDisplayMessage(update),
-                            actor: update.createdBy.displayName,
-                            visibilityLabel: _visibilityLabel(
-                              update.visibility,
-                            ),
-                            timestamp: dateFormat(update.createdAt),
-                            accent: _timelineAccent(update),
-                            isInternal: update.visibility == 'internal',
-                          );
-                        },
-                      ),
-              ),
-              Container(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  border: Border(
-                    top: BorderSide(
-                      color: Theme.of(context).colorScheme.outlineVariant,
-                    ),
-                  ),
-                ),
-                child: Column(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                   children: [
-                    if (ticketClosed)
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          // color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFCBD5E1)),
-                        ),
-                        child: const Text(
-                          'التذكرة مغلقة، لا يمكن إرسال تحديثات جديدة.',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black,
-                          ),
-                        ),
-                      ),
-                    if (details.canManage)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          value: _internalNote,
-                          onChanged: ticketClosed
-                              ? null
-                              : (value) =>
-                                    setState(() => _internalNote = value),
-
-                          title: const Text('إرسال ملاحظة داخلية'),
-                        ),
-                      ),
+                    TicketDetailsHeaderCard(
+                      ticket: displayTicket,
+                      dateFormat: dateFormat,
+                      canManage: viewData.canManage,
+                      onChangeStatus: viewData.canManage
+                          ? () => _changeStatus(viewData)
+                          : null,
+                      onAssign: viewData.canManage
+                          ? () => _assignTicket(viewData)
+                          : null,
+                    ),
+                    const SizedBox(height: 24),
+                    // Timeline Section Header
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _messageController,
-                            enabled: !ticketClosed,
-                            minLines: 1,
-                            maxLines: 5,
-                            decoration: const InputDecoration(
-                              hintText: 'اكتب تحديثًا واضحًا للتذكرة...',
-                              prefixIcon: Icon(Icons.edit_note_rounded),
-                            ),
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.history_rounded,
+                            size: 18,
+                            color: accent,
                           ),
                         ),
                         const SizedBox(width: 10),
-                        FilledButton.icon(
-                          onPressed: ticketClosed
-                              ? null
-                              : () => _sendComment(details),
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text('إرسال'),
+                        Text(
+                          'سجل التحديثات والنشاط',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF2C2C2E)
+                                : const Color(0xFFE5E5EA),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${details.updates.length}',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'مرتب من الأقدم إلى الأحدث',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 14),
+                    if (details.updates.isEmpty)
+                      const _TimelineEmptyView()
+                    else
+                      for (int i = 0; i < details.updates.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: TicketTimelineTile(
+                            label: _kindLabel(details.updates[i].kind),
+                            message: _ticketUpdateDisplayMessage(
+                              details.updates[i],
+                            ),
+                            actor: details.updates[i].createdBy.displayName,
+                            visibilityLabel: _visibilityLabel(
+                              details.updates[i].visibility,
+                            ),
+                            timestamp: dateFormat(
+                              details.updates[i].createdAt,
+                            ),
+                            accent: _timelineAccent(details.updates[i]),
+                            isInternal:
+                                details.updates[i].visibility == 'internal',
+                            isFirst: i == 0,
+                            isLast: i == details.updates.length - 1,
+                          ),
+                        ),
                   ],
                 ),
+              ),
+              _buildBottomInputArea(
+                context,
+                displayTicket,
+                details,
+                ticketClosed,
               ),
             ],
           );
@@ -2155,39 +2422,52 @@ class _TimelineEmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Center(
-      child: Padding(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 20),
         padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E20) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : const Color(0xFFE2E8F0),
+          ),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 82,
-              height: 82,
+              width: 60,
+              height: 60,
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(24),
+                color: TicketsPalette.brand.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: const Icon(
-                Icons.timeline_rounded,
-                size: 38,
-                color: Color(0xFF64748B),
+                Icons.chat_bubble_outline_rounded,
+                size: 28,
+                color: TicketsPalette.brand,
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             Text(
-              'لا توجد تذاكر مطابقة',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+              'لا توجد تحديثات حتى الآن',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
-              'جرّب تعديل البحث أو الفلاتر، أو أنشئ تذكرة جديدة من الأعلى.',
+              'لم يتم تسجيل أي ردود أو تغييرات في حالة هذا الطلب بعد.\nيمكنك كتابة أول تعليق أو ملاحظة باستخدام النموذج بالأسفل.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                height: 1.6,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.5,
               ),
             ),
           ],
