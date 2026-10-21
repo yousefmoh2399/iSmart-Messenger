@@ -29,10 +29,29 @@ function resolveFonts() {
   return { fontRegular, fontBold };
 }
 
-function resolveLogos() {
+function parseCustomLogoBuffer(customLogo) {
+  if (!customLogo || typeof customLogo !== "string") return null;
+  const trimmed = customLogo.trim();
+  if (trimmed.startsWith("data:image")) {
+    try {
+      const commaIdx = trimmed.indexOf(",");
+      if (commaIdx !== -1) {
+        return Buffer.from(trimmed.slice(commaIdx + 1), "base64");
+      }
+    } catch (_) {}
+  } else if (fs.existsSync(trimmed)) {
+    try {
+      return fs.readFileSync(trimmed);
+    } catch (_) {}
+  }
+  return null;
+}
+
+function resolveLogos(headerConfig = {}) {
   const candidates1 = [
     path.join(__dirname, "../../assets/logo1.png"),
     path.join(__dirname, "../../../assets/logo1.png"),
+    path.join(__dirname, "../../../../desktop_app/assets/images/logo.png"),
   ];
   const candidates2 = [
     path.join(__dirname, "../../assets/logo2.png"),
@@ -40,9 +59,85 @@ function resolveLogos() {
   ];
   const logo1Path = candidates1.find((p) => fs.existsSync(p)) || candidates1[0];
   const logo2Path = candidates2.find((p) => fs.existsSync(p)) || candidates2[0];
-  const logo1 = fs.existsSync(logo1Path) ? fs.readFileSync(logo1Path) : null;
-  const logo2 = fs.existsSync(logo2Path) ? fs.readFileSync(logo2Path) : null;
+
+  let logo1 = parseCustomLogoBuffer(headerConfig?.customLogo1);
+  if (!logo1 && fs.existsSync(logo1Path)) {
+    try {
+      logo1 = fs.readFileSync(logo1Path);
+    } catch (_) {}
+  }
+
+  let logo2 = parseCustomLogoBuffer(headerConfig?.customLogo2);
+  if (!logo2 && fs.existsSync(logo2Path)) {
+    try {
+      logo2 = fs.readFileSync(logo2Path);
+    } catch (_) {}
+  }
+
   return { logo1, logo2, logo1Path, logo2Path };
+}
+
+function computeColumnSummary(col, data, idx) {
+  const calc = col.calculationType || "none";
+  const key = col.key;
+
+  if (calc === "none") {
+    if (idx === 0) return "الإجمالي العام";
+    if (idx === 1 && !col.isNumeric && key !== "monoPages") return `عدد السجلات: ${data.length}`;
+    // Fallback if numeric without specified calc
+    const hasNumbers = data.some((item) => isNumericValue(item[key]));
+    if (hasNumbers) {
+      const sum = data.reduce((acc, item) => {
+        const num = Number(item[key]);
+        return acc + (Number.isNaN(num) ? 0 : num);
+      }, 0);
+      return Number.isInteger(sum) ? sum.toLocaleString("en-US") : sum.toFixed(2);
+    }
+    return "—";
+  }
+
+  if (calc === "count") {
+    const validCount = data.filter((d) => d[key] != null && String(d[key]).trim() !== "").length;
+    return `العدد: ${validCount}`;
+  }
+
+  const numericValues = data
+    .map((d) => Number(d[key]))
+    .filter((n) => !Number.isNaN(n));
+
+  if (numericValues.length === 0) {
+    return "—";
+  }
+
+  if (calc === "sum") {
+    const sum = numericValues.reduce((a, b) => a + b, 0);
+    return Number.isInteger(sum) ? sum.toLocaleString("en-US") : sum.toFixed(2);
+  }
+
+  if (calc === "avg") {
+    const sum = numericValues.reduce((a, b) => a + b, 0);
+    const avg = sum / numericValues.length;
+    return `المتوسط: ${avg.toFixed(1)}`;
+  }
+
+  if (calc === "diff") {
+    const diff = numericValues.length === 1
+      ? numericValues[0]
+      : numericValues.slice(1).reduce((acc, val) => acc - val, numericValues[0]);
+    return `الفرق: ${Number.isInteger(diff) ? diff.toLocaleString("en-US") : diff.toFixed(2)}`;
+  }
+
+  if (calc === "min") {
+    const min = Math.min(...numericValues);
+    return `الأدنى: ${Number.isInteger(min) ? min.toLocaleString("en-US") : min.toFixed(2)}`;
+  }
+
+  if (calc === "max") {
+    const max = Math.max(...numericValues);
+    return `الأقصى: ${Number.isInteger(max) ? max.toLocaleString("en-US") : max.toFixed(2)}`;
+  }
+
+  return "—";
 }
 
 function formatValue(value) {
@@ -79,7 +174,8 @@ async function buildDynamicPdfReport({
   entityName = "الفروع",
 }) {
   const { fontRegular, fontBold } = resolveFonts();
-  const { logo1, logo2 } = resolveLogos();
+  const headerConfig = template.headerConfig || {};
+  const { logo1, logo2 } = resolveLogos(headerConfig);
 
   const isLandscape = template.options?.orientation !== "portrait";
   const pageWidth = isLandscape ? 841 : 595;
@@ -107,7 +203,6 @@ async function buildDynamicPdfReport({
     colWidths[colWidths.length - 1] += diff;
   }
 
-  const headerConfig = template.headerConfig || {};
   let finalTitle = reportTitle;
   if (headerConfig.titleFormat && headerConfig.titleFormat.trim()) {
     finalTitle = headerConfig.titleFormat
@@ -171,15 +266,24 @@ async function buildDynamicPdfReport({
       // Main Report Title
       doc.moveDown(1.5);
       doc.font("ArabicBold").fontSize(15);
-      doc.text(processArabicText(finalTitle), 0, 105, {
+      doc.text(processArabicText(finalTitle), 0, 102, {
         width: pageWidth,
         align: "center",
       });
+
+      // Secondary Static Note / Disclaimer
+      if (headerConfig.secondaryNote && headerConfig.secondaryNote.trim()) {
+        doc.font("Arabic").fontSize(9.5).fillColor("#64748B");
+        doc.text(processArabicText(headerConfig.secondaryNote.trim()), margin, 122, {
+          width: availableWidth,
+          align: "center",
+        });
+      }
     }
 
     drawHeaderAndBranding();
 
-    const tableTop = 138;
+    const tableTop = headerConfig.secondaryNote && headerConfig.secondaryNote.trim() ? 144 : 134;
     const rowHeight = Math.max(34, Number(template.options?.rowHeight) || 44);
     let currentY = tableTop;
 
@@ -268,36 +372,41 @@ async function buildDynamicPdfReport({
       }
 
       const totalRow = enabledCols.map((c, idx) => {
-        if (idx === 0) return "الإجمالي العام";
-        if (idx === 1 && c.key !== "monoPages") return `عدد السجلات: ${data.length}`;
-
-        // If numeric column, calculate sum
-        const hasNumbers = data.some((item) => isNumericValue(item[c.key]));
-        if (hasNumbers) {
-          const sum = data.reduce((acc, item) => {
-            const num = Number(item[c.key]);
-            return acc + (Number.isNaN(num) ? 0 : num);
-          }, 0);
-          return Number.isInteger(sum) ? sum.toLocaleString("en-US") : sum.toFixed(2);
-        }
-        return "—";
+        return computeColumnSummary(c, data, idx);
       });
 
       drawRow(currentY, totalRow, false, true);
       currentY += rowHeight;
     }
 
-    // Footer note
-    if (headerConfig.footerNote && currentY + 30 <= pageHeight - margin) {
-      doc.moveDown(1);
-      doc
-        .font("Arabic")
-        .fontSize(10)
-        .fillColor("#475569")
-        .text(processArabicText(headerConfig.footerNote), margin, currentY + 12, {
+    // Signatures and Footer note
+    const hasFooter = headerConfig.footerNote || headerConfig.preparedByLabel || headerConfig.approvedByLabel;
+    if (hasFooter && currentY + 45 <= pageHeight - margin) {
+      currentY += 16;
+      doc.font("Arabic").fontSize(9.5).fillColor("#475569");
+
+      if (headerConfig.preparedByLabel || headerConfig.approvedByLabel) {
+        if (headerConfig.preparedByLabel) {
+          doc.text(processArabicText(headerConfig.preparedByLabel), margin + 30, currentY, {
+            width: 250,
+            align: "right",
+          });
+        }
+        if (headerConfig.approvedByLabel) {
+          doc.text(processArabicText(headerConfig.approvedByLabel), pageWidth - margin - 280, currentY, {
+            width: 250,
+            align: "left",
+          });
+        }
+        currentY += 18;
+      }
+
+      if (headerConfig.footerNote) {
+        doc.text(processArabicText(headerConfig.footerNote), margin, currentY, {
           width: availableWidth,
-          align: "right",
+          align: "center",
         });
+      }
     }
 
     doc.end();
@@ -317,15 +426,32 @@ async function buildDynamicExcelReport({
     views: [{ rightToLeft: true }],
   });
 
-  const { logo1, logo2, logo1Path, logo2Path } = resolveLogos();
   const headerConfig = template.headerConfig || {};
+  const { logo1, logo2, logo1Path, logo2Path } = resolveLogos(headerConfig);
 
   let logo1Id, logo2Id;
-  if (headerConfig.showLogo1 !== false && logo1Path && fs.existsSync(logo1Path)) {
-    logo1Id = workbook.addImage({ filename: logo1Path, extension: "png" });
+  if (headerConfig.showLogo1 !== false) {
+    if (logo1) {
+      try {
+        logo1Id = workbook.addImage({ buffer: logo1, extension: "png" });
+      } catch (_) {}
+    } else if (logo1Path && fs.existsSync(logo1Path)) {
+      try {
+        logo1Id = workbook.addImage({ filename: logo1Path, extension: "png" });
+      } catch (_) {}
+    }
   }
-  if (headerConfig.showLogo2 !== false && logo2Path && fs.existsSync(logo2Path)) {
-    logo2Id = workbook.addImage({ filename: logo2Path, extension: "png" });
+
+  if (headerConfig.showLogo2 !== false) {
+    if (logo2) {
+      try {
+        logo2Id = workbook.addImage({ buffer: logo2, extension: "png" });
+      } catch (_) {}
+    } else if (logo2Path && fs.existsSync(logo2Path)) {
+      try {
+        logo2Id = workbook.addImage({ filename: logo2Path, extension: "png" });
+      } catch (_) {}
+    }
   }
 
   const enabledCols = getEnabledColumns(template);
@@ -342,7 +468,7 @@ async function buildDynamicExcelReport({
   sheet.getRow(1).height = 24;
   sheet.getRow(2).height = 24;
   sheet.getRow(3).height = 24;
-  sheet.getRow(4).height = 12;
+  sheet.getRow(4).height = 10;
   sheet.getRow(5).height = 30;
 
   const numCols = enabledCols.length;
@@ -401,6 +527,16 @@ async function buildDynamicExcelReport({
   titleCell.font = { name: "Arial", bold: true, size: 14 };
   titleCell.alignment = { horizontal: "center", vertical: "middle" };
 
+  const hasSecondaryNote = headerConfig.secondaryNote && headerConfig.secondaryNote.trim();
+  if (hasSecondaryNote) {
+    sheet.getRow(6).height = 20;
+    sheet.mergeCells(`${startLetter}6:${endLetter}6`);
+    const noteCell = sheet.getCell(`${startLetter}6`);
+    noteCell.value = headerConfig.secondaryNote.trim();
+    noteCell.font = { name: "Arial", italic: true, size: 9.5, color: { argb: "FF475569" } };
+    noteCell.alignment = { horizontal: "center", vertical: "middle" };
+  }
+
   // Add logos
   if (logo2Id) {
     sheet.addImage(logo2Id, {
@@ -416,7 +552,7 @@ async function buildDynamicExcelReport({
   }
 
   // Header Row
-  const headerRowIndex = 7;
+  const headerRowIndex = hasSecondaryNote ? 8 : 7;
   const headerRow = sheet.getRow(headerRowIndex);
   headerRow.values = enabledCols.map((c) => c.label);
   headerRow.font = { name: "Arial", bold: true, size: 11, color: { argb: "FF0F172A" } };
@@ -474,18 +610,7 @@ async function buildDynamicExcelReport({
     const totalRow = sheet.getRow(currentRow++);
     totalRow.height = 26;
     totalRow.values = enabledCols.map((c, idx) => {
-      if (idx === 0) return "الإجمالي العام";
-      if (idx === 1 && c.key !== "monoPages") return `عدد السجلات: ${data.length}`;
-
-      const hasNumbers = data.some((item) => isNumericValue(item[c.key]));
-      if (hasNumbers) {
-        const sum = data.reduce((acc, item) => {
-          const num = Number(item[c.key]);
-          return acc + (Number.isNaN(num) ? 0 : num);
-        }, 0);
-        return Number.isInteger(sum) ? sum : Number(sum.toFixed(2));
-      }
-      return "";
+      return computeColumnSummary(c, data, idx);
     });
 
     for (let i = 1; i <= numCols; i++) {
@@ -506,7 +631,20 @@ async function buildDynamicExcelReport({
     }
   }
 
-  // Footer Note
+  // Signatures and Footer note
+  if (headerConfig.preparedByLabel || headerConfig.approvedByLabel) {
+    currentRow += 1;
+    const sigRow = sheet.getRow(currentRow);
+    if (headerConfig.preparedByLabel) {
+      sigRow.getCell(2).value = headerConfig.preparedByLabel;
+      sigRow.getCell(2).font = { name: "Arial", bold: true, size: 10 };
+    }
+    if (headerConfig.approvedByLabel && numCols > 3) {
+      sigRow.getCell(numCols - 1).value = headerConfig.approvedByLabel;
+      sigRow.getCell(numCols - 1).font = { name: "Arial", bold: true, size: 10 };
+    }
+  }
+
   if (headerConfig.footerNote) {
     currentRow += 1;
     const footerRow = sheet.getRow(currentRow);

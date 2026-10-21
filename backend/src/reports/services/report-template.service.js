@@ -394,6 +394,7 @@ function getDefaultColumns(reportType) {
     order: col.order,
     width: col.width,
     align: col.align || "center",
+    calculationType: col.isNumeric ? "sum" : "none",
   }));
 }
 

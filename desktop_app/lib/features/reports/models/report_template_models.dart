@@ -7,6 +7,7 @@ class ReportColumn {
     this.width = 100,
     this.align = 'center',
     this.description = '',
+    this.calculationType = 'none',
   });
 
   final String key;
@@ -16,6 +17,7 @@ class ReportColumn {
   final int width;
   final String align;
   final String description;
+  final String calculationType; // 'none', 'sum', 'avg', 'count', 'diff', 'min', 'max'
 
   ReportColumn copyWith({
     String? key,
@@ -25,6 +27,7 @@ class ReportColumn {
     int? width,
     String? align,
     String? description,
+    String? calculationType,
   }) {
     return ReportColumn(
       key: key ?? this.key,
@@ -34,6 +37,7 @@ class ReportColumn {
       width: width ?? this.width,
       align: align ?? this.align,
       description: description ?? this.description,
+      calculationType: calculationType ?? this.calculationType,
     );
   }
 
@@ -46,6 +50,7 @@ class ReportColumn {
       width: (map['width'] as num?)?.toInt() ?? 100,
       align: map['align']?.toString() ?? 'center',
       description: map['description']?.toString() ?? '',
+      calculationType: map['calculationType']?.toString() ?? 'none',
     );
   }
 
@@ -58,6 +63,7 @@ class ReportColumn {
       'width': width,
       'align': align,
       if (description.isNotEmpty) 'description': description,
+      'calculationType': calculationType,
     };
   }
 }
@@ -70,8 +76,12 @@ class ReportHeaderConfig {
     this.titleFormat = '',
     this.showLogo1 = true,
     this.showLogo2 = true,
+    this.customLogo1,
+    this.customLogo2,
+    this.secondaryNote = '',
     this.footerNote = 'يعتمد، إدارة تكنولوجيا المعلومات',
     this.preparedByLabel = 'إعداد: ',
+    this.approvedByLabel = 'اعتماد: ',
   });
 
   final String line1;
@@ -80,8 +90,12 @@ class ReportHeaderConfig {
   final String titleFormat;
   final bool showLogo1;
   final bool showLogo2;
+  final String? customLogo1;
+  final String? customLogo2;
+  final String secondaryNote;
   final String footerNote;
   final String preparedByLabel;
+  final String approvedByLabel;
 
   ReportHeaderConfig copyWith({
     String? line1,
@@ -90,8 +104,12 @@ class ReportHeaderConfig {
     String? titleFormat,
     bool? showLogo1,
     bool? showLogo2,
+    String? customLogo1,
+    String? customLogo2,
+    String? secondaryNote,
     String? footerNote,
     String? preparedByLabel,
+    String? approvedByLabel,
   }) {
     return ReportHeaderConfig(
       line1: line1 ?? this.line1,
@@ -100,8 +118,12 @@ class ReportHeaderConfig {
       titleFormat: titleFormat ?? this.titleFormat,
       showLogo1: showLogo1 ?? this.showLogo1,
       showLogo2: showLogo2 ?? this.showLogo2,
+      customLogo1: customLogo1 ?? this.customLogo1,
+      customLogo2: customLogo2 ?? this.customLogo2,
+      secondaryNote: secondaryNote ?? this.secondaryNote,
       footerNote: footerNote ?? this.footerNote,
       preparedByLabel: preparedByLabel ?? this.preparedByLabel,
+      approvedByLabel: approvedByLabel ?? this.approvedByLabel,
     );
   }
 
@@ -114,8 +136,12 @@ class ReportHeaderConfig {
       titleFormat: map['titleFormat']?.toString() ?? '',
       showLogo1: map['showLogo1'] != false,
       showLogo2: map['showLogo2'] != false,
+      customLogo1: map['customLogo1']?.toString(),
+      customLogo2: map['customLogo2']?.toString(),
+      secondaryNote: map['secondaryNote']?.toString() ?? '',
       footerNote: map['footerNote']?.toString() ?? 'يعتمد، إدارة تكنولوجيا المعلومات',
       preparedByLabel: map['preparedByLabel']?.toString() ?? 'إعداد: ',
+      approvedByLabel: map['approvedByLabel']?.toString() ?? 'اعتماد: ',
     );
   }
 
@@ -127,8 +153,12 @@ class ReportHeaderConfig {
       'titleFormat': titleFormat,
       'showLogo1': showLogo1,
       'showLogo2': showLogo2,
+      if (customLogo1 != null && customLogo1!.isNotEmpty) 'customLogo1': customLogo1,
+      if (customLogo2 != null && customLogo2!.isNotEmpty) 'customLogo2': customLogo2,
+      'secondaryNote': secondaryNote,
       'footerNote': footerNote,
       'preparedByLabel': preparedByLabel,
+      'approvedByLabel': approvedByLabel,
     };
   }
 }

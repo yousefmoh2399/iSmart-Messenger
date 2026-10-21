@@ -1,3 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -29,18 +34,23 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
   final _line2Controller = TextEditingController();
   final _line3Controller = TextEditingController();
   final _titleFormatController = TextEditingController();
+  final _secondaryNoteController = TextEditingController();
+  final _preparedByController = TextEditingController();
+  final _approvedByController = TextEditingController();
   final _footerNoteController = TextEditingController();
 
   bool _isDefault = false;
   bool _showLogo1 = true;
   bool _showLogo2 = true;
+  String? _customLogo1;
+  String? _customLogo2;
   String _orientation = 'landscape';
   bool _includeSummaryRow = true;
   int _rowHeight = 44;
   String _exportFormatDefault = 'xlsx';
   List<ReportColumn> _columns = [];
 
-  int _editorTabIndex = 0; // 0: Columns, 1: Header/Branding, 2: Layout
+  int _editorTabIndex = 0; // 0: Columns, 1: Header/Branding, 2: Layout, 3: Preview
   bool _isSaving = false;
 
   @override
@@ -57,6 +67,9 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
     _line2Controller.dispose();
     _line3Controller.dispose();
     _titleFormatController.dispose();
+    _secondaryNoteController.dispose();
+    _preparedByController.dispose();
+    _approvedByController.dispose();
     _footerNoteController.dispose();
     super.dispose();
   }
@@ -71,16 +84,88 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
       _line2Controller.text = template.headerConfig.line2;
       _line3Controller.text = template.headerConfig.line3;
       _titleFormatController.text = template.headerConfig.titleFormat;
+      _secondaryNoteController.text = template.headerConfig.secondaryNote;
+      _preparedByController.text = template.headerConfig.preparedByLabel;
+      _approvedByController.text = template.headerConfig.approvedByLabel;
       _footerNoteController.text = template.headerConfig.footerNote;
       _isDefault = isNew ? false : template.isDefault;
       _showLogo1 = template.headerConfig.showLogo1;
       _showLogo2 = template.headerConfig.showLogo2;
+      _customLogo1 = template.headerConfig.customLogo1;
+      _customLogo2 = template.headerConfig.customLogo2;
       _orientation = template.options.orientation;
       _includeSummaryRow = template.options.includeSummaryRow;
       _rowHeight = template.options.rowHeight;
       _exportFormatDefault = template.options.exportFormatDefault;
       _columns = template.columns.map((c) => c.copyWith()).toList();
     });
+  }
+
+  Future<void> _pickCustomLogo(int logoIndex) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        dialogTitle: 'اختر صورة الشعار',
+        type: FileType.custom,
+        allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      List<int>? bytes = file.bytes;
+      if (bytes == null && file.path != null) {
+        final f = File(file.path!);
+        if (await f.exists()) {
+          bytes = await f.readAsBytes();
+        }
+      }
+
+      if (bytes != null) {
+        final ext = (file.extension ?? 'png').toLowerCase();
+        final mimeType = (ext == 'jpg' || ext == 'jpeg') ? 'image/jpeg' : 'image/png';
+        final base64Str = 'data:$mimeType;base64,${base64Encode(bytes)}';
+
+        setState(() {
+          if (logoIndex == 1) {
+            _customLogo1 = base64Str;
+            _showLogo1 = true;
+          } else {
+            _customLogo2 = base64Str;
+            _showLogo2 = true;
+          }
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text('تم استبدال الشعار $logoIndex بنجاح'),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showError('تعذر اختيار الصورة: $e');
+      }
+    }
+  }
+
+  void _resetLogo(int logoIndex) {
+    setState(() {
+      if (logoIndex == 1) {
+        _customLogo1 = null;
+      } else {
+        _customLogo2 = null;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('تم استعادة الشعار الافتراضي للشعار $logoIndex'),
+      ),
+    );
   }
 
   Future<void> _saveCurrentTemplate() async {
@@ -112,7 +197,12 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
           titleFormat: _titleFormatController.text.trim(),
           showLogo1: _showLogo1,
           showLogo2: _showLogo2,
+          customLogo1: _customLogo1,
+          customLogo2: _customLogo2,
+          secondaryNote: _secondaryNoteController.text.trim(),
           footerNote: _footerNoteController.text.trim(),
+          preparedByLabel: _preparedByController.text.trim(),
+          approvedByLabel: _approvedByController.text.trim(),
         ),
         columns: _columns,
         options: ReportOptions(
@@ -280,6 +370,57 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
     );
   }
 
+  Widget _buildLogoWidget(String? customLogo, bool showLogo, {double size = 64}) {
+    if (!showLogo) {
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: Colors.grey.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+        ),
+        child: const Center(
+          child: Text(
+            'شعار مخفي',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+    }
+
+    if (customLogo != null && customLogo.isNotEmpty) {
+      try {
+        if (customLogo.startsWith('data:image')) {
+          final comma = customLogo.indexOf(',');
+          final base64Data = comma != -1 ? customLogo.substring(comma + 1) : customLogo;
+          final bytes = base64Decode(base64Data);
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(bytes, width: size, height: size, fit: BoxFit.contain),
+          );
+        } else if (File(customLogo).existsSync()) {
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(File(customLogo), width: size, height: size, fit: BoxFit.contain),
+          );
+        }
+      } catch (_) {}
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.asset(
+        'assets/images/logo.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => Icon(Icons.corporate_fare_rounded, size: size * 0.7, color: Colors.grey),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -385,7 +526,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
               ),
               const SizedBox(height: 2),
               Text(
-                'اختر نوع التقرير لتعديل أعمدته وترويسته وحفظ قوالب مخصصة',
+                'تخصيص شكل التقرير، استبدال الشعارات، إضافة نصوص ثابتة، وتحديد العمليات الحسابية',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -449,7 +590,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
             child: Row(
               children: [
                 Text(
-                  'القوالب المحفوظة (${templates.length})',
+                  'نماذج وقوالب التقرير',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
@@ -457,16 +598,17 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                 const Spacer(),
                 FilledButton.tonalIcon(
                   style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    visualDensity: VisualDensity.compact,
                   ),
                   onPressed: () {
-                    final base = _selectedTemplate ?? (templates.isNotEmpty ? templates.first : null);
+                    final base = templates.isNotEmpty ? templates.first : null;
                     if (base != null) {
                       _loadTemplateIntoForm(base, isNew: true);
                     }
                   },
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('قالب جديد'),
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text('قالب جديد', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
@@ -482,19 +624,15 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                 final isSelected = !_isEditingNew && _selectedTemplate?.id == t.id;
 
                 return InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () => _loadTemplateIntoForm(t),
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _loadTemplateIntoForm(t, isNew: false),
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? (isDark
-                              ? const Color(0xFF2C2C2E)
-                              : const Color(0xFFEEF2FF))
-                          : (isDark
-                              ? const Color(0xFF202022)
-                              : Colors.white),
-                      borderRadius: BorderRadius.circular(14),
+                          ? const Color(0xFF4F46E5).withValues(alpha: 0.08)
+                          : (isDark ? const Color(0xFF222224) : Colors.white),
+                      borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isSelected
                             ? const Color(0xFF4F46E5)
@@ -606,7 +744,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
       color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
       child: Column(
         children: [
-          // Sub-header with Tab Bar & Save Button
+          // Sub-header with Tab Bar & Save/Preview Buttons
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: BoxDecoration(
@@ -621,31 +759,51 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: Row(
-                    children: [
-                      _SubTabPill(
-                        label: 'الأعمدة والمسميات (${_columns.where((c) => c.enabled).length})',
-                        icon: Icons.table_chart_outlined,
-                        isSelected: _editorTabIndex == 0,
-                        onTap: () => setState(() => _editorTabIndex = 0),
-                      ),
-                      const SizedBox(width: 8),
-                      _SubTabPill(
-                        label: 'الترويسة والشعار والخطوط',
-                        icon: Icons.title_rounded,
-                        isSelected: _editorTabIndex == 1,
-                        onTap: () => setState(() => _editorTabIndex = 1),
-                      ),
-                      const SizedBox(width: 8),
-                      _SubTabPill(
-                        label: 'خيارات التنسيق والصفحة',
-                        icon: Icons.tune_rounded,
-                        isSelected: _editorTabIndex == 2,
-                        onTap: () => setState(() => _editorTabIndex = 2),
-                      ),
-                    ],
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _SubTabPill(
+                          label: 'الأعمدة والحسابات (${_columns.where((c) => c.enabled).length})',
+                          icon: Icons.table_chart_outlined,
+                          isSelected: _editorTabIndex == 0,
+                          onTap: () => setState(() => _editorTabIndex = 0),
+                        ),
+                        const SizedBox(width: 8),
+                        _SubTabPill(
+                          label: 'الترويسة والشعارات والنصوص',
+                          icon: Icons.title_rounded,
+                          isSelected: _editorTabIndex == 1,
+                          onTap: () => setState(() => _editorTabIndex = 1),
+                        ),
+                        const SizedBox(width: 8),
+                        _SubTabPill(
+                          label: 'خيارات التنسيق والصفحة',
+                          icon: Icons.tune_rounded,
+                          isSelected: _editorTabIndex == 2,
+                          onTap: () => setState(() => _editorTabIndex = 2),
+                        ),
+                        const SizedBox(width: 8),
+                        _SubTabPill(
+                          label: 'معاينة القالب الحية',
+                          icon: Icons.visibility_rounded,
+                          isSelected: _editorTabIndex == 3,
+                          onTap: () => setState(() => _editorTabIndex = 3),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  onPressed: () => setState(() => _editorTabIndex = 3),
+                  icon: const Icon(Icons.preview_rounded, size: 18),
+                  label: const Text('معاينة حية', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(width: 10),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF4F46E5),
@@ -674,6 +832,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                 _buildColumnsTab(available, theme, isDark),
                 _buildHeaderBrandingTab(theme, isDark),
                 _buildLayoutOptionsTab(theme, isDark),
+                _buildLiveDocumentPreview(theme, isDark),
               ],
             ),
           ),
@@ -692,21 +851,26 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           color: isDark ? const Color(0xFF222224) : const Color(0xFFF1F5F9),
-          child: Row(
+          child: const Row(
             children: [
-              const SizedBox(width: 48, child: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
-              const SizedBox(width: 44, child: Text('تفعيل', style: TextStyle(fontWeight: FontWeight.bold))),
-              const Expanded(
+              SizedBox(width: 36, child: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
+              SizedBox(width: 44, child: Text('تفعيل', style: TextStyle(fontWeight: FontWeight.bold))),
+              Expanded(
                 flex: 4,
                 child: Text('مسمى العمود في التقرير (قابل للتعديل)', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
-              const SizedBox(width: 16),
-              const Expanded(
+              SizedBox(width: 12),
+              Expanded(
+                flex: 3,
+                child: Text('العملية الحسابية في الإجمالي', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              SizedBox(width: 12),
+              Expanded(
                 flex: 3,
                 child: Text('المعرف البرمجي / الوصف', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
-              const SizedBox(width: 100, child: Text('الترتيب', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold))),
-              const SizedBox(width: 44),
+              SizedBox(width: 80, child: Text('الترتيب', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold))),
+              SizedBox(width: 44),
             ],
           ),
         ),
@@ -745,7 +909,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                     ReorderableDragStartListener(
                       index: index,
                       child: const SizedBox(
-                        width: 48,
+                        width: 36,
                         child: Icon(Icons.drag_indicator_rounded, color: Colors.grey),
                       ),
                     ),
@@ -778,7 +942,54 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                         },
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 3,
+                      child: DropdownButtonFormField<String>(
+                        value: ['none', 'sum', 'avg', 'count', 'diff', 'min', 'max'].contains(col.calculationType)
+                            ? col.calculationType
+                            : 'none',
+                        isDense: true,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'none', child: Text('بدون عملية حسابية', style: TextStyle(fontSize: 12))),
+                          DropdownMenuItem(
+                            value: 'sum',
+                            child: Text('∑ جمع إجمالي (مجموع)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF4F46E5))),
+                          ),
+                          DropdownMenuItem(
+                            value: 'avg',
+                            child: Text('∅ متوسط حسابي', style: TextStyle(fontSize: 12, color: Color(0xFF0D9488))),
+                          ),
+                          DropdownMenuItem(
+                            value: 'count',
+                            child: Text('# عدد السجلات', style: TextStyle(fontSize: 12, color: Color(0xFFD97706))),
+                          ),
+                          DropdownMenuItem(
+                            value: 'diff',
+                            child: Text('− طرح / فرق صافي', style: TextStyle(fontSize: 12, color: Color(0xFFDC2626))),
+                          ),
+                          DropdownMenuItem(
+                            value: 'min',
+                            child: Text('↓ أقل قيمة (أدنى)', style: TextStyle(fontSize: 12)),
+                          ),
+                          DropdownMenuItem(
+                            value: 'max',
+                            child: Text('↑ أعلى قيمة (أقصى)', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          setState(() {
+                            _columns[index] = col.copyWith(calculationType: val ?? 'none');
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       flex: 3,
                       child: Text(
@@ -787,7 +998,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                       ),
                     ),
                     SizedBox(
-                      width: 100,
+                      width: 80,
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -852,7 +1063,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
               ),
               const Spacer(),
               Text(
-                'يمكنك سحب أي عمود لتغيير موضعه، أو تعديل اسمه بالضغط المباشر على الحقل.',
+                'يمكنك تحديد العملية الحسابية لكل عمود في صف الإجماليات (جمع، طرح، متوسط، عدد).',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -908,7 +1119,174 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
             title: const Text('تعيين كقالب معتمد افتراضي لهذا التقرير'),
             subtitle: const Text('سيتم تصدير التقارير تلقائياً بهذا الشكل لجميع المستخدمين ما لم يتم اختيار قالب آخر'),
           ),
-          const Divider(height: 32),
+
+          const Divider(height: 36),
+
+          // Custom Logos Replacement Section
+          Text(
+            'استبدال وإدارة شعارات التقرير (Logos)',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'يمكنك رفع شعار مخصص من حاسوبك لاستبدال الشعارات الافتراضية للجهة أو الجمعية',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              // Logo 1 Card
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF242426) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _buildLogoWidget(_customLogo1, _showLogo1, size: 64),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'الشعار الأيمن (الجهة / المؤسسة)',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _customLogo1 != null ? 'شعار مخصص تم رفعه' : 'الشعار الافتراضي للنظام',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: _customLogo1 != null ? const Color(0xFF4F46E5) : Colors.grey,
+                                    fontWeight: _customLogo1 != null ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _showLogo1,
+                        onChanged: (val) => setState(() => _showLogo1 = val == true),
+                        title: const Text('إظهار الشعار في التقرير', style: TextStyle(fontSize: 13)),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          FilledButton.tonalIcon(
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () => _pickCustomLogo(1),
+                            icon: const Icon(Icons.file_upload_outlined, size: 16),
+                            label: const Text('استبدال الشعار', style: TextStyle(fontSize: 12)),
+                          ),
+                          if (_customLogo1 != null) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: 'استعادة الشعار الافتراضي',
+                              icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                              onPressed: () => _resetLogo(1),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+
+              // Logo 2 Card
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF242426) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _buildLogoWidget(_customLogo2, _showLogo2, size: 64),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'الشعار الأيسر (الجمعية / الشريك)',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _customLogo2 != null ? 'شعار مخصص تم رفعه' : 'الشعار الافتراضي للنظام',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: _customLogo2 != null ? const Color(0xFF4F46E5) : Colors.grey,
+                                    fontWeight: _customLogo2 != null ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: _showLogo2,
+                        onChanged: (val) => setState(() => _showLogo2 = val == true),
+                        title: const Text('إظهار الشعار في التقرير', style: TextStyle(fontSize: 13)),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          FilledButton.tonalIcon(
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () => _pickCustomLogo(2),
+                            icon: const Icon(Icons.file_upload_outlined, size: 16),
+                            label: const Text('استبدال الشعار', style: TextStyle(fontSize: 12)),
+                          ),
+                          if (_customLogo2 != null) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: 'استعادة الشعار الافتراضي',
+                              icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                              onPressed: () => _resetLogo(2),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const Divider(height: 36),
+
           Text(
             'بيانات وهوية الترويسة الرسمية (Header)',
             style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
@@ -959,38 +1337,71 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
               prefixIcon: Icon(Icons.format_size_rounded),
             ),
           ),
+
+          const Divider(height: 36),
+
+          // Custom Static Text Section
+          Text(
+            'نصوص ثابتة وتنبيهات عامة (Custom Static Text)',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'إضافة كلام ثابت وتنويهات في التقرير (مثل تعليمات سرية البيانات أو ملاحظات الاعتماد)',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
           const SizedBox(height: 16),
+          TextField(
+            controller: _secondaryNoteController,
+            decoration: const InputDecoration(
+              labelText: 'نص تنبيه أو ملاحظة ثابتة أسفل العنوان (Secondary Disclaimer)',
+              hintText: 'مثال: ملاحظة: هذا التقرير سري وخاص بالمنظومة الداخلية وتعتمد بياناته لأغراض الجرد والمراجعة فقط',
+              helperText: 'يظهر هذا النص كشريط تنبيهي أنيق أعلى الجدول مباشرة في ملفات PDF والإكسل',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.announcement_outlined),
+            ),
+          ),
+
+          const Divider(height: 36),
+
+          Text(
+            'تذييل وهوامش الاعتماد والتوقيع (Signatures & Footer)',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _showLogo1,
-                  onChanged: (val) => setState(() => _showLogo1 = val == true),
-                  title: const Text('إظهار الشعار الأيمن'),
+                child: TextField(
+                  controller: _preparedByController,
+                  decoration: const InputDecoration(
+                    labelText: 'جهة الإعداد (Prepared By)',
+                    hintText: 'إعداد: إدارة الدعم الفني وتكنولوجيا المعلومات',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.person_outline_rounded),
+                  ),
                 ),
               ),
+              const SizedBox(width: 16),
               Expanded(
-                child: CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _showLogo2,
-                  onChanged: (val) => setState(() => _showLogo2 = val == true),
-                  title: const Text('إظهار الشعار الأيسر'),
+                child: TextField(
+                  controller: _approvedByController,
+                  decoration: const InputDecoration(
+                    labelText: 'جهة الاعتماد (Approved By)',
+                    hintText: 'يعتمد، رئيس قطاع الفروع / المدير التنفيذي',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.verified_user_outlined),
+                  ),
                 ),
               ),
             ],
-          ),
-          const Divider(height: 32),
-          Text(
-            'تذييل التقرير والملاحظات (Footer)',
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _footerNoteController,
             decoration: const InputDecoration(
-              labelText: 'توقيع أو اعتماد أسفل التقرير',
-              hintText: 'يعتمد، مدير تكنولوجيا المعلومات',
+              labelText: 'تذييل أسفل الصفحة (Footer Note)',
+              hintText: 'يعتمد، إدارة تكنولوجيا المعلومات',
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.draw_rounded),
             ),
@@ -1037,8 +1448,8 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
             contentPadding: EdgeInsets.zero,
             value: _includeSummaryRow,
             onChanged: (val) => setState(() => _includeSummaryRow = val),
-            title: const Text('تضمين صف الإجماليات (Totals Row) أسفل الجدول'),
-            subtitle: const Text('يقوم بحساب وجمع إجمالي الصفحات، الرزم، الهالك، الأعداد تلقائياً في نهاية التقرير'),
+            title: const Text('تضمين صف الإجماليات (Totals & Calculations Row) أسفل الجدول'),
+            subtitle: const Text('يقوم بحساب العمليات المحددة (جمع، متوسط، عدد، طرح) تلقائياً في نهاية التقرير'),
           ),
           const Divider(height: 32),
           Text(
@@ -1066,6 +1477,658 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
       ),
     );
   }
+
+  // Live WYSIWYG Document Preview
+  Widget _buildLiveDocumentPreview(ThemeData theme, bool isDark) {
+    final enabledCols = _columns.where((c) => c.enabled).toList();
+    final isLandscape = _orientation == 'landscape';
+    final sampleRows = _selectedReportType == 'printer_consumption'
+        ? _samplePrinterRows
+        : _sampleTicketRows;
+
+    var title = _titleFormatController.text.trim();
+    if (title.isEmpty) {
+      title = _selectedReportType == 'printer_consumption'
+          ? 'استهلاك الفروع للورق عن شهر أكتوبر 2026'
+          : 'تقرير تذاكر الدعم الفني والشكاوى';
+    } else {
+      title = title
+          .replaceAll('{month}', 'أكتوبر')
+          .replaceAll('{year}', '2026')
+          .replaceAll('{entity}', 'الفروع')
+          .replaceAll('{ticketType}', 'تذاكر الدعم الفني');
+    }
+
+    return Container(
+      color: isDark ? const Color(0xFF141416) : const Color(0xFFF1F5F9),
+      child: Column(
+        children: [
+          // Top Preview Controls Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E1E20) : Colors.white,
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.06),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.remove_red_eye_rounded, size: 16, color: Color(0xFF059669)),
+                      SizedBox(width: 6),
+                      Text(
+                        'معاينة حية ومطابقة لمستند الطباعة والإكسل (Live Preview)',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF059669)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Text(
+                  'اتجاه الصفحة: ${isLandscape ? "عرضي (Landscape)" : "طولي (Portrait)"}',
+                  style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '|   الأعمدة المفعلة: ${enabledCols.length}',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const Spacer(),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: const Icon(Icons.tune_rounded, size: 16),
+                  label: const Text('تعديل الحسابات والأعمدة', style: TextStyle(fontSize: 12)),
+                  onPressed: () => setState(() => _editorTabIndex = 0),
+                ),
+              ],
+            ),
+          ),
+
+          // Document Paper View Area
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(28),
+              child: Center(
+                child: Container(
+                  width: isLandscape ? 1040 : 760,
+                  constraints: const BoxConstraints(minHeight: 520),
+                  padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.14),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 1. Header with Logos and Title
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Right Logo
+                          _buildLogoWidget(_customLogo1, _showLogo1, size: 70),
+                          const SizedBox(width: 16),
+
+                          // Center Organization Titles
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Text(
+                                  _line1Controller.text.trim().isNotEmpty
+                                      ? _line1Controller.text.trim()
+                                      : 'جمعية رجال الأعمال والمستثمرين بالدقهلية',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  _line2Controller.text.trim().isNotEmpty
+                                      ? _line2Controller.text.trim()
+                                      : 'مشروع تنمية المنشآت الصغيرة والحرفية',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF334155),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _line3Controller.text.trim().isNotEmpty
+                                      ? _line3Controller.text.trim()
+                                      : 'رقم الإشهار: 777 لسنة 1995 - رقم الترخيص: 1031',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+
+                          // Left Logo
+                          _buildLogoWidget(_customLogo2, _showLogo2, size: 70),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+                      const Divider(color: Color(0xFFCBD5E1), height: 1),
+                      const SizedBox(height: 14),
+
+                      // 2. Main Report Title
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+
+                      // 3. Secondary Static Note / Disclaimer
+                      if (_secondaryNoteController.text.trim().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFF475569)),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  _secondaryNoteController.text.trim(),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF475569),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 20),
+
+                      // 4. Data Table Preview
+                      if (enabledCols.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(32),
+                          alignment: Alignment.center,
+                          child: const Text('لم يتم تفعيل أي أعمدة في هذا القالب بعد.'),
+                        )
+                      else
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: _buildDocumentPreviewTable(enabledCols, sampleRows),
+                        ),
+
+                      const SizedBox(height: 28),
+
+                      // 5. Signatures and Prepared By / Approved By Block
+                      if (_preparedByController.text.trim().isNotEmpty ||
+                          _approvedByController.text.trim().isNotEmpty) ...[
+                        Row(
+                          children: [
+                            if (_preparedByController.text.trim().isNotEmpty)
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _preparedByController.text.trim(),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12.5,
+                                        color: Color(0xFF1E293B),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    const Text('التوقيع: .......................................',
+                                        style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                                  ],
+                                ),
+                              ),
+                            if (_approvedByController.text.trim().isNotEmpty)
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      _approvedByController.text.trim(),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12.5,
+                                        color: Color(0xFF1E293B),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    const Text('التوقيع والاعتماد: ..............................',
+                                        style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+
+                      // 6. Footer Note
+                      if (_footerNoteController.text.trim().isNotEmpty)
+                        Text(
+                          _footerNoteController.text.trim(),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontStyle: FontStyle.italic,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocumentPreviewTable(
+    List<ReportColumn> enabledCols,
+    List<Map<String, dynamic>> sampleRows,
+  ) {
+    return Table(
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      columnWidths: {
+        for (int i = 0; i < enabledCols.length; i++)
+          i: FixedColumnWidth(math.max(70.0, (enabledCols[i].width.toDouble() * 1.1))),
+      },
+      border: TableBorder.all(
+        color: const Color(0xFFCBD5E1),
+        width: 1,
+      ),
+      children: [
+        // Header Row
+        TableRow(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF1F5F9),
+          ),
+          children: [
+            for (final col in enabledCols)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      col.label,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    if (col.calculationType != 'none')
+                      Container(
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _calcBadgeLabel(col.calculationType),
+                          style: const TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF4F46E5),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+
+        // Data Rows
+        for (int r = 0; r < sampleRows.length; r++)
+          TableRow(
+            decoration: BoxDecoration(
+              color: r.isEven ? Colors.white : const Color(0xFFF8FAFC),
+            ),
+            children: [
+              for (final col in enabledCols)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  alignment: _alignmentFrom(col.align),
+                  child: Text(
+                    _formatPreviewValue(sampleRows[r][col.key]),
+                    textAlign: _textAlignFrom(col.align),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+
+        // Summary Row (Calculations)
+        if (_includeSummaryRow && sampleRows.isNotEmpty)
+          TableRow(
+            decoration: const BoxDecoration(
+              color: Color(0xFFE2E8F0),
+            ),
+            children: [
+              for (int i = 0; i < enabledCols.length; i++)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _computePreviewSummary(enabledCols[i], sampleRows, i),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11.5,
+                      color: enabledCols[i].calculationType != 'none'
+                          ? const Color(0xFF312E81)
+                          : const Color(0xFF0F172A),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  String _calcBadgeLabel(String calc) {
+    switch (calc) {
+      case 'sum':
+        return '∑ جمع';
+      case 'avg':
+        return '∅ متوسط';
+      case 'count':
+        return '# عدد';
+      case 'diff':
+        return '− طرح';
+      case 'min':
+        return '↓ أدنى';
+      case 'max':
+        return '↑ أقصى';
+      default:
+        return '';
+    }
+  }
+
+  Alignment _alignmentFrom(String align) {
+    switch (align) {
+      case 'right':
+        return Alignment.centerRight;
+      case 'left':
+        return Alignment.centerLeft;
+      default:
+        return Alignment.center;
+    }
+  }
+
+  TextAlign _textAlignFrom(String align) {
+    switch (align) {
+      case 'right':
+        return TextAlign.right;
+      case 'left':
+        return TextAlign.left;
+      default:
+        return TextAlign.center;
+    }
+  }
+
+  String _formatPreviewValue(dynamic val) {
+    if (val == null) return '—';
+    if (val is num) {
+      return val is int || val == val.roundToDouble()
+          ? val.toInt().toString()
+          : val.toStringAsFixed(1);
+    }
+    return val.toString();
+  }
+
+  String _computePreviewSummary(ReportColumn col, List<Map<String, dynamic>> rows, int colIdx) {
+    final key = col.key;
+    final calc = col.calculationType;
+
+    if (calc == 'none') {
+      if (colIdx == 0) return 'الإجمالي العام';
+      if (colIdx == 1 && key != 'monoPages') return 'عدد السجلات: ${rows.length}';
+      final nums = rows.map((r) => num.tryParse(r[key]?.toString() ?? '')).whereType<num>().toList();
+      if (nums.isNotEmpty) {
+        final s = nums.reduce((a, b) => a + b);
+        final formatted = s is int || s == s.roundToDouble() ? s.toInt().toString() : s.toStringAsFixed(1);
+        return formatted;
+      }
+      return '—';
+    }
+
+    if (calc == 'count') {
+      final valid = rows.where((r) => r[key] != null && r[key].toString().isNotEmpty).length;
+      return '# $valid سجلات';
+    }
+
+    final nums = rows.map((r) => num.tryParse(r[key]?.toString() ?? '')).whereType<num>().toList();
+    if (nums.isEmpty) return '—';
+
+    switch (calc) {
+      case 'sum':
+        final s = nums.reduce((a, b) => a + b);
+        final formatted = s is int || s == s.roundToDouble() ? s.toInt().toString() : s.toStringAsFixed(1);
+        return '∑ $formatted';
+      case 'avg':
+        final avg = nums.reduce((a, b) => a + b) / nums.length;
+        return '∅ ${avg.toStringAsFixed(1)}';
+      case 'diff':
+        final diff = nums.length == 1
+            ? nums.first
+            : nums.skip(1).fold<num>(nums.first, (acc, v) => acc - v);
+        return '− ${diff > 0 ? "+$diff" : diff.toString()}';
+      case 'min':
+        final m = nums.reduce((a, b) => a < b ? a : b);
+        return '↓ $m';
+      case 'max':
+        final m = nums.reduce((a, b) => a > b ? a : b);
+        return '↑ $m';
+      default:
+        return '—';
+    }
+  }
+
+  // Realistic sample datasets for live previews
+  static const List<Map<String, dynamic>> _samplePrinterRows = [
+    {
+      'index': 1,
+      'branchName': 'فرع المنصورة الرئيسي',
+      'printerName': 'HP LaserJet Pro 400',
+      'monoPages': 4250,
+      'colorPages': 1320,
+      'wastePages': 45,
+      'scanPages': 110,
+      'totalPaper': 5615,
+      'overallTotalReams': 11.2,
+      'branchCode': 'BR-01',
+      'ipAddress': '192.168.1.101',
+      'model': 'M402dne',
+      'serialNumber': 'VNB3K12345',
+      'vendor': 'HP',
+      'status': 'متصلة',
+      'requiredReams': 12,
+      'estimatedClients': 350,
+      'currentTotal': 84200,
+      'lifetimeTotal': 142000,
+      'dataQuality': 'ممتازة 100%',
+    },
+    {
+      'index': 2,
+      'branchName': 'فرع ميت غمر',
+      'printerName': 'Canon i-SENSYS LBP',
+      'monoPages': 3100,
+      'colorPages': 580,
+      'wastePages': 30,
+      'scanPages': 75,
+      'totalPaper': 3710,
+      'overallTotalReams': 7.4,
+      'branchCode': 'BR-02',
+      'ipAddress': '192.168.2.105',
+      'model': 'LBP623Cdw',
+      'serialNumber': 'CAN789012',
+      'vendor': 'Canon',
+      'status': 'متصلة',
+      'requiredReams': 8,
+      'estimatedClients': 230,
+      'currentTotal': 52100,
+      'lifetimeTotal': 91000,
+      'dataQuality': 'ممتازة 100%',
+    },
+    {
+      'index': 3,
+      'branchName': 'فرع السنبلاوين',
+      'printerName': 'Xerox Phaser 3020',
+      'monoPages': 2850,
+      'colorPages': 0,
+      'wastePages': 40,
+      'scanPages': 50,
+      'totalPaper': 2890,
+      'overallTotalReams': 5.8,
+      'branchCode': 'BR-03',
+      'ipAddress': '192.168.3.110',
+      'model': 'Phaser 3020',
+      'serialNumber': 'XRX456789',
+      'vendor': 'Xerox',
+      'status': 'متصلة',
+      'requiredReams': 6,
+      'estimatedClients': 180,
+      'currentTotal': 38400,
+      'lifetimeTotal': 64000,
+      'dataQuality': 'جيدة 95%',
+    },
+    {
+      'index': 4,
+      'branchName': 'فرع دكرنس',
+      'printerName': 'Brother HL-L2360D',
+      'monoPages': 1900,
+      'colorPages': 450,
+      'wastePages': 20,
+      'scanPages': 65,
+      'totalPaper': 2370,
+      'overallTotalReams': 4.7,
+      'branchCode': 'BR-04',
+      'ipAddress': '192.168.4.112',
+      'model': 'HL-L2360D',
+      'serialNumber': 'BRT112233',
+      'vendor': 'Brother',
+      'status': 'متصلة',
+      'requiredReams': 5,
+      'estimatedClients': 150,
+      'currentTotal': 29100,
+      'lifetimeTotal': 48000,
+      'dataQuality': 'ممتازة 100%',
+    },
+  ];
+
+  static const List<Map<String, dynamic>> _sampleTicketRows = [
+    {
+      'ticketNumber': '#TKT-1041',
+      'title': 'عطل بطابعة الاستقبال',
+      'status': 'مغلقة',
+      'priority': 'عالية',
+      'department': 'الدعم الفني',
+      'branch': 'فرع المنصورة',
+      'technician': 'أحمد محمود',
+      'resolutionHours': 3.5,
+      'updatesCount': 4,
+      'rating': '★★★★★',
+      'lastMessage': 'تم استبدال بكرة سحب الورق بنجاح',
+    },
+    {
+      'ticketNumber': '#TKT-1042',
+      'title': 'طلب حبر أسود جديد',
+      'status': 'تم الحل',
+      'priority': 'عادية',
+      'department': 'المشتريات',
+      'branch': 'فرع ميت غمر',
+      'technician': 'محمد سعيد',
+      'resolutionHours': 5.0,
+      'updatesCount': 2,
+      'rating': '★★★★☆',
+      'lastMessage': 'تم تسليم عبوة الحبر لمسؤول الفرع',
+    },
+    {
+      'ticketNumber': '#TKT-1043',
+      'title': 'انحشار ورق متكرر في الدرج 2',
+      'status': 'قيد المتابعة',
+      'priority': 'حرجة',
+      'department': 'الصيانة',
+      'branch': 'فرع طلخا',
+      'technician': 'محمود حسن',
+      'resolutionHours': 12.0,
+      'updatesCount': 5,
+      'rating': '—',
+      'lastMessage': 'جارٍ فحص التروس الداخلية للطابعة',
+    },
+    {
+      'ticketNumber': '#TKT-1044',
+      'title': 'تهيئة طابعة شبكية جديدة',
+      'status': 'مغلقة',
+      'priority': 'منخفضة',
+      'department': 'الشبكات',
+      'branch': 'فرع السنبلاوين',
+      'technician': 'خالد إبراهيم',
+      'resolutionHours': 1.5,
+      'updatesCount': 3,
+      'rating': '★★★★★',
+      'lastMessage': 'تم تثبيت التعريفات لجميع أجهزة الفرع',
+    },
+  ];
 }
 
 class _TypePill extends StatelessWidget {

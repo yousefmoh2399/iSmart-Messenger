@@ -12,6 +12,11 @@ const ReportColumnSchema = new mongoose.Schema(
       enum: ["center", "right", "left"],
       default: "center",
     },
+    calculationType: {
+      type: String,
+      enum: ["none", "sum", "avg", "count", "diff", "min", "max"],
+      default: "none",
+    },
   },
   { _id: false },
 );
@@ -33,11 +38,15 @@ const ReportHeaderConfigSchema = new mongoose.Schema(
     titleFormat: { type: String, default: "" },
     showLogo1: { type: Boolean, default: true },
     showLogo2: { type: Boolean, default: true },
+    customLogo1: { type: String, default: "" },
+    customLogo2: { type: String, default: "" },
+    secondaryNote: { type: String, default: "" },
     footerNote: {
       type: String,
       default: "يعتمد، إدارة تكنولوجيا المعلومات",
     },
     preparedByLabel: { type: String, default: "إعداد: " },
+    approvedByLabel: { type: String, default: "اعتماد: " },
   },
   { _id: false },
 );
