@@ -251,7 +251,7 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   return workbook.xlsx.writeBuffer();
 }
 
-async function exportCustomReport(actor, { type = "global", format = "pdf", branchId = null, month = null, year = null }) {
+async function exportCustomReport(actor, { type = "global", format = "pdf", branchId = null, month = null, year = null, templateId = null }) {
   const printerService = require("./printer.service");
   
   const m = month || new Date().getMonth() + 1;
@@ -272,7 +272,7 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
   let formattedData = [];
 
   if (type === "global") {
-    formattedData = consumptionList.map(c => {
+    formattedData = consumptionList.map((c, idx) => {
       const branchWaste = wasteStats.filter(w => w.branchId?.toString() === c.branchId?.toString());
       const wastePages = branchWaste.reduce((sum, w) => sum + (w.estimatedWastePages || 0), 0);
       
@@ -284,19 +284,28 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
       }
 
       const totalPaper = (c.totalPages || 0) + wastePages;
-      const overallTotalReams = (totalPaper / 500).toFixed(2);
+      const overallTotalReams = Number((totalPaper / 500).toFixed(2));
 
       return {
+        index: idx + 1,
         branchName: c.branchName || "فرع غير معروف",
+        branchCode: c.branchCode || "",
+        printerName: "جميع طابعات الفرع",
         monoPages: c.monoPages || 0,
         colorPages: c.colorPages || 0,
         wastePages: wastePages,
         scanPages: scanPages,
         totalPaper: totalPaper,
-        overallTotalReams: overallTotalReams
+        overallTotalReams: overallTotalReams,
+        requiredReams: Math.ceil(totalPaper / 500),
+        estimatedClients: Math.ceil(totalPaper / 16),
+        currentTotal: c.totalPages || 0,
+        lifetimeTotal: c.lifetimeTotal || c.totalPages || 0,
+        dataQuality: c.dataQuality || "مكتمل",
       };
     });
   } else {
+    let globalIdx = 1;
     for (const c of consumptionList) {
        for (const p of (c.printers || [])) {
           const printerWaste = wasteStats.filter(w => w.printerId?.toString() === p.printerId?.toString());
@@ -304,17 +313,29 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
           const scanPages = p.scanPages || 0;
           
           const totalPaper = (p.totalPages || 0) + wastePages;
-          const overallTotalReams = (totalPaper / 500).toFixed(2);
+          const overallTotalReams = Number((totalPaper / 500).toFixed(2));
 
           formattedData.push({
-            branchName: c.branchName,
+            index: globalIdx++,
+            branchName: c.branchName || "فرع غير معروف",
+            branchCode: c.branchCode || "",
             printerName: p.printerName || p.ipAddress || "طابعة غير معروفة",
+            ipAddress: p.ipAddress || "",
+            model: p.model || "",
+            serialNumber: p.serialNumber || "",
+            vendor: p.vendor || "",
+            status: p.status === "online" ? "متصلة" : "غير متصلة",
             monoPages: p.monoPages || 0,
             colorPages: p.colorPages || 0,
             wastePages: wastePages,
             scanPages: scanPages,
             totalPaper: totalPaper,
-            overallTotalReams: overallTotalReams
+            overallTotalReams: overallTotalReams,
+            requiredReams: Math.ceil(totalPaper / 500),
+            estimatedClients: Math.ceil(totalPaper / 16),
+            currentTotal: p.counters?.totalPages || 0,
+            lifetimeTotal: p.lifetimeCounters?.totalPages || 0,
+            dataQuality: c.dataQuality || "مكتمل",
           });
        }
     }
@@ -322,11 +343,40 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
 
   let buffer;
   const reportName = type === "global" ? "printer-global-report" : `printer-branch-report-${y}`;
-  
-  if (format === "xlsx") {
-    buffer = await buildCustomExcelReport(formattedData, reportName, m, y, type);
-  } else {
-    buffer = await buildCustomPdfReport(formattedData, reportName, m, y, type);
+  const entityName = type === "global" ? "الفروع" : (consumptionList[0]?.branchName || "الفرع");
+  const defaultTitle = `استهلاك ${entityName} للورق عن شهر ${m || ""} ${y || ""}`;
+
+  try {
+    const { getActiveTemplate } = require("../../reports/services/report-template.service");
+    const { buildDynamicPdfReport, buildDynamicExcelReport } = require("../../reports/services/report-generator.service");
+    const template = await getActiveTemplate("printer_consumption", templateId);
+
+    if (format === "xlsx") {
+      buffer = await buildDynamicExcelReport({
+        template,
+        data: formattedData,
+        reportTitle: defaultTitle,
+        month: m,
+        year: y,
+        entityName,
+      });
+    } else {
+      buffer = await buildDynamicPdfReport({
+        template,
+        data: formattedData,
+        reportTitle: defaultTitle,
+        month: m,
+        year: y,
+        entityName,
+      });
+    }
+  } catch (err) {
+    console.error("Dynamic report generation fallback due to:", err);
+    if (format === "xlsx") {
+      buffer = await buildCustomExcelReport(formattedData, reportName, m, y, type);
+    } else {
+      buffer = await buildCustomPdfReport(formattedData, reportName, m, y, type);
+    }
   }
 
   const fileName = `${reportName}-${Date.now()}.${format === "xlsx" ? "xlsx" : "pdf"}`;

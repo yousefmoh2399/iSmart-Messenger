@@ -102,6 +102,7 @@ const getConsumptionHandler = asyncHandler(async (req, res) => {
     fromYear: req.query.fromYear || null,
     toMonth: req.query.toMonth || null,
     toYear: req.query.toYear || null,
+    templateId: req.query.templateId || null,
   });
   sendChatResponse(res, { data: result, legacy: result });
 });

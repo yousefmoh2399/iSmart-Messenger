@@ -8,6 +8,8 @@ import '../../../shared/widgets/button_loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../chat/models/chat_models.dart';
 import '../models/ticket_models.dart';
+import '../../reports/presentation/custom_report_export_dialog.dart';
+import '../../reports/presentation/report_templates_screen.dart';
 import 'tickets_ui_kit.dart';
 
 class _TicketsUi {
@@ -173,7 +175,7 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
     }
   }
 
-  Future<void> _exportTicketsReport({String format = 'xlsx'}) async {
+  Future<void> _exportTicketsReport({String format = 'xlsx', String? templateId}) async {
     try {
       final status = widget.closedOnly
           ? 'closed'
@@ -198,12 +200,27 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
             priority: priority,
             q: _searchController.text.trim(),
             format: format,
+            templateId: templateId,
           );
       if (!mounted) return;
       _showMessage('تم تصدير تقرير التذاكر.');
     } catch (error) {
       if (!mounted) return;
       _showMessage(error.toString(), isError: true);
+    }
+  }
+
+  Future<void> _showCustomExportDialog() async {
+    final result = await CustomReportExportDialog.show(
+      context: context,
+      reportType: 'tickets',
+      title: 'تصدير تقرير ${_activeTab.label}',
+    );
+    if (result != null) {
+      await _exportTicketsReport(
+        format: result.format,
+        templateId: result.templateId,
+      );
     }
   }
 
@@ -481,35 +498,22 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
               if (data.settings.canExportTicketReport ||
                   data.settings.canExportComplaintReport ||
                   data.settings.canExportSuggestionReport)
-                PopupMenuButton<String>(
-                  onSelected: (format) => _exportTicketsReport(format: format),
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'pdf',
-                      child: Row(
-                        children: [
-                          Icon(Icons.picture_as_pdf, color: Colors.red),
-                          SizedBox(width: 8),
-                          Text('تصدير كـ PDF'),
-                        ],
+                FilledButton.tonalIcon(
+                  onPressed: _showCustomExportDialog,
+                  icon: const Icon(Icons.file_download_outlined),
+                  label: const Text('تصدير التقرير'),
+                ),
+              if (authUser?.role == 'admin')
+                IconButton(
+                  tooltip: 'تخصيص قوالب التقارير',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ReportTemplatesScreen(
+                        initialReportType: 'tickets',
                       ),
                     ),
-                    const PopupMenuItem(
-                      value: 'xlsx',
-                      child: Row(
-                        children: [
-                          Icon(Icons.table_chart, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text('تصدير كـ Excel'),
-                        ],
-                      ),
-                    ),
-                  ],
-                  child: TextButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.file_download_outlined),
-                    label: const Text('تصدير'),
                   ),
+                  icon: const Icon(Icons.tune_rounded),
                 ),
             ],
           ),

@@ -143,6 +143,7 @@ router.get(
   requirePrinterAccessMiddleware,
   [
     query("branchId").optional().isMongoId(),
+    query("templateId").optional().isMongoId(),
     query("printerId").optional().isMongoId(),
     query("month").optional().isInt({ min: 1, max: 12 }),
     query("year").optional().isInt({ min: 2000, max: 2100 }),

@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
+import '../../reports/presentation/custom_report_export_dialog.dart';
+import '../../reports/presentation/report_templates_controller.dart';
+import '../../reports/presentation/report_templates_screen.dart';
 import '../models/printer_models.dart';
 
 class PrinterMonitoringScreen extends ConsumerStatefulWidget {
@@ -140,6 +143,25 @@ class _PrinterMonitoringScreenState
       _message('اكتملت مزامنة الطابعات بنجاح.');
     } else if (status == 'partial') {
       _message('انتهت المزامنة مع بعض التحذيرات.');
+    }
+  }
+
+  Future<void> _openCustomExportDialog({String defaultFormat = 'xlsx'}) async {
+    final result = await CustomReportExportDialog.show(
+      context: context,
+      reportType: 'printer_consumption',
+      title: 'تصدير تقرير الطابعات ${_selectedBranchId == null ? "(كل الفروع)" : ""}',
+    );
+    if (result != null) {
+      await _run(
+        () => ref.read(printerControllerProvider.notifier).exportReport(
+          format: result.format,
+          type: _selectedBranchId == null ? 'global' : 'branch',
+          branchId: _selectedBranchId,
+          templateId: result.templateId,
+        ),
+        'تم تصدير تقرير الطابعات بصيغة ${result.format.toUpperCase()} بنجاح.',
+      );
     }
   }
 
@@ -358,6 +380,7 @@ class _PrinterMonitoringScreenState
   }
 
   Future<void> _showMonthlyConsumptionDialog(BuildContext context) async {
+    final authUser = ref.read(authControllerProvider).valueOrNull;
     final now = DateTime.now();
     final overview = ref.read(printerControllerProvider).valueOrNull;
     final branches = overview?.branches ?? [];
@@ -372,8 +395,9 @@ class _PrinterMonitoringScreenState
             initialMonth: now.month,
             initialBranchId: _selectedBranchId,
             branches: branches,
+            isAdmin: authUser?.isAdmin == true,
             onExportReport:
-                (format, branchId, fromMonth, fromYear, toMonth, toYear) async {
+                (format, branchId, fromMonth, fromYear, toMonth, toYear, templateId) async {
                   try {
                     await ref
                         .read(printerControllerProvider.notifier)
@@ -385,6 +409,7 @@ class _PrinterMonitoringScreenState
                           fromYear: fromYear,
                           toMonth: toMonth,
                           toYear: toYear,
+                          templateId: templateId,
                         );
                     if (context.mounted) {
                       _message(
@@ -507,28 +532,19 @@ class _PrinterMonitoringScreenState
           onFullSync: canSync ? _runFullSync : null,
           onStopFullSync: canSync ? _stopFullSync : null,
           onExportPdf: canExport
-              ? () => _run(
-                  () => ref
-                      .read(printerControllerProvider.notifier)
-                      .exportReport(
-                        format: 'pdf',
-                        type: _selectedBranchId == null ? 'global' : 'branch',
-                        branchId: _selectedBranchId,
-                      ),
-                  'تم تصدير تقرير PDF.',
-                )
+              ? () => _openCustomExportDialog(defaultFormat: 'pdf')
               : null,
           onExportExcel: canExport
-              ? () => _run(
-                  () => ref
-                      .read(printerControllerProvider.notifier)
-                      .exportReport(
-                        format: 'xlsx',
-                        type: _selectedBranchId == null ? 'global' : 'branch',
-                        branchId: _selectedBranchId,
+              ? () => _openCustomExportDialog(defaultFormat: 'xlsx')
+              : null,
+          onOpenReportTemplates: authUser?.isAdmin == true
+              ? () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ReportTemplatesScreen(
+                        initialReportType: 'printer_consumption',
                       ),
-                  'تم تصدير تقرير Excel.',
-                )
+                    ),
+                  )
               : null,
           onShowMonthlyConsumption: canExport
               ? () => _showMonthlyConsumptionDialog(context)
@@ -616,6 +632,7 @@ class _PrinterContent extends StatelessWidget {
     required this.onDiscover,
     required this.onSyncPrinter,
     required this.onDeletePrinter,
+    this.onOpenReportTemplates,
   });
 
   final PrinterOverviewData data;
@@ -646,6 +663,7 @@ class _PrinterContent extends StatelessWidget {
   final ValueChanged<String>? onDiscover;
   final ValueChanged<String>? onSyncPrinter;
   final ValueChanged<String>? onDeletePrinter;
+  final VoidCallback? onOpenReportTemplates;
 
   @override
   Widget build(BuildContext context) {
@@ -776,6 +794,13 @@ class _PrinterContent extends StatelessWidget {
                       busy: busy,
                       onPressed: onShowMonthlyConsumption,
                     ),
+                    if (authUser?.isAdmin == true)
+                      _ActionButton(
+                        icon: Icons.tune_rounded,
+                        label: 'قوالب التقارير',
+                        busy: busy,
+                        onPressed: onOpenReportTemplates,
+                      ),
                     _ActionButton(
                       icon: Icons.add_rounded,
                       label: 'فرع',
@@ -3781,12 +3806,14 @@ class _MonthlyConsumptionDialogContent extends ConsumerStatefulWidget {
     required this.initialBranchId,
     required this.branches,
     required this.onExportReport,
+    this.isAdmin = false,
   });
 
   final int initialYear;
   final int initialMonth;
   final String? initialBranchId;
   final List<PrinterBranchItem> branches;
+  final bool isAdmin;
   final Future<void> Function(
     String format,
     String? branchId,
@@ -3794,6 +3821,7 @@ class _MonthlyConsumptionDialogContent extends ConsumerStatefulWidget {
     int fromYear,
     int toMonth,
     int toYear,
+    String? templateId,
   )
   onExportReport;
 
@@ -3809,6 +3837,7 @@ class _MonthlyConsumptionDialogContentState
   late int _toYear;
   late int _toMonth;
   String? _selectedBranchId;
+  String? _selectedTemplateId;
   bool _isLoading = false;
   Map<String, dynamic>? _consumptionData;
   String? _errorMessage;
@@ -4105,6 +4134,52 @@ class _MonthlyConsumptionDialogContentState
                         ),
                       ),
                       const SizedBox(width: 16),
+                      Expanded(
+                        child: Consumer(
+                          builder: (context, ref, _) {
+                            final templatesAsync = ref.watch(reportTemplatesProvider('printer_consumption'));
+                            return templatesAsync.when(
+                              data: (templates) => DropdownButtonFormField<String?>(
+                                value: _selectedTemplateId,
+                                isDense: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'قالب التقرير (اختياري)',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                ),
+                                items: [
+                                  const DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text('القالب الافتراضي'),
+                                  ),
+                                  ...templates.map(
+                                    (t) => DropdownMenuItem<String?>(
+                                      value: t.id,
+                                      child: Text(t.name),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (val) => setState(() => _selectedTemplateId = val),
+                              ),
+                              loading: () => const SizedBox.shrink(),
+                              error: (_, __) => const SizedBox.shrink(),
+                            );
+                          },
+                        ),
+                      ),
+                      if (widget.isAdmin)
+                        IconButton(
+                          tooltip: 'تخصيص قوالب التقارير',
+                          icon: const Icon(Icons.tune_rounded),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const ReportTemplatesScreen(
+                                initialReportType: 'printer_consumption',
+                              ),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 8),
                       _ActionButton(
                         icon: Icons.picture_as_pdf_rounded,
                         label: 'تصدير PDF',
@@ -4116,6 +4191,7 @@ class _MonthlyConsumptionDialogContentState
                           _fromYear,
                           _toMonth,
                           _toYear,
+                          _selectedTemplateId,
                         ),
                       ),
                       _ActionButton(
@@ -4129,6 +4205,7 @@ class _MonthlyConsumptionDialogContentState
                           _fromYear,
                           _toMonth,
                           _toYear,
+                          _selectedTemplateId,
                         ),
                       ),
                     ],

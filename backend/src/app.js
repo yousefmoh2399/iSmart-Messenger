@@ -190,6 +190,8 @@ app.use("/api/admin/tickets", ticketRoutes);
 app.use("/api/printers", printerRoutes);
 app.use("/api/admin/printers", printerRoutes);
 app.use("/api/purchase-requests", purchasingRoutes);
+app.use("/api/report-templates", require("./reports/routes/report-template.routes"));
+app.use("/api/admin/report-templates", require("./reports/routes/report-template.routes"));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

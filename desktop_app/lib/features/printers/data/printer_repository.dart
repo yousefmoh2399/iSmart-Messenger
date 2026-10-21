@@ -160,6 +160,7 @@ class PrinterRepository {
     int? fromYear,
     int? toMonth,
     int? toYear,
+    String? templateId,
   }) async {
     final response = await _apiClient.dio.get<dynamic>(
       '/api/printers/reports/export',
@@ -172,6 +173,8 @@ class PrinterRepository {
         if (fromYear != null) 'fromYear': fromYear,
         if (toMonth != null) 'toMonth': toMonth,
         if (toYear != null) 'toYear': toYear,
+        if (templateId != null && templateId.trim().isNotEmpty)
+          'templateId': templateId.trim(),
       },
       options: Options(responseType: ResponseType.bytes),
     );

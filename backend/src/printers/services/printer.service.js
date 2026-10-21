@@ -1693,7 +1693,7 @@ async function ensurePrinterReplacementIndexes() {
   return printerIndexMigrationPromise;
 }
 
-async function exportReport(actor, { type = "global", format = "pdf", branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null }) {
+async function exportReport(actor, { type = "global", format = "pdf", branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null, templateId = null }) {
   if (type === "printer") {
     const printer = await Printer.findOne({ _id: printerId, deletedAt: null })
       .populate("branchId", "name code")
@@ -1730,7 +1730,7 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
 
   if (type === "global" || type === "branch") {
     const { exportCustomReport } = require("./printer-custom-reports.service");
-    return exportCustomReport(actor, { type, format, branchId, month, year });
+    return exportCustomReport(actor, { type, format, branchId, month, year, templateId });
   }
 
   const [branches, printers, snapshots, waste] = await Promise.all([

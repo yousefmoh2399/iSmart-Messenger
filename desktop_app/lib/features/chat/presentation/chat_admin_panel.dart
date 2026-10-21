@@ -2256,6 +2256,7 @@ import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../admin/presentation/backup_screen.dart';
 import '../../admin/presentation/update_management_screen.dart';
 import '../../admin/presentation/server_settings_screen.dart';
+import '../../reports/presentation/report_templates_screen.dart';
 import '../models/chat_models.dart';
 
 class ChatAdminPanel extends ConsumerStatefulWidget {
@@ -2399,6 +2400,7 @@ class _ChatAdminPanelState extends ConsumerState<ChatAdminPanel>
       if (_can('canManageSystem')) 'server',
       if (_can('canManageUpdates')) 'updates',
       if (_can('canManageBackups')) 'backups',
+      if (widget.currentUser.isAdmin) 'reports',
     ];
     return tabs.isEmpty ? const <String>['blocked'] : tabs;
   }
@@ -2549,6 +2551,17 @@ class _ChatAdminPanelState extends ConsumerState<ChatAdminPanel>
           ),
           mobileTab: const Tab(text: 'نسخ احتياطي'),
           child: const BackupScreen(),
+        ),
+      if (_visibleTabKeys.contains('reports'))
+        _AdminPanelTabData(
+          label: 'قوالب التقارير',
+          destination: const NavigationRailDestination(
+            icon: Icon(Icons.table_view_outlined),
+            selectedIcon: Icon(Icons.table_view),
+            label: Text('قوالب التقارير'),
+          ),
+          mobileTab: const Tab(text: 'قوالب التقارير'),
+          child: const ReportTemplatesScreen(),
         ),
     ];
 
