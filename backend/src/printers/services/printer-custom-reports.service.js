@@ -251,7 +251,8 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   return workbook.xlsx.writeBuffer();
 }
 
-async function exportCustomReport(actor, { type = "global", format = "pdf", branchId = null, month = null, year = null, templateId = null }) {
+async function exportCustomReport(actor, { type = "global", format = "pdf", branchId = null, month = null, year = null, templateId = null, sheetsPerClient = 16 }) {
+  const clientRatio = Number(sheetsPerClient) > 0 ? Number(sheetsPerClient) : 16;
   const printerService = require("./printer.service");
   
   const m = month || new Date().getMonth() + 1;
@@ -261,6 +262,7 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
     branchId,
     month: m,
     year: y,
+    sheetsPerClient: clientRatio,
   });
 
   const consumptionList = consumptionResult.consumption || [];
@@ -298,7 +300,7 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
         totalPaper: totalPaper,
         overallTotalReams: overallTotalReams,
         requiredReams: Math.ceil(totalPaper / 500),
-        estimatedClients: Math.ceil(totalPaper / 16),
+        estimatedClients: Math.ceil(totalPaper / clientRatio),
         currentTotal: c.totalPages || 0,
         lifetimeTotal: c.lifetimeTotal || c.totalPages || 0,
         dataQuality: c.dataQuality || "مكتمل",
@@ -332,7 +334,7 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
             totalPaper: totalPaper,
             overallTotalReams: overallTotalReams,
             requiredReams: Math.ceil(totalPaper / 500),
-            estimatedClients: Math.ceil(totalPaper / 16),
+            estimatedClients: Math.ceil(totalPaper / clientRatio),
             currentTotal: p.counters?.totalPages || 0,
             lifetimeTotal: p.lifetimeCounters?.totalPages || 0,
             dataQuality: c.dataQuality || "مكتمل",

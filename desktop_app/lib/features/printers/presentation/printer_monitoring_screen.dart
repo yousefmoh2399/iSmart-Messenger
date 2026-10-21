@@ -397,7 +397,7 @@ class _PrinterMonitoringScreenState
             branches: branches,
             isAdmin: authUser?.isAdmin == true,
             onExportReport:
-                (format, branchId, fromMonth, fromYear, toMonth, toYear, templateId) async {
+                (format, branchId, fromMonth, fromYear, toMonth, toYear, templateId, sheetsPerClient) async {
                   try {
                     await ref
                         .read(printerControllerProvider.notifier)
@@ -410,6 +410,7 @@ class _PrinterMonitoringScreenState
                           toMonth: toMonth,
                           toYear: toYear,
                           templateId: templateId,
+                          sheetsPerClient: sheetsPerClient,
                         );
                     if (context.mounted) {
                       _message(
@@ -744,72 +745,107 @@ class _PrinterContent extends StatelessWidget {
                   ],
                 ),
               ),
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 16,
-              runSpacing: 16,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.print_rounded, size: 28),
-                    SizedBox(width: 10),
-                    Text(
-                      'إدارة ومراقبة الطابعات',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? const Color(0xFF1C1C1E)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Theme.of(context).brightness == Brightness.dark
+                    ? Border.all(color: Colors.white.withValues(alpha: 0.08))
+                    : Border.all(color: Colors.black.withValues(alpha: 0.05)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ],
-                ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _ActionButton(
-                      icon: fullSyncRunning
-                          ? Icons.stop_circle_rounded
-                          : Icons.refresh_rounded,
-                      label: fullSyncRunning ? 'إيقاف' : 'مزامنة',
-                      busy: busy,
-                      onPressed: fullSyncRunning ? onStopFullSync : onFullSync,
+                    child: const Icon(
+                      Icons.print_rounded,
+                      color: Color(0xFF007AFF),
+                      size: 24,
                     ),
-                    _ActionButton(
-                      icon: Icons.picture_as_pdf_rounded,
-                      label: 'PDF',
-                      busy: busy,
-                      onPressed: onExportPdf,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'إدارة ومراقبة الطابعات',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'مراقبة فورية لأجهزة الطباعة، استهلاك الورق، ومستوى الأحبار عبر بروتوكول SNMP',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colors.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                    _ActionButton(
-                      icon: Icons.table_chart_rounded,
-                      label: 'Excel',
-                      busy: busy,
-                      onPressed: onExportExcel,
-                    ),
-                    _ActionButton(
-                      icon: Icons.calendar_month_rounded,
-                      label: 'الاستهلاك الشهري',
-                      busy: busy,
-                      onPressed: onShowMonthlyConsumption,
-                    ),
-                    if (authUser?.isAdmin == true)
+                  ),
+                  const SizedBox(width: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
                       _ActionButton(
-                        icon: Icons.tune_rounded,
-                        label: 'قوالب التقارير',
+                        icon: fullSyncRunning
+                            ? Icons.stop_circle_rounded
+                            : Icons.refresh_rounded,
+                        label: fullSyncRunning ? 'إيقاف المزامنة' : 'مزامنة الشبكة',
                         busy: busy,
-                        onPressed: onOpenReportTemplates,
+                        onPressed: fullSyncRunning ? onStopFullSync : onFullSync,
                       ),
-                    _ActionButton(
-                      icon: Icons.add_rounded,
-                      label: 'فرع',
-                      busy: busy,
-                      onPressed: onAddBranch,
-                    ),
-                  ],
-                ),
-              ],
+                      _ActionButton(
+                        icon: Icons.calendar_month_rounded,
+                        label: 'الاستهلاك الشهري والمحاسبة',
+                        busy: busy,
+                        onPressed: onShowMonthlyConsumption,
+                      ),
+                      _ActionButton(
+                        icon: Icons.picture_as_pdf_rounded,
+                        label: 'PDF',
+                        busy: busy,
+                        onPressed: onExportPdf,
+                      ),
+                      _ActionButton(
+                        icon: Icons.table_chart_rounded,
+                        label: 'Excel',
+                        busy: busy,
+                        onPressed: onExportExcel,
+                      ),
+                      if (authUser?.isAdmin == true)
+                        _ActionButton(
+                          icon: Icons.tune_rounded,
+                          label: 'قوالب التقارير',
+                          busy: busy,
+                          onPressed: onOpenReportTemplates,
+                        ),
+                      _ActionButton(
+                        icon: Icons.add_rounded,
+                        label: 'إضافة فرع',
+                        busy: busy,
+                        onPressed: onAddBranch,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             _StatsGrid(totals: totals),
@@ -2019,122 +2055,241 @@ class _StatsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = [
-      (
-        'الفروع النشطة',
-        totals['branches'] ?? 0,
-        Icons.account_tree_rounded,
-        Colors.indigo,
-      ),
-      (
-        'إجمالي الطابعات',
-        totals['printers'] ?? 0,
-        Icons.print_rounded,
-        Colors.blue,
-      ),
-      (
-        'طابعات متصلة',
-        totals['onlinePrinters'] ?? 0,
-        Icons.wifi_rounded,
-        Colors.green,
-      ),
-      (
-        'طابعات غير متصلة',
-        totals['offlinePrinters'] ?? 0,
-        Icons.wifi_off_rounded,
-        Colors.red,
-      ),
-      (
-        'إجمالي الصفحات المطبوعة',
-        totals['totalPages'] ?? 0,
-        Icons.description_rounded,
-        Colors.purple,
-      ),
-      (
-        'الصفحات التالفة (الهالك)',
-        totals['wastePages'] ?? 0,
-        Icons.delete_sweep_rounded,
-        Colors.blueGrey,
-      ),
-      (
-        'استخدام الشهر الحالي',
-        totals['monthlyUsage'] ?? 0,
-        Icons.calendar_month_rounded,
-        Colors.teal,
-      ),
-      (
-        'تنبيهات انخفاض الحبر',
-        totals['tonerAlerts'] ?? 0,
-        Icons.opacity_rounded,
-        Colors.orange,
-      ),
-    ];
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: items.length,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 220,
-        mainAxisExtent: 90,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-      ),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        final theme = Theme.of(context);
-        final isDark = theme.brightness == Brightness.dark;
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: isDark
-                ? null
-                : Border.all(color: Colors.black.withValues(alpha: 0.05)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: item.$4.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final printersCount = (totals['printers'] ?? 0).toInt();
+    final onlineCount = (totals['onlinePrinters'] ?? 0).toInt();
+    final offlineCount = (totals['offlinePrinters'] ?? 0).toInt();
+    final branchesCount = (totals['branches'] ?? 0).toInt();
+
+    final monthlyPages = (totals['monthlyUsage'] ?? 0).toInt();
+    final monthlyReams = monthlyPages / 500;
+
+    final totalPages = (totals['totalPages'] ?? 0).toInt();
+    final wastePages = (totals['wastePages'] ?? 0).toInt();
+
+    final tonerAlerts = (totals['tonerAlerts'] ?? 0).toInt();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final crossAxisCount = constraints.maxWidth < 900 ? 2 : 4;
+        return GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: 14,
+          mainAxisSpacing: 14,
+          childAspectRatio: crossAxisCount == 4 ? 2.35 : 2.1,
+          children: [
+            _buildStatCard(
+              context: context,
+              isDark: isDark,
+              title: 'أسطول الطابعات والشبكة',
+              value: '$printersCount طابعة',
+              icon: Icons.print_rounded,
+              iconColor: const Color(0xFF007AFF),
+              bottomContent: Row(
+                children: [
+                  _buildMiniBadge(
+                    dotColor: const Color(0xFF34C759),
+                    text: '$onlineCount متصلة',
+                    bgColor: const Color(0xFF34C759).withValues(alpha: 0.12),
+                    textColor: isDark ? const Color(0xFF30D158) : const Color(0xFF248A3D),
                   ),
-                  child: Icon(item.$3, color: item.$4, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        item.$1,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item.$2.toStringAsFixed(0),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 6),
+                  _buildMiniBadge(
+                    dotColor: offlineCount > 0 ? const Color(0xFFFF3B30) : const Color(0xFF8E8E93),
+                    text: '$offlineCount غير متصلة',
+                    bgColor: (offlineCount > 0 ? const Color(0xFFFF3B30) : const Color(0xFF8E8E93)).withValues(alpha: 0.1),
+                    textColor: offlineCount > 0
+                        ? (isDark ? const Color(0xFFFF453A) : const Color(0xFFD70015))
+                        : Colors.grey,
                   ),
-                ),
-              ],
+                  const Spacer(),
+                  Text(
+                    '$branchesCount فرع',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+            _buildStatCard(
+              context: context,
+              isDark: isDark,
+              title: 'استهلاك الشهر الحالي',
+              value: '$monthlyPages ورقة',
+              icon: Icons.calendar_month_rounded,
+              iconColor: const Color(0xFF34C759),
+              bottomContent: Row(
+                children: [
+                  _buildMiniBadge(
+                    dotColor: const Color(0xFF34C759),
+                    text: '~${monthlyReams.toStringAsFixed(1)} رزمة (500 ورقة)',
+                    bgColor: const Color(0xFF34C759).withValues(alpha: 0.12),
+                    textColor: isDark ? const Color(0xFF30D158) : const Color(0xFF248A3D),
+                  ),
+                ],
+              ),
+            ),
+            _buildStatCard(
+              context: context,
+              isDark: isDark,
+              title: 'إجمالي العداد التراكمي',
+              value: '$totalPages صفحة',
+              icon: Icons.speed_rounded,
+              iconColor: const Color(0xFF5856D6),
+              bottomContent: Row(
+                children: [
+                  _buildMiniBadge(
+                    dotColor: wastePages > 0 ? const Color(0xFFFF9500) : const Color(0xFF5856D6),
+                    text: 'الهالك المسجل: $wastePages ورقة',
+                    bgColor: const Color(0xFF5856D6).withValues(alpha: 0.1),
+                    textColor: isDark ? const Color(0xFF5E5CE6) : const Color(0xFF3634A3),
+                  ),
+                ],
+              ),
+            ),
+            _buildStatCard(
+              context: context,
+              isDark: isDark,
+              title: 'الأحبار والمستهلكات',
+              value: tonerAlerts > 0 ? '$tonerAlerts تنبيه حبر' : 'المستويات آمنة',
+              icon: Icons.opacity_rounded,
+              iconColor: tonerAlerts > 0 ? const Color(0xFFFF9500) : const Color(0xFF007AFF),
+              bottomContent: Row(
+                children: [
+                  if (tonerAlerts > 0)
+                    _buildMiniBadge(
+                      dotColor: const Color(0xFFFF9500),
+                      text: 'يلزم استبدال أحبار قريباً',
+                      bgColor: const Color(0xFFFF9500).withValues(alpha: 0.15),
+                      textColor: isDark ? const Color(0xFFFF9F0A) : const Color(0xFFC93400),
+                    )
+                  else
+                    _buildMiniBadge(
+                      dotColor: const Color(0xFF34C759),
+                      text: 'جميع الخراطيش بمستوى آمن ✓',
+                      bgColor: const Color(0xFF34C759).withValues(alpha: 0.12),
+                      textColor: isDark ? const Color(0xFF30D158) : const Color(0xFF248A3D),
+                    ),
+                ],
+              ),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildStatCard({
+    required BuildContext context,
+    required bool isDark,
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color iconColor,
+    required Widget bottomContent,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: isDark
+            ? Border.all(color: Colors.white.withValues(alpha: 0.08))
+            : Border.all(color: Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          bottomContent,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniBadge({
+    required Color dotColor,
+    required String text,
+    required Color bgColor,
+    required Color textColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: dotColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: textColor,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2409,74 +2564,169 @@ class _PrinterTable extends StatelessWidget {
   final ValueChanged<String>? onSyncPrinter;
   final ValueChanged<String>? onDeletePrinter;
 
-  Widget _buildMiniTonerStatus(Map<String, dynamic> toner) {
-    final List<Widget> dots = [];
-
-    void addDot(String key, Color color) {
-      final val = toner[key];
-      if (val != null) {
-        num? number;
-        if (val is num) {
-          number = val;
-        } else {
-          number = num.tryParse(val.toString());
-        }
-
-        if (number != null) {
-          final isLow = number < 15;
-          dots.add(
-            Tooltip(
-              message: '${key.toUpperCase()}: ${number.toStringAsFixed(0)}%',
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                width: 14,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: isLow ? 0.2 : 0.8),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isLow ? Colors.red : color,
-                    width: isLow ? 2 : 1,
-                  ),
-                ),
-                child: isLow
-                    ? const Center(
-                        child: Text(
-                          '!',
-                          style: TextStyle(
-                            color: Colors.red,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-            ),
-          );
-        }
-      }
+  Widget _buildVendorAvatar(PrinterItem printer, bool isOnline) {
+    final brand = (printer.model + ' ' + printer.name).toLowerCase();
+    String label = 'PRN';
+    Color brandColor = const Color(0xFF007AFF);
+    if (brand.contains('kyocera')) {
+      label = 'KYO';
+      brandColor = const Color(0xFFD32F2F);
+    } else if (brand.contains('hp') || brand.contains('hewlett') || brand.contains('laserjet')) {
+      label = 'HP';
+      brandColor = const Color(0xFF0288D1);
+    } else if (brand.contains('canon')) {
+      label = 'CAN';
+      brandColor = const Color(0xFFC2185B);
+    } else if (brand.contains('brother')) {
+      label = 'BRO';
+      brandColor = const Color(0xFF1976D2);
+    } else if (brand.contains('xerox')) {
+      label = 'XRX';
+      brandColor = const Color(0xFFE53935);
+    } else if (brand.contains('ricoh')) {
+      label = 'RIC';
+      brandColor = const Color(0xFFE64A19);
     }
 
-    addDot('black', const Color(0xFF1E293B));
-    addDot('cyan', const Color(0xFF06B6D4));
-    addDot('magenta', const Color(0xFFEC4899));
-    addDot('yellow', const Color(0xFFEAB308));
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: brandColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: brandColor.withValues(alpha: 0.2)),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: brandColor,
+              fontWeight: FontWeight.w900,
+              fontSize: 12,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -1,
+          left: -1,
+          child: Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: isOnline ? const Color(0xFF34C759) : const Color(0xFF8E8E93),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
-    if (dots.isEmpty) {
-      return const Text(
-        'لا تتوفر بيانات حبر',
-        style: TextStyle(color: Colors.grey, fontSize: 10),
+  Widget _buildTonerCapsules(Map<String, dynamic> toner, bool isDark) {
+    final keys = [
+      ('black', 'K', const Color(0xFF1E293B)),
+      ('cyan', 'C', const Color(0xFF0284C7)),
+      ('magenta', 'M', const Color(0xFFDB2777)),
+      ('yellow', 'Y', const Color(0xFFCA8A04)),
+    ];
+
+    final List<Widget> bars = [];
+    for (final entry in keys) {
+      final key = entry.$1;
+      final label = entry.$2;
+      final color = entry.$3;
+
+      final val = toner[key];
+      if (val == null) continue;
+      num? numVal;
+      if (val is num) {
+        numVal = val;
+      } else {
+        numVal = num.tryParse(val.toString());
+      }
+      if (numVal == null) continue;
+
+      final pct = numVal.clamp(0, 100);
+      final isLow = pct < 15;
+
+      bars.add(
+        Tooltip(
+          message: '$key: ${pct.toStringAsFixed(0)}%',
+          child: Container(
+            width: 48,
+            height: 20,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: isLow
+                  ? Colors.red.withValues(alpha: 0.12)
+                  : (isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.05)),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isLow ? Colors.red : color.withValues(alpha: 0.3),
+                width: isLow ? 1.5 : 1,
+              ),
+            ),
+            child: Stack(
+              children: [
+                FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: (pct / 100.0).clamp(0.05, 1.0),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isLow
+                          ? Colors.red.withValues(alpha: 0.4)
+                          : color.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Text(
+                    '$label ${pct.toInt()}%',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      color: isLow
+                          ? Colors.red
+                          : (isDark ? Colors.white : Colors.black87),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
-    return Row(mainAxisSize: MainAxisSize.min, children: dots);
+    if (bars.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.grey.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Text(
+          'بدون بيانات حبر',
+          style: TextStyle(fontSize: 10, color: Colors.grey),
+        ),
+      );
+    }
+
+    return Row(mainAxisSize: MainAxisSize.min, children: bars);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     if (printers.isEmpty) {
       return const _Panel(
@@ -2493,22 +2743,23 @@ class _PrinterTable extends StatelessWidget {
         ),
       );
     }
+
     return _Panel(
-      title: 'قائمة الطابعات المسجلة',
+      title: 'قائمة الطابعات المسجلة (${printers.length})',
       child: ListView.separated(
         itemCount: printers.length,
         separatorBuilder: (_, __) => Divider(
           height: 1,
-          color: theme.dividerColor.withValues(alpha: 0.1),
+          color: theme.dividerColor.withValues(alpha: 0.08),
         ),
         itemBuilder: (context, index) {
           final printer = printers[index];
-          final statusColor = _printerStatusColor(printer.status);
           final isSelected = selectedPrinterId == printer.id;
+          final isOnline = printer.status.toLowerCase() == 'online';
 
           return Container(
             color: isSelected
-                ? colors.primaryContainer.withValues(alpha: 0.15)
+                ? const Color(0xFF007AFF).withValues(alpha: 0.08)
                 : null,
             child: InkWell(
               onTap: () => onSelected(printer),
@@ -2518,97 +2769,134 @@ class _PrinterTable extends StatelessWidget {
                   vertical: 12,
                 ),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.print_rounded,
-                        color: statusColor,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
+                    _buildVendorAvatar(printer, isOnline),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Wrap(
                         alignment: WrapAlignment.spaceBetween,
                         crossAxisAlignment: WrapCrossAlignment.center,
-                        runSpacing: 12,
+                        runSpacing: 10,
                         spacing: 12,
                         children: [
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                printer.name.isEmpty
-                                    ? printer.ipAddress
-                                    : printer.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13.5,
-                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    printer.name.isEmpty
+                                        ? printer.ipAddress
+                                        : printer.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF007AFF)
+                                          .withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      printer.ipAddress,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF007AFF),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 '${printer.branchName} • ${printer.model} • S/N: ${printer.serialNumber}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 11),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                ),
                               ),
                             ],
                           ),
                           Wrap(
-                            spacing: 12,
+                            spacing: 16,
                             runSpacing: 8,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              _buildMiniTonerStatus(printer.tonerLevels),
+                              _buildTonerCapsules(printer.tonerLevels, isDark),
                               Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  Text(
-                                    'إجمالي: ${(printer.lifetimeCounters['totalPages'] ?? 0).toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.description_outlined,
+                                        size: 14,
+                                        color: Colors.grey,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${(printer.lifetimeCounters['totalPages'] ?? 0).toInt()} ورقة',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  if ((printer.lifetimeCounters['scanPages'] ??
-                                          0) >
-                                      0)
+                                  if ((printer.lifetimeCounters['scanPages'] ?? 0) > 0)
                                     Text(
-                                      'مسح: ${(printer.lifetimeCounters['scanPages'] ?? 0).toStringAsFixed(0)}',
+                                      'مسح: ${(printer.lifetimeCounters['scanPages'] ?? 0).toInt()}',
                                       style: const TextStyle(
                                         color: Colors.teal,
-                                        fontSize: 10,
+                                        fontSize: 10.5,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                 ],
                               ),
-                              if (onSyncPrinter != null)
-                                IconButton(
-                                  iconSize: 20,
-                                  tooltip: 'تحديث فوري',
-                                  icon: const Icon(Icons.sync_rounded),
-                                  onPressed: () => onSyncPrinter!(printer.id),
-                                ),
-                              if (onDeletePrinter != null)
-                                IconButton(
-                                  iconSize: 20,
-                                  tooltip: 'حذف',
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    color: Colors.redAccent,
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (onSyncPrinter != null)
+                                    IconButton(
+                                      iconSize: 20,
+                                      tooltip: 'تحديث فوري (SNMP Sync)',
+                                      icon: const Icon(Icons.sync_rounded),
+                                      onPressed: () => onSyncPrinter!(printer.id),
+                                    ),
+                                  if (onDeletePrinter != null)
+                                    IconButton(
+                                      iconSize: 20,
+                                      tooltip: 'حذف الطابعة',
+                                      icon: const Icon(
+                                        Icons.delete_outline_rounded,
+                                        color: Colors.redAccent,
+                                      ),
+                                      onPressed: () => onDeletePrinter!(printer.id),
+                                    ),
+                                  const Icon(
+                                    Icons.chevron_left_rounded,
+                                    size: 20,
+                                    color: Colors.grey,
                                   ),
-                                  onPressed: () => onDeletePrinter!(printer.id),
-                                ),
+                                ],
+                              ),
                             ],
                           ),
                         ],
@@ -3822,6 +4110,7 @@ class _MonthlyConsumptionDialogContent extends ConsumerStatefulWidget {
     int toMonth,
     int toYear,
     String? templateId,
+    int? sheetsPerClient,
   )
   onExportReport;
 
@@ -3843,7 +4132,8 @@ class _MonthlyConsumptionDialogContentState
   String? _errorMessage;
 
   static const int _sheetsPerReam = 500;
-  static const int _sheetsPerClient = 16;
+  int _sheetsPerClient = 16;
+  late final TextEditingController _sheetsPerClientController;
   final Map<String, int> _branchClientsMap = {};
 
   final List<int> _years = [2024, 2025, 2026, 2027, 2028];
@@ -3866,12 +4156,20 @@ class _MonthlyConsumptionDialogContentState
   @override
   void initState() {
     super.initState();
+    _sheetsPerClient = 16;
+    _sheetsPerClientController = TextEditingController(text: '16');
     _fromYear = widget.initialYear;
     _fromMonth = widget.initialMonth == 0 ? 1 : widget.initialMonth;
     _toYear = widget.initialYear;
     _toMonth = widget.initialMonth == 0 ? 12 : widget.initialMonth;
     _selectedBranchId = widget.initialBranchId;
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _sheetsPerClientController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData({bool forceRefresh = false}) async {
@@ -3889,6 +4187,7 @@ class _MonthlyConsumptionDialogContentState
             fromYear: _fromYear,
             toMonth: _toMonth,
             toYear: _toYear,
+            sheetsPerClient: _sheetsPerClient,
             forceRefresh: forceRefresh,
           );
       if (!mounted) return;
@@ -4180,6 +4479,36 @@ class _MonthlyConsumptionDialogContentState
                           ),
                         ),
                       const SizedBox(width: 8),
+                      SizedBox(
+                        width: 155,
+                        child: TextFormField(
+                          controller: _sheetsPerClientController,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'ورقة / عميل',
+                            hintText: '16',
+                            prefixIcon: const Icon(Icons.description_outlined, size: 18),
+                            suffixText: 'ورقة',
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 10,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          onChanged: (val) {
+                            final parsed = int.tryParse(val.trim());
+                            if (parsed != null && parsed > 0 && parsed != _sheetsPerClient) {
+                              setState(() {
+                                _sheetsPerClient = parsed;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       _ActionButton(
                         icon: Icons.picture_as_pdf_rounded,
                         label: 'تصدير PDF',
@@ -4192,6 +4521,7 @@ class _MonthlyConsumptionDialogContentState
                           _toMonth,
                           _toYear,
                           _selectedTemplateId,
+                          _sheetsPerClient,
                         ),
                       ),
                       _ActionButton(
@@ -4206,6 +4536,7 @@ class _MonthlyConsumptionDialogContentState
                           _toMonth,
                           _toYear,
                           _selectedTemplateId,
+                          _sheetsPerClient,
                         ),
                       ),
                     ],
@@ -4234,7 +4565,7 @@ class _MonthlyConsumptionDialogContentState
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'ملاحظة المحاسبة الدقيقة: الرزمة = 500 ورقة | حصة العميل = 16 ورقة. يمكنك تعديل عدد العملاء للفرع في الجدول أدناه لحساب الفرق والهدر بدقة.',
+                      'ملاحظة المحاسبة الدقيقة: الرزمة = 500 ورقة | معدل استهلاك العميل المعتمد = $_sheetsPerClient ورقة. يمكنك تعديل هذا المعدل في الحقل أعلاه في أي وقت لحساب الفرق والعملاء والهدر تلقائياً.',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
