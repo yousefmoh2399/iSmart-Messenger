@@ -24,6 +24,7 @@ class DesktopWorkspaceShell extends ConsumerStatefulWidget {
 
 class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
   StreamSubscription? _updateEventsSub;
+  final Set<int> _mountedTabIndices = <int>{0};
 
   @override
   void initState() {
@@ -218,25 +219,44 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
           });
         }
 
+        final activeIndex = _stackIndexForSection(_activeSection);
+        _mountedTabIndices.add(activeIndex);
+
         return Scaffold(
           body: Row(
             children: [
               Expanded(
                 child: IndexedStack(
-                  index: _stackIndexForSection(_activeSection),
+                  index: activeIndex,
                   children: [
-                    ChatDashboardScreen(
-                      isWrapped: true,
-                      activeSection: _activeSection,
-                      onSectionChanged: _navigateTo,
-                    ),
-                    const FilesDashboardScreen(isWrapped: true),
-                    const ServersScreen(isWrapped: true),
-                    const ProfileScreen(isWrapped: true),
-                    const PrinterMonitoringScreen(isWrapped: true),
-                    const PurchaseRequestsScreen(),
-                    const SnipeitScreen(isWrapped: true),
-                    const SystemMonitorScreen(isWrapped: true),
+                    _mountedTabIndices.contains(0)
+                        ? ChatDashboardScreen(
+                            isWrapped: true,
+                            activeSection: _activeSection,
+                            onSectionChanged: _navigateTo,
+                          )
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(1)
+                        ? const FilesDashboardScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(2)
+                        ? const ServersScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(3)
+                        ? const ProfileScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(4)
+                        ? const PrinterMonitoringScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(5)
+                        ? const PurchaseRequestsScreen()
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(6)
+                        ? const SnipeitScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(7)
+                        ? const SystemMonitorScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
                   ],
                 ),
               ),

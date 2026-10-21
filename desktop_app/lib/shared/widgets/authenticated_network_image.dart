@@ -413,6 +413,8 @@ class _AuthenticatedNetworkImageState
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
+      memCacheWidth: _cacheExtent(context, widget.width),
+      memCacheHeight: _cacheExtent(context, widget.height),
       placeholder: (_, __) => placeholder,
       errorWidget: (_, __, ___) => errorWidget,
     );

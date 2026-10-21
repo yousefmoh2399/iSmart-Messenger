@@ -203,55 +203,49 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
       ),
     ];
 
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-        child: Container(
-          width: 80,
-          height: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
+    return Container(
+      width: 80,
+      height: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF1C1C1E)
+            : const Color(0xFFF6F6F6),
+        border: Border(
+          left: BorderSide(
             color: isDark
-                ? const Color(0xFF1C1C1E).withValues(alpha: 0.75)
-                : const Color(0xFFF6F6F6).withValues(alpha: 0.85),
-            border: Border(
-              left: BorderSide(
-                // In RTL, the right side of the window is visually right. If it's on the visual left, the border is on the right side of the sidebar. Wait, we want the border on the opposite side of the screen edge. If it's on the left, border should be on the right. In LTR, BorderSide(right: ...). In RTL? We can use `BorderDirectional(end: BorderSide(...))` but BoxDecoration uses `Border`. Let's just use `right` border assuming it's placed on the left.
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.1)
-                    : Colors.black.withValues(alpha: 0.05),
-                width: 1.0,
+                ? Colors.white.withValues(alpha: 0.1)
+                : Colors.black.withValues(alpha: 0.05),
+            width: 1.0,
+          ),
+        ),
+      ),
+      child: SafeArea(
+        right: false,
+        child: Column(
+          children: [
+            _DesktopWorkspaceUserPill(
+              user: user,
+              displayName: displayName,
+              isDark: isDark,
+              accentColor: accentColor,
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: actionButtons
+                      .map(
+                        (btn) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: btn,
+                        ),
+                      )
+                      .toList(),
+                ),
               ),
             ),
-          ),
-          child: SafeArea(
-            right: false,
-            child: Column(
-              children: [
-                _DesktopWorkspaceUserPill(
-                  user: user,
-                  displayName: displayName,
-                  isDark: isDark,
-                  accentColor: accentColor,
-                ),
-                const SizedBox(height: 20),
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: actionButtons
-                          .map(
-                            (btn) => Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: btn,
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
         ),
       ),
     );

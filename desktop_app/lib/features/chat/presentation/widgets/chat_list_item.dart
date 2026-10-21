@@ -65,8 +65,9 @@ class _ChatListItemState extends State<ChatListItem> {
     final inactiveColor = colorScheme.surfaceContainerHighest;
     final isTypingPreview = widget.typingPreviewText != null;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 320;
         final avatarRadius = isNarrow ? 20.0 : 24.0;
         final horizontalPadding = isNarrow ? 8.0 : 12.0;
@@ -423,6 +424,7 @@ class _ChatListItemState extends State<ChatListItem> {
         
         ));
       },
+      ),
     );
   }
 }

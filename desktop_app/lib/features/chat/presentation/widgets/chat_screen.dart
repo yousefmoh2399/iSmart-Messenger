@@ -4756,6 +4756,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                             child: ListView.builder(
                               controller: _scrollController,
                               reverse: true,
+                              cacheExtent: 500.0,
                               padding: const EdgeInsets.fromLTRB(
                                 20,
                                 14,

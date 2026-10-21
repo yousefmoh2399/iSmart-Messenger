@@ -381,8 +381,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           color: isDark
-              ? const Color(0xFF1F2C38).withValues(alpha: 0.65)
-              : Colors.white.withValues(alpha: 0.8),
+              ? const Color(0xFF1E2834)
+              : Colors.white,
           border: Border.all(
             color: isDark
                 ? const Color(0xFF314555).withValues(alpha: 0.45)
@@ -398,11 +398,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Padding(
-              padding: EdgeInsets.all(compact ? 22 : 28),
-              child: Form(
+          child: Padding(
+            padding: EdgeInsets.all(compact ? 22 : 28),
+            child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -545,8 +543,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   @override

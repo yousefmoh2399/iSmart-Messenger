@@ -79,6 +79,7 @@ class BundledQuickEmoji extends StatelessWidget {
           fit: BoxFit.contain,
           animate: animate,
           repeat: repeat,
+          frameRate: FrameRate(30),
           errorBuilder: (context, error, stackTrace) => _buildFallback(context),
         ),
       );
