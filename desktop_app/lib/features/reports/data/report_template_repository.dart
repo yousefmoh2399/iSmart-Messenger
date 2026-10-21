@@ -5,7 +5,7 @@ import '../../../shared/providers/providers.dart';
 import '../models/report_template_models.dart';
 
 final reportTemplateRepositoryProvider = Provider<ReportTemplateRepository>((ref) {
-  final apiClient = ref.watch(apiClientProvider);
+  final apiClient = ref.watch(authenticatedApiClientProvider);
   return ReportTemplateRepository(apiClient);
 });
 
