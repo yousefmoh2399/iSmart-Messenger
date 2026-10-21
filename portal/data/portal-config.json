@@ -1,0 +1,41 @@
+{
+  "adminPin": "ismart@2026",
+  "globalDownloadsEnabled": true,
+  "maintenanceMessage": "",
+  "windows": {
+    "enabled": true,
+    "version": "1.1.15",
+    "fileName": "iSmart Messenger Setup 1.1.15.exe",
+    "fileSize": "69.5 MB",
+    "filePath": "downloads/iSmart Messenger Setup 1.1.15.exe",
+    "directPath": "public/downloads/iSmart Messenger Setup 1.1.15.exe",
+    "customUrl": ""
+  },
+  "mobile": {
+    "enabled": true,
+    "version": "1.0.2",
+    "fileName": "iSmart Messenger.apk",
+    "fileSize": "64.5 MB",
+    "filePath": "downloads/iSmart Messenger.apk",
+    "directPath": "public/downloads/iSmart Messenger.apk",
+    "googlePlayUrl": "https://play.google.com/store/apps/details?id=com.ismart.messenger",
+    "customUrl": ""
+  },
+  "vpnPolicy": {
+    "maxConcurrentPerBranch": 1,
+    "maxConcurrentPerIp": 1,
+    "speedLimitKBps": 2048,
+    "subnetMask": "24",
+    "whitelistedSubnets": [
+      "127.0.0.1/32"
+    ],
+    "whitelistedIps": [
+      "127.0.0.1"
+    ]
+  },
+  "branches": {
+    "192.168.10.0/24": "فرع 1",
+    "192.168.11.0/24": "فرع 2",
+    "192.168.12.0/24": "فرع 3"
+  }
+}

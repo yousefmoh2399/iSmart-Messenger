@@ -95,6 +95,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   ChatConversation? _conversation;
   ChatMessage? _replyingTo;
+  bool _isSendingText = false;
   ChatMessage? _editingMessage;
 
   late final ProviderContainer _container;
@@ -746,6 +747,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     bool isSilent = false,
     DateTime? scheduledFor,
   }) async {
+    if (_isSendingText) return;
+
     if (_isUploadingAttachment) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -783,33 +786,52 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       conversationMessagesControllerProvider(widget.conversation.id).notifier,
     );
 
-    if (_editingMessage != null) {
-      await notifier.editMessage(messageId: _editingMessage!.id, content: text);
-    } else {
-      await notifier.sendText(
-        text,
-        replyToMessageId: _replyingTo?.id,
-        metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
-        isSilent: isSilent,
-        scheduledFor: scheduledFor,
-      );
-    }
+    _isSendingText = true;
+    final wasEditing = _editingMessage != null;
+    final targetEditingMessage = _editingMessage;
+    final targetReplyingTo = _replyingTo;
 
+    // Immediately clear text field and draft for instant UI response and prevent double sends
     _messageController.clear();
     unawaited(_draftStore.clear(widget.conversation.id));
 
-    setState(() {
-      _replyingTo = null;
-      _editingMessage = null;
-      if (authUserId != null && authUserId.isNotEmpty) {
-        _typingUsers.remove(authUserId);
-      }
-    });
+    if (mounted) {
+      setState(() {
+        _replyingTo = null;
+        _editingMessage = null;
+        if (authUserId != null && authUserId.isNotEmpty) {
+          _typingUsers.remove(authUserId);
+        }
+      });
+      _scrollToBottom(animated: true);
+    }
 
     notifier.stopTyping();
     _didSendTyping = false;
 
-    _scrollToBottom(animated: true);
+    try {
+      if (wasEditing && targetEditingMessage != null) {
+        await notifier.editMessage(messageId: targetEditingMessage.id, content: text);
+      } else {
+        await notifier.sendText(
+          text,
+          replyToMessageId: targetReplyingTo?.id,
+          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+          isSilent: isSilent,
+          scheduledFor: scheduledFor,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('فشل الإرسال: لا يوجد اتصال بالسيرفر حالياً.'),
+          ),
+        );
+      }
+    } finally {
+      _isSendingText = false;
+    }
   }
 
   Future<void> _sendFile() async {

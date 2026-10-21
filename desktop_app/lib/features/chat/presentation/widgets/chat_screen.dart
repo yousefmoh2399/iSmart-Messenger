@@ -1028,6 +1028,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   late final ProviderContainer _container;
 
   ChatMessage? _replyingTo;
+  bool _isSendingText = false;
   ChatMessage? _editingMessage;
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
   bool _draggingFiles = false;
@@ -2298,6 +2299,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     bool isSilent = false,
     DateTime? scheduledFor,
   }) async {
+    if (_isSendingText) return;
+
     if (_isUploadingAttachment) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2342,32 +2345,40 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       conversationMessagesControllerProvider(_conversationId).notifier,
     );
 
-    try {
-      if (_editingMessage != null) {
-        await notifier.editMessage(
-          messageId: _editingMessage!.id,
-          content: content,
-        );
-      } else {
-        await notifier.sendText(
-          content,
-          replyToMessageId: _replyingTo?.id,
-          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
-          isSilent: isSilent,
-          scheduledFor: scheduledFor,
-        );
-      }
+    _isSendingText = true;
+    final wasEditing = _editingMessage != null;
+    final targetEditingMessage = _editingMessage;
+    final targetReplyingTo = _replyingTo;
 
-      if (!mounted) return;
-      _messageController.clear();
-      unawaited(_draftStore.clear(_conversationId));
-      _stopTypingNow();
+    // Immediately clear text field and reset composer state for instant UI response
+    // and to prevent any duplicate sending while network request is in flight.
+    _messageController.clear();
+    unawaited(_draftStore.clear(_conversationId));
+    _stopTypingNow();
+    if (mounted) {
       setState(() {
         _replyingTo = null;
         _editingMessage = null;
       });
       _scrollToBottom();
       _messageFocusNode.requestFocus();
+    }
+
+    try {
+      if (wasEditing && targetEditingMessage != null) {
+        await notifier.editMessage(
+          messageId: targetEditingMessage.id,
+          content: content,
+        );
+      } else {
+        await notifier.sendText(
+          content,
+          replyToMessageId: targetReplyingTo?.id,
+          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+          isSilent: isSilent,
+          scheduledFor: scheduledFor,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2376,6 +2387,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         );
       }
+    } finally {
+      _isSendingText = false;
     }
   }
 

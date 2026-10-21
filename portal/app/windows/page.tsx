@@ -3,6 +3,7 @@
 import React, { useRef } from 'react';
 import TopStrip from '../../components/TopStrip';
 import { useToast } from '../../components/Toast';
+import ProtectedDownloadButton from '../../components/ProtectedDownloadButton';
 import { Download, Copy, Check } from 'lucide-react';
 
 export default function WindowsGuidePage() {
@@ -313,15 +314,14 @@ export default function WindowsGuidePage() {
 
           {/* Download Bottom Box */}
           <div style={{ textAlign: 'center', marginTop: '34px' }}>
-            <a
-              href="/downloads/iSmart%20Messenger%20Setup%201.1.15.exe"
+            <ProtectedDownloadButton
+              fileType="windows"
               className="nav-cta-btn"
-              style={{ padding: '13px 32px', fontSize: '0.96rem' }}
-              download
+              style={{ padding: '13px 32px', fontSize: '0.96rem', display: 'inline-flex' }}
             >
               <Download size={18} />
-              <span>تحميل برنامج الكمبيوتر الآن (1.1.15 EXE)</span>
-            </a>
+              <span>تحميل برنامج الكمبيوتر الآن (EXE)</span>
+            </ProtectedDownloadButton>
           </div>
         </div>
       </main>

@@ -4,6 +4,7 @@ import React, { useRef } from 'react';
 import TopStrip from '../../components/TopStrip';
 import { useToast } from '../../components/Toast';
 import GooglePlayIcon from '../../components/GooglePlayIcon';
+import ProtectedDownloadButton from '../../components/ProtectedDownloadButton';
 import { Download } from 'lucide-react';
 
 export default function MobileGuidePage() {
@@ -97,15 +98,14 @@ export default function MobileGuidePage() {
                 <GooglePlayIcon size={19} />
                 <span>تثبيت من Google Play</span>
               </a>
-              <a
-                href="/downloads/iSmart-Messenger.apk"
+              <ProtectedDownloadButton
+                fileType="mobile"
                 className="btn-apple-download mobile-download"
                 style={{ width: 'auto', padding: '11px 22px', fontSize: '0.9rem' }}
-                download
               >
                 <Download size={18} />
                 <span>تنزيل ملف APK المباشر</span>
-              </a>
+              </ProtectedDownloadButton>
             </div>
             <div className="callout-box">
               📲 <strong>في حال التثبيت عبر ملف APK يدوياً:</strong> قد تظهر رسالة تفيد بأن <em>&quot;الملف قد يكون ضاراً&quot; (File might be harmful)</em>. اضغط على <strong>&quot;تنزيل على أي حال&quot; (Download anyway)</strong> لأن الملف آمن ومعتمد داخلياً من الشركة.
@@ -180,15 +180,14 @@ export default function MobileGuidePage() {
               <GooglePlayIcon size={19} />
               <span>تثبيت من Google Play</span>
             </a>
-            <a
-              href="/downloads/iSmart-Messenger.apk"
+            <ProtectedDownloadButton
+              fileType="mobile"
               className="btn-apple-download mobile-download"
               style={{ width: 'auto', padding: '13px 28px', fontSize: '0.96rem' }}
-              download
             >
               <Download size={18} />
-              <span>تحميل مباشر (1.0.2 APK)</span>
-            </a>
+              <span>تحميل مباشر (ملف APK)</span>
+            </ProtectedDownloadButton>
           </div>
         </div>
       </main>

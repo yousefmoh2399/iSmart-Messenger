@@ -18,6 +18,12 @@ export default function SiteFooter() {
           <li>
             <Link href="/faq">الدعم الفني</Link>
           </li>
+          <li>
+            <Link href="/admin" style={{ opacity: 0.75, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span>🔐</span>
+              <span>لوحة الإدارة</span>
+            </Link>
+          </li>
         </ul>
         <p>
           جميع الحقوق محفوظة &copy; 2026 iSmart Messenger Network — منظومة المراسلات المعتمدة لشبكة الفروع.

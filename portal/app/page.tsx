@@ -4,13 +4,45 @@ import TopStrip from '../components/TopStrip';
 import ServerIpBar from '../components/ServerIpBar';
 import VideoPlayer from '../components/VideoPlayer';
 import GooglePlayIcon from '../components/GooglePlayIcon';
+import ProtectedDownloadButton from '../components/ProtectedDownloadButton';
 import { Download } from 'lucide-react';
+import { getConfig } from '../lib/downloadManager';
+
+export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
+  const config = getConfig();
+  const downloadsDisabled = !config.globalDownloadsEnabled;
+
   return (
     <>
       {/* Top Branch Announcement Strip */}
       <TopStrip />
+
+      {/* Global Maintenance Alert Banner if downloads are disabled */}
+      {downloadsDisabled && (
+        <div
+          style={{
+            backgroundColor: 'rgba(255, 59, 48, 0.1)',
+            borderBottom: '1px solid rgba(255, 59, 48, 0.25)',
+            padding: '12px 16px',
+            textAlign: 'center',
+            color: 'var(--apple-red, #ff3b30)',
+            fontWeight: 800,
+            fontSize: '0.92rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+          }}
+        >
+          <span>🛑</span>
+          <span>
+            {config.maintenanceMessage ||
+              'تنبيه: تم إيقاف كافة التحميلات مؤقتاً لأعمال الصيانة والتحديثات من قبل الإدارة المركزية.'}
+          </span>
+        </div>
+      )}
 
       {/* Hero Section */}
       <section className="hero-wrapper" id="downloads">
@@ -57,14 +89,13 @@ export default function HomePage() {
                 <li><strong>تنبيهات عاجلة وبدء تلقائي:</strong> إشعارات صوتية لسطح المكتب وتشغيل تلقائي فور فتح جهاز الكمبيوتر.</li>
               </ul>
 
-              <a
-                href="/downloads/iSmart%20Messenger%20Setup%201.1.15.exe"
+              <ProtectedDownloadButton
+                fileType="windows"
                 className="btn-apple-download windows-download"
-                download
               >
                 <Download size={18} />
                 <span>تحميل برنامج الكمبيوتر (EXE)</span>
-              </a>
+              </ProtectedDownloadButton>
 
               <Link href="/windows" className="sub-link">
                 عرض الدليل التوضيحي المفصل والشامل لنسخة الكمبيوتر ←
@@ -114,14 +145,13 @@ export default function HomePage() {
                   <span>تثبيت من Google Play</span>
                 </a>
 
-                <a
-                  href="/downloads/iSmart-Messenger.apk"
+                <ProtectedDownloadButton
+                  fileType="mobile"
                   className="btn-apple-download mobile-download"
-                  download
                 >
                   <Download size={18} />
                   <span>تحميل مباشر (ملف APK)</span>
-                </a>
+                </ProtectedDownloadButton>
               </div>
 
               <Link href="/mobile" className="sub-link" style={{ color: 'var(--apple-green)' }}>
@@ -361,7 +391,7 @@ export default function HomePage() {
               ]}
               guideLink="/windows"
               guideLinkLabel="قراءة الدليل المكتوب لنسخة الكمبيوتر"
-              downloadLink="/downloads/iSmart%20Messenger%20Setup%201.1.15.exe"
+              downloadLink="/api/portal/download?file=windows"
               downloadLinkLabel="تنزيل الملف (EXE)"
             />
 
@@ -382,7 +412,7 @@ export default function HomePage() {
               ]}
               guideLink="/mobile"
               guideLinkLabel="قراءة الدليل المكتوب لنسخة الموبايل"
-              downloadLink="/downloads/iSmart-Messenger.apk"
+              downloadLink="/api/portal/download?file=mobile"
               downloadLinkLabel="تنزيل الملف (APK)"
             />
           </div>

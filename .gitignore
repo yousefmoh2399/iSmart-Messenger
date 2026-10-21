@@ -7,6 +7,7 @@ backend/*firebase-adminsdk*.json
 *.json
 !**/package.json
 !**/tsconfig.json
+!portal/data/portal-config.json
 deployment/
 
 # Flutter / Dart
