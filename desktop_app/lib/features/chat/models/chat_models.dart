@@ -114,6 +114,7 @@ class ChatDirectoryUser {
     required this.id,
     required this.username,
     required this.fullName,
+    this.jobTitle = '',
     required this.role,
     required this.departmentId,
     this.departmentIds = const [],
@@ -130,6 +131,7 @@ class ChatDirectoryUser {
   final String id;
   final String username;
   final String fullName;
+  final String jobTitle;
   final String role;
   final String? departmentId;
   final List<String> departmentIds;
@@ -150,6 +152,7 @@ class ChatDirectoryUser {
       'id': id,
       'username': username,
       'fullName': fullName,
+      'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
       'departmentIds': departmentIds,
@@ -169,6 +172,7 @@ class ChatDirectoryUser {
       id: (json['_id'] ?? json['id'])?.toString() ?? '',
       username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
+      jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
       departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
@@ -728,6 +732,36 @@ class ChatMessage {
       return false;
     }
     return broadcastTargets['sentToAllDepartments'] == true;
+  }
+
+  List<String> get broadcastTargetUserIds {
+    final broadcastTargets = metadata?['broadcastTargets'];
+    if (broadcastTargets is! Map) {
+      return const <String>[];
+    }
+    final raw = broadcastTargets['userIds'];
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((entry) => entry.toString())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
+  }
+
+  List<String> get broadcastTargetUserNames {
+    final broadcastTargets = metadata?['broadcastTargets'];
+    if (broadcastTargets is! Map) {
+      return const <String>[];
+    }
+    final raw = broadcastTargets['userNames'];
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((entry) => entry.toString())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
   }
 
   String? get forwardedFromName {

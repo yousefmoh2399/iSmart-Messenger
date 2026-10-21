@@ -2223,6 +2223,11 @@ class _ConversationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final peer = conversation.type == 'direct' ? _directPeer() : null;
     final title = conversation.displayTitle(currentUserId);
+    final String tooltipMessage = (peer?.jobTitle.trim().isNotEmpty == true)
+        ? '$title\n💼 ${peer!.jobTitle.trim()}'
+        : (peer != null && peer.branchCode.isNotEmpty
+            ? '$title • فرع ${peer.branchCode}'
+            : title);
     final preview = typingPreviewText ?? _conversationPreview(conversation);
     final accent = _conversationAccent(conversation.type);
     final colorScheme = Theme.of(context).colorScheme;

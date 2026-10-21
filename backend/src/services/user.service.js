@@ -71,6 +71,7 @@ function serializeUser(user, permissions = null) {
     id: user._id.toString(),
     username: user.username,
     fullName: user.fullName,
+    jobTitle: user.jobTitle || "",
     role: user.role,
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     departmentIds: Array.isArray(user.departmentIds)
@@ -333,6 +334,7 @@ async function createUser(
       username: normalizedUsername,
       passwordHash,
       fullName: String(fullName).trim(),
+      jobTitle: payload.jobTitle ? String(payload.jobTitle).trim().slice(0, 150) : "",
       role: role || "user",
       permissionOverrides: normalizePermissionOverrides(permissions),
       maxAttachmentSizeMB: maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
@@ -429,6 +431,10 @@ async function updateUser(actor, userId, payload) {
 
   if (payload.fullName != null) {
     user.fullName = String(payload.fullName).trim();
+  }
+
+  if (payload.jobTitle !== undefined) {
+    user.jobTitle = String(payload.jobTitle || "").trim().slice(0, 150);
   }
 
   if (payload.role != null && (actorIsAdmin || actorCanManageUsers)) {
@@ -598,6 +604,10 @@ async function updateProfile(actor, payload) {
 
   if (payload.fullName != null) {
     user.fullName = String(payload.fullName).trim().slice(0, 120);
+  }
+
+  if (payload.jobTitle !== undefined) {
+    user.jobTitle = String(payload.jobTitle || "").trim().slice(0, 150);
   }
 
   if (payload.chatPreferences && typeof payload.chatPreferences === "object") {

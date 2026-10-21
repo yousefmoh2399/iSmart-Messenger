@@ -3,6 +3,7 @@ class AppUser {
     required this.id,
     required this.username,
     required this.fullName,
+    this.jobTitle = '',
     required this.role,
     required this.departmentId,
     required this.branchId,
@@ -21,6 +22,7 @@ class AppUser {
   final String id;
   final String username;
   final String fullName;
+  final String jobTitle;
   final String role;
   final String? departmentId;
   final String? branchId;
@@ -119,6 +121,7 @@ class AppUser {
       id: json['id'] as String,
       username: json['username'] as String,
       fullName: json['fullName'] as String? ?? '',
+      jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
       branchId: json['branchId'] as String?,
@@ -146,6 +149,7 @@ class AppUser {
       'id': id,
       'username': username,
       'fullName': fullName,
+      'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
       'branchId': branchId,

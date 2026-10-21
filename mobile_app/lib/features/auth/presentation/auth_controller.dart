@@ -199,11 +199,13 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> updateProfile({
     required String fullName,
+    String? jobTitle,
     String? password,
   }) async {
     final repository = ref.read(authRepositoryProvider);
     final user = await repository.updateProfile(
       fullName: fullName,
+      jobTitle: jobTitle,
       password: password,
     );
     final session = await repository.getSession();

@@ -65,6 +65,7 @@ router.put(
       .trim()
       .isLength({ min: 2, max: 120 })
       .withMessage("الاسم يجب أن يكون بين 2 و120 حرفًا."),
+    body("jobTitle").optional().isString().trim().isLength({ max: 150 }),
     body("password")
       .optional()
       .isLength({ min: 6 })

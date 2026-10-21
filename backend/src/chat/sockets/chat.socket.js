@@ -33,6 +33,7 @@ const {
 
 const typingState = new Map();
 const typingTimeouts = new Map();
+let activeIOInstance = null;
 const userSockets = new Map();
 const socketPresence = new Map();
 const socketClientType = new Map();

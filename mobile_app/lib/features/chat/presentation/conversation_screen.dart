@@ -37,6 +37,7 @@ import 'attachment_send_dialogs.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
 import 'group_management_screen.dart';
+import 'widgets/broadcast_target_picker_sheet.dart';
 import 'widgets/attachment_bottom_sheet.dart';
 import 'widgets/chat_animated_reaction_picker.dart';
 import 'widgets/chat_audio_attachment_player.dart';
@@ -121,6 +122,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       _downloadStates.isEmpty ? null : _downloadStates.values.first.fileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
+  Set<String> _broadcastTargetUserIds = <String>{};
   bool _isRecordingVoice = false;
   bool _isVoiceRecordingPaused = false;
   Duration _recordingDuration = Duration.zero;
@@ -2376,150 +2378,39 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     final departments = overview?.departments ?? const <DepartmentSummary>[];
-    if (departments.isEmpty) {
-      return {
-        'broadcastTargets': {
-          'departmentIds': const <String>[],
-          'departmentCodes': const <String>[],
-          'departmentNames': const <String>[],
-        },
-      };
-    }
+    final users = overview?.users ?? const <ChatDirectoryUser>[];
+    final currentUserId =
+        ref.read(authControllerProvider).valueOrNull?.id ?? '';
 
-    final selectedIds = <String>{..._broadcastTargetDepartmentIds};
-    var sendToAll = _broadcastSendToAllDepartments || selectedIds.isEmpty;
-
-    final selection = await showModalBottomSheet<bool>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
-
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setModalState) => SafeArea(
-          child: FractionallySizedBox(
-            heightFactor: 0.82,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'إرسال البث إلى',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: sendToAll,
-                    onChanged: (value) {
-                      setModalState(() {
-                        sendToAll = value;
-                      });
-                    },
-                    title: const Text('كل الأقسام'),
-                    subtitle: const Text(
-                      'لو أغلقتها، اختار أقسام محددة للبث الحالي فقط.',
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Expanded(
-                    child: ListView(
-                      children: departments
-                          .map(
-                            (department) => CheckboxListTile(
-                              value: sendToAll
-                                  ? true
-                                  : selectedIds.contains(department.id),
-                              onChanged: sendToAll
-                                  ? null
-                                  : (value) {
-                                      setModalState(() {
-                                        if (value == true) {
-                                          selectedIds.add(department.id);
-                                        } else {
-                                          selectedIds.remove(department.id);
-                                        }
-                                      });
-                                    },
-                              title: Text(department.name),
-                              subtitle: Text(
-                                department.description.isEmpty
-                                    ? 'قسم ${department.code}'
-                                    : department.description,
-                              ),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () =>
-                              Navigator.of(sheetContext).pop(false),
-                          child: const Text('إلغاء'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: (!sendToAll && selectedIds.isEmpty)
-                              ? null
-                              : () => Navigator.of(sheetContext).pop(true),
-                          child: const Text('إرسال'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    final payload = await BroadcastTargetPickerSheet.show(
+      context,
+      departments: departments,
+      users: users,
+      currentUserId: currentUserId,
+      initialSendToAll: _broadcastSendToAllDepartments,
+      initialDepartmentIds: _broadcastTargetDepartmentIds,
+      initialUserIds: _broadcastTargetUserIds,
     );
 
-    if (selection != true) {
+    if (payload == null) {
       return null;
     }
 
-    _broadcastSendToAllDepartments = sendToAll;
-    _broadcastTargetDepartmentIds = sendToAll ? <String>{} : selectedIds;
-    final selectedDepartments = sendToAll
-        ? const <DepartmentSummary>[]
-        : departments.where((entry) => selectedIds.contains(entry.id)).toList();
-    final selectedDepartmentIds = selectedDepartments
-        .map((entry) => entry.id.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentCodes = selectedDepartments
-        .map((entry) => entry.code.trim().toUpperCase())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentNames = selectedDepartments
-        .map((entry) => entry.name.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
+    final rawTargets =
+        payload['broadcastTargets'] as Map<String, dynamic>? ?? {};
+    final bool isAll = rawTargets['sentToAllDepartments'] == true;
+    final deptIds = (rawTargets['departmentIds'] as List<dynamic>? ?? const [])
+        .map((e) => e.toString())
+        .toSet();
+    final userIds = (rawTargets['userIds'] as List<dynamic>? ?? const [])
+        .map((e) => e.toString())
+        .toSet();
 
-    return {
-      'broadcastTargets': {
-        'departmentIds': sendToAll ? const <String>[] : selectedDepartmentIds,
-        'departmentCodes': sendToAll
-            ? const <String>[]
-            : selectedDepartmentCodes,
-        'departmentNames': sendToAll
-            ? const <String>[]
-            : selectedDepartmentNames,
-      },
-    };
+    _broadcastSendToAllDepartments = isAll;
+    _broadcastTargetDepartmentIds = isAll ? <String>{} : deptIds;
+    _broadcastTargetUserIds = isAll ? <String>{} : userIds;
+
+    return payload;
   }
 
   Map<String, dynamic> _forwardMetadataFor(ChatMessage message) {
@@ -4913,59 +4804,45 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                     ],
                                                                   ),
                                                                 ),
-                                                              if (_data.type ==
-                                                                      'broadcast' &&
+                                                              if (_data.type == 'broadcast' &&
                                                                   (message.sentToAllDepartments ||
-                                                                      message
-                                                                          .broadcastTargetDepartmentNames
-                                                                          .isNotEmpty))
-                                                                Container(
-                                                                  width: double
-                                                                      .infinity,
-                                                                  margin:
-                                                                      const EdgeInsets.only(
-                                                                        bottom:
-                                                                            8,
-                                                                      ),
-                                                                  padding:
-                                                                      const EdgeInsets.symmetric(
-                                                                        horizontal:
-                                                                            10,
-                                                                        vertical:
-                                                                            7,
-                                                                      ),
-                                                                  decoration: BoxDecoration(
-                                                                    color:
-                                                                        const Color(
-                                                                          0xFFE67E22,
-                                                                        ).withValues(
-                                                                          alpha:
-                                                                              0.1,
-                                                                        ),
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                          12,
-                                                                        ),
-                                                                  ),
-                                                                  child: Text(
-                                                                    message.sentToAllDepartments
+                                                                      message.broadcastTargetDepartmentNames.isNotEmpty ||
+                                                                      message.broadcastTargetUserNames.isNotEmpty))
+                                                                Builder(
+                                                                  builder: (context) {
+                                                                    final List<String> targets = [];
+                                                                    if (message.broadcastTargetDepartmentNames.isNotEmpty) {
+                                                                      targets.add(message.broadcastTargetDepartmentNames.join('، '));
+                                                                    }
+                                                                    if (message.broadcastTargetUserNames.isNotEmpty) {
+                                                                      targets.add(message.broadcastTargetUserNames.join('، '));
+                                                                    }
+                                                                    final String targetText = message.sentToAllDepartments
                                                                         ? 'إرسال إلى كل الأقسام'
-                                                                        : 'إرسال إلى: ${message.broadcastTargetDepartmentNames.join('، ')}',
-                                                                    maxLines: 2,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style: const TextStyle(
-                                                                      color: Color(
-                                                                        0xFFB85714,
+                                                                        : (targets.isNotEmpty
+                                                                            ? 'إرسال إلى: ${targets.join(' • ')}'
+                                                                            : 'إرسال إلى كل الأقسام');
+
+                                                                    return Container(
+                                                                      width: double.infinity,
+                                                                      margin: const EdgeInsets.only(bottom: 8),
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                                                      decoration: BoxDecoration(
+                                                                        color: const Color(0xFFE67E22).withValues(alpha: 0.1),
+                                                                        borderRadius: BorderRadius.circular(12),
                                                                       ),
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w700,
-                                                                      fontSize:
-                                                                          12,
-                                                                    ),
-                                                                  ),
+                                                                      child: Text(
+                                                                        targetText,
+                                                                        maxLines: 2,
+                                                                        overflow: TextOverflow.ellipsis,
+                                                                        style: const TextStyle(
+                                                                          color: Color(0xFFB85714),
+                                                                          fontWeight: FontWeight.w700,
+                                                                          fontSize: 12,
+                                                                        ),
+                                                                      ),
+                                                                    );
+                                                                  },
                                                                 ),
                                                               if (replyPreview !=
                                                                   null)

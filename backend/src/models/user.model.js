@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 120,
     },
+    jobTitle: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 150,
+    },
     role: {
       type: String,
       required: true,

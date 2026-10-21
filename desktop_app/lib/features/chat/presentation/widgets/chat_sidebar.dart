@@ -2033,19 +2033,28 @@ class _SidebarUserTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      user.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF1C2B3A),
+                    Tooltip(
+                      message: user.jobTitle.trim().isNotEmpty
+                          ? '${user.displayName}\n💼 ${user.jobTitle.trim()}'
+                          : (user.branchCode.isNotEmpty
+                              ? '${user.displayName} • فرع ${user.branchCode}'
+                              : user.displayName),
+                      child: Text(
+                        user.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white : const Color(0xFF1C2B3A),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '@${user.username} • ${formatPresenceLabel(user)}',
+                      user.jobTitle.trim().isNotEmpty
+                          ? '${user.jobTitle.trim()} • ${formatPresenceLabel(user)}'
+                          : '@${user.username} • ${formatPresenceLabel(user)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

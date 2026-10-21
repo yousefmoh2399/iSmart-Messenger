@@ -504,6 +504,7 @@ class AuthRepository {
 
   Future<AppUser> updateProfile({
     required String fullName,
+    String? jobTitle,
     String? password,
   }) async {
     final token = await getToken();
@@ -511,6 +512,7 @@ class AuthRepository {
       '/api/users/me',
       data: {
         'fullName': fullName,
+        if (jobTitle != null) 'jobTitle': jobTitle,
         if (password != null && password.trim().isNotEmpty)
           'password': password,
       },

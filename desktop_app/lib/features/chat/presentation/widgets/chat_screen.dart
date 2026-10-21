@@ -973,6 +973,8 @@ import '../../models/chat_models.dart';
 import '../../utils/chat_attachment_policy.dart';
 import '../chat_appearance.dart';
 import 'attachment_send_dialogs.dart';
+import 'chat_forward_dialog.dart';
+import 'broadcast_target_picker_dialog.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_animated_reaction_picker.dart';
 import 'chat_input.dart';
@@ -1044,6 +1046,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   String? _downloadingFileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
+  Set<String> _broadcastTargetUserIds = <String>{};
   bool _showScrollToBottomButton = false;
   int _unreadBelowCount = 0;
   String? _lastSeenMessageId;
@@ -1831,123 +1834,39 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     final departments = overview?.departments ?? const <DepartmentSummary>[];
-    if (departments.isEmpty) {
-      return {
-        'broadcastTargets': {
-          'departmentIds': const <String>[],
-          'departmentCodes': const <String>[],
-          'departmentNames': const <String>[],
-        },
-      };
-    }
+    final users = overview?.users ?? const <ChatDirectoryUser>[];
 
-    final selectedIds = <String>{..._broadcastTargetDepartmentIds};
-    var sendToAll = _broadcastSendToAllDepartments || selectedIds.isEmpty;
-    final shouldSend = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('إرسال البث إلى'),
-          content: SizedBox(
-            width: 520,
-            height: 420,
-            child: Column(
-              children: [
-                SwitchListTile.adaptive(
-                  value: sendToAll,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      sendToAll = value;
-                    });
-                  },
-                  title: const Text('كل الأقسام'),
-                  subtitle: const Text(
-                    'أغلقها لاختيار أقسام محددة للرسالة الحالية.',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView(
-                    children: departments
-                        .map(
-                          (department) => CheckboxListTile(
-                            value: sendToAll
-                                ? true
-                                : selectedIds.contains(department.id),
-                            onChanged: sendToAll
-                                ? null
-                                : (value) {
-                                    setDialogState(() {
-                                      if (value == true) {
-                                        selectedIds.add(department.id);
-                                      } else {
-                                        selectedIds.remove(department.id);
-                                      }
-                                    });
-                                  },
-                            title: Text(department.name),
-                            subtitle: Text(
-                              department.description.isEmpty
-                                  ? 'قسم ${department.code}'
-                                  : department.description,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: (!sendToAll && selectedIds.isEmpty)
-                  ? null
-                  : () => Navigator.of(dialogContext).pop(true),
-              child: const Text('إرسال'),
-            ),
-          ],
-        ),
-      ),
+    if (!mounted) return null;
+
+    final result = await BroadcastTargetPickerDialog.show(
+      context,
+      departments: departments,
+      users: users,
+      currentUserId: widget.currentUser?.id ?? '',
+      initialSendToAll: _broadcastSendToAllDepartments,
+      initialDepartmentIds: _broadcastTargetDepartmentIds,
+      initialUserIds: _broadcastTargetUserIds,
+      token: widget.token,
     );
 
-    if (shouldSend != true) {
+    if (result == null) {
       return null;
     }
 
-    _broadcastSendToAllDepartments = sendToAll;
-    _broadcastTargetDepartmentIds = sendToAll ? <String>{} : selectedIds;
-    final selectedDepartments = sendToAll
-        ? const <DepartmentSummary>[]
-        : departments.where((entry) => selectedIds.contains(entry.id)).toList();
-    final selectedDepartmentIds = selectedDepartments
-        .map((entry) => entry.id.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentCodes = selectedDepartments
-        .map((entry) => entry.code.trim().toUpperCase())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentNames = selectedDepartments
-        .map((entry) => entry.name.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
+    final broadcastTargets =
+        result['broadcastTargets'] as Map<String, dynamic>?;
+    if (broadcastTargets != null) {
+      _broadcastSendToAllDepartments =
+          broadcastTargets['sentToAllDepartments'] == true;
+      _broadcastTargetDepartmentIds = Set<String>.from(
+        (broadcastTargets['departmentIds'] as List? ?? []),
+      );
+      _broadcastTargetUserIds = Set<String>.from(
+        (broadcastTargets['userIds'] as List? ?? []),
+      );
+    }
 
-    return {
-      'broadcastTargets': {
-        'departmentIds': sendToAll ? const <String>[] : selectedDepartmentIds,
-        'departmentCodes': sendToAll
-            ? const <String>[]
-            : selectedDepartmentCodes,
-        'departmentNames': sendToAll
-            ? const <String>[]
-            : selectedDepartmentNames,
-      },
-    };
+    return result;
   }
 
   Future<void> _jumpToSearchMessage(
@@ -2111,6 +2030,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  Future<void> _forwardSingleMessage(ChatMessage message) async {
+    await _forwardMessages([message]);
+  }
+
   Future<void> _forwardSelectedMessages(List<ChatMessage> allMessages) async {
     final selectedMessages =
         allMessages
@@ -2120,100 +2043,204 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (selectedMessages.isEmpty) {
       return;
     }
+    await _forwardMessages(selectedMessages);
+  }
+
+  Future<void> _forwardMessages(List<ChatMessage> messagesToForward) async {
+    if (messagesToForward.isEmpty) {
+      return;
+    }
 
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     if (overview == null) {
       return;
     }
 
-    final conversations = overview.conversations
-        .where((conversation) => conversation.id != _conversationId)
-        .toList();
-    ChatConversation? target;
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('إعادة توجيه الرسائل'),
-        content: SizedBox(
-          width: 420,
-          child: conversations.isEmpty
-              ? const Text('لا توجد محادثات أخرى متاحة لإعادة التوجيه.')
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: conversations.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final conversation = conversations[index];
-                    return ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      tileColor: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerLowest,
-                      title: Text(
-                        conversation.displayTitle(widget.currentUser?.id ?? ''),
-                      ),
-                      subtitle: Text(switch (conversation.type) {
-                        'direct' => 'محادثة مباشرة',
-                        'department' => 'غرفة قسم',
-                        'broadcast' => 'قناة إعلانية',
-                        _ => 'مجموعة',
-                      }),
-                      onTap: () {
-                        target = conversation;
-                        Navigator.of(dialogContext).pop();
-                      },
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إلغاء'),
-          ),
-        ],
-      ),
+    final targets = await ChatForwardDialog.show(
+      context,
+      currentUserId: widget.currentUser?.id ?? '',
+      currentConversationId: _conversationId,
+      selectedMessageCount: messagesToForward.length,
+      token: widget.token,
     );
 
-    if (target == null) {
+    if (targets == null || targets.isEmpty) {
       return;
     }
 
-    final repository = ref.read(chatRepositoryProvider);
-
+    // Filter restricted attachments
     var skippedRestrictedCount = 0;
-    try {
-      for (final message in selectedMessages) {
-        if (message.hasAttachment && !message.attachmentForwardAllowed) {
-          skippedRestrictedCount++;
-          continue;
-        }
-        final metadata = _forwardMetadataFor(message);
-        await repository.forwardMessage(
-          conversationId: target!.id,
-          sourceMessageId: message.id,
-          metadata: metadata,
-        );
+    final validMessages = <ChatMessage>[];
+    for (final message in messagesToForward) {
+      if (message.hasAttachment && !message.attachmentForwardAllowed) {
+        skippedRestrictedCount++;
+      } else {
+        validMessages.add(message);
       }
+    }
 
-      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
-      if (!mounted) {
-        return;
-      }
-      _clearSelection();
-      final forwardedCount = selectedMessages.length - skippedRestrictedCount;
-      if (forwardedCount > 0) {
+    if (validMessages.isEmpty) {
+      if (mounted && skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تمت إعادة توجيه $forwardedCount رسالة إلى ${target!.displayTitle(widget.currentUser?.id ?? '')}',
+              'تم تخطي $skippedRestrictedCount مرفق لأن المرسل منع إعادة توجيهه.',
             ),
           ),
         );
       }
+      return;
+    }
+
+    final repository = ref.read(chatRepositoryProvider);
+    final targetConversationIds = <String>{};
+    final targetNames = <String>[];
+
+    // Show loading indicator
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 12),
+            Text('جاري إعادة توجيه الرسائل...'),
+          ],
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    for (final target in targets) {
+      try {
+        switch (target.kind) {
+          case ForwardTargetKind.conversation:
+            if (target.conversation != null) {
+              targetConversationIds.add(target.conversation!.id);
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.user:
+            if (target.user != null) {
+              // Check if direct conversation already exists in overview
+              ChatConversation? existingDirect;
+              for (final conv in overview.conversations) {
+                if (conv.type == 'direct') {
+                  final isWithTarget = conv.members.any((m) => m.id == target.user!.id);
+                  if (isWithTarget) {
+                    existingDirect = conv;
+                    break;
+                  }
+                }
+              }
+
+              if (existingDirect != null) {
+                targetConversationIds.add(existingDirect.id);
+              } else {
+                final created = await repository.createDirectConversation(target.user!.id);
+                targetConversationIds.add(created.id);
+              }
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.department:
+            if (target.department != null) {
+              final dept = target.department!;
+              // 1. Try to find room conversation for this department
+              ChatConversation? deptRoom;
+              for (final conv in overview.conversations) {
+                if (conv.departmentId == dept.id || conv.id == dept.defaultConversationId) {
+                  deptRoom = conv;
+                  break;
+                }
+              }
+
+              if (deptRoom != null) {
+                targetConversationIds.add(deptRoom.id);
+                targetNames.add('غرفة ${dept.name}');
+              } else {
+                // If no room conversation exists, forward to each user in this department!
+                final deptUsers = overview.users.where((u) =>
+                  (u.departmentId == dept.id || u.departmentIds.contains(dept.id)) &&
+                  u.id != (widget.currentUser?.id ?? '')
+                ).toList();
+
+                if (deptUsers.isEmpty) {
+                  targetNames.add(dept.name);
+                } else {
+                  targetNames.add('${dept.name} (${deptUsers.length} أعضاء)');
+                  for (final member in deptUsers) {
+                    ChatConversation? memberConv;
+                    for (final conv in overview.conversations) {
+                      if (conv.type == 'direct' && conv.members.any((m) => m.id == member.id)) {
+                        memberConv = conv;
+                        break;
+                      }
+                    }
+                    if (memberConv != null) {
+                      targetConversationIds.add(memberConv.id);
+                    } else {
+                      try {
+                        final created = await repository.createDirectConversation(member.id);
+                        targetConversationIds.add(created.id);
+                      } catch (_) {}
+                    }
+                  }
+                }
+              }
+            }
+            break;
+        }
+      } catch (err) {
+        debugPrint('Error resolving forward target: $err');
+      }
+    }
+
+    if (targetConversationIds.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر تحديد وجهة إعادة التوجيه')),
+        );
+      }
+      return;
+    }
+
+    try {
+      for (final convId in targetConversationIds) {
+        for (final message in validMessages) {
+          final metadata = _forwardMetadataFor(message);
+          await repository.forwardMessage(
+            conversationId: convId,
+            sourceMessageId: message.id,
+            metadata: metadata,
+          );
+        }
+      }
+
+      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
+
+      if (!mounted) return;
+      _clearSelection();
+
+      final destinationText = targetNames.length <= 2
+          ? targetNames.join(' و ')
+          : '${targetNames.first} و ${targetNames.length - 1} وجهات أخرى';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تمت إعادة توجيه ${validMessages.length} رسالة إلى $destinationText بنجاح',
+          ),
+          backgroundColor: const Color(0xFF34C759),
+        ),
+      );
+
       if (skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2224,12 +2251,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         );
       }
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('حدث خطأ أثناء إعادة التوجيه: $error')),
+      );
     }
   }
 
@@ -4951,9 +4976,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               message.id,
                                             )
                                           : null,
-                                      onLongPress: () =>
-                                          _toggleMessageSelection(message.id),
-                                      onReply: () {
+                                       onLongPress: () =>
+                                           _toggleMessageSelection(message.id),
+                                       onForward: () =>
+                                           _forwardSingleMessage(message),
+                                       onReply: () {
                                         if (_selectionMode) return;
                                         if (isReadOnly) return;
                                         setState(() {
@@ -5410,6 +5437,9 @@ class _ChatHeader extends StatelessWidget {
               .cast<ChatDirectoryUser?>()
               .firstWhere((_) => true, orElse: () => null)
         : null;
+    final headerTooltip = (peer?.jobTitle.trim().isNotEmpty == true)
+        ? '$title\n💼 ${peer!.jobTitle.trim()}'
+        : title;
 
     final headerBg = Color.lerp(
       appearance.incomingBubbleColor,
@@ -5458,19 +5488,25 @@ class _ChatHeader extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: titleColor,
+                    Tooltip(
+                      message: headerTooltip,
+                      waitDuration: const Duration(milliseconds: 250),
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: titleColor,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      statusText,
+                      (peer?.jobTitle.trim().isNotEmpty == true)
+                          ? '${peer!.jobTitle.trim()} • $statusText'
+                          : statusText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

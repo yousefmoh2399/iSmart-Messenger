@@ -324,6 +324,7 @@ function serializeUserLite(user) {
     id: user._id.toString(),
     username: user.username,
     fullName: user.fullName,
+    jobTitle: user.jobTitle || "",
     role: user.role,
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     departmentIds: Array.isArray(user.departmentIds)
@@ -529,7 +530,7 @@ async function createSystemConversationMessage(conversation, actor, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -544,7 +545,7 @@ async function refreshConversationLastMessage(conversationId) {
     .sort({ createdAt: -1, _id: -1 })
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -650,15 +651,15 @@ async function getConversationById(conversationId) {
   })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "blockedMembers",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .exec();
@@ -861,11 +862,11 @@ async function listConversationsForUser(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -930,11 +931,11 @@ async function listManageableConversations(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -1396,7 +1397,7 @@ async function listMessagesForConversation(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1430,7 +1431,7 @@ async function createMessage(currentUser, payload, file) {
     })
       .populate(
         "senderId",
-        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
     if (existing) {
@@ -1576,24 +1577,69 @@ async function createMessage(currentUser, payload, file) {
         normalizedMetadata.departmentNames ||
         payload.departmentNames ||
         [],
+      userIds:
+        rawTargets.userIds ||
+        normalizedMetadata.userIds ||
+        payload.userIds ||
+        [],
+      userNames:
+        rawTargets.userNames ||
+        normalizedMetadata.userNames ||
+        payload.userNames ||
+        [],
     };
+    const targetDepartmentIds =
+      await resolveBroadcastTargetDepartmentIds(mergedRawTargets);
+    const targetUserIds = Array.from(
+      new Set(
+        (mergedRawTargets.userIds || [])
+          .map((entry) => getObjectIdString(entry))
+          .filter(Boolean),
+      ),
+    );
     const requestedTargetCount =
       (mergedRawTargets.departmentIds || []).length +
       (mergedRawTargets.departmentCodes || []).length +
-      (mergedRawTargets.departmentNames || []).length;
-    const targetDepartmentIds =
-      await resolveBroadcastTargetDepartmentIds(mergedRawTargets);
-    if (requestedTargetCount > 0 && targetDepartmentIds.length === 0) {
-      throw new ApiError(400, "No valid target departments selected.");
+      (mergedRawTargets.departmentNames || []).length +
+      targetUserIds.length;
+    if (requestedTargetCount > 0 && targetDepartmentIds.length === 0 && targetUserIds.length === 0) {
+      throw new ApiError(400, "No valid target departments or users selected.");
     }
-    const userQuery = {
-      isActive: true,
-      ...(targetDepartmentIds.length > 0
-        ? { departmentId: { $in: targetDepartmentIds } }
-        : {}),
-    };
-    const targetUsers = await User.find(userQuery, "_id").lean();
-    recipientIds = targetUsers.map((entry) => entry._id.toString());
+
+    if (targetDepartmentIds.length > 0 && targetUserIds.length > 0) {
+      const targetDeptUsers = await User.find(
+        {
+          isActive: true,
+          $or: [
+            { departmentId: { $in: targetDepartmentIds } },
+            { departmentIds: { $in: targetDepartmentIds } },
+          ],
+        },
+        "_id",
+      ).lean();
+      const combined = new Set([
+        ...targetDeptUsers.map((entry) => entry._id.toString()),
+        ...targetUserIds,
+      ]);
+      recipientIds = Array.from(combined);
+    } else if (targetDepartmentIds.length > 0) {
+      const targetDeptUsers = await User.find(
+        {
+          isActive: true,
+          $or: [
+            { departmentId: { $in: targetDepartmentIds } },
+            { departmentIds: { $in: targetDepartmentIds } },
+          ],
+        },
+        "_id",
+      ).lean();
+      recipientIds = targetDeptUsers.map((entry) => entry._id.toString());
+    } else if (targetUserIds.length > 0) {
+      recipientIds = targetUserIds;
+    } else {
+      const allActiveUsers = await User.find({ isActive: true }, "_id").lean();
+      recipientIds = allActiveUsers.map((entry) => entry._id.toString());
+    }
 
     const conversationMemberIds = new Set(
       (conversation.members || []).map((entry) => getObjectIdString(entry)),
@@ -1637,11 +1683,21 @@ async function createMessage(currentUser, payload, file) {
         .map((id) => departmentCodeById.get(id))
         .filter(Boolean);
     }
+    let targetUserNames = mergedRawTargets.userNames || [];
+    if (targetUserIds.length > 0 && targetUserNames.length === 0) {
+      const users = await User.find(
+        { _id: { $in: targetUserIds } },
+        "fullName username",
+      ).lean();
+      targetUserNames = users.map((u) => u.fullName || u.username);
+    }
     normalizedMetadata.broadcastTargets = {
       departmentIds: targetDepartmentIds,
       departmentNames: targetDepartmentNames,
       departmentCodes: targetDepartmentCodes,
-      sentToAllDepartments: targetDepartmentIds.length === 0,
+      userIds: targetUserIds,
+      userNames: targetUserNames,
+      sentToAllDepartments: targetDepartmentIds.length === 0 && targetUserIds.length === 0,
     };
   } else if (conversation.type === "department" && currentUser.departmentId) {
     const departmentUsers = await User.find(
@@ -1815,7 +1871,7 @@ async function createMessage(currentUser, payload, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1878,8 +1934,16 @@ async function markConversationDelivered(currentUser, conversationId) {
       const targets = message.metadata.broadcastTargets;
       if (targets && targets.sentToAllDepartments === false) {
         const targetDeptIds = (targets.departmentIds || []).map(String);
+        const targetUserIds = (targets.userIds || []).map(String);
+        const currentUserId = String(currentUser.id || currentUser._id);
         const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
-        if (!userDeptId || !targetDeptIds.includes(userDeptId)) {
+        const userDeptIds = (currentUser.departmentIds || []).map(String);
+        const isUserMatch = targetUserIds.includes(currentUserId);
+        const isDeptMatch = targetDeptIds.length > 0 && (
+          (userDeptId && targetDeptIds.includes(userDeptId)) ||
+          userDeptIds.some((id) => targetDeptIds.includes(id))
+        );
+        if (!isUserMatch && !isDeptMatch) {
           continue;
         }
       }
@@ -1941,8 +2005,16 @@ async function markPendingDeliveriesForUser(currentUser) {
       const targets = message.metadata.broadcastTargets;
       if (targets && targets.sentToAllDepartments === false) {
         const targetDeptIds = (targets.departmentIds || []).map(String);
+        const targetUserIds = (targets.userIds || []).map(String);
+        const currentUserId = String(currentUser.id || currentUser._id);
         const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
-        if (!userDeptId || !targetDeptIds.includes(userDeptId)) {
+        const userDeptIds = (currentUser.departmentIds || []).map(String);
+        const isUserMatch = targetUserIds.includes(currentUserId);
+        const isDeptMatch = targetDeptIds.length > 0 && (
+          (userDeptId && targetDeptIds.includes(userDeptId)) ||
+          userDeptIds.some((id) => targetDeptIds.includes(id))
+        );
+        if (!isUserMatch && !isDeptMatch) {
           continue;
         }
       }
@@ -2076,7 +2148,7 @@ async function updateMessage(currentUser, messageId, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2141,7 +2213,7 @@ async function toggleMessageReaction(currentUser, messageId, emoji) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2181,7 +2253,7 @@ async function toggleMessageFavorite(currentUser, messageId) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2701,7 +2773,7 @@ async function searchMessages(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2779,7 +2851,7 @@ async function listFavoriteMessages(
       .limit(batchSize)
       .populate(
         "senderId",
-        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
 
@@ -2984,7 +3056,7 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
   return serializeMessage(populated, populated.senderId);
@@ -3040,7 +3112,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 

@@ -64,6 +64,7 @@ class MessageBubble extends StatefulWidget {
     this.albumMessages = const [],
     this.onOpenAlbum,
     this.onRetry,
+    this.onForward,
   });
 
   final ChatMessage message;
@@ -101,6 +102,7 @@ class MessageBubble extends StatefulWidget {
   final List<ChatMessage> albumMessages;
   final ValueChanged<ChatMessage>? onOpenAlbum;
   final VoidCallback? onRetry;
+  final VoidCallback? onForward;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -123,6 +125,9 @@ class _MessageBubbleState extends State<MessageBubble> {
         break;
       case _BubbleMenuAction.reply:
         widget.onReply();
+        break;
+      case _BubbleMenuAction.forward:
+        widget.onForward?.call();
         break;
       case _BubbleMenuAction.copy:
         await Clipboard.setData(ClipboardData(text: widget.message.content));
@@ -208,6 +213,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                   color: Color(0xFF3390EC),
                 ),
               ),
+              if (widget.onForward != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.forward,
+                  child: _PopupActionRow(
+                    icon: Icons.shortcut_rounded,
+                    label: 'إعادة توجيه',
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
               const PopupMenuItem(
                 value: _BubbleMenuAction.favorite,
                 child: _PopupActionRow(
@@ -299,13 +313,49 @@ class _MessageBubbleState extends State<MessageBubble> {
         ? resolved.outgoingBorderColor
         : resolved.incomingBorderColor;
 
-    final subColor = widget.isMine
+        final subColor = widget.isMine
         ? (bubbleUsesDarkTone
               ? const Color(0xFFC9DDF2)
               : const Color(0xFF5C748B))
         : (bubbleUsesDarkTone
               ? const Color(0xFF9BB0C3)
               : const Color(0xFF7A8A99));
+
+    final forwardColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? const Color(0xFFE0F2FE)
+            : const Color(0xFF0369A1))
+        : (isDark
+            ? const Color(0xFF38BDF8)
+            : const Color(0xFF0284C7));
+
+    final replyBgColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? Colors.black.withValues(alpha: 0.20)
+            : Colors.black.withValues(alpha: 0.08))
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.08)
+            : const Color(0xFFF1F5F9));
+
+    final replyBorderColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? const Color(0xFF38BDF8)
+            : const Color(0xFF0284C7))
+        : resolved.accent;
+
+    final replySenderColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? Colors.white
+            : const Color(0xFF0F172A))
+        : resolved.accent;
+
+    final replyTextColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? const Color(0xFFE2E8F0)
+            : const Color(0xFF334155))
+        : (isDark
+            ? const Color(0xFFCBD5E1)
+            : const Color(0xFF475569));
 
     final selectedFill = const Color(0xFF3390EC).withValues(alpha: 0.14);
     final searchMatchFill = isDark
@@ -402,10 +452,10 @@ class _MessageBubbleState extends State<MessageBubble> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.forward_rounded,
                             size: 15,
-                            color: Color(0xFF3390EC),
+                            color: forwardColor,
                           ),
                           const SizedBox(width: 6),
                           Flexible(
@@ -414,7 +464,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: resolved.accent,
+                                color: forwardColor,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -424,7 +474,8 @@ class _MessageBubbleState extends State<MessageBubble> {
                       ),
                     ),
                   if (widget.message.sentToAllDepartments ||
-                      widget.message.broadcastTargetDepartmentNames.isNotEmpty)
+                      widget.message.broadcastTargetDepartmentNames.isNotEmpty ||
+                      widget.message.broadcastTargetUserNames.isNotEmpty)
                     Container(
                       width: double.infinity,
                       margin: const EdgeInsets.only(bottom: 8),
@@ -438,8 +489,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                       ),
                       child: Text(
                         widget.message.sentToAllDepartments
-                            ? 'إرسال إلى كل الأقسام'
-                            : 'إرسال إلى: ${widget.message.broadcastTargetDepartmentNames.join('، ')}',
+                            ? 'إرسال إلى: كل الأقسام والموظفين'
+                            : (widget.message.broadcastTargetDepartmentNames.isNotEmpty &&
+                                    widget.message.broadcastTargetUserNames.isNotEmpty)
+                                ? 'إرسال إلى أقسام: ${widget.message.broadcastTargetDepartmentNames.join('، ')} • وموظفون: ${widget.message.broadcastTargetUserNames.join('، ')}'
+                                : widget.message.broadcastTargetDepartmentNames.isNotEmpty
+                                    ? 'إرسال إلى: ${widget.message.broadcastTargetDepartmentNames.join('، ')}'
+                                    : 'إرسال إلى: ${widget.message.broadcastTargetUserNames.join('، ')}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -459,16 +515,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: widget.isMine
-                            ? resolved.outgoingReplyColor
-                            : resolved.incomingReplyColor,
+                        color: replyBgColor,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border(
-                          left: BorderSide(
-                            color: widget.isMine
-                                ? resolved.accent.withValues(alpha: 0.92)
-                                : resolved.accent,
-                            width: 3,
+                        border: BorderDirectional(
+                          start: BorderSide(
+                            color: replyBorderColor,
+                            width: 3.5,
                           ),
                         ),
                       ),
@@ -484,7 +536,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  color: resolved.accent,
+                                  color: replySenderColor,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -495,7 +547,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: subColor,
+                              color: replyTextColor,
                               fontSize: 12,
                               height: 1.3,
                             ),
@@ -1112,6 +1164,7 @@ class _ReactionBar extends StatelessWidget {
 enum _BubbleMenuAction {
   react,
   reply,
+  forward,
   favorite,
   copy,
   saveAttachment,

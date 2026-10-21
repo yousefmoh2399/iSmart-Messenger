@@ -22,6 +22,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
+  final _jobTitleController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _saving = false;
   bool _uploadingAvatar = false;
@@ -29,6 +30,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void dispose() {
     _fullNameController.dispose();
+    _jobTitleController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -44,6 +46,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           .read(authControllerProvider.notifier)
           .updateProfile(
             fullName: _fullNameController.text.trim(),
+            jobTitle: _jobTitleController.text.trim(),
             password: _passwordController.text.trim(),
           );
       if (!mounted) {
