@@ -174,11 +174,13 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
       final name = user.displayName.toLowerCase();
       final username = user.username.toLowerCase();
       final branch = user.branchCode.toLowerCase();
+      final jobTitle = user.jobTitle.toLowerCase();
       final deptName =
           (departmentsById[user.departmentId]?.name ?? '').toLowerCase();
       return name.contains(query) ||
           username.contains(query) ||
           branch.contains(query) ||
+          jobTitle.contains(query) ||
           deptName.contains(query);
     }).toList();
 
@@ -641,41 +643,41 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                 ),
               ),
               const Spacer(),
-              if (!_sendToAll) ...[
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      for (final d in filteredDepartments) {
-                        _selectedDepartmentIds.add(d.id);
-                      }
-                    });
-                  },
-                  style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('تحديد الكل', style: TextStyle(fontSize: 11.5)),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _sendToAll = false;
+                    for (final d in filteredDepartments) {
+                      _selectedDepartmentIds.add(d.id);
+                    }
+                  });
+                },
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const SizedBox(width: 8),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      for (final d in filteredDepartments) {
-                        _selectedDepartmentIds.remove(d.id);
-                      }
-                    });
-                  },
-                  style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('إلغاء التحديد', style: TextStyle(fontSize: 11.5)),
+                child: const Text('تحديد الكل', style: TextStyle(fontSize: 11.5)),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _sendToAll = false;
+                    for (final d in filteredDepartments) {
+                      _selectedDepartmentIds.remove(d.id);
+                    }
+                  });
+                },
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-              ],
+                child: const Text('إلغاء التحديد', style: TextStyle(fontSize: 11.5)),
+              ),
             ],
           ),
         ),
@@ -705,17 +707,22 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                 ),
                 child: CheckboxListTile(
                   value: isChecked,
-                  onChanged: _sendToAll
-                      ? null
-                      : (val) {
-                          setState(() {
-                            if (val == true) {
-                              _selectedDepartmentIds.add(dept.id);
-                            } else {
-                              _selectedDepartmentIds.remove(dept.id);
-                            }
-                          });
-                        },
+                  onChanged: (val) {
+                    setState(() {
+                      if (_sendToAll) {
+                        _sendToAll = false;
+                        _selectedDepartmentIds.clear();
+                        _selectedUserIds.clear();
+                        _selectedDepartmentIds.add(dept.id);
+                      } else {
+                        if (val == true) {
+                          _selectedDepartmentIds.add(dept.id);
+                        } else {
+                          _selectedDepartmentIds.remove(dept.id);
+                        }
+                      }
+                    });
+                  },
                   activeColor: const Color(0xFFFF9500),
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -807,41 +814,41 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                 ),
               ),
               const Spacer(),
-              if (!_sendToAll) ...[
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      for (final u in filteredUsers) {
-                        _selectedUserIds.add(u.id);
-                      }
-                    });
-                  },
-                  style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('تحديد الكل', style: TextStyle(fontSize: 11.5)),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _sendToAll = false;
+                    for (final u in filteredUsers) {
+                      _selectedUserIds.add(u.id);
+                    }
+                  });
+                },
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                const SizedBox(width: 8),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      for (final u in filteredUsers) {
-                        _selectedUserIds.remove(u.id);
-                      }
-                    });
-                  },
-                  style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('إلغاء التحديد', style: TextStyle(fontSize: 11.5)),
+                child: const Text('تحديد الكل', style: TextStyle(fontSize: 11.5)),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _sendToAll = false;
+                    for (final u in filteredUsers) {
+                      _selectedUserIds.remove(u.id);
+                    }
+                  });
+                },
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-              ],
+                child: const Text('إلغاء التحديد', style: TextStyle(fontSize: 11.5)),
+              ),
             ],
           ),
         ),
@@ -873,17 +880,22 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                 ),
                 child: CheckboxListTile(
                   value: isChecked,
-                  onChanged: _sendToAll
-                      ? null
-                      : (val) {
-                          setState(() {
-                            if (val == true) {
-                              _selectedUserIds.add(user.id);
-                            } else {
-                              _selectedUserIds.remove(user.id);
-                            }
-                          });
-                        },
+                  onChanged: (val) {
+                    setState(() {
+                      if (_sendToAll) {
+                        _sendToAll = false;
+                        _selectedDepartmentIds.clear();
+                        _selectedUserIds.clear();
+                        _selectedUserIds.add(user.id);
+                      } else {
+                        if (val == true) {
+                          _selectedUserIds.add(user.id);
+                        } else {
+                          _selectedUserIds.remove(user.id);
+                        }
+                      }
+                    });
+                  },
                   activeColor: const Color(0xFFFF9500),
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -966,9 +978,11 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                     ],
                   ),
                   subtitle: Text(
-                    deptName.isNotEmpty
-                        ? '$deptName • @${user.username}'
-                        : '@${user.username}',
+                    [
+                      if (user.jobTitle.isNotEmpty) user.jobTitle,
+                      if (deptName.isNotEmpty) deptName,
+                      '@${user.username}',
+                    ].join(' • '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

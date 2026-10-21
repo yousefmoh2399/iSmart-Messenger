@@ -42,6 +42,7 @@ import 'widgets/attachment_bottom_sheet.dart';
 import 'widgets/chat_animated_reaction_picker.dart';
 import 'widgets/chat_audio_attachment_player.dart';
 import 'widgets/chat_avatar.dart';
+import 'widgets/chat_forward_sheet.dart';
 import 'widgets/chat_link_text.dart';
 import 'widgets/chat_poll_bubble.dart';
 import 'widgets/chat_text_field_paste_menu.dart';
@@ -2511,127 +2512,204 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    final conversations = overview.conversations
-        .where((conversation) => conversation.id != widget.conversation.id)
-        .toList();
-    ChatConversation? target;
+    final currentUserId =
+        ref.read(authControllerProvider).valueOrNull?.id ?? '';
 
-    await showModalBottomSheet<void>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
-
-      builder: (sheetContext) => SafeArea(
-        child: FractionallySizedBox(
-          heightFactor: 0.82,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'إعادة توجيه ${selectedMessages.length} رسالة',
-                        style: Theme.of(sheetContext).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const Text('إلغاء'),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: conversations.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'لا توجد محادثات أخرى متاحة لإعادة التوجيه.',
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        itemCount: conversations.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final conversation = conversations[index];
-                          return ListTile(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            tileColor: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerLowest,
-                            title: Text(
-                              conversation.displayTitle(
-                                ref
-                                        .read(authControllerProvider)
-                                        .valueOrNull
-                                        ?.id ??
-                                    '',
-                              ),
-                            ),
-                            subtitle: Text(switch (conversation.type) {
-                              'direct' => 'محادثة مباشرة',
-                              'department' => 'غرفة قسم',
-                              'broadcast' => 'قناة إعلانية',
-                              _ => 'مجموعة',
-                            }),
-                            onTap: () {
-                              target = conversation;
-                              Navigator.of(sheetContext).pop();
-                            },
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final targets = await ChatForwardSheet.show(
+      context,
+      currentUserId: currentUserId,
+      currentConversationId: widget.conversation.id,
+      selectedMessageCount: selectedMessages.length,
     );
 
-    if (target == null) {
+    if (targets == null || targets.isEmpty) {
       return;
     }
 
-    final repository = ref.read(chatRepositoryProvider);
-
+    // Filter restricted attachments
     var skippedRestrictedCount = 0;
-    try {
-      for (final message in selectedMessages) {
-        if (message.hasAttachment && !message.attachmentForwardAllowed) {
-          skippedRestrictedCount++;
-          continue;
-        }
-        final metadata = _forwardMetadataFor(message);
-        await repository.forwardMessage(
-          conversationId: target!.id,
-          sourceMessageId: message.id,
-          metadata: metadata,
-        );
+    final validMessages = <ChatMessage>[];
+    for (final message in selectedMessages) {
+      if (message.hasAttachment && !message.attachmentForwardAllowed) {
+        skippedRestrictedCount++;
+      } else {
+        validMessages.add(message);
       }
+    }
 
-      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
-      if (!mounted) {
-        return;
-      }
-      _clearSelection();
-      final forwardedCount = selectedMessages.length - skippedRestrictedCount;
-      final targetName = target!.displayTitle(
-        ref.read(authControllerProvider).valueOrNull?.id ?? '',
-      );
-      if (forwardedCount > 0) {
+    if (validMessages.isEmpty) {
+      if (mounted && skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تمت إعادة توجيه $forwardedCount رسالة إلى $targetName',
+              'تم تخطي $skippedRestrictedCount مرفق لأن المرسل منع إعادة توجيهه.',
             ),
           ),
         );
       }
+      return;
+    }
+
+    final repository = ref.read(chatRepositoryProvider);
+    final targetConversationIds = <String>{};
+    final targetNames = <String>[];
+
+    // Show loading indicator
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            ),
+            SizedBox(width: 12),
+            Text('جاري إعادة توجيه الرسائل...'),
+          ],
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    for (final target in targets) {
+      try {
+        switch (target.kind) {
+          case ForwardTargetKind.conversation:
+            if (target.conversation != null) {
+              targetConversationIds.add(target.conversation!.id);
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.user:
+            if (target.user != null) {
+              ChatConversation? existingDirect;
+              for (final conv in overview.conversations) {
+                if (conv.type == 'direct') {
+                  final isWithTarget =
+                      conv.members.any((m) => m.id == target.user!.id);
+                  if (isWithTarget) {
+                    existingDirect = conv;
+                    break;
+                  }
+                }
+              }
+
+              if (existingDirect != null) {
+                targetConversationIds.add(existingDirect.id);
+              } else {
+                final created = await repository.createDirectConversation(
+                  target.user!.id,
+                );
+                targetConversationIds.add(created.id);
+              }
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.department:
+            if (target.department != null) {
+              final dept = target.department!;
+              ChatConversation? deptRoom;
+              for (final conv in overview.conversations) {
+                if (conv.departmentId == dept.id ||
+                    conv.id == dept.defaultConversationId) {
+                  deptRoom = conv;
+                  break;
+                }
+              }
+
+              if (deptRoom != null) {
+                targetConversationIds.add(deptRoom.id);
+                targetNames.add('غرفة ${dept.name}');
+              } else {
+                final deptUsers = overview.users
+                    .where(
+                      (u) =>
+                          u.departmentId == dept.id &&
+                          u.id != currentUserId,
+                    )
+                    .toList();
+
+                if (deptUsers.isEmpty) {
+                  targetNames.add(dept.name);
+                } else {
+                  targetNames.add('${dept.name} (${deptUsers.length} أعضاء)');
+                  for (final member in deptUsers) {
+                    ChatConversation? memberConv;
+                    for (final conv in overview.conversations) {
+                      if (conv.type == 'direct' &&
+                          conv.members.any((m) => m.id == member.id)) {
+                        memberConv = conv;
+                        break;
+                      }
+                    }
+                    if (memberConv != null) {
+                      targetConversationIds.add(memberConv.id);
+                    } else {
+                      try {
+                        final created =
+                            await repository.createDirectConversation(
+                              member.id,
+                            );
+                        targetConversationIds.add(created.id);
+                      } catch (_) {}
+                    }
+                  }
+                }
+              }
+            }
+            break;
+        }
+      } catch (err) {
+        debugPrint('Error resolving forward target: $err');
+      }
+    }
+
+    if (targetConversationIds.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر تحديد وجهة إعادة التوجيه')),
+        );
+      }
+      return;
+    }
+
+    try {
+      for (final convId in targetConversationIds) {
+        for (final message in validMessages) {
+          final metadata = _forwardMetadataFor(message);
+          await repository.forwardMessage(
+            conversationId: convId,
+            sourceMessageId: message.id,
+            metadata: metadata,
+          );
+        }
+      }
+
+      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
+
+      if (!mounted) return;
+      _clearSelection();
+
+      final destinationText = targetNames.length <= 2
+          ? targetNames.join(' و ')
+          : '${targetNames.first} و ${targetNames.length - 1} وجهات أخرى';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تمت إعادة توجيه ${validMessages.length} رسالة إلى $destinationText بنجاح',
+          ),
+          backgroundColor: const Color(0xFF34C759),
+        ),
+      );
+
       if (skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2650,6 +2728,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       ).showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
+
 
   Future<void> _retryMessage(ChatMessage message) async {
     final clientMessageId = message.metadata?['clientMessageId']?.toString();
