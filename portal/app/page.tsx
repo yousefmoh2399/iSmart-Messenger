@@ -75,8 +75,8 @@ export default function HomePage() {
               </div>
 
               <div className="spec-row">
-                <span className="spec-pill">الإصدار: <strong>1.1.15</strong></span>
-                <span className="spec-pill">الحجم: <strong>66.3 MB</strong></span>
+                <span className="spec-pill">الإصدار: <strong>{config.windows.version || '1.1.15'}</strong></span>
+                <span className="spec-pill">الحجم: <strong>{config.windows.fileSize || '68.2 MB'}</strong></span>
                 <span className="spec-pill">النوع: <strong>Setup EXE</strong></span>
               </div>
 
@@ -120,8 +120,8 @@ export default function HomePage() {
               </div>
 
               <div className="spec-row">
-                <span className="spec-pill">الإصدار: <strong>1.0.2</strong></span>
-                <span className="spec-pill">الحجم: <strong>56.9 MB</strong></span>
+                <span className="spec-pill">الإصدار: <strong>{config.mobile.version || '1.0.2'}</strong></span>
+                <span className="spec-pill">الحجم: <strong>{config.mobile.fileSize || '61.5 MB'}</strong></span>
                 <span className="spec-pill">النوع: <strong>Google Play & APK</strong></span>
               </div>
 

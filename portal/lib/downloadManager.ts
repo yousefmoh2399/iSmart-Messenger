@@ -47,7 +47,23 @@ export interface ActiveDownloadSession {
   status: 'downloading' | 'completed' | 'aborted';
 }
 
-const CONFIG_PATH = path.join(process.cwd(), 'data', 'portal-config.json');
+function resolveConfigPath(): string {
+  const candidates = [
+    path.join(process.cwd(), 'data', 'portal-config.json'),
+    path.join(process.cwd(), 'portal', 'data', 'portal-config.json'),
+    path.resolve(__dirname, '..', 'data', 'portal-config.json'),
+    path.resolve(__dirname, '..', '..', 'data', 'portal-config.json'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
+function resolveSessionsPath(): string {
+  const dir = path.dirname(resolveConfigPath());
+  return path.join(dir, 'active-sessions.json');
+}
 
 // Default Fallback Config
 const DEFAULT_CONFIG: PortalConfig = {
@@ -57,19 +73,19 @@ const DEFAULT_CONFIG: PortalConfig = {
   windows: {
     enabled: true,
     version: '1.1.15',
-    fileName: 'iSmart Messenger Setup 1.1.15.exe',
-    fileSize: '69.5 MB',
-    filePath: 'downloads/iSmart Messenger Setup 1.1.15.exe',
-    directPath: 'public/downloads/iSmart Messenger Setup 1.1.15.exe',
+    fileName: 'iSmart.exe',
+    fileSize: '68.2 MB',
+    filePath: 'downloads/iSmart.exe',
+    directPath: 'downloads/iSmart.exe',
     customUrl: '',
   },
   mobile: {
     enabled: true,
     version: '1.0.2',
     fileName: 'iSmart Messenger.apk',
-    fileSize: '64.5 MB',
+    fileSize: '61.5 MB',
     filePath: 'downloads/iSmart Messenger.apk',
-    directPath: 'public/downloads/iSmart Messenger.apk',
+    directPath: 'downloads/iSmart Messenger.apk',
     googlePlayUrl: 'https://play.google.com/store/apps/details?id=com.ismart.messenger',
     customUrl: '',
   },
@@ -89,38 +105,64 @@ const DEFAULT_CONFIG: PortalConfig = {
 };
 
 // Global in-memory map for active download sessions
-// Persists across Next.js API re-evaluations via globalThis
 declare global {
   // eslint-disable-next-line no-var
   var __portalActiveSessions: Map<string, ActiveDownloadSession> | undefined;
+  // eslint-disable-next-line no-var
+  var __portalAbortedSessions: Set<string> | undefined;
 }
 
 if (!globalThis.__portalActiveSessions) {
   globalThis.__portalActiveSessions = new Map<string, ActiveDownloadSession>();
 }
-const activeSessions = globalThis.__portalActiveSessions;
 
-// Clean up stale sessions periodically (every 30s)
+if (!globalThis.__portalAbortedSessions) {
+  globalThis.__portalAbortedSessions = new Set<string>();
+}
+
+const activeSessions = globalThis.__portalActiveSessions;
+const abortedSessions = globalThis.__portalAbortedSessions;
+
+// Clean up stale sessions periodically (every 15s)
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     cleanupStaleSessions();
-  }, 30000);
+  }, 15000);
+}
+
+function syncSessionsToFile(): void {
+  try {
+    const filePath = resolveSessionsPath();
+    const data = Array.from(activeSessions.values());
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch {
+    // Non-fatal if file write fails
+  }
 }
 
 export function cleanupStaleSessions(): void {
   const now = Date.now();
+  let changed = false;
   for (const [id, session] of Array.from(activeSessions.entries())) {
-    // If no progress for more than 45 seconds, assume disconnected
-    if (now - session.lastActiveAt > 45000) {
+    // If completed or aborted for more than 10 seconds, or no activity for 40 seconds
+    if (session.status !== 'downloading' && now - session.lastActiveAt > 10000) {
       activeSessions.delete(id);
+      changed = true;
+    } else if (now - session.lastActiveAt > 40000) {
+      activeSessions.delete(id);
+      changed = true;
     }
+  }
+  if (changed) {
+    syncSessionsToFile();
   }
 }
 
 export function getConfig(): PortalConfig {
   try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const data = fs.readFileSync(CONFIG_PATH, 'utf8');
+    const configPath = resolveConfigPath();
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf8');
       return { ...DEFAULT_CONFIG, ...JSON.parse(data) };
     }
   } catch (err) {
@@ -131,15 +173,71 @@ export function getConfig(): PortalConfig {
 
 export function saveConfig(newConfig: PortalConfig): void {
   try {
-    const dir = path.dirname(CONFIG_PATH);
+    const configPath = resolveConfigPath();
+    const dir = path.dirname(configPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2), 'utf8');
+    fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf8');
   } catch (err) {
     console.error('Error writing portal-config.json:', err);
     throw err;
   }
+}
+
+/**
+ * Intelligent file finder that searches candidate directories and falls back
+ * to any file matching the requested extension (.exe or .apk).
+ */
+export function findDownloadFile(
+  configuredDirectPath: string,
+  configuredFileName: string,
+  fileKey: 'windows' | 'mobile'
+): string | null {
+  const ext = fileKey === 'windows' ? '.exe' : '.apk';
+  const roots = [
+    process.cwd(),
+    path.join(process.cwd(), 'portal'),
+    path.resolve(__dirname, '..'),
+    path.resolve(__dirname, '..', '..'),
+  ];
+
+  // 1. Direct path check
+  for (const root of roots) {
+    if (configuredDirectPath) {
+      const p = path.join(root, configuredDirectPath);
+      if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
+    }
+    if (configuredFileName) {
+      const p1 = path.join(root, 'downloads', configuredFileName);
+      if (fs.existsSync(p1) && fs.statSync(p1).isFile()) return p1;
+
+      const p2 = path.join(root, 'public', 'downloads', configuredFileName);
+      if (fs.existsSync(p2) && fs.statSync(p2).isFile()) return p2;
+    }
+  }
+
+  // 2. Intelligent scan inside downloads and public/downloads
+  for (const root of roots) {
+    const searchDirs = [
+      path.join(root, 'downloads'),
+      path.join(root, 'public', 'downloads'),
+    ];
+    for (const d of searchDirs) {
+      if (fs.existsSync(d) && fs.statSync(d).isDirectory()) {
+        const files = fs.readdirSync(d);
+        // Find matching extension (excluding videos)
+        const match = files.find(
+          (f) => f.toLowerCase().endsWith(ext) && !f.toLowerCase().endsWith('.mp4')
+        );
+        if (match) {
+          return path.join(d, match);
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export function cleanIp(ip: string): string {
@@ -187,6 +285,9 @@ export function getBranchName(subnet: string, config: PortalConfig): string {
   if (config.branches && config.branches[subnet]) {
     return config.branches[subnet];
   }
+  if (subnet === '127.0.0.1/32' || subnet.startsWith('127.0.0.')) {
+    return 'الخادم المركزي / الفرع الرئيسي';
+  }
   return `فرع (${subnet})`;
 }
 
@@ -206,12 +307,12 @@ export function checkDownloadAllowed(
 ): CheckDownloadResult {
   cleanupStaleSessions();
 
-  // 1. Global Downloads Check
+  // 1. Global Downloads Check (Priority #1 - Affects everyone)
   if (!config.globalDownloadsEnabled) {
     return {
       allowed: false,
       reason: 'maintenance',
-      message: config.maintenanceMessage || 'تم إيقاف التحميلات مؤقتاً لأعمال الصيانة والتحديثات من قبل الإدارة.',
+      message: config.maintenanceMessage || 'تم إيقاف كافة التحميلات مؤقتاً لأعمال الصيانة والتحديثات من قبل الإدارة المركزية.',
     };
   }
 
@@ -225,7 +326,7 @@ export function checkDownloadAllowed(
     };
   }
 
-  // 3. Check Whitelists
+  // 3. Check Whitelists (Whitelisted IPs or subnets bypass branch congestion limits)
   const isIpWhitelisted = config.vpnPolicy.whitelistedIps?.includes(ip);
   const subnet = getSubnet(ip, config.vpnPolicy.subnetMask);
   const isSubnetWhitelisted = config.vpnPolicy.whitelistedSubnets?.includes(subnet);
@@ -295,6 +396,7 @@ export function registerDownloadSession(
   };
 
   activeSessions.set(id, session);
+  syncSessionsToFile();
   return session;
 }
 
@@ -306,23 +408,46 @@ export function updateSessionProgress(sessionId: string, bytesChunk: number): vo
   }
 }
 
-export function releaseDownloadSession(sessionId: string, finalStatus: 'completed' | 'aborted' = 'completed'): void {
+export function releaseDownloadSession(
+  sessionId: string,
+  finalStatus: 'completed' | 'aborted' = 'completed'
+): void {
   const session = activeSessions.get(sessionId);
   if (session) {
     session.status = finalStatus;
     session.lastActiveAt = Date.now();
+    syncSessionsToFile();
     // Remove from active list after 5 seconds to let UI see completion
     setTimeout(() => {
       activeSessions.delete(sessionId);
+      syncSessionsToFile();
     }, 5000);
   }
 }
 
 export function killDownload(sessionId: string): boolean {
+  abortedSessions.add(sessionId);
   if (activeSessions.has(sessionId)) {
     const session = activeSessions.get(sessionId)!;
     session.status = 'aborted';
-    activeSessions.delete(sessionId);
+    session.lastActiveAt = Date.now();
+    syncSessionsToFile();
+    // Delete after 2 seconds
+    setTimeout(() => {
+      activeSessions.delete(sessionId);
+      syncSessionsToFile();
+    }, 2000);
+    return true;
+  }
+  return false;
+}
+
+export function isSessionAborted(sessionId: string): boolean {
+  if (abortedSessions.has(sessionId)) {
+    return true;
+  }
+  const session = activeSessions.get(sessionId);
+  if (!session || session.status === 'aborted') {
     return true;
   }
   return false;
@@ -330,5 +455,6 @@ export function killDownload(sessionId: string): boolean {
 
 export function getActiveDownloads(): ActiveDownloadSession[] {
   cleanupStaleSessions();
-  return Array.from(activeSessions.values());
+  // Return active downloading sessions first
+  return Array.from(activeSessions.values()).sort((a, b) => b.startedAt - a.startedAt);
 }

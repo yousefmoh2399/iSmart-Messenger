@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
-import path from 'path';
 import {
   getConfig,
   getClientIp,
   checkDownloadAllowed,
+  findDownloadFile,
   registerDownloadSession,
   updateSessionProgress,
   releaseDownloadSession,
+  isSessionAborted,
 } from '@/lib/downloadManager';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
         error: check.reason,
         message: check.message,
         busyIp: check.busyIp,
+        busyBranch: check.busyBranch,
       }),
       {
         status: 429,
@@ -37,21 +39,20 @@ export async function GET(request: NextRequest) {
   }
 
   const fileConf = fileKey === 'windows' ? config.windows : config.mobile;
-  
-  // Resolve absolute file path
-  let absoluteFilePath = path.join(process.cwd(), fileConf.directPath || `public/downloads/${fileConf.fileName}`);
-  if (!fs.existsSync(absoluteFilePath)) {
-    // Try downloads directory
-    absoluteFilePath = path.join(process.cwd(), 'downloads', fileConf.fileName);
-  }
-  if (!fs.existsSync(absoluteFilePath)) {
-    // Try public downloads directory
-    absoluteFilePath = path.join(process.cwd(), 'public', 'downloads', fileConf.fileName);
-  }
 
-  if (!fs.existsSync(absoluteFilePath)) {
+  // 2. Resolve absolute file path safely on disk
+  const absoluteFilePath = findDownloadFile(
+    fileConf.directPath || fileConf.filePath,
+    fileConf.fileName,
+    fileKey
+  );
+
+  if (!absoluteFilePath || !fs.existsSync(absoluteFilePath)) {
     return new NextResponse(
-      JSON.stringify({ error: 'file_not_found', message: 'الملف المطلوب غير موجود على الخادم حالياً.' }),
+      JSON.stringify({
+        error: 'file_not_found',
+        message: 'الملف المطلوب غير موجود على الخادم حالياً. يرجى مراجعة إدارة النظام.',
+      }),
       { status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
     );
   }
@@ -59,10 +60,16 @@ export async function GET(request: NextRequest) {
   const fileStats = fs.statSync(absoluteFilePath);
   const totalFileSize = fileStats.size;
 
-  // 2. Register Active Download Session
-  const session = registerDownloadSession(clientIp, fileKey, fileConf.fileName, totalFileSize, config);
+  // 3. Register Active Download Session in Admin Monitor
+  const session = registerDownloadSession(
+    clientIp,
+    fileKey,
+    fileConf.fileName,
+    totalFileSize,
+    config
+  );
 
-  // 3. Handle Range Requests if present
+  // 4. Handle Range Requests if present
   let start = 0;
   let end = totalFileSize - 1;
   const rangeHeader = request.headers.get('range');
@@ -95,7 +102,7 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  // 4. Create Web ReadableStream with pacing
+  // 5. Create Web ReadableStream with live kill & pause checks
   const stream = new ReadableStream({
     async start(controller) {
       let fileHandle: fs.promises.FileHandle | null = null;
@@ -105,6 +112,27 @@ export async function GET(request: NextRequest) {
         let currentPos = start;
 
         while (currentPos <= end) {
+          // Check if session was killed or downloads were disabled by admin
+          const liveConfig = getConfig();
+          if (!liveConfig.globalDownloadsEnabled) {
+            cleanup('aborted');
+            controller.error(new Error('Emergency Stop: تم إيقاف التحميل من قبل الإدارة المركزية'));
+            break;
+          }
+
+          const liveFileConf = fileKey === 'windows' ? liveConfig.windows : liveConfig.mobile;
+          if (!liveFileConf.enabled) {
+            cleanup('aborted');
+            controller.error(new Error('تم إيقاف هذا التحميل من قبل الإدارة'));
+            break;
+          }
+
+          if (isSessionAborted(session.id)) {
+            cleanup('aborted');
+            controller.error(new Error('تم إنهاء جلسة التحميل وفك قفل الفرع من قبل الإدارة'));
+            break;
+          }
+
           const toRead = Math.min(chunkSize, end - currentPos + 1);
           const { bytesRead } = await fileHandle.read(buffer, 0, toRead, currentPos);
           if (bytesRead === 0) {
@@ -125,10 +153,14 @@ export async function GET(request: NextRequest) {
         }
 
         cleanup('completed');
-        controller.close();
+        try {
+          controller.close();
+        } catch {}
       } catch (err) {
         cleanup('aborted');
-        controller.error(err);
+        try {
+          controller.error(err);
+        } catch {}
       } finally {
         if (fileHandle) {
           await fileHandle.close().catch(() => {});

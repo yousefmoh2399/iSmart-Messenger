@@ -75,13 +75,24 @@ export default function AdminPage() {
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
 
+  // Get admin authorization headers from localStorage
+  const getAuthHeaders = (): Record<string, string> => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('ismart_admin_token');
+      if (token) {
+        return { 'x-admin-token': token };
+      }
+    }
+    return {};
+  };
+
   // Fetch status from API
   const fetchStatus = async (isBackground = false) => {
     try {
       if (!isBackground) setLoadingLoading(true);
       const res = await fetch('/api/admin/status', {
         cache: 'no-store',
-        headers: { 'x-admin-token': 'authenticated_admin' },
+        headers: getAuthHeaders(),
       });
       if (res.status === 401) {
         if (typeof window !== 'undefined') {
@@ -126,7 +137,7 @@ export default function AdminPage() {
     if (!isAuthenticated || activeTab !== 'live') return;
     const interval = setInterval(() => {
       fetchStatus(true);
-    }, 4000);
+    }, 2000);
     return () => clearInterval(interval);
   }, [isAuthenticated, activeTab]);
 
@@ -144,8 +155,8 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (data.success) {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ismart_admin_token', 'authenticated_admin');
+        if (typeof window !== 'undefined' && data.token) {
+          localStorage.setItem('ismart_admin_token', data.token);
         }
         setIsAuthenticated(true);
         setPinInput('');
@@ -162,12 +173,13 @@ export default function AdminPage() {
 
   // Handle Logout
   const handleLogout = async () => {
+    const authHeaders = getAuthHeaders();
     if (typeof window !== 'undefined') {
       localStorage.removeItem('ismart_admin_token');
     }
     await fetch('/api/admin/logout', {
       method: 'POST',
-      headers: { 'x-admin-token': 'authenticated_admin' },
+      headers: authHeaders,
     });
     setIsAuthenticated(false);
     setConfig(null);
@@ -183,7 +195,7 @@ export default function AdminPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': 'authenticated_admin',
+          ...getAuthHeaders(),
         },
         body: JSON.stringify(partialUpdates),
       });
@@ -207,7 +219,7 @@ export default function AdminPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': 'authenticated_admin',
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ sessionId }),
       });
@@ -244,7 +256,7 @@ export default function AdminPage() {
 
       const res = await fetch('/api/admin/upload', {
         method: 'POST',
-        headers: { 'x-admin-token': 'authenticated_admin' },
+        headers: getAuthHeaders(),
         body: formData,
       });
       const data = await res.json();

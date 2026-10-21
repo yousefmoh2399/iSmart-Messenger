@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getConfig } from '@/lib/downloadManager';
+import { createAdminSession } from '@/lib/adminAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,26 +9,31 @@ export async function POST(request: NextRequest) {
     const { pin } = await request.json();
     const config = getConfig();
 
-    if (!pin || String(pin).trim() !== String(config.adminPin).trim()) {
+    const expectedPin = String(config.adminPin || 'ismart@2026').trim();
+    const providedPin = String(pin || '').trim();
+
+    if (!providedPin || providedPin !== expectedPin) {
       return NextResponse.json(
-        { success: false, message: 'رمز الدخول (PIN) غير صحيح!' },
+        { success: false, message: 'رمز الدخول (PIN) غير صحيح! تأكد من الرمز وحاول مرة أخرى.' },
         { status: 401 }
       );
     }
 
-    // Set secure authentication cookie (secure: false for internal HTTP intranet/VPN networks)
+    // Generate real secure session token
+    const token = createAdminSession();
+
     const response = NextResponse.json({
       success: true,
-      token: 'authenticated_admin',
+      token,
       message: 'تم تسجيل الدخول بنجاح.',
     });
 
-    response.cookies.set('ismart_admin_session', 'authenticated_admin', {
+    response.cookies.set('ismart_admin_session', token, {
       httpOnly: true,
       secure: false, // Internal HTTP network compatibility
       sameSite: 'lax',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24, // 24 hours
     });
 
     return response;
