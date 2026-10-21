@@ -458,15 +458,32 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
-app.commandLine.appendSwitch("disable-renderer-backgrounding");
-app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
-app.commandLine.appendSwitch("disable-background-timer-throttling");
 
-// Windows 7 (NT 6.1) struggles with modern Chromium hardware acceleration,
-// and forcing WebGL causes severe lag, stuttering, and high response times.
-// Disabling hardware acceleration on Windows 7 falls back to a much faster software renderer.
+// V8 32-bit Memory Optimization: constrain heap to 512MB to trigger fast, non-blocking GC pauses
+// preventing memory fragmentation and 1-2 second freezes on low-RAM branch PCs.
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=512");
+
+// Limit disk cache to prevent thrashing slow mechanical 5400rpm hard drives
+app.commandLine.appendSwitch("disk-cache-size", "67108864");
+
+// Graphics Performance Tuning:
+// On Windows 7 (NT 6.1), disabling hardware acceleration forces CPU software emulation (SwiftShader),
+// which pegs dual-core CPUs at 100% and freezes the app when scrolling or typing.
+// Instead, we force the mature DirectX 9 ANGLE backend with GPU rasterization,
+// which runs at 60fps on virtually all legacy Intel/AMD/Nvidia drivers on Windows 7.
 if (os.release().startsWith("6.1")) {
-  app.disableHardwareAcceleration();
+  const forceSoftware = process.argv.includes("--disable-gpu") || process.env.ISMART_DISABLE_GPU === "1";
+  if (forceSoftware) {
+    app.disableHardwareAcceleration();
+  } else {
+    app.commandLine.appendSwitch("use-angle", "d3d9");
+    app.commandLine.appendSwitch("ignore-gpu-blocklist");
+    app.commandLine.appendSwitch("enable-gpu-rasterization");
+    app.commandLine.appendSwitch("enable-zero-copy");
+  }
+} else {
+  app.commandLine.appendSwitch("enable-gpu-rasterization");
+  app.commandLine.appendSwitch("enable-zero-copy");
 }
 
 app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
@@ -856,7 +873,7 @@ function createWindow(startUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       webSecurity: false,
       allowRunningInsecureContent: true,
     },

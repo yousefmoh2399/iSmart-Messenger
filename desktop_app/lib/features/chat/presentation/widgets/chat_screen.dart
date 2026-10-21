@@ -4888,8 +4888,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                         _editingMessage = null;
                                       });
                                     },
-                                    child: MessageBubble(
-                                      message: message,
+                                    child: RepaintBoundary(
+                                      child: MessageBubble(
+                                        message: message,
                                       albumMessages: _albumFor(
                                         message,
                                         filteredMessages,
@@ -5045,6 +5046,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               'failed'
                                           ? () => _retryMessage(message)
                                           : null,
+                                      ),
                                     ),
                                   ),
                                 ],
