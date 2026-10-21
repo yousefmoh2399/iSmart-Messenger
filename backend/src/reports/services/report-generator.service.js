@@ -16,17 +16,33 @@ function processArabicText(text) {
 }
 
 function resolveFonts() {
-  const fontRegular = path.join(__dirname, "../../../assets/fonts/Arial.ttf");
-  const fontBold = path.join(__dirname, "../../../assets/fonts/Arial-Bold.ttf");
+  const candidatesRegular = [
+    path.join(__dirname, "../../assets/fonts/Arial.ttf"),
+    path.join(__dirname, "../../../assets/fonts/Arial.ttf"),
+  ];
+  const candidatesBold = [
+    path.join(__dirname, "../../assets/fonts/Arial-Bold.ttf"),
+    path.join(__dirname, "../../../assets/fonts/Arial-Bold.ttf"),
+  ];
+  const fontRegular = candidatesRegular.find((p) => fs.existsSync(p)) || candidatesRegular[0];
+  const fontBold = candidatesBold.find((p) => fs.existsSync(p)) || candidatesBold[0];
   return { fontRegular, fontBold };
 }
 
 function resolveLogos() {
-  const logo1Path = path.join(__dirname, "../../../assets/logo1.png");
-  const logo2Path = path.join(__dirname, "../../../assets/logo2.png");
+  const candidates1 = [
+    path.join(__dirname, "../../assets/logo1.png"),
+    path.join(__dirname, "../../../assets/logo1.png"),
+  ];
+  const candidates2 = [
+    path.join(__dirname, "../../assets/logo2.png"),
+    path.join(__dirname, "../../../assets/logo2.png"),
+  ];
+  const logo1Path = candidates1.find((p) => fs.existsSync(p)) || candidates1[0];
+  const logo2Path = candidates2.find((p) => fs.existsSync(p)) || candidates2[0];
   const logo1 = fs.existsSync(logo1Path) ? fs.readFileSync(logo1Path) : null;
   const logo2 = fs.existsSync(logo2Path) ? fs.readFileSync(logo2Path) : null;
-  return { logo1, logo2 };
+  return { logo1, logo2, logo1Path, logo2Path };
 }
 
 function formatValue(value) {
@@ -301,16 +317,14 @@ async function buildDynamicExcelReport({
     views: [{ rightToLeft: true }],
   });
 
-  const { logo1, logo2 } = resolveLogos();
+  const { logo1, logo2, logo1Path, logo2Path } = resolveLogos();
   const headerConfig = template.headerConfig || {};
 
   let logo1Id, logo2Id;
-  const logo1Path = path.join(__dirname, "../../../assets/logo1.png");
-  const logo2Path = path.join(__dirname, "../../../assets/logo2.png");
-  if (headerConfig.showLogo1 !== false && fs.existsSync(logo1Path)) {
+  if (headerConfig.showLogo1 !== false && logo1Path && fs.existsSync(logo1Path)) {
     logo1Id = workbook.addImage({ filename: logo1Path, extension: "png" });
   }
-  if (headerConfig.showLogo2 !== false && fs.existsSync(logo2Path)) {
+  if (headerConfig.showLogo2 !== false && logo2Path && fs.existsSync(logo2Path)) {
     logo2Id = workbook.addImage({ filename: logo2Path, extension: "png" });
   }
 
