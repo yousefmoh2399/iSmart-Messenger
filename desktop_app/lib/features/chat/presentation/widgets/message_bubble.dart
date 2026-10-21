@@ -10,6 +10,7 @@ import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
 import '../chat_appearance.dart';
 import 'authenticated_attachment_image.dart';
+import 'bundled_quick_emoji.dart';
 import 'chat_animated_reaction_picker.dart';
 import 'chat_audio_attachment_player.dart';
 import 'chat_poll_bubble.dart';
@@ -1296,8 +1297,13 @@ class _AnimatedReactionChipState extends State<_AnimatedReactionChip>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(widget.emoji, style: emojiStyle),
-              const SizedBox(width: 3),
+              BundledQuickEmoji(
+                emoji: widget.emoji,
+                size: 18,
+                animate: false,
+                textFallbackStyle: emojiStyle,
+              ),
+              const SizedBox(width: 4),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
                 transitionBuilder: (child, anim) => ScaleTransition(

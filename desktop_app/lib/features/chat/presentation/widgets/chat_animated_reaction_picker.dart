@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'bundled_quick_emoji.dart';
 import 'emoji_picker_panel.dart';
 
 /// شريط التفاعل السريع واختيار الإيموجي للرسائل (Quick Reactions Bar).
@@ -245,17 +246,11 @@ class _QuickEmojiButtonState extends State<_QuickEmojiButton> {
             scale: _hovered ? 1.25 : 1.0,
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeOutBack,
-            child: Text(
-              widget.emoji,
-              style: const TextStyle(
-                fontSize: 22,
-                fontFamilyFallback: [
-                  'Segoe UI Emoji',
-                  'Apple Color Emoji',
-                  'Noto Color Emoji',
-                  'Segoe UI Symbol',
-                ],
-              ),
+            child: BundledQuickEmoji(
+              emoji: widget.emoji,
+              size: 26,
+              animate: _hovered,
+              repeat: false,
             ),
           ),
         ),

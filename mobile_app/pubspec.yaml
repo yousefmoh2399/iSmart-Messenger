@@ -71,6 +71,7 @@ flutter:
     - assets/notification_sounds/chime_tone.wav
     - assets/notification_sounds/alert_tone.wav
     - assets/images/logo.png
+    - assets/emojis/
 
 
 simple_splash_view:
