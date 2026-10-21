@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -22,6 +23,100 @@ class DesktopWorkspaceShell extends ConsumerStatefulWidget {
 }
 
 class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
+  StreamSubscription? _updateEventsSub;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initUpdateListener();
+    });
+  }
+
+  @override
+  void dispose() {
+    _updateEventsSub?.cancel();
+    super.dispose();
+  }
+
+  void _initUpdateListener() {
+    try {
+      final agent = ref.read(desktopUpdateAgentProvider);
+      _updateEventsSub = agent.events.listen((event) {
+        if (!mounted) return;
+        if (event.type == 'ready_to_restart') {
+          _showUpdateReadyDialog(event.message);
+        }
+      });
+      // Check initial state
+      agent.hasPreparedUpdate();
+    } catch (_) {}
+  }
+
+  Future<void> _showUpdateReadyDialog(String message) async {
+    if (!mounted) return;
+    final agent = ref.read(desktopUpdateAgentProvider);
+
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF10B981),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'اكتمل تنزيل التحديث',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: Text(
+            message.isNotEmpty
+                ? message
+                : 'تم تنزيل حزمة التحديث بنجاح وهي جاهزة للتثبيت.\nهل ترغب في تثبيت التحديث وإعادة تشغيل التطبيق الآن أم المتابعة لاحقاً؟',
+            style: const TextStyle(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('later'),
+              child: const Text('لاحقاً (متابعة العمل)'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(ctx).pop('now'),
+              icon: const Icon(Icons.restart_alt_rounded, size: 18),
+              label: const Text('تثبيت الآن'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (action == 'now') {
+      try {
+        await agent.restartToApplyPreparedUpdate();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('فشل بدء التثبيت: $e'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
 
 
   // Getter to read the global active section

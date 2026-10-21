@@ -38,6 +38,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
     this.showServersShortcut = true,
     required this.onOpenProfile,
     this.onOpenUpdates,
+    this.hasPulsingUpdate = false,
     required this.onToggleTheme,
     required this.onOpenTickets,
     this.onOpenPrinters,
@@ -61,6 +62,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
   final bool showServersShortcut;
   final VoidCallback onOpenProfile;
   final VoidCallback? onOpenUpdates;
+  final bool hasPulsingUpdate;
   final VoidCallback onToggleTheme;
   final VoidCallback onOpenTickets;
   final VoidCallback? onOpenPrinters;
@@ -308,11 +310,13 @@ class _DesktopWorkspaceIconButton extends StatefulWidget {
     this.selected = false,
     this.accent = false,
     this.badgeCount = 0,
+    this.hasPulsingBadge = false,
     this.statusColor,
   });
 
   final String tooltip;
   final int badgeCount;
+  final bool hasPulsingBadge;
   final IconData icon;
   final bool isDark;
   final Color accentColor;
@@ -671,6 +675,88 @@ class _SidebarConnectionStatusState
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PulsingUpdateBadge extends StatefulWidget {
+  const _PulsingUpdateBadge();
+
+  @override
+  State<_PulsingUpdateBadge> createState() => _PulsingUpdateBadgeState();
+}
+
+class _PulsingUpdateBadgeState extends State<_PulsingUpdateBadge>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scaleAnimation;
+  late final Animation<double> _opacityAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 2.1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+    _opacityAnimation = Tween<double>(begin: 0.85, end: 0.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 14,
+      height: 14,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              return Transform.scale(
+                scale: _scaleAnimation.value,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFFEF4444).withValues(alpha: _opacityAnimation.value),
+                  ),
+                ),
+              );
+            },
+          ),
+          Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFEF4444),
+              border: Border.all(color: Colors.white, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.6),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

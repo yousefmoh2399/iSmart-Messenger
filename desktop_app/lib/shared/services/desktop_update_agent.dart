@@ -113,6 +113,10 @@ class DesktopUpdateAgent {
   bool _isReportingProgress = false;
   _QueuedTaskReport? _queuedProgressReport;
 
+  final ValueNotifier<bool> hasPreparedUpdateNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<double?> downloadProgressNotifier = ValueNotifier<double?>(null);
+  final ValueNotifier<String?> statusMessageNotifier = ValueNotifier<String?>(null);
+
   Stream<DesktopUpdateEvent> get events => _eventsController.stream;
   DeviceHeartbeatResponse? get lastHeartbeatResponse => _lastHeartbeatResponse;
   String? get deviceUid => _deviceUid;
@@ -539,6 +543,36 @@ class DesktopUpdateAgent {
     }
   }
 
+    Future<bool> hasPreparedUpdate() async {
+    final taskState = await _stateStore.load();
+    final isReady = taskState.status == 'downloaded' &&
+        taskState.artifactPath != null &&
+        taskState.artifactPath!.trim().isNotEmpty &&
+        File(taskState.artifactPath!).existsSync();
+    hasPreparedUpdateNotifier.value = isReady;
+    return isReady;
+  }
+
+  Future<void> downloadRelease(ManagedUpdateRelease release) async {
+    if (_isTaskRunning || kIsWeb) {
+      return;
+    }
+    final currentVersion = await _resolveAppVersion();
+    if (_sameVersion(currentVersion, release.version)) {
+      statusMessageNotifier.value = 'هذا الجهاز محدث بالفعل للإصدار ' + release.version + '.';
+      return;
+    }
+
+    final task = PendingUpdateTask(
+      id: 'release-' + release.id,
+      status: 'pending',
+      progress: 0,
+      releaseVersion: release.version,
+      release: release,
+    );
+    await _executePendingTask(task);
+  }
+
   Future<DesktopUpdateState> loadState() => _stateStore.load();
 
   Future<void> restartToApplyPreparedUpdate() async {
@@ -567,6 +601,7 @@ class DesktopUpdateAgent {
       message: 'يتم الآن إغلاق التطبيق لإكمال تثبيت التحديث.',
     );
     await _stateStore.markInstalling();
+    hasPreparedUpdateNotifier.value = false;
 
     final installResult = await _runInstaller(
       taskId: taskId,

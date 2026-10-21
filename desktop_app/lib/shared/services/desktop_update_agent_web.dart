@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:dio/dio.dart';
@@ -100,6 +101,10 @@ class DesktopUpdateAgent {
   DeviceHeartbeatResponse? _lastHeartbeatResponse;
   int _lastProgressReported = -1;
   String? _lastReportedStatus;
+
+  final ValueNotifier<bool> hasPreparedUpdateNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<double?> downloadProgressNotifier = ValueNotifier<double?>(null);
+  final ValueNotifier<String?> statusMessageNotifier = ValueNotifier<String?>(null);
 
   Stream<DesktopUpdateEvent> get events => _eventsController.stream;
   DeviceHeartbeatResponse? get lastHeartbeatResponse => _lastHeartbeatResponse;
@@ -389,6 +394,17 @@ class DesktopUpdateAgent {
       // restart, or post-restart reconciliation when the server throttles or
       // the task was already finalized.
     }
+  }
+
+  Future<bool> hasPreparedUpdate() async {
+    final taskState = await _stateStore.load();
+    final isReady = taskState.status == 'downloaded';
+    hasPreparedUpdateNotifier.value = isReady;
+    return isReady;
+  }
+
+  Future<void> downloadRelease(ManagedUpdateRelease release) async {
+    // Web updater stub
   }
 
   Future<void> restartToApplyPreparedUpdate() async {

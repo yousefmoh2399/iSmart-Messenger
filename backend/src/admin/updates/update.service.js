@@ -738,11 +738,21 @@ async function registerDeviceHeartbeat(actor, payload = {}, requestMeta = {}) {
 
   const baseUrlOverride = requestMeta.baseUrlOverride;
 
+  const latestReleaseDoc = await UpdateRelease.findOne({
+    platform: device.platform || "desktop_windows",
+    isEnabled: true,
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
   return {
     device: serializeDevice(device),
     pendingTasks: pendingTasks.map((task) =>
       serializeTask(task, task.releaseId, { baseUrlOverride }),
     ),
+    latestRelease: latestReleaseDoc
+      ? serializeRelease(latestReleaseDoc, { baseUrlOverride })
+      : null,
     heartbeatIntervalSeconds: 30,
     serverTime: nowIso(),
   };
@@ -943,7 +953,11 @@ async function createRelease(actor, payload = {}, artifactFile = null) {
       ? "installer"
       : payload.packageLayout === "apk"
         ? "apk"
-        : "bundle_zip";
+        : payload.packageLayout === "bundle_zip"
+          ? "bundle_zip"
+          : (resolvedInstallerKind === "exe" || resolvedInstallerKind === "msi")
+            ? "installer"
+            : (resolvedInstallerKind === "apk" ? "apk" : "bundle_zip");
   const entryExecutable =
     String(payload.entryExecutable || "")
       .trim()
