@@ -14,7 +14,6 @@ import '../../home/presentation/home_screen.dart';
 import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
 import '../../tickets/presentation/tickets_screen.dart';
-import '../../updates/presentation/update_center_screen.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
 import '../providers/chat_folders_provider.dart';
@@ -749,11 +748,6 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         Navigator.of(
           context,
         ).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
-        break;
-      case 'updates':
-        Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const UpdateCenterScreen()));
         break;
       case 'favoriteMessages':
         Navigator.of(context).push(
@@ -2657,15 +2651,6 @@ class _HeaderMoreButton extends StatelessWidget {
             title: Text('الرسائل المفضلة'),
           ),
         ),
-        const PopupMenuItem(
-          value: 'updates',
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.system_update_alt_rounded),
-            title: Text('التحديثات'),
-          ),
-        ),
         const PopupMenuDivider(),
         const PopupMenuItem(
           value: 'logout',
@@ -2875,12 +2860,6 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                     cardColor: cardColor,
                     dividerColor: dividerColor,
                     items: [
-                      _MenuItem(
-                        icon: Icons.system_update_alt_rounded,
-                        label: 'التحديثات',
-                        onTap: () => onSelected('updates'),
-                        iconColor: const Color(0xFF007AFF),
-                      ),
                       _MenuItem(
                         icon: Icons.color_lens_outlined,
                         label: 'مظهر المحادثات',
