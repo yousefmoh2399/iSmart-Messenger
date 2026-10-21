@@ -114,7 +114,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
     late ChatDirectoryUsersPage usersPage;
     try {
-      usersPage = await _guardAuth(repository.fetchUsersPage);
+      usersPage = await _guardAuth(() => repository.fetchUsersPage(limit: 250));
     } catch (error) {
       if (_isUnauthorized(error)) rethrow;
       usersPage = const ChatDirectoryUsersPage(

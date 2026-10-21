@@ -79,6 +79,34 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
   int _page = 1;
   bool _hasMore = false;
   bool _loadingMore = false;
+  String? _search;
+  final int _limit = 100;
+
+  bool get hasMore => _hasMore;
+  bool get isLoadingMore => _loadingMore;
+
+  Future<void> setSearch(String? search) async {
+    if (!_canReadAllDocuments()) return;
+    _search = search?.trim();
+    _page = 1;
+    final current = state;
+    state = const AsyncLoading<List<RemoteDocument>>().copyWithPrevious(current);
+    state = await AsyncValue.guard(
+      () => _guardAuth(() async {
+        final page = await ref
+            .read(documentRepositoryProvider)
+            .fetchDocumentsPage(
+              includeAll: true,
+              search: _search,
+              page: 1,
+              limit: _limit,
+            );
+        _page = page.page;
+        _hasMore = page.hasMore;
+        return page.documents;
+      }),
+    );
+  }
 
   bool _isUnauthorized(Object error) {
     return error is ApiException && error.isUnauthorized;
@@ -113,7 +141,7 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
     final page = await _guardAuth(
       () => ref
           .watch(documentRepositoryProvider)
-          .fetchDocumentsPage(includeAll: true),
+          .fetchDocumentsPage(includeAll: true, search: _search, page: 1, limit: _limit),
     );
     _page = page.page;
     _hasMore = page.hasMore;
@@ -130,7 +158,7 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
       () => _guardAuth(() async {
         final page = await ref
             .read(documentRepositoryProvider)
-            .fetchDocumentsPage(includeAll: true);
+            .fetchDocumentsPage(includeAll: true, search: _search, page: 1, limit: _limit);
         _page = page.page;
         _hasMore = page.hasMore;
         return page.documents;
@@ -146,7 +174,7 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
       final page = await _guardAuth(
         () => ref
             .read(documentRepositoryProvider)
-            .fetchDocumentsPage(includeAll: true, page: _page + 1),
+            .fetchDocumentsPage(includeAll: true, search: _search, page: _page + 1, limit: _limit),
       );
       _page = page.page;
       _hasMore = page.hasMore;

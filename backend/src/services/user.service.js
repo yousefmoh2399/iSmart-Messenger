@@ -221,7 +221,7 @@ async function resolveNamedIds(Model, value) {
 
 async function listUsers(actor = null, filters = {}) {
   const page = Math.max(1, Math.min(Number(filters.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(filters.limit || 50), 100));
+  const limit = Math.max(1, Math.min(Number(filters.limit || 50), 500));
   const skip = (page - 1) * limit;
   const query = {};
   if (actor?.role === "manager" && actor.departmentId) {
@@ -249,6 +249,19 @@ async function listUsers(actor = null, filters = {}) {
       { fullName: searchRegex },
       { branchCode: searchRegex },
     );
+    const [matchingDeptIds, matchingBranchIds] = await Promise.all([
+      resolveNamedIds(Department, filters.search || filters.q),
+      resolveNamedIds(Branch, filters.search || filters.q),
+    ]);
+    if (matchingDeptIds.length) {
+      or.push(
+        { departmentId: { $in: matchingDeptIds } },
+        { departmentIds: { $in: matchingDeptIds } },
+      );
+    }
+    if (matchingBranchIds.length) {
+      or.push({ branchId: { $in: matchingBranchIds } });
+    }
   }
 
   const departmentIds = await resolveNamedIds(Department, filters.department);

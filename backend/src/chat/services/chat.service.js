@@ -670,7 +670,7 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
   const shouldPaginate =
     options.page !== undefined || options.limit !== undefined;
   const page = Math.max(1, Math.min(Number(options.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(options.limit || 50), 100));
+  const limit = Math.max(1, Math.min(Number(options.limit || 50), 500));
   const skip = (page - 1) * limit;
   const query = {
     isActive: true,

@@ -2240,6 +2240,8 @@
 //   }
 // }
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:iconsax/iconsax.dart';
@@ -2781,11 +2783,24 @@ class _AdminDocumentsTab extends ConsumerStatefulWidget {
 
 class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
   final _searchController = TextEditingController();
+  Timer? _debounceTimer;
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String val) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      final query = _searchController.text.trim();
+      ref.read(adminDocumentsControllerProvider.notifier).setSearch(
+            query.isEmpty ? null : query,
+          );
+    });
+    setState(() {});
   }
 
   List<RemoteDocument> _filter(List<RemoteDocument> documents) {
@@ -2899,6 +2914,11 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
 
   @override
   Widget build(BuildContext context) {
+    final docsState = ref.watch(adminDocumentsControllerProvider);
+    final docsNotifier = ref.watch(adminDocumentsControllerProvider.notifier);
+    final hasMore = docsNotifier.hasMore;
+    final isLoadingMore = docsNotifier.isLoadingMore;
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -2908,10 +2928,21 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
               Expanded(
                 child: TextField(
                   controller: _searchController,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: _onSearchChanged,
                   decoration: _dialogInputDecoration(
                     'ابحث باسم الملف أو صاحبه',
-                  ).copyWith(prefixIcon: const Icon(Iconsax.search_normal)),
+                  ).copyWith(
+                    prefixIcon: const Icon(Iconsax.search_normal),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              _onSearchChanged('');
+                            },
+                          )
+                        : null,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -2925,12 +2956,35 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: widget.documentsState.when(
+            child: docsState.when(
               loading: () => const _AdminTableLoadingShimmer(),
               error: (error, stackTrace) =>
                   Center(child: Text(error.toString())),
               data: (documents) {
                 final filtered = _filter(documents);
+                if (filtered.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Iconsax.document_text_1,
+                          size: 48,
+                          color: Theme.of(context).disabledColor,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _searchController.text.isNotEmpty
+                              ? 'لا توجد ملفات تطابق بحثك'
+                              : 'لا توجد ملفات حالياً',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: Theme.of(context).hintColor,
+                              ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
                 return Card(
                   elevation: 0,
                   clipBehavior: Clip.antiAlias,
@@ -2941,7 +2995,7 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
                     ),
                   ),
                   child: ListView.separated(
-                    itemCount: filtered.length + 1,
+                    itemCount: filtered.length + (hasMore ? 1 : 0),
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       color: Theme.of(context).dividerColor.withOpacity(0.3),
@@ -2950,13 +3004,25 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
                       if (index == filtered.length) {
                         return Padding(
                           padding: const EdgeInsets.all(12),
-                          child: OutlinedButton.icon(
-                            onPressed: () => ref
-                                .read(adminDocumentsControllerProvider.notifier)
-                                .loadMore(),
-                            icon: const Icon(Icons.expand_more_rounded),
-                            label: const Text('تحميل المزيد'),
-                          ),
+                          child: isLoadingMore
+                              ? const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(8.0),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                    ),
+                                  ),
+                                )
+                              : OutlinedButton.icon(
+                                  onPressed: () => ref
+                                      .read(
+                                        adminDocumentsControllerProvider
+                                            .notifier,
+                                      )
+                                      .loadMore(),
+                                  icon: const Icon(Icons.expand_more_rounded),
+                                  label: const Text('تحميل المزيد'),
+                                ),
                         );
                       }
                       final document = filtered[index];
@@ -3076,6 +3142,7 @@ class _UsersAdminTab extends ConsumerStatefulWidget {
 
 class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
   final _searchController = TextEditingController();
+  Timer? _debounceTimer;
   String? _departmentFilter;
   String? _branchFilter;
   String? _roleFilter;
@@ -3083,8 +3150,28 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String _) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _applyFilters();
+    });
+    setState(() {});
+  }
+
+  void _applyFilters() {
+    final query = _searchController.text.trim();
+    ref.read(usersControllerProvider.notifier).setFilters(
+          search: query.isEmpty ? null : query,
+          departmentId: _departmentFilter,
+          branchId: _branchFilter,
+          role: _roleFilter,
+          status: _statusFilter == 'all' ? null : _statusFilter,
+        );
   }
 
   List<ManagedUser> _filterUsers(List<ManagedUser> users) {
@@ -3579,6 +3666,11 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
 
   @override
   Widget build(BuildContext context) {
+    final usersState = ref.watch(usersControllerProvider);
+    final usersNotifier = ref.watch(usersControllerProvider.notifier);
+    final hasMore = usersNotifier.hasMore;
+    final isLoadingMore = usersNotifier.isLoadingMore;
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -3608,10 +3700,21 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                 width: 300,
                 child: TextField(
                   controller: _searchController,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: _onSearchChanged,
                   decoration: _dialogInputDecoration(
                     'بحث بالاسم أو الفرع أو القسم أو اسم المستخدم',
-                  ).copyWith(prefixIcon: const Icon(Icons.search)),
+                  ).copyWith(
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              _onSearchChanged('');
+                            },
+                          )
+                        : null,
+                  ),
                 ),
               ),
               SizedBox(
@@ -3632,8 +3735,10 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                       ),
                     ),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _departmentFilter = value),
+                  onChanged: (value) {
+                    setState(() => _departmentFilter = value);
+                    _applyFilters();
+                  },
                 ),
               ),
               SizedBox(
@@ -3654,7 +3759,10 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                       ),
                     ),
                   ],
-                  onChanged: (value) => setState(() => _branchFilter = value),
+                  onChanged: (value) {
+                    setState(() => _branchFilter = value);
+                    _applyFilters();
+                  },
                 ),
               ),
               SizedBox(
@@ -3669,7 +3777,10 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                     DropdownMenuItem(value: 'manager', child: Text('manager')),
                     DropdownMenuItem(value: 'user', child: Text('user')),
                   ],
-                  onChanged: (value) => setState(() => _roleFilter = value),
+                  onChanged: (value) {
+                    setState(() => _roleFilter = value);
+                    _applyFilters();
+                  },
                 ),
               ),
               SizedBox(
@@ -3683,20 +3794,49 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                     DropdownMenuItem(value: 'active', child: Text('نشط')),
                     DropdownMenuItem(value: 'inactive', child: Text('موقوف')),
                   ],
-                  onChanged: (value) =>
-                      setState(() => _statusFilter = value ?? 'all'),
+                  onChanged: (value) {
+                    setState(() => _statusFilter = value ?? 'all');
+                    _applyFilters();
+                  },
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: widget.usersState.when(
+            child: usersState.when(
               loading: () => const _AdminTableLoadingShimmer(),
               error: (error, stackTrace) =>
                   Center(child: Text(error.toString())),
               data: (users) {
                 final filteredUsers = _filterUsers(users);
+                if (filteredUsers.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Iconsax.user_remove,
+                          size: 48,
+                          color: Theme.of(context).disabledColor,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _searchController.text.isNotEmpty ||
+                                  _departmentFilter != null ||
+                                  _branchFilter != null ||
+                                  _roleFilter != null ||
+                                  _statusFilter != 'all'
+                              ? 'لا توجد نتائج تطابق معايير البحث'
+                              : 'لا يوجد مستخدمون حالياً',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: Theme.of(context).hintColor,
+                              ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
                 return Card(
                   elevation: 0,
                   clipBehavior: Clip.antiAlias,
@@ -3707,7 +3847,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                     ),
                   ),
                   child: ListView.separated(
-                    itemCount: filteredUsers.length + 1,
+                    itemCount: filteredUsers.length + (hasMore ? 1 : 0),
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       color: Theme.of(context).dividerColor.withOpacity(0.3),
@@ -3716,13 +3856,22 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                       if (index == filteredUsers.length) {
                         return Padding(
                           padding: const EdgeInsets.all(12),
-                          child: OutlinedButton.icon(
-                            onPressed: () => ref
-                                .read(usersControllerProvider.notifier)
-                                .loadMore(),
-                            icon: const Icon(Icons.expand_more_rounded),
-                            label: const Text('تحميل المزيد'),
-                          ),
+                          child: isLoadingMore
+                              ? const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(8.0),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                    ),
+                                  ),
+                                )
+                              : OutlinedButton.icon(
+                                  onPressed: () => ref
+                                      .read(usersControllerProvider.notifier)
+                                      .loadMore(),
+                                  icon: const Icon(Icons.expand_more_rounded),
+                                  label: const Text('تحميل المزيد'),
+                                ),
                         );
                       }
                       final user = filteredUsers[index];
@@ -4829,6 +4978,7 @@ class _RoomsAdminTab extends ConsumerWidget {
     );
     final nameController = TextEditingController();
     final descriptionController = TextEditingController();
+    final publisherSearchController = TextEditingController();
     final selectedPublishers = <String>{};
     final selectedAdmins = <String>{};
     var isSaving = false;
@@ -4869,23 +5019,66 @@ class _RoomsAdminTab extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  ...users.map(
-                    (user) => CheckboxListTile(
-                      value: selectedPublishers.contains(user.id),
-                      title: Text(user.displayName),
-                      subtitle: Text(user.username),
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                              setLocalState(() {
-                                if (value == true) {
-                                  selectedPublishers.add(user.id);
-                                } else {
-                                  selectedPublishers.remove(user.id);
-                                  selectedAdmins.remove(user.id);
-                                }
-                              });
-                            },
+                  TextField(
+                    controller: publisherSearchController,
+                    enabled: !isSaving,
+                    decoration: _dialogInputDecoration('بحث بالاسم أو اسم المستخدم...').copyWith(
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setLocalState(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(context).dividerColor.withOpacity(0.4),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Builder(
+                      builder: (context) {
+                        final pQuery = publisherSearchController.text.trim().toLowerCase();
+                        final visibleUsers = users.where((u) {
+                          if (pQuery.isEmpty) return true;
+                          return u.displayName.toLowerCase().contains(pQuery) ||
+                              u.username.toLowerCase().contains(pQuery);
+                        }).toList();
+                        if (visibleUsers.isEmpty) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Text('لا توجد نتائج مطابقة'),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: visibleUsers.length,
+                          itemBuilder: (context, idx) {
+                            final user = visibleUsers[idx];
+                            return CheckboxListTile(
+                              dense: true,
+                              value: selectedPublishers.contains(user.id),
+                              title: Text(user.displayName),
+                              subtitle: Text(user.username),
+                              onChanged: isSaving
+                                  ? null
+                                  : (value) {
+                                      setLocalState(() {
+                                        if (value == true) {
+                                          selectedPublishers.add(user.id);
+                                        } else {
+                                          selectedPublishers.remove(user.id);
+                                          selectedAdmins.remove(user.id);
+                                        }
+                                      });
+                                    },
+                            );
+                          },
+                        );
+                      },
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -5020,6 +5213,7 @@ class _RoomsAdminTab extends ConsumerWidget {
     final selectedAdmins = <String>{
       ...conversation.admins.map((entry) => entry.id),
     };
+    final memberSearchController = TextEditingController();
     var isArchived = conversation.isArchived;
     var isActive = conversation.isActive;
     var isSaving = false;
@@ -5074,23 +5268,67 @@ class _RoomsAdminTab extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  ...users.map(
-                    (user) => CheckboxListTile(
-                      value: selectedMembers.contains(user.id),
-                      title: Text(user.displayName),
-                      subtitle: Text(user.username),
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                              setLocalState(() {
-                                if (value == true) {
-                                  selectedMembers.add(user.id);
-                                } else {
-                                  selectedMembers.remove(user.id);
-                                  selectedAdmins.remove(user.id);
-                                }
-                              });
-                            },
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: memberSearchController,
+                    enabled: !isSaving,
+                    decoration: _dialogInputDecoration('بحث بالاسم أو اسم المستخدم...').copyWith(
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setLocalState(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(context).dividerColor.withOpacity(0.4),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Builder(
+                      builder: (context) {
+                        final mQuery = memberSearchController.text.trim().toLowerCase();
+                        final visibleUsers = users.where((u) {
+                          if (mQuery.isEmpty) return true;
+                          return u.displayName.toLowerCase().contains(mQuery) ||
+                              u.username.toLowerCase().contains(mQuery);
+                        }).toList();
+                        if (visibleUsers.isEmpty) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Text('لا توجد نتائج مطابقة'),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: visibleUsers.length,
+                          itemBuilder: (context, idx) {
+                            final user = visibleUsers[idx];
+                            return CheckboxListTile(
+                              dense: true,
+                              value: selectedMembers.contains(user.id),
+                              title: Text(user.displayName),
+                              subtitle: Text(user.username),
+                              onChanged: isSaving
+                                  ? null
+                                  : (value) {
+                                      setLocalState(() {
+                                        if (value == true) {
+                                          selectedMembers.add(user.id);
+                                        } else {
+                                          selectedMembers.remove(user.id);
+                                          selectedAdmins.remove(user.id);
+                                        }
+                                      });
+                                    },
+                            );
+                          },
+                        );
+                      },
                     ),
                   ),
                   const Divider(height: 28),
