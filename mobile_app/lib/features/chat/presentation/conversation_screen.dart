@@ -37,6 +37,7 @@ import '../utils/chat_attachment_policy.dart';
 import 'attachment_send_dialogs.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
+import 'conversation_details_screen.dart';
 import 'group_management_screen.dart';
 import 'widgets/broadcast_target_picker_sheet.dart';
 import 'widgets/attachment_bottom_sheet.dart';
@@ -5010,63 +5011,83 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           ),
           title: _selectionMode
               ? Text('${_selectedMessageIds.length} محددة')
-              : Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: colorScheme.surfaceContainerHighest,
-                      child: peer?.avatarUrl?.isNotEmpty == true
-                          ? ClipOval(
-                              child: CachedNetworkImage(
-                                imageUrl: peer!.avatarUrl!,
-                                width: 40,
-                                height: 40,
-                                fit: BoxFit.cover,
-                                httpHeaders: token == null || token.isEmpty
-                                    ? null
-                                    : {'Authorization': 'Bearer $token'},
-                                errorWidget: (_, __, ___) => Icon(
-                                  _data.type == 'group'
-                                      ? Icons.groups_outlined
-                                      : Icons.person_outline,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            )
-                          : Icon(
-                              _data.type == 'group'
-                                  ? Icons.groups_outlined
-                                  : Icons.person_outline,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _data.displayTitle(authUser?.id ?? ''),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            effectiveStatusText,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: statusColor,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+              : GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () async {
+                    final updated = await Navigator.of(context).push<ChatConversation>(
+                      CupertinoPageRoute(
+                        builder: (_) => ConversationDetailsScreen(
+                          conversation: _data,
+                          peer: peer,
+                          messages: loadedMessages,
+                          token: token,
+                        ),
                       ),
-                    ),
-                  ],
+                    );
+                    if (updated != null && mounted) {
+                      setState(() {
+                        _conversation = updated;
+                      });
+                    }
+                  },
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: colorScheme.surfaceContainerHighest,
+                        child: peer?.avatarUrl?.isNotEmpty == true
+                            ? ClipOval(
+                                child: CachedNetworkImage(
+                                  imageUrl: peer!.avatarUrl!,
+                                  width: 40,
+                                  height: 40,
+                                  fit: BoxFit.cover,
+                                  httpHeaders: token == null || token.isEmpty
+                                      ? null
+                                      : {'Authorization': 'Bearer $token'},
+                                  errorWidget: (_, __, ___) => Icon(
+                                    _data.type == 'group'
+                                        ? Icons.groups_outlined
+                                        : Icons.person_outline,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              )
+                            : Icon(
+                                _data.type == 'group'
+                                    ? Icons.groups_outlined
+                                    : Icons.person_outline,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _data.displayTitle(authUser?.id ?? ''),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              effectiveStatusText,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: statusColor,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
           actions: [
             if (_selectionMode) ...[
