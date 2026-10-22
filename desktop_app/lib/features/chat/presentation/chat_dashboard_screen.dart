@@ -86,6 +86,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   double _rightPanelWidth = 320;
   int _searchSignal = 0;
   int _adminTabIndex = 0;
+  String? _targetMessageId;
+  int _targetMessageSignal = 0;
   void _syncSectionFromWidget() {
     final shouldShowAdmin =
         widget.activeSection == DesktopWorkspaceSection.admin;
@@ -295,9 +297,14 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   void _selectConversation(
     ChatConversation? conversation, {
     bool openInfoPanel = false,
+    String? targetMessageId,
   }) {
     setState(() {
       _selectedConversationId = conversation?.id;
+      _targetMessageId = targetMessageId;
+      if (targetMessageId != null) {
+        _targetMessageSignal++;
+      }
       _showAdminPanel = false;
       _showTicketsPanel = false;
       if (conversation == null) {
@@ -333,13 +340,16 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   }
 
   Future<void> _openFavoriteMessages() async {
-    final conversation = await Navigator.of(context).push<ChatConversation>(
+    final result = await Navigator.of(context).push<FavoriteMessageSelectionResult>(
       MaterialPageRoute(builder: (_) => const FavoriteMessagesScreen()),
     );
-    if (!mounted || conversation == null) {
+    if (!mounted || result == null) {
       return;
     }
-    _selectConversation(conversation);
+    _selectConversation(
+      result.conversation,
+      targetMessageId: result.targetMessageId,
+    );
   }
 
   Future<void> _openOrStartDirectConversation(
@@ -1005,10 +1015,13 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                         : selectedConversation == null
                         ? const _TelegramEmptyState()
                         : ChatScreen(
-                            key: ValueKey('chat_${selectedConversation.id}'),
+                            key: ValueKey(
+                              'chat_${selectedConversation.id}_$_targetMessageSignal',
+                            ),
                             conversation: selectedConversation,
                             currentUser: authUser,
                             token: authToken,
+                            initialTargetMessageId: _targetMessageId,
                             searchSignal: _searchSignal,
                             rightPanelVisible: _showRightPanel,
                             onToggleRightPanel: () => setState(

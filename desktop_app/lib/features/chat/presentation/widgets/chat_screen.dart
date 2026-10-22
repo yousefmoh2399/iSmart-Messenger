@@ -53,6 +53,7 @@ class ChatScreen extends ConsumerStatefulWidget {
     required this.onToggleRightPanel,
     required this.onCloseConversation,
     required this.onConversationDeleted,
+    this.initialTargetMessageId,
     super.key,
   });
 
@@ -64,6 +65,7 @@ class ChatScreen extends ConsumerStatefulWidget {
   final VoidCallback onToggleRightPanel;
   final VoidCallback onCloseConversation;
   final VoidCallback onConversationDeleted;
+  final String? initialTargetMessageId;
 
   @override
   ConsumerState<ChatScreen> createState() => ChatScreenState();
@@ -97,6 +99,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   int _lastMessageCount = 0;
   int _activeSearchMatchIndex = 0;
   String? _focusedMessageId;
+  Timer? _focusedMessageClearTimer;
   bool _isUploadingAttachment = false;
   double _uploadProgress = 0;
   String? _uploadingFileName;
@@ -205,6 +208,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _listenToSocket();
     unawaited(_refreshRemotePeerDevice());
     unawaited(_restoreDraft());
+    if (widget.initialTargetMessageId != null) {
+      _focusedMessageId = widget.initialTargetMessageId;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(activeConversationIdProvider.notifier).state = _conversationId;
@@ -214,6 +220,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       controller.markSeen();
       controller.refresh();
       _messageFocusNode.requestFocus();
+      if (widget.initialTargetMessageId != null) {
+        _scrollToTargetWithRetry(widget.initialTargetMessageId!);
+      }
     });
   }
 
@@ -245,7 +254,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       unawaited(_restoreDraft());
       _lastMessageCount = 0;
       _activeSearchMatchIndex = 0;
-      _focusedMessageId = null;
+      _focusedMessageId = widget.initialTargetMessageId;
       _showScrollToBottomButton = false;
       _lastSeenMessageId = null;
       _lastLatestMessageId = null;
@@ -260,8 +269,18 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         controller.markSeen();
         controller.refresh();
         _messageFocusNode.requestFocus();
+        if (widget.initialTargetMessageId != null) {
+          _scrollToTargetWithRetry(widget.initialTargetMessageId!);
+        }
       });
       unawaited(_refreshRemotePeerDevice());
+    } else if (widget.initialTargetMessageId != null &&
+        widget.initialTargetMessageId != oldWidget.initialTargetMessageId) {
+      _focusedMessageId = widget.initialTargetMessageId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scrollToTargetWithRetry(widget.initialTargetMessageId!);
+      });
     }
     if (oldWidget.searchSignal != widget.searchSignal) {
       _openSearch();
@@ -297,6 +316,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _messageFocusNode.dispose();
+    _focusedMessageClearTimer?.cancel();
     _scrollController.dispose();
     _messageKeys.clear();
     super.dispose();
@@ -798,6 +818,50 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
     setState(_selectedMessageIds.clear);
+  }
+
+  Future<void> _scrollToTargetWithRetry(String targetId) async {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      if (!mounted) return;
+      await Future.delayed(Duration(milliseconds: attempt == 0 ? 350 : 250));
+      if (!mounted) return;
+
+      final messages = ref
+          .read(conversationMessagesControllerProvider(_conversationId))
+          .valueOrNull
+          ?.messages;
+
+      if (messages != null && messages.isNotEmpty) {
+        final found = messages.any((m) => m.id == targetId);
+        if (found) {
+          if (mounted) {
+            setState(() {
+              _focusedMessageId = targetId;
+            });
+          }
+          await _scrollToMessageById(targetId);
+          _focusedMessageClearTimer?.cancel();
+          _focusedMessageClearTimer = Timer(const Duration(seconds: 4), () {
+            if (mounted && _focusedMessageId == targetId) {
+              setState(() => _focusedMessageId = null);
+            }
+          });
+          return;
+        } else {
+          final hasMore = ref
+              .read(conversationMessagesControllerProvider(_conversationId))
+              .valueOrNull
+              ?.hasMore ?? false;
+          if (hasMore) {
+            await ref
+                .read(conversationMessagesControllerProvider(_conversationId).notifier)
+                .loadMore();
+          } else {
+            break;
+          }
+        }
+      }
+    }
   }
 
   Future<void> _scrollToMessageById(String messageId) async {

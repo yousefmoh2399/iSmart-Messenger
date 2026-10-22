@@ -223,12 +223,16 @@ class _MessageBubbleState extends State<MessageBubble> {
                     color: Color(0xFF007AFF),
                   ),
                 ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: _BubbleMenuAction.favorite,
                 child: _PopupActionRow(
-                  icon: Icons.star_outline_rounded,
-                  label: 'تبديل المفضلة',
-                  color: Color(0xFFF59E0B),
+                  icon: widget.message.isFavoritedBy(widget.currentUserId)
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  label: widget.message.isFavoritedBy(widget.currentUserId)
+                      ? 'إزالة من المفضلة'
+                      : 'إضافة إلى المفضلة',
+                  color: const Color(0xFFF59E0B),
                 ),
               ),
               const PopupMenuItem(
@@ -683,6 +687,17 @@ class _MessageBubbleState extends State<MessageBubble> {
                             color: subColor,
                             fontSize: 11,
                             height: 1,
+                          ),
+                        ),
+                      ],
+                      if (widget.message.isFavoritedBy(widget.currentUserId)) ...[
+                        const SizedBox(width: 4),
+                        const Tooltip(
+                          message: 'رسالة مفضلة',
+                          child: Icon(
+                            Icons.star_rounded,
+                            size: 13.5,
+                            color: Color(0xFFF59E0B),
                           ),
                         ),
                       ],
