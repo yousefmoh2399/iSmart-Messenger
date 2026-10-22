@@ -1794,8 +1794,31 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
                   Positioned.fill(
                     child: documentsState.when(
                       loading: () => const _FilesDashboardLoading(),
-                      error: (error, _) =>
-                          Center(child: Text(error.toString())),
+                      error: (error, _) => Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.folder_off_outlined,
+                              size: 48,
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'تعذر تحميل الملفات',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.tonalIcon(
+                              onPressed: () => ref
+                                  .read(documentsControllerProvider.notifier)
+                                  .refresh(),
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('إعادة المحاولة'),
+                            ),
+                          ],
+                        ),
+                      ),
                       data: (documents) {
                         final documentFolders = ref.watch(documentFoldersProvider);
                         final folders = documentFolders.valueOrNull ?? [];

@@ -106,10 +106,10 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
   @override
   void initState() {
     super.initState();
-    // تحديث قائمة الملفات عند كل دخول للشاشة (سواء أول مرة أو عودة من شاشة أخرى)
+    // تحديث قائمة الملفات بسلاسة عند كل دخول للشاشة
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        ref.invalidate(remoteDocumentsControllerProvider);
+        ref.read(remoteDocumentsControllerProvider.notifier).refresh();
       }
     });
     if (widget.launchDesktopSendPickerOnOpen) {
@@ -2332,14 +2332,36 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         );
       }
 
-      if (documentsState.hasError) {
+      if (documentsState.hasError && !documentsState.hasValue) {
         return ListView(
           padding: const EdgeInsets.only(bottom: 80),
           children: [
             headerCard, ...banners, searchField, toolbar,
             Padding(
-              padding: const EdgeInsets.all(24),
-              child: Center(child: Text(documentsState.error.toString())),
+              padding: const EdgeInsets.all(32),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.folder_off_outlined,
+                      size: 48,
+                      color: colorScheme.outline,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'تعذر تحميل الملفات',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.tonalIcon(
+                      onPressed: refreshDocuments,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('إعادة المحاولة'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         );

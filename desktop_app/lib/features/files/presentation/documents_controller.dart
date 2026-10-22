@@ -1,7 +1,9 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../shared/models/remote_document.dart';
 import '../../../shared/providers/providers.dart';
+import '../../auth/presentation/auth_controller.dart';
 
 class DocumentsController extends AsyncNotifier<List<RemoteDocument>> {
   int _page = 1;
@@ -9,7 +11,12 @@ class DocumentsController extends AsyncNotifier<List<RemoteDocument>> {
   bool _loadingMore = false;
 
   bool _isUnauthorized(Object error) {
-    return error is ApiException && error.isUnauthorized;
+    if (error is ApiException && error.isUnauthorized) return true;
+    if (error is DioException) {
+      if (error.response?.statusCode == 401) return true;
+      if (error.error is ApiException && (error.error as ApiException).isUnauthorized) return true;
+    }
+    return false;
   }
 
   Future<T> _guardAuth<T>(Future<T> Function() action) async {
@@ -28,28 +35,46 @@ class DocumentsController extends AsyncNotifier<List<RemoteDocument>> {
   @override
   Future<List<RemoteDocument>> build() async {
     ref.watch(serverRecoveryRevisionProvider);
-    return _guardAuth(() async {
-      final repository = ref.watch(documentRepositoryProvider);
-      await repository.syncPendingLocalDocuments();
-      final page = await repository.fetchDocumentsPage();
-      _page = page.page;
-      _hasMore = page.hasMore;
-      return page.documents;
-    });
-  }
-
-  Future<void> refresh() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _guardAuth(() async {
-        final repository = ref.read(documentRepositoryProvider);
-        await repository.syncPendingLocalDocuments();
+    final auth = ref.watch(authControllerProvider);
+    if (auth.status != AuthStatus.authenticated || auth.user == null) {
+      return const <RemoteDocument>[];
+    }
+    try {
+      return await _guardAuth(() async {
+        final repository = ref.watch(documentRepositoryProvider);
+        try {
+          await repository.syncPendingLocalDocuments();
+        } catch (_) {}
         final page = await repository.fetchDocumentsPage();
         _page = page.page;
         _hasMore = page.hasMore;
         return page.documents;
-      }),
-    );
+      });
+    } catch (_) {
+      return const <RemoteDocument>[];
+    }
+  }
+
+  Future<void> refresh() async {
+    final auth = ref.read(authControllerProvider);
+    if (auth.status != AuthStatus.authenticated) return;
+    try {
+      final docs = await _guardAuth(() async {
+        final repository = ref.read(documentRepositoryProvider);
+        try {
+          await repository.syncPendingLocalDocuments();
+        } catch (_) {}
+        final page = await repository.fetchDocumentsPage();
+        _page = page.page;
+        _hasMore = page.hasMore;
+        return page.documents;
+      });
+      state = AsyncData(docs);
+    } catch (_) {
+      if (!state.hasValue) {
+        state = const AsyncData(<RemoteDocument>[]);
+      }
+    }
   }
 
   Future<void> loadMore() async {
@@ -109,7 +134,12 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
   }
 
   bool _isUnauthorized(Object error) {
-    return error is ApiException && error.isUnauthorized;
+    if (error is ApiException && error.isUnauthorized) return true;
+    if (error is DioException) {
+      if (error.response?.statusCode == 401) return true;
+      if (error.error is ApiException && (error.error as ApiException).isUnauthorized) return true;
+    }
+    return false;
   }
 
   Future<T> _guardAuth<T>(Future<T> Function() action) async {
@@ -135,35 +165,49 @@ class AdminDocumentsController extends AsyncNotifier<List<RemoteDocument>> {
   @override
   Future<List<RemoteDocument>> build() async {
     ref.watch(serverRecoveryRevisionProvider);
+    final auth = ref.watch(authControllerProvider);
+    if (auth.status != AuthStatus.authenticated || auth.user == null) {
+      return const [];
+    }
     if (!_canReadAllDocuments(listen: true)) {
       return const [];
     }
-    final page = await _guardAuth(
-      () => ref
-          .watch(documentRepositoryProvider)
-          .fetchDocumentsPage(includeAll: true, search: _search, page: 1, limit: _limit),
-    );
-    _page = page.page;
-    _hasMore = page.hasMore;
-    return page.documents;
+    try {
+      final page = await _guardAuth(
+        () => ref
+            .watch(documentRepositoryProvider)
+            .fetchDocumentsPage(includeAll: true, search: _search, page: 1, limit: _limit),
+      );
+      _page = page.page;
+      _hasMore = page.hasMore;
+      return page.documents;
+    } catch (_) {
+      return const [];
+    }
   }
 
   Future<void> refresh() async {
+    final auth = ref.read(authControllerProvider);
+    if (auth.status != AuthStatus.authenticated) return;
     if (!_canReadAllDocuments()) {
       state = const AsyncData(<RemoteDocument>[]);
       return;
     }
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _guardAuth(() async {
+    try {
+      final page = await _guardAuth(() async {
         final page = await ref
             .read(documentRepositoryProvider)
             .fetchDocumentsPage(includeAll: true, search: _search, page: 1, limit: _limit);
         _page = page.page;
         _hasMore = page.hasMore;
         return page.documents;
-      }),
-    );
+      });
+      state = AsyncData(page);
+    } catch (_) {
+      if (!state.hasValue) {
+        state = const AsyncData(<RemoteDocument>[]);
+      }
+    }
   }
 
   Future<void> loadMore() async {
