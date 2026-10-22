@@ -49,15 +49,42 @@ async function processSingleScheduledMessage(msgData, io) {
   const conversation = await getConversationById(message.conversationId);
   if (!conversation) return null;
 
-  // 2. Extract recipient IDs
-  const recipientUserIds = (message.deliveredTo || [])
-    .map((r) => {
-      const raw = r.userId || r;
-      return raw?._id ? String(raw._id) : String(raw);
-    })
-    .filter(Boolean);
+  // 2. Extract recipient IDs directly from conversation members (excluding sender)
+  let recipientUserIds = (conversation.members || [])
+    .map((entry) => String(entry?._id || entry))
+    .filter((id) => id && id !== senderId);
 
-  // 3. Update conversation lastMessage & lastActivityAt
+  if (conversation.type === "broadcast") {
+    const targets = message.metadata?.broadcastTargets;
+    if (targets && Array.isArray(targets.userIds) && targets.userIds.length > 0) {
+      recipientUserIds = targets.userIds
+        .map(String)
+        .filter((id) => id && id !== senderId);
+    }
+  }
+
+  // 3. Mark live delivery receipts for currently connected recipients
+  if (io) {
+    const liveRecipientIds = recipientUserIds.filter((userId) => {
+      const delivery = getUserDeliveryContext(io, userId);
+      return delivery.hasMobile || delivery.hasDesktop || delivery.hasWeb;
+    });
+
+    if (liveRecipientIds.length > 0) {
+      const existingDelivered = new Set(
+        (message.deliveredTo || []).map((entry) => String(entry.userId || entry))
+      );
+      const newReceipts = liveRecipientIds
+        .filter((id) => !existingDelivered.has(id))
+        .map((userId) => ({ userId, at: now }));
+      if (newReceipts.length > 0) {
+        message.deliveredTo = [...(message.deliveredTo || []), ...newReceipts];
+        await message.save();
+      }
+    }
+  }
+
+  // 4. Update conversation lastMessage & lastActivityAt
   conversation.lastMessage = {
     content: message.content || message.fileName || "",
     senderId,
@@ -68,20 +95,32 @@ async function processSingleScheduledMessage(msgData, io) {
   conversation.lastActivityAt = now;
   await conversation.save();
 
-  // 4. Increment unread count for recipients
+  // 5. Increment unread count for recipients
   await incrementUnreadCounts(
     conversation._id,
     recipientUserIds,
     senderId
   );
 
-  // 5. Serialize
+  // 6. Serialize
   const serializedConversation = await serializeConversation(conversation, senderId);
   const serializedMessage = serializeMessage(message, sender);
 
-  // 6. Emit to sockets
+  // 7. Emit to sockets
   if (io) {
-    emitMessageToRecipients(io, serializedMessage);
+    emitMessageToRecipients(io, serializedMessage, recipientUserIds);
+
+    // Also notify active conversation room & sender that scheduled message has been dispatched
+    io.to(`conversation:${message.conversationId}`).emit("scheduled_message_sent", {
+      conversationId: String(message.conversationId),
+      messageId: String(message._id),
+    });
+    if (senderId) {
+      io.to(`user:${senderId}`).emit("scheduled_message_sent", {
+        conversationId: String(message.conversationId),
+        messageId: String(message._id),
+      });
+    }
 
     let audienceIds = [];
     if (conversation.type === "broadcast") {
@@ -106,7 +145,7 @@ async function processSingleScheduledMessage(msgData, io) {
       await emitConversationToMembers(io, message.conversationId);
     }
 
-    // 7. Push Notification
+    // 8. Push Notification
     sendChatPushNotifications({
       recipientUserIds: recipientUserIds,
       conversation: serializedConversation,

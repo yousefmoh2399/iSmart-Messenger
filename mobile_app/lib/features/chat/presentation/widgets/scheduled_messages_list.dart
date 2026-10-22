@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,18 +30,49 @@ class _ScheduledMessagesSheetState extends ConsumerState<ScheduledMessagesSheet>
   bool _isLoading = true;
   String? _errorMessage;
   String? _actionInProgressId;
+  StreamSubscription? _eventsSubscription;
+  Timer? _countdownTimer;
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
+    _listenToSocket();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
-  Future<void> _loadMessages() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _eventsSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _listenToSocket() {
+    _eventsSubscription?.cancel();
+    final socketService = ref.read(chatSocketServiceProvider);
+    _eventsSubscription = socketService.events.listen((event) {
+      if (!mounted) return;
+      final convId = event.payload['conversationId']?.toString();
+      if (convId != null && convId != widget.conversationId) return;
+
+      if (event.type == 'scheduled_message_sent' ||
+          event.type == 'receive_message' ||
+          event.type == 'message_deleted') {
+        _loadMessages(silent: true);
+      }
     });
+  }
+
+  Future<void> _loadMessages({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final result = await ref
@@ -50,6 +82,7 @@ class _ScheduledMessagesSheetState extends ConsumerState<ScheduledMessagesSheet>
       setState(() {
         _messages = result.messages;
         _isLoading = false;
+        _errorMessage = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -75,6 +108,10 @@ class _ScheduledMessagesSheetState extends ConsumerState<ScheduledMessagesSheet>
         _messages.removeWhere((m) => m.id == msg.id);
         _actionInProgressId = null;
       });
+
+      ref
+          .read(conversationMessagesControllerProvider(widget.conversationId).notifier)
+          .refresh();
 
       widget.onMessageSent?.call();
 

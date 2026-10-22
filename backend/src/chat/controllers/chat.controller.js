@@ -109,6 +109,13 @@ function emitMessageToRecipients(io, message, recipientUserIds = []) {
     deliveredUsers.add(String(userId));
   }
 
+  if (message.conversationId) {
+    io.to(`conversation:${message.conversationId}`).emit(
+      "receive_message",
+      message,
+    );
+  }
+
   if (message.senderId) {
     io.to(`user:${message.senderId}`).emit("receive_message", message);
   }

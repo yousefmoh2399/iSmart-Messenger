@@ -195,6 +195,7 @@ class ChatSocketService {
     }
 
     bind('receive_message');
+    bind('scheduled_message_sent');
     bind('typing');
     bind('stop_typing');
     bind('message_seen');

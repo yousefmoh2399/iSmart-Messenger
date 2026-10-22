@@ -1564,110 +1564,227 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _showScheduledMessages() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: SizedBox(
-            width: 400,
-            height: 600,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'الرسائل المجدولة',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ScheduledMessagesList(
-                    conversationId: widget.conversation.id,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+    ScheduledMessagesDialog.show(
+      context,
+      conversationId: _conversationId,
+      onMessageSent: () {
+        ref
+            .read(conversationMessagesControllerProvider(_conversationId).notifier)
+            .refresh();
       },
     );
   }
 
   void _showSendOptions() {
-    // In desktop app, we can use showMenu
-    // Need to find the button's position. For simplicity, we could just show a dialog,
-    // or standard dialog if we don't have position. Let's use a dialog to be safe.
+    final hasContent = _messageController.text.trim().isNotEmpty;
+    if (!hasContent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى كتابة نص الرسالة أولاً قبل جدولتها.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final today6PM = DateTime(now.year, now.month, now.day, 18, 0);
+    final tomorrow9AM = DateTime(now.year, now.month, now.day + 1, 9, 0);
+
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('خيارات الإرسال'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.notifications_off_rounded),
-                title: const Text('إرسال بدون صوت'),
-                onTap: () {
-                  Navigator.pop(dialogContext);
-                  _sendText(isSilent: true);
-                },
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        final cardBg = isDark ? const Color(0xFF1E1E20) : Colors.white;
+        final borderColor = isDark ? Colors.white12 : const Color(0xFFE5E5EA);
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Container(
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: borderColor, width: 0.8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-              ListTile(
-                leading: const Icon(Icons.schedule_rounded),
-                title: const Text('جدولة الرسالة'),
-                onTap: () async {
-                  Navigator.pop(dialogContext);
-                  final selectedDate = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (selectedDate != null && mounted) {
-                    final selectedTime = await showTimePicker(
-                      context: context,
-                      initialTime: TimeOfDay.now(),
-                    );
-                    if (selectedTime != null && mounted) {
-                      final scheduledFor = DateTime(
-                        selectedDate.year,
-                        selectedDate.month,
-                        selectedDate.day,
-                        selectedTime.hour,
-                        selectedTime.minute,
-                      );
-                      if (scheduledFor.isAfter(DateTime.now())) {
-                        _sendText(scheduledFor: scheduledFor);
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('يجب أن يكون الوقت في المستقبل.'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(9),
                           ),
+                          child: const Icon(
+                            Icons.send_rounded,
+                            color: Color(0xFF007AFF),
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'خيارات الإرسال المتقدمة',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => Navigator.pop(dialogContext),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, thickness: 0.6, color: borderColor),
+
+                  // Option 1: Silent send
+                  ListTile(
+                    leading: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.notifications_off_rounded, color: Colors.orange, size: 18),
+                    ),
+                    title: const Text('إرسال بدون صوت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text('يصل إشعار صامت للمستلم دون إصدار نغمة', style: TextStyle(fontSize: 12)),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(isSilent: true);
+                    },
+                  ),
+
+                  Divider(height: 1, thickness: 0.6, color: borderColor),
+
+                  // Presets title
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'جدولة الرسالة',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Preset 1: +30 minutes
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('بعد 30 دقيقة', style: TextStyle(fontSize: 13.5)),
+                    trailing: Text(
+                      DateFormat('hh:mm a', 'ar').format(now.add(const Duration(minutes: 30))),
+                      style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                    ),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(scheduledFor: now.add(const Duration(minutes: 30)));
+                    },
+                  ),
+
+                  // Preset 2: +1 hour
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('بعد ساعة واحدة', style: TextStyle(fontSize: 13.5)),
+                    trailing: Text(
+                      DateFormat('hh:mm a', 'ar').format(now.add(const Duration(hours: 1))),
+                      style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                    ),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(scheduledFor: now.add(const Duration(hours: 1)));
+                    },
+                  ),
+
+                  // Preset 3: Today 6 PM (if before 5:30 PM)
+                  if (now.isBefore(today6PM.subtract(const Duration(minutes: 30))))
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.nightlight_round, size: 20, color: Color(0xFF007AFF)),
+                      title: const Text('مساء اليوم (06:00 م)', style: TextStyle(fontSize: 13.5)),
+                      onTap: () {
+                        Navigator.pop(dialogContext);
+                        _sendText(scheduledFor: today6PM);
+                      },
+                    ),
+
+                  // Preset 4: Tomorrow 9 AM
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.wb_sunny_rounded, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('صباح الغد (09:00 ص)', style: TextStyle(fontSize: 13.5)),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(scheduledFor: tomorrow9AM);
+                    },
+                  ),
+
+                  // Preset 5: Custom Date/Time
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.edit_calendar_rounded, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('تحديد موعد مخصص...', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    onTap: () async {
+                      Navigator.pop(dialogContext);
+                      final selectedDate = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (selectedDate != null && mounted) {
+                        final selectedTime = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.now(),
                         );
+                        if (selectedTime != null && mounted) {
+                          final scheduledFor = DateTime(
+                            selectedDate.year,
+                            selectedDate.month,
+                            selectedDate.day,
+                            selectedTime.hour,
+                            selectedTime.minute,
+                          );
+                          if (scheduledFor.isAfter(DateTime.now())) {
+                            _sendText(scheduledFor: scheduledFor);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('يجب أن يكون الوقت في المستقبل.'),
+                              ),
+                            );
+                          }
+                        }
                       }
-                    }
-                  }
-                },
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ),
-            ],
+            ),
           ),
         );
       },

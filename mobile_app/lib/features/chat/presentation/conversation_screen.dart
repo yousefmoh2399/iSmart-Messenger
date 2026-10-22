@@ -649,27 +649,124 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   void _showSendOptions() {
+    final hasContent = _messageController.text.trim().isNotEmpty;
+    if (!hasContent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى كتابة نص الرسالة أولاً قبل جدولتها.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final today6PM = DateTime(now.year, now.month, now.day, 18, 0);
+    final tomorrow9AM = DateTime(now.year, now.month, now.day + 1, 9, 0);
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 8, bottom: 6),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black26,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
               ListTile(
-                leading: const Icon(Icons.notifications_off_rounded),
-                title: const Text('إرسال بدون صوت'),
+                leading: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.notifications_off_rounded, color: Colors.orange, size: 18),
+                ),
+                title: const Text('إرسال بدون صوت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('يصل إشعار صامت للمستلم دون إصدار نغمة', style: TextStyle(fontSize: 12)),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _sendText(isSilent: true);
                 },
               ),
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    'جدولة الرسالة',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ),
+              ),
               ListTile(
-                leading: const Icon(Icons.schedule_rounded),
-                title: const Text('جدولة الرسالة'),
+                dense: true,
+                leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('بعد 30 دقيقة', style: TextStyle(fontSize: 14)),
+                trailing: Text(
+                  DateFormat('hh:mm a', 'ar').format(now.add(const Duration(minutes: 30))),
+                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _sendText(scheduledFor: now.add(const Duration(minutes: 30)));
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('بعد ساعة واحدة', style: TextStyle(fontSize: 14)),
+                trailing: Text(
+                  DateFormat('hh:mm a', 'ar').format(now.add(const Duration(hours: 1))),
+                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _sendText(scheduledFor: now.add(const Duration(hours: 1)));
+                },
+              ),
+              if (now.isBefore(today6PM.subtract(const Duration(minutes: 30))))
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.nightlight_round, size: 20, color: Color(0xFF007AFF)),
+                  title: const Text('مساء اليوم (06:00 م)', style: TextStyle(fontSize: 14)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _sendText(scheduledFor: today6PM);
+                  },
+                ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.wb_sunny_rounded, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('صباح الغد (09:00 ص)', style: TextStyle(fontSize: 14)),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _sendText(scheduledFor: tomorrow9AM);
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.edit_calendar_rounded, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('تحديد موعد مخصص...', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 onTap: () async {
                   Navigator.pop(sheetContext);
                   final selectedDate = await showDatePicker(
@@ -691,7 +788,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         selectedTime.hour,
                         selectedTime.minute,
                       );
-                      // check if it's in the future
                       if (scheduledFor.isAfter(DateTime.now())) {
                         _sendText(scheduledFor: scheduledFor);
                       } else {
@@ -705,6 +801,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   }
                 },
               ),
+              const SizedBox(height: 8),
             ],
           ),
         );

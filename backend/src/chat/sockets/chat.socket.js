@@ -339,17 +339,31 @@ async function resolveSocketUser(socket) {
   };
 }
 
-function emitMessageToRecipients(io, message) {
+function emitMessageToRecipients(io, message, recipientUserIds = []) {
   const recipients = new Set(
-    (message.deliveredTo || [])
-      .map((entry) => entry.userId?.toString?.() || entry.userId)
+    (recipientUserIds || [])
+      .concat(
+        (message.deliveredTo || []).map(
+          (entry) => entry.userId?.toString?.() || entry.userId,
+        ),
+      )
       .filter(Boolean),
   );
 
+  // 1. Emit to the conversation room so whoever is actively viewing the conversation gets it immediately
+  if (message.conversationId) {
+    io.to(`conversation:${message.conversationId}`).emit(
+      "receive_message",
+      message,
+    );
+  }
+
+  // 2. Emit to sender's personal room
   if (message.senderId) {
     io.to(`user:${message.senderId}`).emit("receive_message", message);
   }
 
+  // 3. Emit to all recipients' personal rooms
   for (const userId of recipients) {
     io.to(`user:${userId}`).emit("receive_message", message);
     io.to(`user:${userId}`).emit("message_delivered", {

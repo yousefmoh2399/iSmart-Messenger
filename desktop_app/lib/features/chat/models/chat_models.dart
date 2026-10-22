@@ -602,6 +602,8 @@ class ChatMessage {
     required this.mimeType,
     required this.replyToMessageId,
     required this.isDeleted,
+    this.isScheduled = false,
+    this.scheduledFor,
     required this.metadata,
     required this.createdAt,
     required this.updatedAt,
@@ -621,6 +623,8 @@ class ChatMessage {
   final String? mimeType;
   final String? replyToMessageId;
   final bool isDeleted;
+  final bool isScheduled;
+  final DateTime? scheduledFor;
   final Map<String, dynamic>? metadata;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -822,6 +826,8 @@ class ChatMessage {
     String? mimeType,
     String? replyToMessageId,
     bool? isDeleted,
+    bool? isScheduled,
+    DateTime? scheduledFor,
     Map<String, dynamic>? metadata,
     DateTime? updatedAt,
     List<ChatReceipt>? seenBy,
@@ -840,6 +846,8 @@ class ChatMessage {
       mimeType: mimeType ?? this.mimeType,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       isDeleted: isDeleted ?? this.isDeleted,
+      isScheduled: isScheduled ?? this.isScheduled,
+      scheduledFor: scheduledFor ?? this.scheduledFor,
       metadata: metadata ?? this.metadata,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -862,6 +870,8 @@ class ChatMessage {
       'mimeType': mimeType,
       'replyToMessageId': replyToMessageId,
       'isDeleted': isDeleted,
+      'isScheduled': isScheduled,
+      'scheduledFor': scheduledFor?.toIso8601String(),
       'metadata': metadata,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -888,6 +898,10 @@ class ChatMessage {
       mimeType: json['mimeType'] as String?,
       replyToMessageId: json['replyToMessageId'] as String?,
       isDeleted: json['isDeleted'] == true,
+      isScheduled: json['isScheduled'] == true,
+      scheduledFor: json['scheduledFor'] is String
+          ? DateTime.tryParse(json['scheduledFor'] as String)
+          : null,
       metadata: () {
         final raw = json['metadata'];
         final meta = raw is Map<String, dynamic>
