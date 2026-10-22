@@ -2723,7 +2723,7 @@ class _DirectoryUserTile extends StatelessWidget {
   }
 }
 
-class _ConversationCard extends StatelessWidget {
+class _ConversationCard extends ConsumerStatefulWidget {
   const _ConversationCard({
     required this.conversation,
     required this.currentUserId,
@@ -2748,6 +2748,14 @@ class _ConversationCard extends StatelessWidget {
   final VoidCallback onToggleFavorite;
   final VoidCallback onDeleteConversation;
 
+  @override
+  ConsumerState<_ConversationCard> createState() => _ConversationCardState();
+}
+
+class _ConversationCardState extends ConsumerState<_ConversationCard> {
+  bool _didDragMove = false;
+  Offset? _dragStartPos;
+
   String _directPeerName(ChatDirectoryUser user) {
     if (user.fullName.trim().isNotEmpty) return user.fullName.trim();
     return user.username;
@@ -2759,7 +2767,9 @@ class _ConversationCard extends StatelessWidget {
   }
 
   ChatDirectoryUser? _directPeer() {
-    return conversation.members.where((m) => m.id != currentUserId).firstOrNull;
+    return widget.conversation.members
+        .where((m) => m.id != widget.currentUserId)
+        .firstOrNull;
   }
 
   Color _presenceColor(String status) {
@@ -2804,57 +2814,355 @@ class _ConversationCard extends StatelessWidget {
     }
   }
 
+  void _showActionMenu(BuildContext context) {
+    final folders = ref.read(chatFoldersProvider).value ?? [];
+    final inFolders = folders
+        .where((f) => f.conversationIds.contains(widget.conversation.id))
+        .toList();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                widget.conversation.isPinned
+                    ? Icons.push_pin_rounded
+                    : Icons.push_pin_outlined,
+              ),
+              title: Text(
+                widget.conversation.isPinned ? 'إلغاء التثبيت' : 'تثبيت المحادثة',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onTogglePin();
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: Icon(
+                widget.conversation.isMuted
+                    ? Icons.volume_off_rounded
+                    : Icons.volume_up_outlined,
+              ),
+              title: Text(
+                widget.conversation.isMuted ? 'إلغاء كتم الصوت' : 'كتم المحادثة',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onToggleMute();
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: Icon(
+                widget.conversation.isFavorite
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                color: widget.conversation.isFavorite
+                    ? const Color(0xFFFFB020)
+                    : null,
+              ),
+              title: Text(
+                widget.conversation.isFavorite
+                    ? 'إزالة من المفضلة'
+                    : 'إضافة إلى المفضلة',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onToggleFavorite();
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.folder_outlined,
+                color: Color(0xFF007AFF),
+              ),
+              title: Text(
+                inFolders.isNotEmpty ? 'إدارة المجلدات' : 'نقل إلى مجلد...',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: inFolders.isNotEmpty
+                  ? Text(
+                      'في: ${inFolders.map((f) => f.name).join('، ')}',
+                      style: const TextStyle(fontSize: 12),
+                    )
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                _showMoveToFolderSheet(context);
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+              title: const Text(
+                'مسح/مغادرة',
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onDeleteConversation();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showMoveToFolderSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => Consumer(
+        builder: (context, ref, _) {
+          final folders = ref.watch(chatFoldersProvider).value ?? [];
+
+          return Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'اختر مجلداً للمحادثة',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(sheetContext),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (folders.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                    child: Center(
+                      child: Text(
+                        'لا توجد مجلدات حالياً.\nيمكنك إنشاء مجلد جديد من القائمة أو زر (+).',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                else
+                  ...folders.map((folder) {
+                    final isMember =
+                        folder.conversationIds.contains(widget.conversation.id);
+                    return ListTile(
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.folder_rounded,
+                          color: Color(0xFF007AFF),
+                        ),
+                      ),
+                      title: Text(
+                        folder.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      trailing: isMember
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF34C759),
+                            )
+                          : const Icon(
+                              Icons.radio_button_unchecked_rounded,
+                              color: Colors.grey,
+                            ),
+                      onTap: () async {
+                        await ref
+                            .read(chatFoldersProvider.notifier)
+                            .updateFolderMembership(
+                              folderId: folder.id,
+                              conversationId: widget.conversation.id,
+                              add: !isMember,
+                            );
+                        HapticFeedback.lightImpact();
+                      },
+                    );
+                  }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final peer = conversation.type == 'direct' ? _directPeer() : null;
-    final title = conversation.displayTitle(currentUserId);
+    final peer = widget.conversation.type == 'direct' ? _directPeer() : null;
+    final title = widget.conversation.displayTitle(widget.currentUserId);
     final String tooltipMessage = (peer?.jobTitle.trim().isNotEmpty == true)
         ? '$title\n💼 ${peer!.jobTitle.trim()}'
         : (peer != null && peer.branchCode.isNotEmpty
             ? '$title • فرع ${peer.branchCode}'
             : title);
-    final preview = typingPreviewText ?? _conversationPreview(conversation);
-    final accent = _conversationAccent(conversation.type);
+    final preview =
+        widget.typingPreviewText ?? _conversationPreview(widget.conversation);
+    final accent = _conversationAccent(widget.conversation.type);
     final colorScheme = Theme.of(context).colorScheme;
-    final isTypingPreview = typingPreviewText != null;
-    final hasUnread = conversation.unreadCount > 0;
+    final isTypingPreview = widget.typingPreviewText != null;
+    final hasUnread = widget.conversation.unreadCount > 0;
 
     return LongPressDraggable<ChatConversation>(
-      data: conversation,
+      data: widget.conversation,
+      delay: const Duration(milliseconds: 240),
+      onDragStarted: () {
+        HapticFeedback.mediumImpact();
+        setState(() {
+          _didDragMove = false;
+          _dragStartPos = null;
+        });
+      },
+      onDragUpdate: (details) {
+        _dragStartPos ??= details.globalPosition;
+        if ((details.globalPosition - _dragStartPos!).distance > 12) {
+          _didDragMove = true;
+        }
+      },
+      onDragCompleted: () {
+        HapticFeedback.lightImpact();
+      },
+      onDraggableCanceled: (velocity, offset) {
+        if (!_didDragMove && mounted) {
+          _showActionMenu(context);
+        }
+      },
       feedback: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(12),
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          width: 300,
+          width: MediaQuery.of(context).size.width * 0.85,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                backgroundColor: accent.withValues(alpha: 0.2),
-                child: Icon(Icons.forum, color: accent),
+              ChatAvatar(
+                radius: 22,
+                backgroundColor: accent.withValues(alpha: 0.14),
+                avatarUrl: peer?.avatarUrl,
+                fallback: Text(
+                  peer != null
+                      ? _avatarLabel(peer.displayName)
+                      : _avatarLabel(title),
+                  style: TextStyle(
+                    color: accent,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      preview,
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
+              Icon(Icons.drive_file_move_rounded, color: accent, size: 22),
             ],
           ),
         ),
       ),
       childWhenDragging: Opacity(
-        opacity: 0.4,
+        opacity: 0.35,
         child: _buildItem(
           context,
           peer,
@@ -2874,14 +3182,11 @@ class _ConversationCard extends StatelessWidget {
         closedElevation: 0,
         openElevation: 0,
         openBuilder: (context, _) =>
-            ConversationScreen(conversation: conversation),
+            ConversationScreen(conversation: widget.conversation),
         closedBuilder: (context, openContainer) => Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: openContainer,
-            onLongPress: () {
-              _showActionMenu(context);
-            },
             child: _buildItem(
               context,
               peer,
@@ -2898,102 +3203,7 @@ class _ConversationCard extends StatelessWidget {
     );
   }
 
-  void _showActionMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(
-                conversation.isPinned
-                    ? Icons.push_pin_rounded
-                    : Icons.push_pin_outlined,
-              ),
-              title: Text(
-                conversation.isPinned ? 'إلغاء التثبيت' : 'تثبيت المحادثة',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onTogglePin();
-              },
-            ),
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              indent: 56,
-              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
-            ),
-            ListTile(
-              leading: Icon(
-                conversation.isMuted
-                    ? Icons.volume_off_rounded
-                    : Icons.volume_up_outlined,
-              ),
-              title: Text(
-                conversation.isMuted ? 'إلغاء كتم الصوت' : 'كتم المحادثة',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onToggleMute();
-              },
-            ),
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              indent: 56,
-              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
-            ),
-            ListTile(
-              leading: Icon(
-                conversation.isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                color: conversation.isFavorite ? const Color(0xFFFFB020) : null,
-              ),
-              title: Text(
-                conversation.isFavorite
-                    ? 'إزالة من المفضلة'
-                    : 'إضافة إلى المفضلة',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onToggleFavorite();
-              },
-            ),
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              indent: 56,
-              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
-              title: const Text(
-                'مسح/مغادرة',
-                style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onDeleteConversation();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildItem(
+    Widget _buildItem(
     BuildContext context,
     ChatDirectoryUser? peer,
     String title,
@@ -3070,7 +3280,7 @@ class _ConversationCard extends StatelessWidget {
                                 ),
                           ),
                         ),
-                        if (conversation.isPinned) ...[
+                        if (widget.conversation.isPinned) ...[
                           const SizedBox(width: 4),
                           Icon(
                             Icons.push_pin_rounded,
@@ -3078,7 +3288,7 @@ class _ConversationCard extends StatelessWidget {
                             color: colorScheme.onSurfaceVariant,
                           ),
                         ],
-                        if (conversation.isFavorite) ...[
+                        if (widget.conversation.isFavorite) ...[
                           const SizedBox(width: 4),
                           const Icon(
                             Icons.star_rounded,
@@ -3086,7 +3296,7 @@ class _ConversationCard extends StatelessWidget {
                             color: Color(0xFFFFB020),
                           ),
                         ],
-                        if (conversation.isMuted) ...[
+                        if (widget.conversation.isMuted) ...[
                           const SizedBox(width: 4),
                           Icon(
                             Icons.volume_off_rounded,
@@ -3096,16 +3306,16 @@ class _ConversationCard extends StatelessWidget {
                         ],
                         const SizedBox(width: 8),
                         Text(
-                          conversation.lastMessage?.createdAt != null
+                          widget.conversation.lastMessage?.createdAt != null
                               ? formatEgyptTime(
-                                  conversation.lastMessage!.createdAt!,
+                                  widget.conversation.lastMessage!.createdAt!,
                                 )
                               : DateFormat(
                                   'dd/MM',
-                                ).format(conversation.updatedAt.toLocal()),
+                                ).format(widget.conversation.updatedAt.toLocal()),
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                             color: hasUnread
-                                ? appearance.accent
+                                ? widget.appearance.accent
                                 : colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
                             fontWeight: hasUnread
                                 ? FontWeight.w700
@@ -3126,7 +3336,7 @@ class _ConversationCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: isTypingPreview
-                                  ? appearance.accent
+                                  ? widget.appearance.accent
                                   : colorScheme.onSurfaceVariant,
                               fontWeight: hasUnread || isTypingPreview
                                   ? FontWeight.w600
@@ -3148,12 +3358,12 @@ class _ConversationCard extends StatelessWidget {
                               minHeight: 20,
                             ),
                             decoration: BoxDecoration(
-                              color: appearance.accent,
+                              color: widget.appearance.accent,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             alignment: Alignment.center,
                             child: Text(
-                              "${conversation.unreadCount}",
+                              "${widget.conversation.unreadCount}",
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,
