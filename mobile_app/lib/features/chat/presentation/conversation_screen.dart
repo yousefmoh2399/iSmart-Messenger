@@ -5286,6 +5286,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       if (_lastMessageCount == 0 && messages.isNotEmpty) {
                         _animatedMessageIds.addAll(messages.map((m) => m.id));
+                        _animatedMessageIds.addAll(
+                          messages
+                              .map((m) => m.metadata?['clientMessageId']?.toString())
+                              .whereType<String>(),
+                        );
                       }
 
                       final hasNewMessages =
@@ -5974,7 +5979,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                           width: maxBubbleWidth,
                                                                                           height: 180,
                                                                                           child: Hero(
-                                                                                            tag: 'image_${message.id}',
+                                                                                            tag: 'image_$stableItemKey',
                                                                                             child: _ChatAttachmentImage(
                                                                                               message: message,
                                                                                               fit: BoxFit.cover,
@@ -6142,10 +6147,21 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                           ),
                                                                         )
                                                                       else
-                                                                        Icon(
-                                                                          status.icon,
-                                                                          size: 15,
-                                                                          color: status.color,
+                                                                        AnimatedSwitcher(
+                                                                          duration: const Duration(milliseconds: 220),
+                                                                          transitionBuilder: (child, animation) => ScaleTransition(
+                                                                            scale: CurvedAnimation(
+                                                                              parent: animation,
+                                                                              curve: Curves.easeOutBack,
+                                                                            ),
+                                                                            child: child,
+                                                                          ),
+                                                                          child: Icon(
+                                                                            status.icon,
+                                                                            key: ValueKey(status.icon),
+                                                                            size: 15,
+                                                                            color: status.color,
+                                                                          ),
                                                                         ),
                                                                     ],
                                                                   ],
@@ -6377,7 +6393,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             ),
                           );
 
-                          if (!_animatedMessageIds.contains(message.id)) {
+                          final animationKey =
+                              message.metadata?['clientMessageId']?.toString() ??
+                              message.id;
+                          final alreadyAnimated =
+                              _animatedMessageIds.contains(animationKey) ||
+                              _animatedMessageIds.contains(message.id);
+
+                          if (!alreadyAnimated) {
+                            _animatedMessageIds.add(animationKey);
                             _animatedMessageIds.add(message.id);
                             child = child
                                 .animate()
@@ -6388,6 +6412,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   duration: 200.ms,
                                   curve: Curves.easeOut,
                                 );
+                          } else {
+                            _animatedMessageIds.add(animationKey);
+                            _animatedMessageIds.add(message.id);
                           }
                           return child;
                         },
