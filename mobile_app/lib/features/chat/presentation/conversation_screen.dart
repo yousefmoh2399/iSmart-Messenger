@@ -5951,12 +5951,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                           if (message
                                                                               .hasAttachment)
                                                                             Padding(
-                                                                              padding: const EdgeInsets.only(
-                                                                                top: 10,
+                                                                              padding: EdgeInsets.only(
+                                                                                top: message.content.isNotEmpty ? 8 : 0,
                                                                               ),
                                                                               child: message.isAudioMessage
                                                                                   ? ChatAudioAttachmentPlayer(
                                                                                       message: message,
+                                                                                      isMine: isMine,
                                                                                     )
                                                                                   : message.isImageMessage &&
                                                                                         albumMessages.length >
@@ -7570,72 +7571,236 @@ class _TelegramComposerUploadStrip extends StatelessWidget {
   }
 }
 
-class _VoiceHoldRecordingBar extends StatelessWidget {
+class _VoiceHoldRecordingBar extends StatefulWidget {
   const _VoiceHoldRecordingBar({
     required this.colorScheme,
     required this.durationLabel,
     required this.slideCancelArmed,
     required this.gestureOffset,
+    required this.isDark,
   });
 
   final ColorScheme colorScheme;
   final String durationLabel;
   final bool slideCancelArmed;
   final Offset gestureOffset;
+  final bool isDark;
+
+  @override
+  State<_VoiceHoldRecordingBar> createState() => _VoiceHoldRecordingBarState();
+}
+
+class _VoiceHoldRecordingBarState extends State<_VoiceHoldRecordingBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final dx = rtl ? -gestureOffset.dx * 0.22 : gestureOffset.dx * 0.22;
-    final cancelColor = slideCancelArmed
-        ? const Color(0xFFDC2626)
-        : colorScheme.onSurfaceVariant;
-    return Transform.translate(
-      offset: Offset(dx, gestureOffset.dy * 0.08),
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: slideCancelArmed
-                ? const Color(0xFFFCA5A5)
-                : colorScheme.outlineVariant,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              rtl ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-              size: 20,
-              color: cancelColor,
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                slideCancelArmed ? 'اترك للإلغاء' : 'اسحب للإلغاء',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  color: cancelColor,
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final dragX = isRtl
+        ? (widget.gestureOffset.dx * 0.35).clamp(-100.0, 0.0)
+        : (widget.gestureOffset.dx * 0.35).clamp(0.0, 100.0);
+
+    final cancelColor = widget.slideCancelArmed
+        ? const Color(0xFFEF4444)
+        : (widget.isDark ? Colors.white70 : const Color(0xFF64748B));
+
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: widget.isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          // 1. Red Pulsing Recording Indicator Dot
+          AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, _) {
+              final opacity = 0.35 + (_pulseController.value * 0.65);
+              return Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: opacity),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withValues(alpha: opacity * 0.6),
+                      blurRadius: 5,
+                    ),
+                  ],
                 ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+
+          // 2. Live Duration Counter
+          Text(
+            widget.durationLabel,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+              color: widget.isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // 3. Slide to Cancel Animated Indicator
+          Expanded(
+            child: Transform.translate(
+              offset: Offset(dragX, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    widget.slideCancelArmed
+                        ? Icons.delete_outline_rounded
+                        : (isRtl ? Icons.chevron_right_rounded : Icons.chevron_left_rounded),
+                    size: 18,
+                    color: cancelColor,
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      widget.slideCancelArmed ? 'اترك للإلغاء' : 'اسحب للإلغاء',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: cancelColor,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 6),
-            Text(
-              durationLabel,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: colorScheme.onSurfaceVariant,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Floating lock capsule displayed vertically above the mic button during hold-recording.
+class _VoiceLockPill extends StatefulWidget {
+  const _VoiceLockPill({
+    required this.gestureDy,
+    required this.isDark,
+    required this.colorScheme,
+  });
+
+  final double gestureDy;
+  final bool isDark;
+  final ColorScheme colorScheme;
+
+  @override
+  State<_VoiceLockPill> createState() => _VoiceLockPillState();
+}
+
+class _VoiceLockPillState extends State<_VoiceLockPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isNearLock = widget.gestureDy < -45;
+    final dyOffset = (widget.gestureDy * 0.25).clamp(-20.0, 0.0);
+
+    return Transform.translate(
+      offset: Offset(0, dyOffset),
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder: (context, _) {
+          final bounce = math.sin(_anim.value * math.pi) * 3;
+          return Container(
+            width: 42,
+            height: 84,
+            decoration: BoxDecoration(
+              color: widget.isDark ? const Color(0xFF1E293B) : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isNearLock
+                    ? const Color(0xFF00A884)
+                    : (widget.isDark ? Colors.white12 : Colors.black12),
+                width: isNearLock ? 1.5 : 0.8,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: widget.isDark ? 0.35 : 0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            const SizedBox(width: 72, child: _RecordingWaveform()),
-          ],
-        ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: isNearLock
+                        ? const Color(0xFF00A884).withValues(alpha: 0.15)
+                        : Colors.transparent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isNearLock ? Icons.lock_open_rounded : Icons.lock_rounded,
+                    size: 20,
+                    color: isNearLock
+                        ? const Color(0xFF00A884)
+                        : (widget.isDark ? Colors.white70 : const Color(0xFF64748B)),
+                  ),
+                ),
+                Transform.translate(
+                  offset: Offset(0, -bounce),
+                  child: Icon(
+                    Icons.keyboard_arrow_up_rounded,
+                    size: 20,
+                    color: isNearLock
+                        ? const Color(0xFF00A884)
+                        : (widget.isDark ? Colors.white38 : const Color(0xFF94A3B8)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -7854,6 +8019,7 @@ class _MessageComposerState extends State<_MessageComposer> {
                           durationLabel: _formatDuration(recordingDuration),
                           slideCancelArmed: voiceSlideCancelArmed,
                           gestureOffset: voiceGestureOffset,
+                          isDark: isDark,
                         )
                       : lockedOrDraftBar
                           ? Row(
@@ -7863,8 +8029,8 @@ class _MessageComposerState extends State<_MessageComposer> {
                                   onPressed: enabled ? onCancelVoiceNote : null,
                                   icon: const Icon(
                                     Icons.delete_outline_rounded,
-                                    color: Color(0xFFDC2626),
-                                    size: 22,
+                                    color: Color(0xFFEF4444),
+                                    size: 24,
                                   ),
                                 ),
                                 Expanded(
@@ -7873,9 +8039,11 @@ class _MessageComposerState extends State<_MessageComposer> {
                                     durationLabel:
                                         _formatDuration(recordingDuration),
                                     isLocked: isVoiceLocked || !isRecordingVoice,
+                                    isPaused: isVoicePaused,
+                                    isDark: isDark,
                                   ),
                                 ),
-                                if (isRecordingVoice) ...[
+                                if (isRecordingVoice)
                                   IconButton(
                                     tooltip: isVoicePaused
                                         ? 'استئناف'
@@ -7887,22 +8055,14 @@ class _MessageComposerState extends State<_MessageComposer> {
                                         : null,
                                     icon: Icon(
                                       isVoicePaused
-                                          ? Icons.play_arrow_rounded
-                                          : Icons.pause_rounded,
-                                      size: 22,
-                                      color: colorScheme.onSurfaceVariant,
+                                          ? Icons.mic_rounded
+                                          : Icons.pause_circle_outline_rounded,
+                                      size: 24,
+                                      color: isVoicePaused
+                                          ? const Color(0xFFEF4444)
+                                          : (isDark ? Colors.white70 : const Color(0xFF64748B)),
                                     ),
                                   ),
-                                  IconButton(
-                                    tooltip: 'إيقاف وحفظ',
-                                    onPressed: enabled ? onStopVoiceNote : null,
-                                    icon: Icon(
-                                      Icons.stop_rounded,
-                                      size: 22,
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
                               ],
                             )
                           : Row(
@@ -8055,38 +8215,41 @@ class _MessageComposerState extends State<_MessageComposer> {
                 ),
               ),
               const SizedBox(width: 6),
-              // WhatsApp Circular Action Button (Mic / Send)
-              _buildCircularActionButton(
-                context: context,
-                colorScheme: colorScheme,
-                enabled: enabled,
-                isUploading: isUploading,
-                uploadProgress: uploadProgress,
-                isEditing: isEditing,
-                showVoiceActionButtons: showVoiceActionButtons,
-                onSendVoiceNote: onSendVoiceNote,
-                onSend: onSend,
-                onSendOptions: widget.onSendOptions,
-                onVoiceLongPressStart: onVoiceLongPressStart,
-                onVoiceLongPressMove: onVoiceLongPressMove,
-                onVoiceLongPressEnd: onVoiceLongPressEnd,
-                isVoiceRecordingActive: isVoiceRecordingActive,
+              // WhatsApp Circular Action Button (Mic / Send) with Floating Lock Capsule
+              Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.bottomCenter,
+                children: [
+                  if (holdPhase && isVoiceHoldActive)
+                    Positioned(
+                      bottom: 58,
+                      child: _VoiceLockPill(
+                        gestureDy: voiceGestureOffset.dy,
+                        isDark: isDark,
+                        colorScheme: colorScheme,
+                      ),
+                    ),
+                  _buildCircularActionButton(
+                    context: context,
+                    colorScheme: colorScheme,
+                    enabled: enabled,
+                    isUploading: isUploading,
+                    uploadProgress: uploadProgress,
+                    isEditing: isEditing,
+                    showVoiceActionButtons: showVoiceActionButtons,
+                    onSendVoiceNote: onSendVoiceNote,
+                    onSend: onSend,
+                    onSendOptions: widget.onSendOptions,
+                    onVoiceLongPressStart: onVoiceLongPressStart,
+                    onVoiceLongPressMove: onVoiceLongPressMove,
+                    onVoiceLongPressEnd: onVoiceLongPressEnd,
+                    isVoiceRecordingActive: isVoiceRecordingActive,
+                    isHoldingVoice: holdPhase && isVoiceHoldActive,
+                  ),
+                ],
               ),
             ],
           ),
-          if (holdPhase && isVoiceHoldActive)
-            Padding(
-              padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
-              child: Text(
-                'اسحب للأعلى للقفل ثم التعديل قبل الإرسال',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -8107,17 +8270,20 @@ class _MessageComposerState extends State<_MessageComposer> {
     required void Function(LongPressMoveUpdateDetails) onVoiceLongPressMove,
     required Future<void> Function() onVoiceLongPressEnd,
     required bool isVoiceRecordingActive,
+    bool isHoldingVoice = false,
   }) {
+    const whatsappGreen = Color(0xFF00A884);
+
     if (showVoiceActionButtons) {
       return Container(
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: colorScheme.primary,
+          color: whatsappGreen,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: colorScheme.primary.withValues(alpha: 0.35),
+              color: whatsappGreen.withValues(alpha: 0.38),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -8215,24 +8381,26 @@ class _MessageComposerState extends State<_MessageComposer> {
                       onLongPressMoveUpdate: onVoiceLongPressMove,
                       onLongPressEnd: (_) =>
                           unawaited(onVoiceLongPressEnd()),
-                      child: Container(
-                        width: 48,
-                        height: 48,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: isHoldingVoice ? 54 : 48,
+                        height: isHoldingVoice ? 54 : 48,
                         decoration: BoxDecoration(
-                          color: colorScheme.primary,
+                          color: isHoldingVoice ? whatsappGreen : colorScheme.primary,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: colorScheme.primary.withValues(alpha: 0.35),
-                              blurRadius: 8,
+                              color: (isHoldingVoice ? whatsappGreen : colorScheme.primary)
+                                  .withValues(alpha: isHoldingVoice ? 0.45 : 0.32),
+                              blurRadius: isHoldingVoice ? 12 : 8,
                               offset: const Offset(0, 2),
                             ),
                           ],
                         ),
-                        child: const Center(
+                        child: Center(
                           child: Icon(
                             Icons.mic_rounded,
-                            size: 23,
+                            size: isHoldingVoice ? 26 : 23,
                             color: Colors.white,
                           ),
                         ),
@@ -8246,50 +8414,115 @@ class _MessageComposerState extends State<_MessageComposer> {
   }
 }
 
-class _VoiceRecordingLockedBar extends StatelessWidget {
+class _VoiceRecordingLockedBar extends StatefulWidget {
   const _VoiceRecordingLockedBar({
     required this.colorScheme,
     required this.durationLabel,
     required this.isLocked,
+    this.isPaused = false,
+    required this.isDark,
   });
 
   final ColorScheme colorScheme;
   final String durationLabel;
   final bool isLocked;
+  final bool isPaused;
+  final bool isDark;
+
+  @override
+  State<_VoiceRecordingLockedBar> createState() => _VoiceRecordingLockedBarState();
+}
+
+class _VoiceRecordingLockedBarState extends State<_VoiceRecordingLockedBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    if (!widget.isPaused) {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _VoiceRecordingLockedBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isPaused && _pulseController.isAnimating) {
+      _pulseController.stop();
+    } else if (!widget.isPaused && !_pulseController.isAnimating) {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final fg = colorScheme.onSurfaceVariant;
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            isLocked ? Icons.lock_rounded : Icons.mic_rounded,
-            size: 18,
-            color: fg,
+    return Row(
+      children: [
+        // Pulsing red dot (or static gray dot when paused)
+        if (!widget.isPaused)
+          AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, _) {
+              final opacity = 0.35 + (_pulseController.value * 0.65);
+              return Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: opacity),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withValues(alpha: opacity * 0.6),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              );
+            },
+          )
+        else
+          Container(
+            width: 10,
+            height: 10,
+            decoration: const BoxDecoration(
+              color: Color(0xFF94A3B8),
+              shape: BoxShape.circle,
+            ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            durationLabel,
-            style: TextStyle(fontWeight: FontWeight.w800, color: fg),
+        const SizedBox(width: 8),
+        Text(
+          widget.durationLabel,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+            color: widget.isDark ? Colors.white : const Color(0xFF0F172A),
           ),
-          const SizedBox(width: 10),
-          const Expanded(child: _RecordingWaveform()),
-        ],
-      ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _RecordingWaveform(isPaused: widget.isPaused),
+        ),
+      ],
     );
   }
 }
 
 class _RecordingWaveform extends StatefulWidget {
-  const _RecordingWaveform();
+  const _RecordingWaveform({this.isPaused = false});
+
+  final bool isPaused;
 
   @override
   State<_RecordingWaveform> createState() => _RecordingWaveformState();
@@ -8297,10 +8530,29 @@ class _RecordingWaveform extends StatefulWidget {
 
 class _RecordingWaveformState extends State<_RecordingWaveform>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (!widget.isPaused) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecordingWaveform oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isPaused && _controller.isAnimating) {
+      _controller.stop();
+    } else if (!widget.isPaused && !_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
 
   @override
   void dispose() {
@@ -8310,7 +8562,8 @@ class _RecordingWaveformState extends State<_RecordingWaveform>
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    const waveColor = Color(0xFF00A884);
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -8319,17 +8572,19 @@ class _RecordingWaveformState extends State<_RecordingWaveform>
           alignment: Alignment.centerLeft,
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: List.generate(10, (i) {
-              final phase = (t * 6.28318) + (i * 0.6);
-              final v = (0.5 + 0.5 * (math.sin(phase))).clamp(0.0, 1.0);
-              final h = 6 + (v * 14);
+            children: List.generate(14, (i) {
+              final phase = (t * 6.28318) + (i * 0.55);
+              final v = widget.isPaused
+                  ? 0.3
+                  : (0.35 + 0.65 * (math.sin(phase))).clamp(0.15, 1.0);
+              final h = 5 + (v * 18);
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 1.5),
                 child: Container(
-                  width: 3,
+                  width: 2.8,
                   height: h,
                   decoration: BoxDecoration(
-                    color: cs.primary.withValues(alpha: 0.65),
+                    color: waveColor.withValues(alpha: widget.isPaused ? 0.35 : 0.8),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),

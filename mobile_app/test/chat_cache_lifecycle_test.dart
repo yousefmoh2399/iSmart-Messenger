@@ -7,12 +7,13 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// ignore: depend_on_referenced_packages
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+// ignore: depend_on_referenced_packages
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'package:mobile_app/features/chat/data/chat_local_cache.dart';
 import 'package:mobile_app/features/chat/models/chat_models.dart';
-import 'package:mobile_app/features/chat/presentation/chat_overview_controller.dart';
 import 'package:mobile_app/features/chat/data/chat_repository.dart';
 import 'package:mobile_app/features/chat/data/chat_socket_service.dart';
 import 'package:mobile_app/shared/providers/providers.dart';
