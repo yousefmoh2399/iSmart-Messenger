@@ -2,6 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  compress: false, // Ensures binary installer downloads (.exe / .apk) are not compressed or corrupted by gzip
   experimental: {},
   async rewrites() {
     return [

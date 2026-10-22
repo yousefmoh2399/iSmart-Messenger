@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
+import path from 'path';
 import {
   getConfig,
   getClientIp,
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
   const session = registerDownloadSession(
     clientIp,
     fileKey,
-    fileConf.fileName,
+    path.basename(absoluteFilePath) || fileConf.fileName,
     totalFileSize,
     config
   );
@@ -75,14 +76,14 @@ export async function GET(request: NextRequest) {
   const rangeHeader = request.headers.get('range');
   let isPartial = false;
 
-  if (rangeHeader) {
+  if (rangeHeader && rangeHeader.startsWith('bytes=')) {
     const parts = rangeHeader.replace(/bytes=/, '').split('-');
     const partialStart = parseInt(parts[0], 10);
     const partialEnd = parts[1] ? parseInt(parts[1], 10) : end;
-    if (!isNaN(partialStart)) {
+    if (!isNaN(partialStart) && partialStart >= 0 && partialStart < totalFileSize) {
       start = partialStart;
     }
-    if (!isNaN(partialEnd)) {
+    if (!isNaN(partialEnd) && partialEnd >= start && partialEnd < totalFileSize) {
       end = partialEnd;
     }
     isPartial = true;
@@ -102,82 +103,128 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  // 5. Create Web ReadableStream with live kill & pause checks
+  // 5. Create Web ReadableStream using pull() with native backpressure
+  // Each chunk allocates its own buffer to prevent buffer aliasing / stream corruption.
+  let fileHandle: fs.promises.FileHandle | null = null;
+  let currentPos = start;
+
   const stream = new ReadableStream({
-    async start(controller) {
-      let fileHandle: fs.promises.FileHandle | null = null;
-      try {
-        fileHandle = await fs.promises.open(absoluteFilePath, 'r');
-        const buffer = Buffer.alloc(chunkSize);
-        let currentPos = start;
+    async start() {
+      fileHandle = await fs.promises.open(absoluteFilePath, 'r');
+    },
 
-        while (currentPos <= end) {
-          // Check if session was killed or downloads were disabled by admin
-          const liveConfig = getConfig();
-          if (!liveConfig.globalDownloadsEnabled) {
-            cleanup('aborted');
-            controller.error(new Error('Emergency Stop: تم إيقاف التحميل من قبل الإدارة المركزية'));
-            break;
-          }
-
-          const liveFileConf = fileKey === 'windows' ? liveConfig.windows : liveConfig.mobile;
-          if (!liveFileConf.enabled) {
-            cleanup('aborted');
-            controller.error(new Error('تم إيقاف هذا التحميل من قبل الإدارة'));
-            break;
-          }
-
-          if (isSessionAborted(session.id)) {
-            cleanup('aborted');
-            controller.error(new Error('تم إنهاء جلسة التحميل وفك قفل الفرع من قبل الإدارة'));
-            break;
-          }
-
-          const toRead = Math.min(chunkSize, end - currentPos + 1);
-          const { bytesRead } = await fileHandle.read(buffer, 0, toRead, currentPos);
-          if (bytesRead === 0) {
-            break;
-          }
-
-          currentPos += bytesRead;
-          updateSessionProgress(session.id, bytesRead);
-
-          // Enqueue chunk as Uint8Array
-          const chunkData = new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
-          controller.enqueue(chunkData);
-
-          // Bandwidth Throttling delay to protect VPN connection
-          if (delayMsPerChunk > 0 && currentPos <= end) {
-            await new Promise((res) => setTimeout(res, delayMsPerChunk));
-          }
-        }
-
+    async pull(controller) {
+      if (currentPos > end) {
         cleanup('completed');
         try {
           controller.close();
         } catch {}
+        if (fileHandle) {
+          await fileHandle.close().catch(() => {});
+          fileHandle = null;
+        }
+        return;
+      }
+
+      // Check if session was killed or downloads were disabled by admin
+      const liveConfig = getConfig();
+      if (!liveConfig.globalDownloadsEnabled) {
+        cleanup('aborted');
+        controller.error(new Error('Emergency Stop: تم إيقاف التحميل من قبل الإدارة المركزية'));
+        if (fileHandle) {
+          await fileHandle.close().catch(() => {});
+          fileHandle = null;
+        }
+        return;
+      }
+
+      const liveFileConf = fileKey === 'windows' ? liveConfig.windows : liveConfig.mobile;
+      if (!liveFileConf.enabled) {
+        cleanup('aborted');
+        controller.error(new Error('تم إيقاف هذا التحميل من قبل الإدارة'));
+        if (fileHandle) {
+          await fileHandle.close().catch(() => {});
+          fileHandle = null;
+        }
+        return;
+      }
+
+      if (isSessionAborted(session.id)) {
+        cleanup('aborted');
+        controller.error(new Error('تم إنهاء جلسة التحميل وفك قفل الفرع من قبل الإدارة'));
+        if (fileHandle) {
+          await fileHandle.close().catch(() => {});
+          fileHandle = null;
+        }
+        return;
+      }
+
+      try {
+        if (!fileHandle) {
+          fileHandle = await fs.promises.open(absoluteFilePath, 'r');
+        }
+
+        const toRead = Math.min(chunkSize, end - currentPos + 1);
+        // Allocate a dedicated buffer for this chunk so it cannot be overwritten before sending
+        const buffer = Buffer.alloc(toRead);
+        const { bytesRead } = await fileHandle.read(buffer, 0, toRead, currentPos);
+
+        if (bytesRead === 0) {
+          cleanup('completed');
+          try {
+            controller.close();
+          } catch {}
+          if (fileHandle) {
+            await fileHandle.close().catch(() => {});
+            fileHandle = null;
+          }
+          return;
+        }
+
+        currentPos += bytesRead;
+        updateSessionProgress(session.id, bytesRead);
+
+        // Enqueue independent chunk (clean Uint8Array pointing only to this dedicated buffer)
+        controller.enqueue(new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead));
+
+        // Bandwidth Throttling delay to protect VPN connection
+        if (delayMsPerChunk > 0 && currentPos <= end) {
+          await new Promise((res) => setTimeout(res, delayMsPerChunk));
+        }
       } catch (err) {
         cleanup('aborted');
         try {
           controller.error(err);
         } catch {}
-      } finally {
         if (fileHandle) {
           await fileHandle.close().catch(() => {});
+          fileHandle = null;
         }
       }
     },
-    cancel() {
+
+    async cancel() {
       cleanup('aborted');
+      if (fileHandle) {
+        await fileHandle.close().catch(() => {});
+        fileHandle = null;
+      }
     },
   });
 
+  const fileNameToServe = path.basename(absoluteFilePath) || fileConf.fileName;
+  const safeAsciiName = fileNameToServe.replace(/[^\w.-]/g, '_');
+  const encodedName = encodeURIComponent(fileNameToServe);
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
-    'Content-Disposition': `attachment; filename="${encodeURIComponent(fileConf.fileName)}"`,
+    'Content-Disposition': `attachment; filename="${safeAsciiName}"; filename*=UTF-8''${encodedName}`,
     'Content-Length': contentLength.toString(),
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Content-Encoding': 'identity',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     'X-Content-Type-Options': 'nosniff',
   };
 
