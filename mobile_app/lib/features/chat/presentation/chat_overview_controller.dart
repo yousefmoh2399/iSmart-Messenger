@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
@@ -31,11 +32,20 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
+  bool _isUnauthorized(Object error) {
+    if (error is ApiException && error.isUnauthorized) return true;
+    if (error is DioException) {
+      if (error.response?.statusCode == 401) return true;
+      if (error.error is ApiException && (error.error as ApiException).isUnauthorized) return true;
+    }
+    return false;
+  }
+
   Future<T> _guardAuth<T>(Future<T> Function() action) async {
     try {
       return await action();
     } catch (error, stackTrace) {
-      if (error is ApiException && error.isUnauthorized) {
+      if (_isUnauthorized(error)) {
         Future<void>.microtask(
           () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
@@ -44,10 +54,36 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
   }
 
+  Future<bool> _waitForAuthenticatedSession() async {
+    ref.watch(authCredentialsRevisionProvider);
+    final authUser = ref.watch(currentUserProvider);
+    if (authUser == null) {
+      return false;
+    }
+    final token = await ref.watch(authTokenProvider.future);
+    if (token == null || token.trim().isEmpty) {
+      return false;
+    }
+    return true;
+  }
+
   @override
   Future<ChatOverviewData> build() async {
     ref.watch(serverRecoveryRevisionProvider);
-    await ref.watch(chatSocketConnectionProvider.future);
+    final hasSession = await _waitForAuthenticatedSession();
+    if (!hasSession) {
+      return const ChatOverviewData(
+        conversations: [],
+        manageableConversations: [],
+        users: [],
+        departments: [],
+        branches: [],
+        roles: [],
+      );
+    }
+    try {
+      await ref.watch(chatSocketConnectionProvider.future);
+    } catch (_) {}
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatSocketService = ref.read(chatSocketServiceProvider);
     _currentUserId = ref.read(authControllerProvider).valueOrNull?.id ?? '';
@@ -57,7 +93,30 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       _disposed = true;
       _eventsSubscription?.cancel();
     });
-    return _loadOverview();
+    try {
+      return await _loadOverview();
+    } catch (_) {
+      try {
+        final cached = await _repository().fetchConversations();
+        return ChatOverviewData(
+          conversations: cached,
+          manageableConversations: const [],
+          users: const [],
+          departments: const [],
+          branches: const [],
+          roles: const [],
+        );
+      } catch (_) {
+        return const ChatOverviewData(
+          conversations: [],
+          manageableConversations: [],
+          users: [],
+          departments: [],
+          branches: [],
+          roles: [],
+        );
+      }
+    }
   }
 
   Future<ChatOverviewData> _loadOverview() async {
@@ -1116,11 +1175,20 @@ class ConversationMessagesController
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
+  bool _isUnauthorized(Object error) {
+    if (error is ApiException && error.isUnauthorized) return true;
+    if (error is DioException) {
+      if (error.response?.statusCode == 401) return true;
+      if (error.error is ApiException && (error.error as ApiException).isUnauthorized) return true;
+    }
+    return false;
+  }
+
   Future<T> _guardAuth<T>(Future<T> Function() action) async {
     try {
       return await action();
     } catch (error, stackTrace) {
-      if (error is ApiException && error.isUnauthorized) {
+      if (_isUnauthorized(error)) {
         Future<void>.microtask(
           () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
@@ -1132,6 +1200,15 @@ class ConversationMessagesController
   @override
   Future<ConversationMessagesState> build(String arg) async {
     ref.watch(serverRecoveryRevisionProvider);
+    final authUser = ref.watch(currentUserProvider);
+    if (authUser == null) {
+      return const ConversationMessagesState(
+        messages: [],
+        nextCursor: null,
+        hasMore: false,
+        isLoadingMore: false,
+      );
+    }
     unawaited(ref.read(chatSocketConnectionProvider.future));
     _socketService = ref.read(chatSocketServiceProvider);
     _chatRepository = ref.read(chatRepositoryProvider);

@@ -32,10 +32,7 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
     }
     final token = await ref.watch(authTokenProvider.future);
     if (token == null || token.trim().isEmpty) {
-      throw const ApiException(
-        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-        statusCode: 401,
-      );
+      return false;
     }
     return true;
   }

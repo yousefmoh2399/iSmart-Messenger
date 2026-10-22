@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/document_folder_service.dart';
+import '../../chat/providers/chat_folders_provider.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../data/session_store.dart';
 
@@ -181,6 +183,20 @@ class AuthController extends Notifier<AuthState> {
       try {
         await ref.read(chatLocalCacheProvider).clearAll();
       } catch (_) {}
+
+      // Invalidate all dependent providers for a clean slate
+      ref.invalidate(chatOverviewControllerProvider);
+      ref.invalidate(chatRealtimeControllerProvider);
+      ref.invalidate(usersControllerProvider);
+      ref.invalidate(documentsControllerProvider);
+      ref.invalidate(adminDocumentsControllerProvider);
+      ref.invalidate(announcementsControllerProvider);
+      ref.invalidate(adminAnnouncementsControllerProvider);
+      ref.invalidate(ticketsControllerProvider);
+      ref.invalidate(printerControllerProvider);
+      ref.invalidate(documentFoldersProvider);
+      ref.invalidate(chatFoldersProvider);
+
       state = const AuthState(status: AuthStatus.unauthenticated);
     } finally {
       _isLoggingOut = false;

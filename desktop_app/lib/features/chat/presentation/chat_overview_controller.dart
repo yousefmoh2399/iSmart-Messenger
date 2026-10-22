@@ -50,10 +50,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     if (token == null ||
         token.trim().isEmpty ||
         token.trim().toLowerCase() == 'null') {
-      throw const ApiException(
-        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-        statusCode: 401,
-      );
+      return false;
     }
     return true;
   }
@@ -1190,10 +1187,7 @@ class ConversationMessagesController
     if (token == null ||
         token.trim().isEmpty ||
         token.trim().toLowerCase() == 'null') {
-      throw const ApiException(
-        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-        statusCode: 401,
-      );
+      return false;
     }
     return true;
   }
@@ -1311,12 +1305,10 @@ class ConversationMessagesController
           return;
         }
 
-        var matchedAny = false;
         final updatedMessages = current.messages.map((message) {
           if (!messageIds.contains(message.id)) {
             return message;
           }
-          matchedAny = true;
           final alreadySeen = message.seenBy.any(
             (entry) => entry.userId == userId,
           );
@@ -1332,15 +1324,6 @@ class ConversationMessagesController
         }).toList();
 
         _setStateAndCache(current.copyWith(messages: updatedMessages));
-
-        if (!matchedAny) {
-          Future<void>.microtask(() async {
-            if (_disposed) {
-              return;
-            }
-            await refresh();
-          });
-        }
         return;
       }
 
