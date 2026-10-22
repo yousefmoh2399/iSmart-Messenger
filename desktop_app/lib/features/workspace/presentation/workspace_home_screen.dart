@@ -62,6 +62,40 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
     _openEditor(newDoc);
   }
 
+  void _confirmDelete(WorkspaceDoc doc) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('حذف المستند'),
+        content: Text('هل أنت متأكد من حذف "${doc.title}"؟ لا يمكن التراجع عن هذا الإجراء.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(workspaceDocsProvider.notifier).deleteDoc(doc.id);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('تم حذف "${doc.title}"'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<WorkspaceDoc> _filterDocs(List<WorkspaceDoc> docs) {
     var result = docs;
     final query = _searchController.text.trim().toLowerCase();
@@ -354,7 +388,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                             onTogglePin: () => ref.read(workspaceDocsProvider.notifier).togglePin(doc.id),
                             onToggleFavorite: () => ref.read(workspaceDocsProvider.notifier).toggleFavorite(doc.id),
                             onDuplicate: () => ref.read(workspaceDocsProvider.notifier).duplicateDoc(doc.id),
-                            onDelete: () => ref.read(workspaceDocsProvider.notifier).deleteDoc(doc.id),
+                            onDelete: () => _confirmDelete(doc),
                           );
                         },
                         childCount: filtered.length,
@@ -376,7 +410,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                             onTogglePin: () => ref.read(workspaceDocsProvider.notifier).togglePin(doc.id),
                             onToggleFavorite: () => ref.read(workspaceDocsProvider.notifier).toggleFavorite(doc.id),
                             onDuplicate: () => ref.read(workspaceDocsProvider.notifier).duplicateDoc(doc.id),
-                            onDelete: () => ref.read(workspaceDocsProvider.notifier).deleteDoc(doc.id),
+                            onDelete: () => _confirmDelete(doc),
                           );
                         },
                         childCount: filtered.length,

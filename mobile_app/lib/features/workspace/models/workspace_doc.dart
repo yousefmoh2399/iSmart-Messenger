@@ -6,8 +6,11 @@ enum WorkspaceBlockType {
   text,
   todo,
   bullet,
+  numbered,
   callout,
   quote,
+  code,
+  toggle,
   divider,
 }
 
@@ -18,13 +21,15 @@ class WorkspaceBlock {
     required this.content,
     this.isChecked = false,
     this.calloutIcon = '💡',
+    this.isExpanded = true,
   }) : id = id ?? const Uuid().v4();
 
   final String id;
-  final WorkspaceBlockType type;
+  WorkspaceBlockType type;
   String content;
   bool isChecked;
   String calloutIcon;
+  bool isExpanded;
 
   WorkspaceBlock copyWith({
     String? id,
@@ -32,6 +37,7 @@ class WorkspaceBlock {
     String? content,
     bool? isChecked,
     String? calloutIcon,
+    bool? isExpanded,
   }) {
     return WorkspaceBlock(
       id: id ?? this.id,
@@ -39,6 +45,7 @@ class WorkspaceBlock {
       content: content ?? this.content,
       isChecked: isChecked ?? this.isChecked,
       calloutIcon: calloutIcon ?? this.calloutIcon,
+      isExpanded: isExpanded ?? this.isExpanded,
     );
   }
 
@@ -49,6 +56,7 @@ class WorkspaceBlock {
       'content': content,
       'isChecked': isChecked,
       'calloutIcon': calloutIcon,
+      'isExpanded': isExpanded,
     };
   }
 
@@ -62,6 +70,7 @@ class WorkspaceBlock {
       content: json['content'] as String? ?? '',
       isChecked: json['isChecked'] as bool? ?? false,
       calloutIcon: json['calloutIcon'] as String? ?? '💡',
+      isExpanded: json['isExpanded'] as bool? ?? true,
     );
   }
 }
@@ -103,6 +112,25 @@ class WorkspaceDoc {
       .where((b) => b.type == WorkspaceBlockType.todo && b.isChecked)
       .length;
 
+  int get wordCount {
+    int count = 0;
+    for (final b in blocks) {
+      final trimmed = b.content.trim();
+      if (trimmed.isNotEmpty) {
+        count += trimmed.split(RegExp(r'\s+')).length;
+      }
+    }
+    return count;
+  }
+
+  int get characterCount {
+    int count = 0;
+    for (final b in blocks) {
+      count += b.content.length;
+    }
+    return count;
+  }
+
   String get previewText {
     for (final b in blocks) {
       if (b.content.trim().isNotEmpty && b.type != WorkspaceBlockType.divider) {
@@ -110,6 +138,61 @@ class WorkspaceDoc {
       }
     }
     return 'مستند فارغ...';
+  }
+
+  String toMarkdown() {
+    final buffer = StringBuffer();
+    buffer.writeln('# $icon $title\n');
+    int numIndex = 1;
+    for (final b in blocks) {
+      switch (b.type) {
+        case WorkspaceBlockType.heading1:
+          buffer.writeln('\n# ${b.content}\n');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.heading2:
+          buffer.writeln('\n## ${b.content}\n');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.todo:
+          buffer.writeln('${b.isChecked ? '[x]' : '[ ]'} ${b.content}');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.bullet:
+          buffer.writeln('• ${b.content}');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.numbered:
+          buffer.writeln('$numIndex. ${b.content}');
+          numIndex++;
+          break;
+        case WorkspaceBlockType.callout:
+          buffer.writeln('> ${b.calloutIcon} ${b.content}');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.quote:
+          buffer.writeln('> ${b.content}');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.code:
+          buffer.writeln('```\n${b.content}\n```');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.toggle:
+          buffer.writeln('▶ ${b.content}');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.divider:
+          buffer.writeln('\n---\n');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.text:
+          buffer.writeln('${b.content}\n');
+          numIndex = 1;
+          break;
+      }
+    }
+    return buffer.toString().trim();
   }
 
   WorkspaceDoc copyWith({
