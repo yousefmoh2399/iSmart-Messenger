@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
@@ -257,6 +258,527 @@ class _ChatAdminManagementScreenState
   }
 }
 
+// ─── Apple Minimalist Admin Dialog Components ─────────────────────────────────
+
+class _AppleAdminDialog extends StatelessWidget {
+  const _AppleAdminDialog({
+    required this.badgeIcon,
+    required this.badgeColor,
+    required this.title,
+    this.subtitle,
+    required this.content,
+    required this.actions,
+  });
+
+  final IconData badgeIcon;
+  final Color badgeColor;
+  final String title;
+  final String? subtitle;
+  final Widget content;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+    return Dialog(
+      backgroundColor: bg,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+          width: 0.8,
+        ),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 16, 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: badgeColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Icon(badgeIcon, color: badgeColor, size: 24),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: isDark
+                                ? const Color(0xFFF8FAFC)
+                                : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            subtitle!,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: isDark
+                                  ? Colors.white60
+                                  : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 20,
+                      color: isDark ? Colors.white54 : const Color(0xFF94A3B8),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    visualDensity: VisualDensity.compact,
+                    splashRadius: 18,
+                  ),
+                ],
+              ),
+            ),
+            Divider(
+              height: 1,
+              thickness: 0.7,
+              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+            ),
+            // Body Content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                child: content,
+              ),
+            ),
+            // Actions
+            Divider(
+              height: 1,
+              thickness: 0.7,
+              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: actions,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleDangerDialog extends StatelessWidget {
+  const _AppleDangerDialog({
+    required this.title,
+    required this.subtitle,
+    required this.message,
+    this.confirmLabel = 'تأكيد الحذف',
+    required this.onConfirm,
+  });
+
+  final String title;
+  final String subtitle;
+  final String message;
+  final String confirmLabel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+    return Dialog(
+      backgroundColor: bg,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+          width: 0.8,
+        ),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFEF4444),
+                    size: 28,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: isDark
+                      ? const Color(0xFFF8FAFC)
+                      : const Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2C2C2E)
+                      : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.45,
+                    color: isDark ? Colors.white70 : const Color(0xFF475569),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        side: BorderSide(
+                          color: isDark
+                              ? Colors.white24
+                              : const Color(0xFFCBD5E1),
+                        ),
+                      ),
+                      child: Text(
+                        'إلغاء',
+                        style: TextStyle(
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF475569),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onConfirm,
+                      icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                      label: Text(
+                        confirmLabel,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFDC2626),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleTextField extends StatelessWidget {
+  const _AppleTextField({
+    required this.controller,
+    required this.label,
+    this.hint,
+    this.prefixIcon,
+    this.suffix,
+    this.enabled = true,
+    this.obscureText = false,
+    this.maxLines = 1,
+    this.minLines,
+    this.autofocus = false,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String? hint;
+  final IconData? prefixIcon;
+  final Widget? suffix;
+  final bool enabled;
+  final bool obscureText;
+  final int? maxLines;
+  final int? minLines;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fill = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF8FAFC);
+    final border = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          enabled: enabled,
+          obscureText: obscureText,
+          maxLines: maxLines,
+          minLines: minLines,
+                    autofocus: autofocus,
+          style: TextStyle(
+            fontSize: 14,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(
+              fontSize: 13,
+              color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
+            ),
+            filled: true,
+            fillColor: enabled
+                ? fill
+                : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
+            prefixIcon: prefixIcon != null
+                ? Icon(
+                    prefixIcon,
+                    size: 19,
+                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  )
+                : null,
+            suffixIcon: suffix,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: Color(0xFF0284C7),
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AppleDropdown<T> extends StatelessWidget {
+  const _AppleDropdown({
+    required this.value,
+    required this.label,
+    required this.items,
+    required this.onChanged,
+    this.prefixIcon,
+    this.enabled = true,
+  });
+
+  final T value;
+  final String label;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final IconData? prefixIcon;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fill = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF8FAFC);
+    final border = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+          ),
+        ),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<T>(
+          value: value,
+          items: items,
+          onChanged: enabled ? onChanged : null,
+          style: TextStyle(
+            fontSize: 14,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          icon: Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: isDark ? Colors.white54 : const Color(0xFF64748B),
+          ),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: enabled
+                ? fill
+                : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
+            prefixIcon: prefixIcon != null
+                ? Icon(
+                    prefixIcon,
+                    size: 19,
+                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: Color(0xFF0284C7),
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AppleErrorBanner extends StatelessWidget {
+  const _AppleErrorBanner({required this.error});
+  final String error;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEF4444).withValues(alpha: isDark ? 0.2 : 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFEF4444),
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              error,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: isDark
+                    ? const Color(0xFFFCA5A5)
+                    : const Color(0xFFB91C1C),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AdminDocumentsTab extends ConsumerStatefulWidget {
   const _AdminDocumentsTab({required this.documentsState});
 
@@ -305,21 +827,40 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
     final controller = TextEditingController(text: document.fileName);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('إعادة تسمية الملف'),
-        content: TextField(
+      builder: (context) => _AppleAdminDialog(
+        badgeIcon: Icons.edit_note_rounded,
+        badgeColor: const Color(0xFF0284C7),
+        title: 'إعادة تسمية الملف',
+        subtitle: 'تعديل اسم الملف المعروض في المستندات الإدارية',
+        content: _AppleTextField(
           controller: controller,
-          decoration: const InputDecoration(labelText: 'اسم الملف'),
+          label: 'اسم الملف الجديد',
+          hint: 'اكتب اسم الملف...',
+          prefixIcon: Icons.description_outlined,
           autofocus: true,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
             child: const Text('إلغاء'),
           ),
-          FilledButton(
+          const SizedBox(width: 8),
+          FilledButton.icon(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('حفظ'),
+            icon: const Icon(Icons.check_rounded, size: 18),
+            label: const Text('حفظ التعديل'),
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            ),
           ),
         ],
       ),
@@ -348,19 +889,12 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
     final shouldDelete =
         await showDialog<bool>(
           context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('حذف الملف'),
-            content: Text('هل تريد حذف "${document.fileName}" نهائيًا؟'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('إلغاء'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('حذف'),
-              ),
-            ],
+          builder: (context) => _AppleDangerDialog(
+            title: 'حذف الملف نهائياً',
+            subtitle: 'تأكيد إزالة المستند من الخادم',
+            message:
+                'هل أنت متأكد من رغبتك في حذف "${document.fileName}"؟ لن يتمكن الموظفون من تنزيله بعد الحذف.',
+            onConfirm: () => Navigator.pop(context, true),
           ),
         ) ??
         false;
@@ -590,84 +1124,143 @@ class _UsersTab extends ConsumerWidget {
     final userRepository = ref.read(userManagementRepositoryProvider);
     final passwordController = TextEditingController(text: '123456');
     var isSaving = false;
+    var obscure = false;
     String? errorText;
 
     await showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(
-            'إعادة تعيين كلمة المرور لـ ${user.fullName.isEmpty ? user.username : user.fullName}',
-          ),
-          content: SizedBox(
-            width: 420,
-            child: Column(
+        builder: (context, setLocalState) {
+          final displayName =
+              user.fullName.isEmpty ? user.username : user.fullName;
+          return _AppleAdminDialog(
+            badgeIcon: Icons.key_rounded,
+            badgeColor: const Color(0xFFF59E0B),
+            title: 'إعادة تعيين كلمة المرور',
+            subtitle: 'تغيير رمز المرور لحساب: $displayName',
+            content: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
+                _AppleTextField(
                   controller: passwordController,
                   enabled: !isSaving,
-                  decoration: const InputDecoration(
-                    labelText: 'كلمة المرور الجديدة',
+                  obscureText: obscure,
+                  label: 'كلمة المرور الجديدة',
+                  hint: 'أدخل 6 أحرف أو أرقام على الأقل',
+                  prefixIcon: Icons.lock_outline_rounded,
+                  suffix: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'توليد كلمة مرور عشوائية',
+                        icon: const Icon(Icons.shuffle_rounded, size: 20),
+                        onPressed: isSaving
+                            ? null
+                            : () {
+                                final rnd = 100000 + math.Random().nextInt(900000);
+                                setLocalState(() {
+                                  passwordController.text = '$rnd';
+                                });
+                              },
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          obscure
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 20,
+                        ),
+                        onPressed: () => setLocalState(() => obscure = !obscure),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'سيتم إلزام المستخدم باستخدام كلمة المرور هذه لتسجيل الدخول القادم.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white54
+                        : const Color(0xFF64748B),
                   ),
                 ),
                 if (errorText != null) ...[
                   const SizedBox(height: 12),
-                  Text(
-                    errorText!,
-                    style: const TextStyle(color: Color(0xFFB91C1C)),
-                  ),
+                  _AppleErrorBanner(error: errorText!),
                 ],
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(context),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton.icon(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      final password = passwordController.text.trim();
-                      if (password.length < 6) {
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                child: const Text('إلغاء'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final password = passwordController.text.trim();
+                        if (password.length < 6) {
+                          setLocalState(() {
+                            errorText =
+                                'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
+                          });
+                          return;
+                        }
                         setLocalState(() {
-                          errorText =
-                              'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
+                          isSaving = true;
+                          errorText = null;
                         });
-                        return;
-                      }
-                      setLocalState(() {
-                        isSaving = true;
-                        errorText = null;
-                      });
-                      try {
-                        await userRepository.resetPassword(
-                          userId: user.id,
-                          password: password,
-                        );
-                        if (!context.mounted) return;
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('تمت إعادة تعيين كلمة المرور بنجاح'),
-                          ),
-                        );
-                      } catch (error) {
-                        setLocalState(() {
-                          isSaving = false;
-                          errorText = error.toString();
-                        });
-                      }
-                    },
-              icon: const Icon(Icons.lock_reset_outlined),
-              label: isSaving
-                  ? const Text('جار الحفظ...')
-                  : const Text('إعادة التعيين'),
-            ),
-          ],
-        ),
+                        try {
+                          await userRepository.resetPassword(
+                            userId: user.id,
+                            password: password,
+                          );
+                          if (!context.mounted) return;
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('تمت إعادة تعيين كلمة المرور بنجاح'),
+                            ),
+                          );
+                        } catch (error) {
+                          setLocalState(() {
+                            isSaving = false;
+                            errorText = error.toString();
+                          });
+                        }
+                      },
+                icon: isSaving ? null : const Icon(Icons.check_rounded, size: 18),
+                label: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : const Text('تعيين كلمة المرور'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF59E0B),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -677,27 +1270,15 @@ class _UsersTab extends ConsumerWidget {
     WidgetRef ref,
     ManagedUser user,
   ) async {
+    final displayName = user.fullName.isEmpty ? user.username : user.fullName;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('حذف المستخدم'),
-        content: Text(
-          'هل تريد حذف المستخدم "${user.fullName.isEmpty ? user.username : user.fullName}" نهائياً؟ هذا الإجراء سيؤدي إلى حذف المحادثات والتذاكر المرتبطة به.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFB91C1C),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('حذف'),
-          ),
-        ],
+      builder: (context) => _AppleDangerDialog(
+        title: 'حذف حساب المستخدم',
+        subtitle: 'إزالة المستخدم $displayName من النظام',
+        message:
+            'هل أنت متأكد من حذف الحساب نهائياً؟ سيتم إلغاء وصوله وإزالة المحادثات المرتبطة به.',
+        onConfirm: () => Navigator.pop(context, true),
       ),
     );
 
@@ -723,23 +1304,16 @@ class _UsersTab extends ConsumerWidget {
     WidgetRef ref,
     ManagedUser user,
   ) async {
+    final displayName = user.fullName.isEmpty ? user.username : user.fullName;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('إنهاء جميع الجلسات'),
-        content: Text(
-          'هل تريد تسجيل الخروج القسري لـ "${user.fullName.isEmpty ? user.username : user.fullName}" من جميع الأجهزة والمنصات؟',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('تأكيد تسجيل الخروج'),
-          ),
-        ],
+      builder: (context) => _AppleDangerDialog(
+        title: 'إنهاء جميع الجلسات',
+        subtitle: 'تسجيل خروج إجباري لـ $displayName',
+        confirmLabel: 'تسجيل الخروج',
+        message:
+            'سيتم قطع الاتصال الفوري وإبطال جميع جلسات الدخول للمستخدم عبر كافة الأجهزة والهواتف والكمبيوتر.',
+        onConfirm: () => Navigator.pop(context, true),
       ),
     );
 
@@ -780,118 +1354,134 @@ class _UsersTab extends ConsumerWidget {
     String? departmentId = user?.departmentId;
     String? branchId = user?.branchId;
     var isSaving = false;
+    var obscurePassword = true;
     String? errorText;
 
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(user == null ? 'إضافة مستخدم' : 'تعديل مستخدم'),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: usernameController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(
-                      labelText: 'اسم المستخدم',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: fullNameController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(
-                      labelText: 'الاسم الكامل',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: role,
-                    decoration: const InputDecoration(labelText: 'الدور'),
-                    items: const [
-                      DropdownMenuItem(value: 'user', child: Text('user')),
-                      DropdownMenuItem(
-                        value: 'manager',
-                        child: Text('manager'),
-                      ),
-                      DropdownMenuItem(value: 'admin', child: Text('admin')),
-                    ],
-                    onChanged: isSaving
-                        ? null
-                        : (value) => role = value ?? role,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String?>(
-                    initialValue: departmentId,
-                    decoration: const InputDecoration(labelText: 'القسم'),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('بدون قسم'),
-                      ),
-                      ...departments.map(
-                        (department) => DropdownMenuItem<String?>(
-                          value: department.id,
-                          child: Text(department.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: isSaving
-                        ? null
-                        : (value) => departmentId = value,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String?>(
-                    initialValue: branchId,
-                    decoration: const InputDecoration(labelText: 'الفرع'),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('بدون فرع'),
-                      ),
-                      ...branches.map(
-                        (branch) => DropdownMenuItem<String?>(
-                          value: branch.id,
-                          child: Text(branch.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: isSaving ? null : (value) => branchId = value,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: passwordController,
-                    enabled: !isSaving,
-                    decoration: InputDecoration(
-                      labelText: user == null
-                          ? 'كلمة المرور'
-                          : 'كلمة مرور جديدة أو إعادة تعيينها',
-                      helperText: user == null
-                          ? 'اتركها فارغة لاستخدام 123456 أو اكتب 6 أحرف على الأقل'
-                          : 'اتركها فارغة لو لن تغيّر كلمة المرور',
-                    ),
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      errorText!,
-                      style: const TextStyle(color: Color(0xFFB91C1C)),
-                    ),
-                  ],
-                ],
+        builder: (context, setLocalState) => _AppleAdminDialog(
+          badgeIcon: user == null ? Icons.person_add_rounded : Icons.manage_accounts_rounded,
+          badgeColor: const Color(0xFF0284C7),
+          title: user == null ? 'إضافة مستخدم جديد' : 'تعديل بيانات المستخدم',
+          subtitle: user == null
+              ? 'إنشاء حساب موظف جديد وتعيين الصلاحيات والقسم'
+              : 'تحديث بيانات الحساب أو كلمة المرور أو القسم',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _AppleTextField(
+                controller: usernameController,
+                enabled: !isSaving,
+                label: 'اسم المستخدم (Username)',
+                hint: 'مثال: ahmed_ali',
+                prefixIcon: Icons.alternate_email_rounded,
               ),
-            ),
+              const SizedBox(height: 12),
+              _AppleTextField(
+                controller: fullNameController,
+                enabled: !isSaving,
+                label: 'الاسم الكامل الثلاثي أو الثنائي',
+                hint: 'مثال: أحمد علي حسن',
+                prefixIcon: Icons.badge_outlined,
+              ),
+              const SizedBox(height: 12),
+              _AppleDropdown<String>(
+                value: role,
+                label: 'صلاحيات الدور (Role)',
+                prefixIcon: Icons.shield_outlined,
+                enabled: !isSaving,
+                items: const [
+                  DropdownMenuItem(value: 'user', child: Text('مستخدم عادي (User)')),
+                  DropdownMenuItem(value: 'manager', child: Text('مدير قسم (Manager)')),
+                  DropdownMenuItem(value: 'admin', child: Text('مسؤول نظام (Admin)')),
+                ],
+                onChanged: (val) => setLocalState(() => role = val ?? role),
+              ),
+              const SizedBox(height: 12),
+              _AppleDropdown<String?>(
+                value: departmentId,
+                label: 'القسم التابع له',
+                prefixIcon: Icons.business_outlined,
+                enabled: !isSaving,
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('بدون قسم'),
+                  ),
+                  ...departments.map(
+                    (dept) => DropdownMenuItem<String?>(
+                      value: dept.id,
+                      child: Text(dept.name),
+                    ),
+                  ),
+                ],
+                onChanged: (val) => setLocalState(() => departmentId = val),
+              ),
+              const SizedBox(height: 12),
+              _AppleDropdown<String?>(
+                value: branchId,
+                label: 'الفرع التابع له',
+                prefixIcon: Icons.storefront_outlined,
+                enabled: !isSaving,
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('بدون فرع'),
+                  ),
+                  ...branches.map(
+                    (br) => DropdownMenuItem<String?>(
+                      value: br.id,
+                      child: Text(br.name),
+                    ),
+                  ),
+                ],
+                onChanged: (val) => setLocalState(() => branchId = val),
+              ),
+              const SizedBox(height: 12),
+              _AppleTextField(
+                controller: passwordController,
+                enabled: !isSaving,
+                obscureText: obscurePassword,
+                label: user == null
+                    ? 'كلمة المرور'
+                    : 'كلمة مرور جديدة (اختياري)',
+                hint: user == null
+                    ? 'اتركها فارغة لاستخدام 123456 أو أدخل 6 أحرف'
+                    : 'اتركها فارغة للإبقاء على كلمة المرور الحالية',
+                prefixIcon: Icons.lock_outline_rounded,
+                suffix: IconButton(
+                  icon: Icon(
+                    obscurePassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    size: 20,
+                  ),
+                  onPressed: () =>
+                      setLocalState(() => obscurePassword = !obscurePassword),
+                ),
+              ),
+              if (errorText != null) ...[
+                const SizedBox(height: 14),
+                _AppleErrorBanner(error: errorText!),
+              ],
+            ],
           ),
           actions: [
             TextButton(
               onPressed: isSaving ? null : () => Navigator.pop(context),
+              style: TextButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
               child: const Text('إلغاء'),
             ),
-            FilledButton(
+            const SizedBox(width: 8),
+            FilledButton.icon(
               onPressed: isSaving
                   ? null
                   : () async {
@@ -952,13 +1542,21 @@ class _UsersTab extends ConsumerWidget {
                         });
                       }
                     },
-              child: isSaving
+              icon: isSaving ? null : const Icon(Icons.check_rounded, size: 18),
+              label: isSaving
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: ButtonLoadingIndicator(),
                     )
-                  : const Text('حفظ'),
+                  : Text(user == null ? 'إنشاء الحساب' : 'حفظ التعديلات'),
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              ),
             ),
           ],
         ),
@@ -1331,134 +1929,192 @@ class _AnnouncementsTab extends ConsumerWidget {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(announcement == null ? 'إضافة إعلان' : 'تعديل إعلان'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: titleController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'العنوان'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: messageController,
-                    enabled: !isSaving,
-                    minLines: 3,
-                    maxLines: 5,
-                    decoration: const InputDecoration(labelText: 'نص الإعلان'),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: tone,
-                    decoration: const InputDecoration(labelText: 'النوع'),
-                    items: const [
-                      DropdownMenuItem(value: 'info', child: Text('معلومة')),
-                      DropdownMenuItem(value: 'success', child: Text('نجاح')),
-                      DropdownMenuItem(value: 'warning', child: Text('تنبيه')),
-                      DropdownMenuItem(value: 'critical', child: Text('عاجل')),
-                    ],
-                    onChanged: isSaving
-                        ? null
-                        : (value) => tone = value ?? tone,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    value: isPinned,
-                    onChanged: isSaving
-                        ? null
-                        : (value) => setLocalState(() => isPinned = value),
-                    title: const Text('تثبيت في البداية'),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  SwitchListTile(
-                    value: isActive,
-                    onChanged: isSaving
-                        ? null
-                        : (value) => setLocalState(() => isActive = value),
-                    title: const Text('نشط'),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      errorText!,
-                      style: const TextStyle(color: Color(0xFFB91C1C)),
-                    ),
+        builder: (context, setLocalState) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          return _AppleAdminDialog(
+            badgeIcon: Icons.campaign_rounded,
+            badgeColor: const Color(0xFFEA580C),
+            title: announcement == null ? 'إضافة إعلان جديد' : 'تعديل الإعلان',
+            subtitle: announcement == null
+                ? 'نشر إشعار إداري لجميع مستخدمي المنظومة'
+                : 'تحديث تفاصيل وبيانات الإعلان المنشور',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _AppleTextField(
+                  controller: titleController,
+                  enabled: !isSaving,
+                  label: 'عنوان الإعلان',
+                  hint: 'أدخل عنواناً موجزاً وواضحاً...',
+                  prefixIcon: Icons.title_rounded,
+                ),
+                const SizedBox(height: 12),
+                _AppleTextField(
+                  controller: messageController,
+                  enabled: !isSaving,
+                  label: 'نص الإعلان والتفاصيل',
+                  hint: 'اكتب نص الإعلان والتعليمات المطلوب تعميمها...',
+                  prefixIcon: Icons.article_outlined,
+                  minLines: 3,
+                  maxLines: 5,
+                ),
+                const SizedBox(height: 12),
+                _AppleDropdown<String>(
+                  value: tone,
+                  label: 'نوع الإعلان وأهميته',
+                  prefixIcon: Icons.palette_outlined,
+                  enabled: !isSaving,
+                  items: const [
+                    DropdownMenuItem(value: 'info', child: Text('معلومة عامة (أزرق)')),
+                    DropdownMenuItem(value: 'success', child: Text('إشعار نجاح (أخضر)')),
+                    DropdownMenuItem(value: 'warning', child: Text('تنبيه هام (برتقالي)')),
+                    DropdownMenuItem(value: 'critical', child: Text('عاجل وضروري (أحمر)')),
                   ],
+                  onChanged: (val) => setLocalState(() => tone = val ?? tone),
+                ),
+                const SizedBox(height: 14),
+                // Apple-style Card with Switches
+                Container(
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      SwitchListTile(
+                        value: isPinned,
+                        onChanged: isSaving
+                            ? null
+                            : (val) => setLocalState(() => isPinned = val),
+                        title: const Text(
+                          'تثبيت في البداية',
+                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: const Text(
+                          'إبقاء الإعلان مثبتاً في أعلى قائمة إعلانات الموظفين',
+                          style: TextStyle(fontSize: 11.5),
+                        ),
+                        secondary: const Icon(Icons.push_pin_outlined, size: 20),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                      ),
+                      Divider(
+                        height: 1,
+                        thickness: 0.6,
+                        indent: 48,
+                        color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                      ),
+                      SwitchListTile(
+                        value: isActive,
+                        onChanged: isSaving
+                            ? null
+                            : (val) => setLocalState(() => isActive = val),
+                        title: const Text(
+                          'إعلان نشط',
+                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: const Text(
+                          'ظهور الإعلان فوراً للموظفين في الشاشات',
+                          style: TextStyle(fontSize: 11.5),
+                        ),
+                        secondary: const Icon(Icons.visibility_outlined, size: 20),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                      ),
+                    ],
+                  ),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 14),
+                  _AppleErrorBanner(error: errorText!),
                 ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                child: const Text('إلغاء'),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(context),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      final title = titleController.text.trim();
-                      final message = messageController.text.trim();
-                      if (title.length < 2) {
-                        setLocalState(() {
-                          errorText = 'العنوان يجب أن يكون حرفين على الأقل.';
-                        });
-                        return;
-                      }
-                      if (message.length < 4) {
-                        setLocalState(() {
-                          errorText = 'نص الإعلان قصير جدًا.';
-                        });
-                        return;
-                      }
-                      setLocalState(() {
-                        isSaving = true;
-                        errorText = null;
-                      });
-                      try {
-                        if (announcement == null) {
-                          await announcementRepository.createAnnouncement(
-                            title: title,
-                            message: message,
-                            tone: tone,
-                            isPinned: isPinned,
-                            isActive: isActive,
-                          );
-                        } else {
-                          await announcementRepository.updateAnnouncement(
-                            announcementId: announcement.id,
-                            title: title,
-                            message: message,
-                            tone: tone,
-                            isPinned: isPinned,
-                            isActive: isActive,
-                          );
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final title = titleController.text.trim();
+                        final message = messageController.text.trim();
+                        if (title.length < 2) {
+                          setLocalState(() {
+                            errorText = 'العنوان يجب أن يكون حرفين على الأقل.';
+                          });
+                          return;
                         }
-                        if (!context.mounted) return;
-                        Navigator.pop(context, true);
-                      } catch (error) {
+                        if (message.length < 4) {
+                          setLocalState(() {
+                            errorText = 'نص الإعلان قصير جدًا.';
+                          });
+                          return;
+                        }
                         setLocalState(() {
-                          isSaving = false;
-                          errorText = error.toString();
+                          isSaving = true;
+                          errorText = null;
                         });
-                      }
-                    },
-              child: isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: ButtonLoadingIndicator(),
-                    )
-                  : const Text('حفظ'),
-            ),
-          ],
-        ),
+                        try {
+                          if (announcement == null) {
+                            await announcementRepository.createAnnouncement(
+                              title: title,
+                              message: message,
+                              tone: tone,
+                              isPinned: isPinned,
+                              isActive: isActive,
+                            );
+                          } else {
+                            await announcementRepository.updateAnnouncement(
+                              announcementId: announcement.id,
+                              title: title,
+                              message: message,
+                              tone: tone,
+                              isPinned: isPinned,
+                              isActive: isActive,
+                            );
+                          }
+                          if (!context.mounted) return;
+                          Navigator.pop(context, true);
+                        } catch (error) {
+                          setLocalState(() {
+                            isSaving = false;
+                            errorText = error.toString();
+                          });
+                        }
+                      },
+                icon: isSaving ? null : const Icon(Icons.campaign_rounded, size: 18),
+                label: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : Text(announcement == null ? 'نشر الإعلان' : 'حفظ التعديلات'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFEA580C),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -1680,6 +2336,17 @@ class _AnnouncementsTab extends ConsumerWidget {
                                     ),
                                     color: Colors.red,
                                     onPressed: () async {
+                                      final confirmed = await showDialog<bool>(
+                                        context: context,
+                                        builder: (ctx) => _AppleDangerDialog(
+                                          title: 'حذف الإعلان',
+                                          subtitle: 'تأكيد إزالة الإعلان من النظام',
+                                          message:
+                                              'هل أنت متأكد من حذف إعلان "${announcement.title}" نهائياً؟',
+                                          onConfirm: () => Navigator.pop(ctx, true),
+                                        ),
+                                      );
+                                      if (confirmed != true || !context.mounted) return;
                                       await ref
                                           .read(announcementRepositoryProvider)
                                           .deleteAnnouncement(announcement.id);
@@ -1741,137 +2408,244 @@ class _DepartmentsTab extends ConsumerWidget {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(department == null ? 'إضافة قسم' : 'تعديل قسم'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'اسم القسم'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: codeController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'الكود'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: descriptionController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'الوصف'),
-                  ),
-                  const SizedBox(height: 14),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'المديرون',
-                      style: Theme.of(context).textTheme.titleMedium,
+        builder: (context, setLocalState) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final candidates = users
+              .where(
+                (entry) =>
+                    entry.role == 'manager' || entry.role == 'admin',
+              )
+              .toList();
+
+          return _AppleAdminDialog(
+            badgeIcon: Icons.corporate_fare_rounded,
+            badgeColor: const Color(0xFF4F46E5),
+            title: department == null ? 'إضافة قسم جديد' : 'تعديل بيانات القسم',
+            subtitle: department == null
+                ? 'إنشاء قسم جديد في الهيكل الإداري وتحديد المديرين'
+                : 'تحديث اسم القسم أو كوده أو المديرين المسؤولين',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _AppleTextField(
+                  controller: nameController,
+                  enabled: !isSaving,
+                  label: 'اسم القسم',
+                  hint: 'مثال: المبيعات، الحسابات، الدعم الفني',
+                  prefixIcon: Icons.business_center_rounded,
+                ),
+                const SizedBox(height: 12),
+                _AppleTextField(
+                  controller: codeController,
+                  enabled: !isSaving,
+                  label: 'كود القسم',
+                  hint: 'مثال: SAL, ACC, TECH',
+                  prefixIcon: Icons.tag_rounded,
+                ),
+                const SizedBox(height: 12),
+                _AppleTextField(
+                  controller: descriptionController,
+                  enabled: !isSaving,
+                  label: 'الوصف أو الملاحظات (اختياري)',
+                  hint: 'وصف مهام واختصاصات القسم',
+                  prefixIcon: Icons.notes_rounded,
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.supervisor_account_rounded,
+                      size: 18,
+                      color: Color(0xFF4F46E5),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...users
-                      .where(
-                        (entry) =>
-                            entry.role == 'manager' || entry.role == 'admin',
-                      )
-                      .map(
-                        (entry) => CheckboxListTile(
-                          value: selectedManagers.contains(entry.id),
-                          title: Text(entry.displayName),
-                          subtitle: Text(entry.username),
-                          onChanged: isSaving
-                              ? null
-                              : (value) {
-                                  setLocalState(() {
-                                    if (value == true) {
-                                      selectedManagers.add(entry.id);
-                                    } else {
-                                      selectedManagers.remove(entry.id);
-                                    }
-                                  });
-                                },
-                        ),
-                      ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(width: 8),
                     Text(
-                      errorText!,
-                      style: const TextStyle(color: Color(0xFFB91C1C)),
+                      'المديرون المسؤولون عن القسم',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? const Color(0xFFF1F5F9)
+                            : const Color(0xFF1E293B),
+                      ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF2C2C2E)
+                        : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: candidates.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Center(
+                            child: Text(
+                              'لا يوجد مستخدمون برتبة مدير أو أدمن بعد',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                              ),
+                            ),
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: candidates.length,
+                          separatorBuilder: (ctx, idx) => Divider(
+                            height: 1,
+                            thickness: 0.6,
+                            indent: 52,
+                            color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                          ),
+                          itemBuilder: (ctx, idx) {
+                            final entry = candidates[idx];
+                            final isSelected = selectedManagers.contains(entry.id);
+                            return CheckboxListTile(
+                              value: isSelected,
+                              dense: true,
+                              contentPadding:
+                                  const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                              secondary: CircleAvatar(
+                                radius: 16,
+                                backgroundColor: const Color(0xFF4F46E5)
+                                    .withValues(alpha: isSelected ? 0.2 : 0.1),
+                                child: Text(
+                                  entry.displayName.isNotEmpty
+                                      ? entry.displayName.substring(0, 1).toUpperCase()
+                                      : 'U',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF4F46E5),
+                                  ),
+                                ),
+                              ),
+                              title: Text(
+                                entry.displayName,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '@${entry.username} (${entry.role})',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onChanged: isSaving
+                                  ? null
+                                  : (value) {
+                                      setLocalState(() {
+                                        if (value == true) {
+                                          selectedManagers.add(entry.id);
+                                        } else {
+                                          selectedManagers.remove(entry.id);
+                                        }
+                                      });
+                                    },
+                            );
+                          },
+                        ),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 14),
+                  _AppleErrorBanner(error: errorText!),
                 ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                child: const Text('إلغاء'),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(context),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      final name = nameController.text.trim();
-                      final code = codeController.text.trim();
-                      if (name.isEmpty) {
-                        setLocalState(() {
-                          errorText = 'اسم القسم مطلوب.';
-                        });
-                        return;
-                      }
-                      if (code.isEmpty) {
-                        setLocalState(() {
-                          errorText = 'كود القسم مطلوب.';
-                        });
-                        return;
-                      }
-                      setLocalState(() {
-                        isSaving = true;
-                        errorText = null;
-                      });
-                      try {
-                        if (department == null) {
-                          await overviewController.createDepartment(
-                            name: name,
-                            code: code,
-                            description: descriptionController.text.trim(),
-                          );
-                        } else {
-                          await overviewController.updateDepartment(
-                            departmentId: department.id,
-                            name: name,
-                            code: code,
-                            description: descriptionController.text.trim(),
-                            managers: selectedManagers.toList(),
-                          );
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final name = nameController.text.trim();
+                        final code = codeController.text.trim();
+                        if (name.isEmpty) {
+                          setLocalState(() {
+                            errorText = 'اسم القسم مطلوب.';
+                          });
+                          return;
                         }
-                        if (context.mounted) {
-                          Navigator.pop(context, true);
+                        if (code.isEmpty) {
+                          setLocalState(() {
+                            errorText = 'كود القسم مطلوب.';
+                          });
+                          return;
                         }
-                      } catch (error) {
                         setLocalState(() {
-                          isSaving = false;
-                          errorText = error.toString();
+                          isSaving = true;
+                          errorText = null;
                         });
-                      }
-                    },
-              child: isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: ButtonLoadingIndicator(),
-                    )
-                  : const Text('حفظ'),
-            ),
-          ],
-        ),
+                        try {
+                          if (department == null) {
+                            await overviewController.createDepartment(
+                              name: name,
+                              code: code,
+                              description: descriptionController.text.trim(),
+                            );
+                          } else {
+                            await overviewController.updateDepartment(
+                              departmentId: department.id,
+                              name: name,
+                              code: code,
+                              description: descriptionController.text.trim(),
+                              managers: selectedManagers.toList(),
+                            );
+                          }
+                          if (context.mounted) {
+                            Navigator.pop(context, true);
+                          }
+                        } catch (error) {
+                          setLocalState(() {
+                            isSaving = false;
+                            errorText = error.toString();
+                          });
+                        }
+                      },
+                icon: isSaving ? null : const Icon(Icons.check_rounded, size: 18),
+                label: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : Text(department == null ? 'إنشاء القسم' : 'حفظ التعديلات'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF4F46E5),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -1996,6 +2770,17 @@ class _DepartmentsTab extends ConsumerWidget {
                                 department: department,
                               );
                             } else if (action == 'delete') {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => _AppleDangerDialog(
+                                  title: 'حذف القسم',
+                                  subtitle: 'تأكيد إزالة القسم من الهيكل الإداري',
+                                  message:
+                                      'هل أنت متأكد من حذف قسم "${department.name}" (${department.code})؟ لن يتم حذف الموظفين لكنهم سيصبحون بدون قسم.',
+                                  onConfirm: () => Navigator.pop(ctx, true),
+                                ),
+                              );
+                              if (confirmed != true || !context.mounted) return;
                               try {
                                 await ref
                                     .read(
@@ -2004,7 +2789,9 @@ class _DepartmentsTab extends ConsumerWidget {
                                     .deleteDepartment(department.id);
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('تم حذف القسم')),
+                                  const SnackBar(
+                                    content: Text('تم حذف القسم بنجاح'),
+                                  ),
                                 );
                               } catch (error) {
                                 if (!context.mounted) return;
@@ -2081,48 +2868,61 @@ class _BranchesTab extends ConsumerWidget {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(branch == null ? 'إضافة فرع' : 'تعديل فرع'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'اسم الفرع'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: codeController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'كود الفرع'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: descriptionController,
-                    enabled: !isSaving,
-                    decoration: const InputDecoration(labelText: 'الوصف'),
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      errorText!,
-                      style: const TextStyle(color: Color(0xFFB91C1C)),
-                    ),
-                  ],
-                ],
+        builder: (context, setLocalState) => _AppleAdminDialog(
+          badgeIcon: Icons.storefront_rounded,
+          badgeColor: const Color(0xFF9333EA),
+          title: branch == null ? 'إضافة فرع جديد' : 'تعديل بيانات الفرع',
+          subtitle: branch == null
+              ? 'تسجيل موقع أو فرع عمل جديد في النظام'
+              : 'تعديل بيانات الفرع والكود والرمز الخاص به',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _AppleTextField(
+                controller: nameController,
+                enabled: !isSaving,
+                label: 'اسم الفرع',
+                hint: 'مثال: فرع القاهرة، فرع الإسكندرية',
+                prefixIcon: Icons.place_rounded,
               ),
-            ),
+              const SizedBox(height: 12),
+              _AppleTextField(
+                controller: codeController,
+                enabled: !isSaving,
+                label: 'كود الفرع',
+                hint: 'مثال: CAI-01, ALX-02',
+                prefixIcon: Icons.pin_drop_rounded,
+              ),
+              const SizedBox(height: 12),
+              _AppleTextField(
+                controller: descriptionController,
+                enabled: !isSaving,
+                label: 'العنوان أو الوصف (اختياري)',
+                hint: 'تفاصيل العنوان ورقم الاتصال بالفرع',
+                prefixIcon: Icons.notes_rounded,
+                maxLines: 2,
+              ),
+              if (errorText != null) ...[
+                const SizedBox(height: 14),
+                _AppleErrorBanner(error: errorText!),
+              ],
+            ],
           ),
           actions: [
             TextButton(
               onPressed: isSaving ? null : () => Navigator.pop(context),
+              style: TextButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
               child: const Text('إلغاء'),
             ),
-            FilledButton(
+            const SizedBox(width: 8),
+            FilledButton.icon(
               onPressed: isSaving
                   ? null
                   : () async {
@@ -2165,13 +2965,23 @@ class _BranchesTab extends ConsumerWidget {
                         });
                       }
                     },
-              child: isSaving
+              icon: isSaving ? null : const Icon(Icons.check_rounded, size: 18),
+              label: isSaving
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: ButtonLoadingIndicator(),
                     )
-                  : const Text('حفظ'),
+                  : Text(branch == null ? 'إنشاء الفرع' : 'حفظ التعديلات'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF9333EA),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              ),
             ),
           ],
         ),
@@ -2293,6 +3103,17 @@ class _BranchesTab extends ConsumerWidget {
                             if (action == 'edit') {
                               _showBranchDialog(context, ref, branch: branch);
                             } else if (action == 'delete') {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => _AppleDangerDialog(
+                                  title: 'حذف الفرع',
+                                  subtitle: 'تأكيد إزالة الفرع من النظام',
+                                  message:
+                                      'هل أنت متأكد من حذف فرع "${branch.name}" (${branch.code})؟ لن يتم حذف الأجهزة أو الموظفين التابعين له.',
+                                  onConfirm: () => Navigator.pop(ctx, true),
+                                ),
+                              );
+                              if (confirmed != true || !context.mounted) return;
                               try {
                                 await ref
                                     .read(
@@ -2301,7 +3122,9 @@ class _BranchesTab extends ConsumerWidget {
                                     .deleteBranch(branch.id);
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('تم حذف الفرع')),
+                                  const SnackBar(
+                                    content: Text('تم حذف الفرع بنجاح'),
+                                  ),
                                 );
                               } catch (error) {
                                 if (!context.mounted) return;
