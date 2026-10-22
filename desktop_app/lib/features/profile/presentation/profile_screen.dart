@@ -924,16 +924,17 @@ class _InsetGroup extends StatelessWidget {
             ),
           ),
         ),
-        Container(
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        Material(
+          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
+            side: BorderSide(
               color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
               width: 0.8,
             ),
           ),
-          clipBehavior: Clip.antiAlias,
           child: Column(children: children),
         ),
       ],
