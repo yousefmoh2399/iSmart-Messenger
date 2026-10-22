@@ -79,6 +79,17 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
     final unreadCount = chatState.valueOrNull?.totalUnread ?? 0;
     final agent = ref.watch(desktopUpdateAgentProvider);
 
+    final ticketsState = ref.watch(ticketsControllerProvider);
+    final ticketsOverview = ticketsState.valueOrNull;
+    final pendingTicketsCount = ticketsOverview != null
+        ? ticketsOverview.tickets.where((ticket) {
+            final isNotClosed = ticket.status != 'closed' && ticket.status != 'resolved';
+            final isOpen = ticket.status == 'open';
+            final hasNoReply = ticket.lastPublicMessage.trim().isEmpty;
+            return isOpen || (isNotClosed && hasNoReply && ticket.assignedTo == null);
+          }).length
+        : 0;
+
     return ValueListenableBuilder<bool>(
       valueListenable: agent.hasPreparedUpdateNotifier,
       builder: (context, hasPrepared, _) {
@@ -190,6 +201,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
         selected: activeSection == DesktopWorkspaceSection.tickets,
         isDark: isDark,
         accentColor: accentColor,
+        badgeCount: pendingTicketsCount,
         onPressed: onOpenTickets,
       ),
       if (onOpenSnipeit != null)

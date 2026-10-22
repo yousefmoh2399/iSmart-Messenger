@@ -78,179 +78,392 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
 
     if (!mounted) return;
 
+    final themeColor = switch (_activeTab) {
+      TicketTab.tickets => const Color(0xFF2563EB),
+      TicketTab.complaints => const Color(0xFFEA580C),
+      TicketTab.suggestions => const Color(0xFF7C3AED),
+    };
+
+    final typeIcon = switch (_activeTab) {
+      TicketTab.tickets => Icons.support_agent_rounded,
+      TicketTab.complaints => Icons.report_problem_rounded,
+      TicketTab.suggestions => Icons.lightbulb_rounded,
+    };
+
+    final titleLabel = switch (_activeTab) {
+      TicketTab.tickets => 'إنشاء تذكرة جديدة',
+      TicketTab.complaints => 'تقديم شكوى جديدة',
+      TicketTab.suggestions => 'تقديم مقترح جديد',
+    };
+
+    final subtitleLabel = switch (_activeTab) {
+      TicketTab.tickets => 'تواصل مع فريق الدعم الفني لحل مشكلة تقنية',
+      TicketTab.complaints => 'أرسل شكواك إلى القسم المعني لمتابعتها وحلها',
+      TicketTab.suggestions => 'شاركنا أفكارك ومقترحاتك لتطوير بيئة العمل',
+    };
+
     await showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final dialogWidth = _dialogWidth(context, 440);
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final dialogWidth = _dialogWidth(context, 480);
           final dialogHeight = _dialogMaxHeight(context);
 
-          final titleLabel = switch (_activeTab) {
-            TicketTab.tickets => 'إنشاء تذكرة جديدة',
-            TicketTab.complaints => 'تقديم شكوى جديدة',
-            TicketTab.suggestions => 'تقديم مقترح جديد',
-          };
+          final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+          final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+          final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
 
-          return AlertDialog(
-            title: Text(titleLabel),
-            content: ConstrainedBox(
+          return Dialog(
+            backgroundColor: surfaceColor,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+              side: BorderSide(color: borderColor, width: 1),
+            ),
+            child: ConstrainedBox(
               constraints: BoxConstraints(
                 maxWidth: dialogWidth,
                 maxHeight: dialogHeight,
               ),
               child: SizedBox(
                 width: dialogWidth,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: titleController,
-                        enabled: !isSaving,
-                        decoration: const InputDecoration(labelText: 'العنوان'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: descriptionController,
-                        enabled: !isSaving,
-                        minLines: 4,
-                        maxLines: 8,
-                        decoration: InputDecoration(
-                          labelText: _activeTab == TicketTab.tickets
-                              ? 'وصف المشكلة'
-                              : 'التفاصيل',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        value: selectedDepartmentId,
-                        isExpanded: true,
-                        items: departments.map((dept) {
-                          final id =
-                              dept['id']?.toString() ??
-                              dept['_id']?.toString() ??
-                              '';
-                          final name =
-                              dept['name']?.toString() ?? 'قسم غير معروف';
-                          return DropdownMenuItem(value: id, child: Text(name));
-                        }).toList(),
-                        onChanged: isSaving
-                            ? null
-                            : (value) => setLocalState(
-                                () => selectedDepartmentId = value,
-                              ),
-                        decoration: const InputDecoration(
-                          labelText: 'القسم الموجه إليه',
-                          prefixIcon: Icon(Icons.account_tree_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (_activeTab == TicketTab.tickets)
-                        DropdownButtonFormField<String>(
-                          initialValue: priority,
-                          isExpanded: true,
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'low',
-                              child: Text('منخفضة'),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: themeColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(13),
                             ),
-                            DropdownMenuItem(
-                              value: 'normal',
-                              child: Text('عادية'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'high',
-                              child: Text('عالية'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'critical',
-                              child: Text('حرجة'),
-                            ),
-                          ],
-                          onChanged: isSaving
-                              ? null
-                              : (value) => setLocalState(
-                                  () => priority = value ?? priority,
-                                ),
-                          decoration: const InputDecoration(
-                            labelText: 'الأولوية',
+                            child: Icon(typeIcon, color: themeColor, size: 22),
                           ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  titleLabel,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitleLabel,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 20),
+                            onPressed: isSaving ? null : () => Navigator.pop(context),
+                            style: IconButton.styleFrom(
+                              foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    Divider(height: 1, thickness: 1, color: borderColor),
+
+                    // Form Body
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Title
+                            const Text('عنوان الطلب *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 6),
+                            TextFormField(
+                              controller: titleController,
+                              enabled: !isSaving,
+                              textInputAction: TextInputAction.next,
+                              decoration: InputDecoration(
+                                hintText: 'مثال: عطل في الطابعة أو تأخر في الطلب',
+                                prefixIcon: Icon(Icons.title_rounded, color: themeColor, size: 18),
+                                filled: true,
+                                fillColor: fieldFillColor,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: themeColor, width: 1.5),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                              ),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Department
+                            const Text('القسم الموجه إليه *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 6),
+                            DropdownButtonFormField<String>(
+                              value: selectedDepartmentId,
+                              isExpanded: true,
+                              dropdownColor: surfaceColor,
+                              decoration: InputDecoration(
+                                prefixIcon: Icon(Icons.apartment_rounded, color: themeColor, size: 18),
+                                filled: true,
+                                fillColor: fieldFillColor,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: themeColor, width: 1.5),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                              ),
+                              items: departments.map((dept) {
+                                final id = dept['id']?.toString() ?? dept['_id']?.toString() ?? '';
+                                final name = dept['name']?.toString() ?? 'قسم غير معروف';
+                                return DropdownMenuItem(value: id, child: Text(name, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)));
+                              }).toList(),
+                              onChanged: isSaving
+                                  ? null
+                                  : (value) => setLocalState(() => selectedDepartmentId = value),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Priority chips
+                            const Text('مستوى الأولوية', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                {'key': 'low', 'label': 'منخفضة', 'color': const Color(0xFF0D9488)},
+                                {'key': 'normal', 'label': 'عادية', 'color': const Color(0xFF2563EB)},
+                                {'key': 'high', 'label': 'عالية', 'color': const Color(0xFFEA580C)},
+                                {'key': 'critical', 'label': 'حرجة', 'color': const Color(0xFFDC2626)},
+                              ].map((prio) {
+                                final key = prio['key'] as String;
+                                final label = prio['label'] as String;
+                                final color = prio['color'] as Color;
+                                final isSelected = priority == key;
+
+                                return Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                                    child: InkWell(
+                                      onTap: isSaving ? null : () => setLocalState(() => priority = key),
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: isSelected
+                                              ? color.withValues(alpha: 0.12)
+                                              : (isDark ? const Color(0xFF242428) : const Color(0xFFF1F5F9)),
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(
+                                            color: isSelected ? color : Colors.transparent,
+                                            width: 1.5,
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            label,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                              color: isSelected
+                                                  ? color
+                                                  : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Description
+                            Text(
+                              _activeTab == TicketTab.tickets ? 'وصف المشكلة بالتفصيل *' : 'التفاصيل والوصف *',
+                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 6),
+                            TextFormField(
+                              controller: descriptionController,
+                              enabled: !isSaving,
+                              minLines: 4,
+                              maxLines: 6,
+                              decoration: InputDecoration(
+                                hintText: 'يرجى كتابة التفاصيل بوضوح لتسهيل المعالجة...',
+                                alignLabelWithHint: true,
+                                prefixIcon: Padding(
+                                  padding: const EdgeInsets.only(bottom: 45),
+                                  child: Icon(Icons.description_outlined, color: themeColor, size: 18),
+                                ),
+                                filled: true,
+                                fillColor: fieldFillColor,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide: BorderSide(color: themeColor, width: 1.5),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              ),
+                            ),
+
+                            if (errorText != null) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDC2626).withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        errorText!,
+                                        style: const TextStyle(
+                                          color: Color(0xFFDC2626),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      if (errorText != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          errorText!,
-                          style: const TextStyle(color: Color(0xFFB91C1C)),
-                        ),
-                      ],
-                    ],
-                  ),
+                      ),
+                    ),
+
+                    Divider(height: 1, thickness: 1, color: borderColor),
+
+                    // Actions
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: isSaving ? null : () => Navigator.pop(context),
+                            style: TextButton.styleFrom(
+                              foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                            child: const Text('إلغاء'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    final title = titleController.text.trim();
+                                    final description = descriptionController.text.trim();
+                                    if (title.length < 4 || description.length < 4) {
+                                      setLocalState(() {
+                                        errorText = 'العنوان والوصف مطلوبان (4 أحرف على الأقل).';
+                                      });
+                                      return;
+                                    }
+                                    if (selectedDepartmentId == null) {
+                                      setLocalState(() {
+                                        errorText = 'يجب اختيار القسم الموجه إليه الطلب.';
+                                      });
+                                      return;
+                                    }
+
+                                    setLocalState(() {
+                                      isSaving = true;
+                                      errorText = null;
+                                    });
+                                    try {
+                                      final ticketType = switch (_activeTab) {
+                                        TicketTab.tickets => 'ticket',
+                                        TicketTab.complaints => 'complaint',
+                                        TicketTab.suggestions => 'suggestion',
+                                      };
+
+                                      await ref
+                                          .read(ticketsControllerProvider.notifier)
+                                          .createTicket(
+                                            title: title,
+                                            description: description,
+                                            priority: priority,
+                                            ticketType: ticketType,
+                                            targetDepartmentId: selectedDepartmentId,
+                                          );
+                                      if (!context.mounted) return;
+                                      Navigator.pop(context);
+                                    } catch (error) {
+                                      setLocalState(() {
+                                        isSaving = false;
+                                        errorText = error.toString();
+                                      });
+                                    }
+                                  },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: themeColor,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              elevation: 0,
+                            ),
+                            icon: isSaving
+                                ? const ButtonLoadingIndicator(radius: 8)
+                                : const Icon(Icons.send_rounded, size: 16),
+                            label: Text(
+                              isSaving ? 'جارٍ الإنشاء...' : 'إنشاء الآن',
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: isSaving ? null : () => Navigator.pop(context),
-                child: const Text('إلغاء'),
-              ),
-              FilledButton(
-                onPressed: isSaving
-                    ? null
-                    : () async {
-                        final title = titleController.text.trim();
-                        final description = descriptionController.text.trim();
-                        if (title.length < 4 || description.length < 4) {
-                          setLocalState(() {
-                            errorText =
-                                'العنوان والوصف مطلوبان (4 أحرف على الأقل).';
-                          });
-                          return;
-                        }
-                        if (selectedDepartmentId == null) {
-                          setLocalState(() {
-                            errorText = 'يجب اختيار القسم الموجه إليه الطلب.';
-                          });
-                          return;
-                        }
-
-                        setLocalState(() {
-                          isSaving = true;
-                          errorText = null;
-                        });
-                        try {
-                          final ticketType = switch (_activeTab) {
-                            TicketTab.tickets => 'ticket',
-                            TicketTab.complaints => 'complaint',
-                            TicketTab.suggestions => 'suggestion',
-                          };
-
-                          await ref
-                              .read(ticketsControllerProvider.notifier)
-                              .createTicket(
-                                title: title,
-                                description: description,
-                                priority: priority,
-                                ticketType: ticketType,
-                                targetDepartmentId: selectedDepartmentId,
-                              );
-                          if (!context.mounted) return;
-                          Navigator.pop(context);
-                        } catch (error) {
-                          setLocalState(() {
-                            isSaving = false;
-                            errorText = error.toString();
-                          });
-                        }
-                      },
-                child: isSaving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: ButtonLoadingIndicator(),
-                      )
-                    : const Text('إنشاء'),
-              ),
-            ],
           );
         },
       ),
@@ -268,7 +481,13 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
           .read(ticketsControllerProvider.notifier)
           .fetchSupportUsers();
       final selectedIds = <String>{...data.supportAgentIds};
+      final exportPermissionsByUserId = <String, Set<String>>{
+        for (final user in data.users)
+          user.id: <String>{...user.exportTicketTypes},
+      };
+
       var isSaving = false;
+      var searchText = '';
       String? errorText;
 
       if (!mounted) return;
@@ -276,77 +495,405 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setLocalState) {
-            final dialogWidth = _dialogWidth(context, 520);
-            return AlertDialog(
-              title: const Text('إعداد فريق IT'),
-              content: SizedBox(
-                width: dialogWidth,
-                height: 500,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: data.users.length,
-                        itemBuilder: (context, index) {
-                          final user = data.users[index];
-                          return CheckboxListTile(
-                            value: selectedIds.contains(user.id),
-                            title: Text(user.displayName),
-                            subtitle: Text('${user.username} • ${user.role}'),
-                            onChanged: isSaving
-                                ? null
-                                : (value) {
-                                    setLocalState(() {
-                                      if (value == true) {
-                                        selectedIds.add(user.id);
-                                      } else {
-                                        selectedIds.remove(user.id);
-                                      }
-                                    });
-                                  },
-                          );
-                        },
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final dialogWidth = _dialogWidth(context, 500);
+            final dialogHeight = _dialogMaxHeight(context);
+            final brandColor = const Color(0xFF2563EB);
+
+            final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+            final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+            final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
+
+            final query = searchText.trim().toLowerCase();
+            final filteredUsers = data.users.where((user) {
+              if (query.isEmpty) return true;
+              return user.displayName.toLowerCase().contains(query) ||
+                  user.username.toLowerCase().contains(query);
+            }).toList();
+
+            return Dialog(
+              backgroundColor: surfaceColor,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+                side: BorderSide(color: borderColor, width: 1),
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: dialogWidth,
+                  maxHeight: dialogHeight,
+                ),
+                child: SizedBox(
+                  width: dialogWidth,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Header
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: brandColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                              child: Icon(Icons.admin_panel_settings_rounded, color: brandColor, size: 22),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'إعداد فريق الدعم والصلاحيات',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.2,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'عيّن موظفي الدعم وحدّد صلاحيات التصدير',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 20),
+                              onPressed: isSaving ? null : () => Navigator.pop(context),
+                              style: IconButton.styleFrom(
+                                foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    if (errorText != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        errorText!,
-                        style: const TextStyle(color: Color(0xFFB91C1C)),
+
+                      Divider(height: 1, thickness: 1, color: borderColor),
+
+                      // Search bar & summary
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Column(
+                          children: [
+                            TextField(
+                              decoration: InputDecoration(
+                                hintText: 'بحث في قائمة المستخدمين...',
+                                prefixIcon: Icon(Icons.search_rounded, size: 18, color: brandColor),
+                                filled: true,
+                                fillColor: fieldFillColor,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(color: borderColor),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(color: brandColor, width: 1.5),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              ),
+                              onChanged: (val) => setLocalState(() => searchText = val),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: brandColor.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'تم تحديد ${selectedIds.length} كأعضاء دعم',
+                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: brandColor),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${filteredUsers.length} مستخدم',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      Divider(height: 1, thickness: 1, color: borderColor),
+
+                      // Users list
+                      Expanded(
+                        child: filteredUsers.isEmpty
+                            ? Center(
+                                child: Text(
+                                  data.users.isEmpty ? 'لا يوجد مستخدمون بالنظام.' : 'لا توجد نتائج مطابقة لبحثك.',
+                                  style: TextStyle(
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              )
+                            : Scrollbar(
+                                child: ListView.separated(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  itemCount: filteredUsers.length,
+                                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                  itemBuilder: (context, index) {
+                                    final user = filteredUsers[index];
+                                    final isSelected = selectedIds.contains(user.id);
+                                    final exportTypes = exportPermissionsByUserId[user.id] ?? <String>{};
+
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? brandColor.withValues(alpha: 0.05)
+                                            : (isDark ? const Color(0xFF222226) : const Color(0xFFF8FAFC)),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? brandColor.withValues(alpha: 0.35)
+                                              : borderColor,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          InkWell(
+                                            borderRadius: BorderRadius.circular(14),
+                                            onTap: isSaving
+                                                ? null
+                                                : () {
+                                                    setLocalState(() {
+                                                      if (isSelected) {
+                                                        selectedIds.remove(user.id);
+                                                      } else {
+                                                        selectedIds.add(user.id);
+                                                      }
+                                                    });
+                                                  },
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                              child: Row(
+                                                children: [
+                                                  Container(
+                                                    width: 20,
+                                                    height: 20,
+                                                    decoration: BoxDecoration(
+                                                      color: isSelected ? brandColor : Colors.transparent,
+                                                      borderRadius: BorderRadius.circular(5),
+                                                      border: Border.all(
+                                                        color: isSelected ? brandColor : (isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1)),
+                                                        width: 1.5,
+                                                      ),
+                                                    ),
+                                                    child: isSelected
+                                                        ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                                                        : null,
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  CircleAvatar(
+                                                    radius: 16,
+                                                    backgroundColor: brandColor.withValues(alpha: 0.15),
+                                                    child: Text(
+                                                      user.displayName.isNotEmpty
+                                                          ? user.displayName[0].toUpperCase()
+                                                          : '?',
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: brandColor,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text(
+                                                          user.displayName,
+                                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                                        ),
+                                                        Text(
+                                                          '@${user.username} • ${user.role}',
+                                                          style: TextStyle(
+                                                            fontSize: 11.5,
+                                                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+
+                                          if (isSelected) ...[
+                                            Container(
+                                              padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                                              decoration: BoxDecoration(
+                                                color: brandColor.withValues(alpha: 0.04),
+                                                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(13)),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Text(
+                                                    'تصدير:',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: brandColor,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Wrap(
+                                                    spacing: 4,
+                                                    children: [
+                                                      {'key': 'ticket', 'label': 'تذاكر', 'color': const Color(0xFF2563EB)},
+                                                      {'key': 'complaint', 'label': 'شكاوى', 'color': const Color(0xFFEA580C)},
+                                                      {'key': 'suggestion', 'label': 'مقترحات', 'color': const Color(0xFF7C3AED)},
+                                                    ].map((perm) {
+                                                      final key = perm['key'] as String;
+                                                      final label = perm['label'] as String;
+                                                      final color = perm['color'] as Color;
+                                                      final hasPerm = exportTypes.contains(key);
+
+                                                      return InkWell(
+                                                        onTap: isSaving
+                                                            ? null
+                                                            : () {
+                                                                setLocalState(() {
+                                                                  if (hasPerm) {
+                                                                    exportTypes.remove(key);
+                                                                  } else {
+                                                                    exportTypes.add(key);
+                                                                  }
+                                                                  exportPermissionsByUserId[user.id] = exportTypes;
+                                                                });
+                                                              },
+                                                        borderRadius: BorderRadius.circular(6),
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                          decoration: BoxDecoration(
+                                                            color: hasPerm ? color.withValues(alpha: 0.15) : Colors.transparent,
+                                                            borderRadius: BorderRadius.circular(6),
+                                                            border: Border.all(
+                                                              color: hasPerm ? color : color.withValues(alpha: 0.3),
+                                                            ),
+                                                          ),
+                                                          child: Text(
+                                                            label,
+                                                            style: TextStyle(
+                                                              fontSize: 10.5,
+                                                              fontWeight: hasPerm ? FontWeight.w700 : FontWeight.w500,
+                                                              color: hasPerm ? color : color.withValues(alpha: 0.7),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      );
+                                                    }).toList(),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                      ),
+
+                      if (errorText != null) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                          child: Text(
+                            errorText!,
+                            style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+
+                      Divider(height: 1, thickness: 1, color: borderColor),
+
+                      // Actions
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: isSaving ? null : () => Navigator.pop(context),
+                              style: TextButton.styleFrom(
+                                foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              ),
+                              child: const Text('إلغاء'),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton.icon(
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      setLocalState(() {
+                                        isSaving = true;
+                                        errorText = null;
+                                      });
+                                      try {
+                                        await ref
+                                            .read(ticketsControllerProvider.notifier)
+                                            .updateSupportAgents(
+                                              selectedIds.toList(),
+                                              exportPermissionsByUserId: {
+                                                for (final entry in exportPermissionsByUserId.entries)
+                                                  entry.key: entry.value.toList(),
+                                              },
+                                            );
+                                        if (!context.mounted) return;
+                                        Navigator.pop(context);
+                                      } catch (error) {
+                                        setLocalState(() {
+                                          isSaving = false;
+                                          errorText = error.toString();
+                                        });
+                                      }
+                                    },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: brandColor,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                elevation: 0,
+                              ),
+                              icon: isSaving
+                                  ? const ButtonLoadingIndicator(radius: 8)
+                                  : const Icon(Icons.check_rounded, size: 16),
+                              label: Text(
+                                isSaving ? 'جارٍ الحفظ...' : 'حفظ التغييرات',
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(context),
-                  child: const Text('إلغاء'),
-                ),
-                FilledButton(
-                  onPressed: isSaving
-                      ? null
-                      : () async {
-                          setLocalState(() {
-                            isSaving = true;
-                            errorText = null;
-                          });
-                          try {
-                            await ref
-                                .read(ticketsControllerProvider.notifier)
-                                .updateSupportAgents(selectedIds.toList());
-                            if (!context.mounted) return;
-                            Navigator.pop(context);
-                          } catch (error) {
-                            setLocalState(() {
-                              isSaving = false;
-                              errorText = error.toString();
-                            });
-                          }
-                        },
-                  child: const Text('حفظ'),
-                ),
-              ],
             );
           },
         ),
@@ -358,7 +905,6 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
       ).showSnackBar(SnackBar(content: Text(error.toString())));
     }
   }
-
   String _departmentHandlerTypeForTab() => switch (_activeTab) {
     TicketTab.complaints => 'complaint',
     TicketTab.suggestions => 'suggestion',
@@ -1484,11 +2030,30 @@ class _DepartmentHandlersDialog extends ConsumerStatefulWidget {
   final String handlerType;
 
   bool get isSuggestion => handlerType == 'suggestion';
+  bool get isTicket => handlerType == 'ticket';
 
   String get dialogTitle => switch (handlerType) {
-    'suggestion' => 'مسؤولو المقترحات حسب القسم',
-    'ticket' => 'مسؤولو التذاكر حسب القسم',
-    _ => 'مسؤولو الشكاوى حسب القسم',
+    'suggestion' => 'مسؤولو الرد على المقترحات',
+    'ticket' => 'مسؤولو الرد على تذاكر الدعم',
+    _ => 'مسؤولو الرد على الشكاوى',
+  };
+
+  String get dialogSubtitle => switch (handlerType) {
+    'suggestion' => 'اختر القسم ثم حدّد الموظفين المسؤولين عن استلام والرد على مقترحات هذا القسم.',
+    'ticket' => 'اختر القسم ثم حدّد الموظفين المسؤولين عن استلام والرد على تذاكر هذا القسم.',
+    _ => 'اختر القسم ثم حدّد الموظفين المسؤولين عن استلام والرد على الشكاوى الموجهة لهذا القسم.',
+  };
+
+  Color get typeColor => switch (handlerType) {
+    'suggestion' => const Color(0xFF7C3AED),
+    'ticket' => const Color(0xFF2563EB),
+    _ => const Color(0xFFEA580C),
+  };
+
+  IconData get typeIcon => switch (handlerType) {
+    'suggestion' => Icons.lightbulb_rounded,
+    'ticket' => Icons.support_agent_rounded,
+    _ => Icons.report_problem_rounded,
   };
 
   @override
@@ -1505,11 +2070,13 @@ class _DepartmentHandlersDialogState
   bool _isLoadingDepts = true;
   bool _isLoadingHandlers = false;
   bool _isSaving = false;
+  String _searchText = '';
   String? _errorText;
 
   @override
   void initState() {
     super.initState();
+    _searchText = '';
     _loadInitialData();
   }
 
@@ -1599,22 +2166,30 @@ class _DepartmentHandlersDialogState
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoadingDepts) {
-      return const AlertDialog(
-        content: SizedBox(
-          height: 100,
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
-
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final availableWidth = MediaQuery.sizeOf(context).width - 32;
     final dialogWidth = math.max(280.0, math.min(520.0, availableWidth));
-    final dialogHeight = MediaQuery.sizeOf(context).height * 0.78;
+    final dialogHeight = MediaQuery.sizeOf(context).height * 0.85;
 
-    return AlertDialog(
-      title: Text(widget.dialogTitle),
-      content: ConstrainedBox(
+    final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
+
+    final query = _searchText.trim().toLowerCase();
+    final filteredUsers = _supportUsers.where((user) {
+      if (query.isEmpty) return true;
+      return user.displayName.toLowerCase().contains(query) ||
+          user.username.toLowerCase().contains(query);
+    }).toList();
+
+    return Dialog(
+      backgroundColor: surfaceColor,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: borderColor, width: 1),
+      ),
+      child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: dialogWidth,
           maxHeight: dialogHeight,
@@ -1625,92 +2200,322 @@ class _DepartmentHandlersDialogState
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<String>(
-                value: _selectedDeptId,
-                isExpanded: true,
-                items: _departments.map((dept) {
-                  final id =
-                      dept['id']?.toString() ?? dept['_id']?.toString() ?? '';
-                  final name = dept['name']?.toString() ?? 'قسم غير معروف';
-                  return DropdownMenuItem(value: id, child: Text(name));
-                }).toList(),
-                onChanged: _isSaving
-                    ? null
-                    : (value) {
-                        if (value != null) {
-                          setState(() {
-                            _selectedDeptId = value;
-                          });
-                          _loadHandlers(value);
-                        }
-                      },
-                decoration: const InputDecoration(
-                  labelText: 'اختر القسم لتحديد المسؤولين عنه',
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: widget.typeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: Icon(widget.typeIcon, color: widget.typeColor, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.dialogTitle,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.dialogSubtitle,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: IconButton.styleFrom(
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              if (_isLoadingHandlers)
-                const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: _supportUsers.map((user) {
-                        return CheckboxListTile(
-                          value: _selectedHandlerIds.contains(user.id),
-                          title: Text(user.displayName),
-                          subtitle: Text('${user.username} • ${user.role}'),
-                          onChanged: _isSaving
-                              ? null
-                              : (checked) {
-                                  setState(() {
-                                    if (checked == true) {
-                                      _selectedHandlerIds.add(user.id);
-                                    } else {
-                                      _selectedHandlerIds.remove(user.id);
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Department Selector card
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: fieldFillColor,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.apartment_rounded, size: 16, color: widget.typeColor),
+                              const SizedBox(width: 6),
+                              const Text('القسم المستهدف:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                decoration: BoxDecoration(
+                                  color: widget.typeColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'تعيين ${_selectedHandlerIds.length} مسؤول',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: widget.typeColor),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _selectedDeptId,
+                            isExpanded: true,
+                            dropdownColor: surfaceColor,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: true,
+                              fillColor: surfaceColor,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: widget.typeColor, width: 1.5),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            ),
+                            items: _departments.map((dept) {
+                              final id = dept['id']?.toString() ?? dept['_id']?.toString() ?? '';
+                              final name = dept['name']?.toString() ?? 'قسم غير معروف';
+                              return DropdownMenuItem(value: id, child: Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)));
+                            }).toList(),
+                            onChanged: _isSaving
+                                ? null
+                                : (value) {
+                                    if (value != null) {
+                                      setState(() {
+                                        _selectedDeptId = value;
+                                      });
+                                      _loadHandlers(value);
                                     }
-                                  });
-                                },
-                        );
-                      }).toList(),
+                                  },
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(height: 8),
+                    // Search bar
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'بحث في قائمة الموظفين...',
+                        prefixIcon: Icon(Icons.search_rounded, size: 18, color: widget.typeColor),
+                        filled: true,
+                        fillColor: fieldFillColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: widget.typeColor, width: 1.5),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      onChanged: (val) => setState(() => _searchText = val),
+                    ),
+                  ],
+                ),
+              ),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Handlers list
+              Expanded(
+                child: _isLoadingDepts || _isLoadingHandlers
+                    ? const Center(child: CircularProgressIndicator())
+                    : filteredUsers.isEmpty
+                    ? Center(
+                        child: Text(
+                          _supportUsers.isEmpty ? 'لا يوجد مستخدمون متاحون.' : 'لا توجد نتائج مطابقة لبحثك.',
+                          style: TextStyle(
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            fontSize: 13,
+                          ),
+                        ),
+                      )
+                    : Scrollbar(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          itemCount: filteredUsers.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            final user = filteredUsers[index];
+                            final isAssigned = _selectedHandlerIds.contains(user.id);
+
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: isAssigned
+                                    ? widget.typeColor.withValues(alpha: 0.05)
+                                    : (isDark ? const Color(0xFF222226) : const Color(0xFFF8FAFC)),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isAssigned
+                                      ? widget.typeColor.withValues(alpha: 0.35)
+                                      : borderColor,
+                                ),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: _isSaving
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          if (isAssigned) {
+                                            _selectedHandlerIds.remove(user.id);
+                                          } else {
+                                            _selectedHandlerIds.add(user.id);
+                                          }
+                                        });
+                                      },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 20,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          color: isAssigned ? widget.typeColor : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(5),
+                                          border: Border.all(
+                                            color: isAssigned ? widget.typeColor : (isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1)),
+                                            width: 1.5,
+                                          ),
+                                        ),
+                                        child: isAssigned
+                                            ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                                            : null,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      CircleAvatar(
+                                        radius: 16,
+                                        backgroundColor: widget.typeColor.withValues(alpha: 0.15),
+                                        child: Text(
+                                          user.displayName.isNotEmpty
+                                              ? user.displayName[0].toUpperCase()
+                                              : '?',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: widget.typeColor,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              user.displayName,
+                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                            ),
+                                            Text(
+                                              '@${user.username} • ${user.role}',
+                                              style: TextStyle(
+                                                fontSize: 11.5,
+                                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+
+              if (_errorText != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Text(
+                    _errorText!,
+                    style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.w600),
                   ),
                 ),
-              if (_errorText != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _errorText!,
-                  style: const TextStyle(color: Color(0xFFB91C1C)),
-                ),
               ],
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Actions
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                      child: const Text('إلغاء'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: _isSaving ? null : _saveHandlers,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: widget.typeColor,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      icon: _isSaving
+                          ? const ButtonLoadingIndicator(radius: 8)
+                          : const Icon(Icons.check_rounded, size: 16),
+                      label: Text(
+                        _isSaving ? 'جارٍ الحفظ...' : 'حفظ التعيينات',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
-          child: const Text('إلغاء'),
-        ),
-        FilledButton(
-          onPressed: _isSaving || _selectedDeptId == null
-              ? null
-              : _saveHandlers,
-          child: _isSaving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2,
-                  ),
-                )
-              : const Text('حفظ'),
-        ),
-      ],
     );
   }
 }
