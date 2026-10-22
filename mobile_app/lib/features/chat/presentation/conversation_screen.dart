@@ -7723,29 +7723,60 @@ class _MessageComposer extends StatefulWidget {
 }
 
 class _MessageComposerState extends State<_MessageComposer> {
-  double _sendScale = 1.0;
-
-  void _scaleSendButton(bool scaleDown) {
-    if (!mounted) return;
-    setState(() => _sendScale = scaleDown ? 0.9 : 1.0);
-  }
-
   String _formatDuration(Duration value) {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
   }
 
+  Future<void> _openActionsMenu() async {
+    if (!widget.enabled) return;
+
+    final selected = await showModalBottomSheet<dynamic>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const AttachmentBottomSheet(),
+    );
+
+    if (selected is String) {
+      widget.onSendSpecificFile?.call(selected);
+    }
+
+    if (selected is AttachmentBottomSheetResult) {
+      switch (selected) {
+        case AttachmentBottomSheetResult.image:
+          widget.onPickImage();
+          break;
+        case AttachmentBottomSheetResult.file:
+          widget.onAttach();
+          break;
+        case AttachmentBottomSheetResult.screenshot:
+          widget.onSendScreenshot();
+          break;
+        case AttachmentBottomSheetResult.reaction:
+          widget.onOpenReactionPicker();
+          break;
+        case AttachmentBottomSheetResult.poll:
+          widget.onSendPoll();
+          break;
+        case AttachmentBottomSheetResult.gif:
+          widget.onSendGif();
+          break;
+        case AttachmentBottomSheetResult.checklist:
+          widget.onSendChecklist();
+          break;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = widget.colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final enabled = widget.enabled;
     final isUploading = widget.isUploading;
     final isEditing = widget.isEditing;
-    final onAttach = widget.onAttach;
-    final onPickImage = widget.onPickImage;
-    final onSendScreenshot = widget.onSendScreenshot;
-    final onOpenReactionPicker = widget.onOpenReactionPicker;
     final onSend = widget.onSend;
     final controller = widget.controller;
     final uploadFileName = widget.uploadFileName;
@@ -7773,70 +7804,50 @@ class _MessageComposerState extends State<_MessageComposer> {
     final enterSendsMessage = widget.enterSendsMessage;
     final onChanged = widget.onChanged;
 
-    /// أزرار التحكم تظهر دائمًا أثناء التسجيل أو مع مسودة (لا نعتمد على وضع القفل فقط).
     final showVoiceActionButtons = isVoiceRecordingActive;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
-        decoration: BoxDecoration(
-          color: colorScheme.surface.withValues(alpha: 0.98),
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.35),
-            width: 0.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isUploading)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(6, 2, 6, 10),
-                child: _TelegramComposerUploadStrip(
-                  colorScheme: colorScheme,
-                  fileName: uploadFileName ?? 'مرفق',
-                  progress: uploadProgress,
-                ),
+      padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isUploading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
+              child: _TelegramComposerUploadStrip(
+                colorScheme: colorScheme,
+                fileName: uploadFileName ?? 'مرفق',
+                progress: uploadProgress,
               ),
-            Row(
-              children: [
-                if (!isVoiceRecordingActive) ...[
-                  _ComposerActionsFab(
-                    enabled: enabled && !isUploading,
-                    colorScheme: colorScheme,
-                    onAttach: onAttach,
-                    onPickImage: onPickImage,
-                    onSendSpecificFile: widget.onSendSpecificFile,
-                    onSendScreenshot: onSendScreenshot,
-                    onOpenReactionPicker: onOpenReactionPicker,
-                    onSendPoll: widget.onSendPoll,
-                    onSendChecklist: widget.onSendChecklist,
-                    onSendGif: widget.onSendGif,
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton.filledTonal(
-                    tooltip: 'الكاميرا',
-                    onPressed: enabled && !isUploading
-                        ? widget.onTakePhoto
-                        : null,
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size(42, 42),
-                      padding: EdgeInsets.zero,
-                      backgroundColor: colorScheme.surfaceContainerHighest,
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // WhatsApp style Input Capsule
+              Expanded(
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? colorScheme.surfaceContainerHigh
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: colorScheme.outlineVariant
+                          .withValues(alpha: isDark ? 0.35 : 0.22),
+                      width: 0.5,
                     ),
-                    icon: const Icon(Icons.camera_alt_rounded, size: 20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: isDark ? 0.25 : 0.04,
+                        ),
+                        blurRadius: 6,
+                        offset: const Offset(0, 1.5),
+                      ),
+                    ],
                   ),
-                ],
-                Expanded(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                   child: holdPhase
                       ? _VoiceHoldRecordingBar(
                           colorScheme: colorScheme,
@@ -7845,210 +7856,392 @@ class _MessageComposerState extends State<_MessageComposer> {
                           gestureOffset: voiceGestureOffset,
                         )
                       : lockedOrDraftBar
-                      ? _VoiceRecordingLockedBar(
-                          colorScheme: colorScheme,
-                          durationLabel: _formatDuration(recordingDuration),
-                          isLocked: isVoiceLocked || !isRecordingVoice,
-                        )
-                      : ChatTextFieldPasteMenu(
-                          controller: controller,
-                          enabled: enabled,
-                          child: TextField(
-                            controller: controller,
-                            enabled: enabled,
-                            minLines: 1,
-                            maxLines: 5,
-                            onChanged: onChanged,
-                            textInputAction: enterSendsMessage
-                                ? TextInputAction.send
-                                : TextInputAction.newline,
-                            onSubmitted: enterSendsMessage && enabled
-                                ? (_) => onSend()
-                                : null,
-                            decoration: InputDecoration(
-                              hintText: enabled
-                                  ? (isEditing
-                                        ? 'عدّل الرسالة...'
-                                        : 'اكتب رسالة...')
-                                  : 'الغرفة للقراءة فقط',
-                              border: InputBorder.none,
-                              filled: false,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 10,
-                              ),
-                            ),
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 4),
-                if (showVoiceActionButtons) ...[
-                  if (isRecordingVoice) ...[
-                    IconButton.filledTonal(
-                      onPressed: enabled
-                          ? (isVoicePaused
-                                ? onResumeVoiceNote
-                                : onPauseVoiceNote)
-                          : null,
-                      tooltip: isVoicePaused ? 'استئناف' : 'إيقاف مؤقت',
-                      style: IconButton.styleFrom(
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                      ),
-                      icon: Icon(
-                        isVoicePaused
-                            ? Icons.play_arrow_rounded
-                            : Icons.pause_rounded,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton.filledTonal(
-                      onPressed: enabled ? onStopVoiceNote : null,
-                      tooltip: 'إيقاف وحفظ مسودة',
-                      style: IconButton.styleFrom(
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                      ),
-                      icon: const Icon(Icons.stop_rounded),
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  IconButton.filledTonal(
-                    onPressed: enabled ? onCancelVoiceNote : null,
-                    tooltip: 'إلغاء التسجيل',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFE4E6),
-                    ),
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Color(0xFFB91C1C),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Tooltip(
-                    message: hasVoiceDraft ? 'إرسال' : 'إرسال الملاحظة الصوتية',
-                    child: FilledButton(
-                      onPressed: enabled ? onSendVoiceNote : null,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                        padding: EdgeInsets.zero,
-                        shape: const CircleBorder(),
-                      ),
-                      child: const Icon(Icons.send_rounded, size: 20),
-                    ),
-                  ),
-                ] else
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: controller,
-                    builder: (context, value, _) {
-                      final hasText = value.text.trim().isNotEmpty || isEditing;
-                      return AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        transitionBuilder: (child, animation) =>
-                            ScaleTransition(scale: animation, child: child),
-                        child: hasText
-                            ? Stack(
-                                key: const ValueKey('send_btn'),
-                                alignment: Alignment.center,
-                                children: [
-                                  if (isUploading)
-                                    SizedBox(
-                                      width: 52,
-                                      height: 52,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.6,
-                                        value: uploadProgress <= 0
-                                            ? null
-                                            : uploadProgress,
-                                        color: const Color(0xFF3390EC),
-                                        backgroundColor:
-                                            colorScheme.surfaceContainerHighest,
-                                      ),
-                                    ),
-                                  GestureDetector(
-                                    onTapDown: (_) => _scaleSendButton(true),
-                                    onTapUp: (_) => _scaleSendButton(false),
-                                    onTapCancel: () => _scaleSendButton(false),
-                                    onLongPress:
-                                        enabled && !isUploading && !isEditing
-                                        ? widget.onSendOptions
+                          ? Row(
+                              children: [
+                                IconButton(
+                                  tooltip: 'إلغاء وحذف',
+                                  onPressed: enabled ? onCancelVoiceNote : null,
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                    color: Color(0xFFDC2626),
+                                    size: 22,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _VoiceRecordingLockedBar(
+                                    colorScheme: colorScheme,
+                                    durationLabel:
+                                        _formatDuration(recordingDuration),
+                                    isLocked: isVoiceLocked || !isRecordingVoice,
+                                  ),
+                                ),
+                                if (isRecordingVoice) ...[
+                                  IconButton(
+                                    tooltip: isVoicePaused
+                                        ? 'استئناف'
+                                        : 'إيقاف مؤقت',
+                                    onPressed: enabled
+                                        ? (isVoicePaused
+                                            ? onResumeVoiceNote
+                                            : onPauseVoiceNote)
                                         : null,
-                                    child: AnimatedScale(
-                                      scale: _sendScale,
-                                      duration: const Duration(
-                                        milliseconds: 100,
-                                      ),
-                                      child: FilledButton(
-                                        onPressed: enabled && !isUploading
-                                            ? onSend
-                                            : null,
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(48, 48),
-                                          padding: EdgeInsets.zero,
-                                          shape: const CircleBorder(),
-                                        ),
-                                        child: Icon(
-                                          isEditing
-                                              ? Icons.check_rounded
-                                              : Icons.send_rounded,
-                                          size: 20,
-                                        ),
-                                      ),
+                                    icon: Icon(
+                                      isVoicePaused
+                                          ? Icons.play_arrow_rounded
+                                          : Icons.pause_rounded,
+                                      size: 22,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'إيقاف وحفظ',
+                                    onPressed: enabled ? onStopVoiceNote : null,
+                                    icon: Icon(
+                                      Icons.stop_rounded,
+                                      size: 22,
+                                      color: colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ],
-                              )
-                            : Tooltip(
-                                key: const ValueKey('mic_btn'),
-                                message: 'اضغط مطوّلاً للتسجيل',
-                                child: IgnorePointer(
-                                  ignoring:
-                                      !enabled ||
-                                      isUploading ||
-                                      isVoiceRecordingActive,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onLongPressStart: (_) =>
-                                        unawaited(onVoiceLongPressStart()),
-                                    onLongPressMoveUpdate: onVoiceLongPressMove,
-                                    onLongPressEnd: (_) =>
-                                        unawaited(onVoiceLongPressEnd()),
-                                    child: Container(
-                                      width: 48,
-                                      height: 48,
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color:
-                                            colorScheme.surfaceContainerHighest,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        Icons.mic_rounded,
-                                        color: colorScheme.onSurfaceVariant,
+                              ],
+                            )
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                // Left: Emoji & Stickers button
+                                IconButton(
+                                  tooltip: 'الملصقات والتعبيرات',
+                                  onPressed: enabled && !isUploading
+                                      ? widget.onSendGif
+                                      : null,
+                                  splashRadius: 20,
+                                  padding: const EdgeInsets.all(8),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 44,
+                                  ),
+                                  icon: Icon(
+                                    Icons.sentiment_satisfied_rounded,
+                                    size: 24,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                                // Center: Text field expanding to fill all available space
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 2,
+                                    ),
+                                    child: ChatTextFieldPasteMenu(
+                                      controller: controller,
+                                      enabled: enabled,
+                                      child: TextField(
+                                        controller: controller,
+                                        enabled: enabled,
+                                        minLines: 1,
+                                        maxLines: 6,
+                                        onChanged: onChanged,
+                                        textInputAction: enterSendsMessage
+                                            ? TextInputAction.send
+                                            : TextInputAction.newline,
+                                        onSubmitted:
+                                            enterSendsMessage && enabled
+                                                ? (_) => onSend()
+                                                : null,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          height: 1.3,
+                                          color: isDark
+                                              ? const Color(0xFFF8FAFC)
+                                              : const Color(0xFF0F172A),
+                                        ),
+                                        decoration: InputDecoration(
+                                          hintText: enabled
+                                              ? (isEditing
+                                                  ? 'عدّل الرسالة...'
+                                                  : 'اكتب رسالة...')
+                                              : 'المحادثة للقراءة فقط',
+                                          hintStyle: TextStyle(
+                                            fontSize: 15.5,
+                                            color: isDark
+                                                ? Colors.white38
+                                                : const Color(0xFF94A3B8),
+                                          ),
+                                          border: InputBorder.none,
+                                          isDense: true,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 4,
+                                                vertical: 11,
+                                              ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                      );
-                    },
-                  ),
-              ],
-            ),
-            if (holdPhase && isVoiceHoldActive)
-              Padding(
-                padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
-                child: Text(
-                  'اسحب للأعلى للقفل ثم التعديل قبل الإرسال',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                                // Trailing attachment and camera inside bubble
+                                ValueListenableBuilder<TextEditingValue>(
+                                  valueListenable: controller,
+                                  builder: (context, value, _) {
+                                    final hasText =
+                                        value.text.trim().isNotEmpty ||
+                                        isEditing;
+                                    return Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        // Attachment (Paperclip) button
+                                        IconButton(
+                                          tooltip: 'إرفاق',
+                                          onPressed: enabled && !isUploading
+                                              ? _openActionsMenu
+                                              : null,
+                                          splashRadius: 20,
+                                          padding: const EdgeInsets.all(8),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 38,
+                                            minHeight: 44,
+                                          ),
+                                          icon: Icon(
+                                            Icons.attach_file_rounded,
+                                            size: 23,
+                                            color: isDark
+                                                ? Colors.white70
+                                                : const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                        // Camera button (disappears smoothly when user starts typing)
+                                        AnimatedSize(
+                                          duration: const Duration(
+                                            milliseconds: 200,
+                                          ),
+                                          curve: Curves.easeInOutCubic,
+                                          child: hasText
+                                              ? const SizedBox.shrink()
+                                              : IconButton(
+                                                  tooltip: 'الكاميرا',
+                                                  onPressed:
+                                                      enabled && !isUploading
+                                                          ? widget.onTakePhoto
+                                                          : null,
+                                                  splashRadius: 20,
+                                                  padding:
+                                                      const EdgeInsets.all(8),
+                                                  constraints:
+                                                      const BoxConstraints(
+                                                        minWidth: 38,
+                                                        minHeight: 44,
+                                                      ),
+                                                  icon: Icon(
+                                                    Icons.camera_alt_rounded,
+                                                    size: 22,
+                                                    color: isDark
+                                                        ? Colors.white70
+                                                        : const Color(
+                                                            0xFF64748B,
+                                                          ),
+                                                  ),
+                                                ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
                 ),
               ),
+              const SizedBox(width: 6),
+              // WhatsApp Circular Action Button (Mic / Send)
+              _buildCircularActionButton(
+                context: context,
+                colorScheme: colorScheme,
+                enabled: enabled,
+                isUploading: isUploading,
+                uploadProgress: uploadProgress,
+                isEditing: isEditing,
+                showVoiceActionButtons: showVoiceActionButtons,
+                onSendVoiceNote: onSendVoiceNote,
+                onSend: onSend,
+                onSendOptions: widget.onSendOptions,
+                onVoiceLongPressStart: onVoiceLongPressStart,
+                onVoiceLongPressMove: onVoiceLongPressMove,
+                onVoiceLongPressEnd: onVoiceLongPressEnd,
+                isVoiceRecordingActive: isVoiceRecordingActive,
+              ),
+            ],
+          ),
+          if (holdPhase && isVoiceHoldActive)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+              child: Text(
+                'اسحب للأعلى للقفل ثم التعديل قبل الإرسال',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCircularActionButton({
+    required BuildContext context,
+    required ColorScheme colorScheme,
+    required bool enabled,
+    required bool isUploading,
+    required double uploadProgress,
+    required bool isEditing,
+    required bool showVoiceActionButtons,
+    required VoidCallback onSendVoiceNote,
+    required VoidCallback onSend,
+    required VoidCallback onSendOptions,
+    required Future<void> Function() onVoiceLongPressStart,
+    required void Function(LongPressMoveUpdateDetails) onVoiceLongPressMove,
+    required Future<void> Function() onVoiceLongPressEnd,
+    required bool isVoiceRecordingActive,
+  }) {
+    if (showVoiceActionButtons) {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: colorScheme.primary,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: colorScheme.primary.withValues(alpha: 0.35),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
-      ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: enabled ? onSendVoiceNote : null,
+            child: const Center(
+              child: Icon(Icons.send_rounded, size: 22, color: Colors.white),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: widget.controller,
+      builder: (context, value, _) {
+        final hasText = value.text.trim().isNotEmpty || isEditing;
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          transitionBuilder: (child, animation) =>
+              ScaleTransition(scale: animation, child: child),
+          child: hasText
+              ? Container(
+                  key: const ValueKey('send_btn'),
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: colorScheme.primary.withValues(alpha: 0.35),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: enabled && !isUploading ? onSend : null,
+                      onLongPress: enabled && !isUploading && !isEditing
+                          ? onSendOptions
+                          : null,
+                      child: Center(
+                        child: isUploading
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  value: uploadProgress <= 0
+                                      ? null
+                                      : uploadProgress,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(
+                                isEditing
+                                    ? Icons.check_rounded
+                                    : Icons.send_rounded,
+                                size: 21,
+                                color: Colors.white,
+                              ),
+                      ),
+                    ),
+                  ),
+                )
+              : Tooltip(
+                  key: const ValueKey('mic_btn'),
+                  message: 'اضغط مطوّلاً للتسجيل',
+                  child: IgnorePointer(
+                    ignoring: !enabled || isUploading || isVoiceRecordingActive,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'اضغط مطوّلاً على المايك لتسجيل رسالة صوتية',
+                              textAlign: TextAlign.center,
+                            ),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      onLongPressStart: (_) =>
+                          unawaited(onVoiceLongPressStart()),
+                      onLongPressMoveUpdate: onVoiceLongPressMove,
+                      onLongPressEnd: (_) =>
+                          unawaited(onVoiceLongPressEnd()),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: colorScheme.primary.withValues(alpha: 0.35),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.mic_rounded,
+                            size: 23,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+        );
+      },
     );
   }
 }
@@ -8150,103 +8343,6 @@ class _RecordingWaveformState extends State<_RecordingWaveform>
 }
 
 // (Removed) Slide-to-lock/cancel voice recording UI.
-
-class _ComposerActionsFab extends StatefulWidget {
-  const _ComposerActionsFab({
-    required this.enabled,
-    required this.colorScheme,
-    required this.onAttach,
-    required this.onPickImage,
-    this.onSendSpecificFile,
-    required this.onSendScreenshot,
-    required this.onOpenReactionPicker,
-    this.onSendPoll,
-    this.onSendChecklist,
-    this.onSendGif,
-  });
-
-  final bool enabled;
-  final ColorScheme colorScheme;
-  final VoidCallback onAttach;
-  final VoidCallback onPickImage;
-  final ValueChanged<String>? onSendSpecificFile;
-  final VoidCallback onSendScreenshot;
-  final VoidCallback onOpenReactionPicker;
-  final VoidCallback? onSendPoll;
-  final VoidCallback? onSendChecklist;
-  final VoidCallback? onSendGif;
-
-  @override
-  State<_ComposerActionsFab> createState() => _ComposerActionsFabState();
-}
-
-class _ComposerActionsFabState extends State<_ComposerActionsFab> {
-  final GlobalKey _anchorKey = GlobalKey();
-
-  Future<void> _openActionsMenu() async {
-    if (!widget.enabled) {
-      return;
-    }
-
-    final anchorContext = _anchorKey.currentContext;
-    if (anchorContext == null) {
-      return;
-    }
-
-    final selected = await showModalBottomSheet<dynamic>(
-      context: anchorContext,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => const AttachmentBottomSheet(),
-    );
-
-    if (selected is String) {
-      widget.onSendSpecificFile?.call(selected);
-    }
-
-    if (selected is AttachmentBottomSheetResult) {
-      switch (selected) {
-        case AttachmentBottomSheetResult.image:
-          widget.onPickImage();
-          break;
-        case AttachmentBottomSheetResult.file:
-          widget.onAttach();
-          break;
-        case AttachmentBottomSheetResult.screenshot:
-          widget.onSendScreenshot();
-          break;
-        case AttachmentBottomSheetResult.reaction:
-          widget.onOpenReactionPicker();
-          break;
-        case AttachmentBottomSheetResult.poll:
-          widget.onSendPoll?.call();
-          break;
-        case AttachmentBottomSheetResult.gif:
-          widget.onSendGif?.call();
-          break;
-        case AttachmentBottomSheetResult.checklist:
-          widget.onSendChecklist?.call();
-          break;
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 42,
-      height: 42,
-      child: IconButton.filledTonal(
-        key: _anchorKey,
-        onPressed: widget.enabled ? _openActionsMenu : null,
-        style: IconButton.styleFrom(
-          backgroundColor: widget.colorScheme.surfaceContainerHighest,
-        ),
-        icon: const Icon(Icons.add_rounded),
-      ),
-    );
-  }
-}
 
 String _presenceLabel(ChatDirectoryUser user) {
   if (user.presenceStatus == 'online') return 'متصل الآن';
