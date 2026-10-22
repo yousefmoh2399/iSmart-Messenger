@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -528,6 +529,596 @@ InputDecoration _dialogInputDecoration(String label) {
   );
 }
 
+// ─── Apple Minimalist Admin Dialog Components for Desktop ─────────────────────
+
+class _AppleAdminDialog extends StatelessWidget {
+  const _AppleAdminDialog({
+    required this.badgeIcon,
+    required this.badgeColor,
+    required this.title,
+    this.subtitle,
+    required this.content,
+    required this.actions,
+    this.maxWidth = 520,
+  });
+
+  final IconData badgeIcon;
+  final Color badgeColor;
+  final String title;
+  final String? subtitle;
+  final Widget content;
+  final List<Widget> actions;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF1E222A) : Colors.white;
+
+    return Dialog(
+      backgroundColor: bg,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+          width: 0.8,
+        ),
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 20, 18, 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: badgeColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(
+                      child: Icon(badgeIcon, color: badgeColor, size: 24),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: isDark
+                                ? const Color(0xFFF8FAFC)
+                                : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            subtitle!,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: isDark
+                                  ? Colors.white60
+                                  : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 20,
+                      color: isDark ? Colors.white54 : const Color(0xFF94A3B8),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    visualDensity: VisualDensity.compact,
+                    splashRadius: 18,
+                  ),
+                ],
+              ),
+            ),
+            Divider(
+              height: 1,
+              thickness: 0.7,
+              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+            ),
+            // Body Content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 18, 22, 14),
+                child: content,
+              ),
+            ),
+            // Actions
+            Divider(
+              height: 1,
+              thickness: 0.7,
+              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: actions,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleDangerDialog extends StatelessWidget {
+  const _AppleDangerDialog({
+    required this.title,
+    required this.subtitle,
+    required this.message,
+    this.confirmLabel = 'تأكيد الحذف',
+    required this.onConfirm,
+  });
+
+  final String title;
+  final String subtitle;
+  final String message;
+  final String confirmLabel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF1E222A) : Colors.white;
+
+    return Dialog(
+      backgroundColor: bg,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+          width: 0.8,
+        ),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFEF4444),
+                    size: 28,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: isDark
+                      ? const Color(0xFFF8FAFC)
+                      : const Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2C323D)
+                      : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.45,
+                    color: isDark ? Colors.white70 : const Color(0xFF475569),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        side: BorderSide(
+                          color: isDark
+                              ? Colors.white24
+                              : const Color(0xFFCBD5E1),
+                        ),
+                      ),
+                      child: Text(
+                        'إلغاء',
+                        style: TextStyle(
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF475569),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onConfirm,
+                      icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                      label: Text(
+                        confirmLabel,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFDC2626),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleTextField extends StatelessWidget {
+  const _AppleTextField({
+    required this.controller,
+    required this.label,
+    this.hint,
+    this.prefixIcon,
+    this.suffix,
+    this.enabled = true,
+    this.obscureText = false,
+    this.maxLines = 1,
+    this.minLines,
+    this.autofocus = false,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String? hint;
+  final IconData? prefixIcon;
+  final Widget? suffix;
+  final bool enabled;
+  final bool obscureText;
+  final int? maxLines;
+  final int? minLines;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fill = isDark ? const Color(0xFF282D37) : const Color(0xFFF8FAFC);
+    final border = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          enabled: enabled,
+          obscureText: obscureText,
+          maxLines: maxLines,
+          minLines: minLines,
+          autofocus: autofocus,
+          style: TextStyle(
+            fontSize: 13.5,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(
+              fontSize: 12.5,
+              color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
+            ),
+            filled: true,
+            fillColor: enabled
+                ? fill
+                : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
+            prefixIcon: prefixIcon != null
+                ? Icon(
+                    prefixIcon,
+                    size: 18,
+                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  )
+                : null,
+            suffixIcon: suffix,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 11,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: Color(0xFF0284C7),
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AppleDropdown<T> extends StatelessWidget {
+  const _AppleDropdown({
+    required this.value,
+    required this.label,
+    required this.items,
+    required this.onChanged,
+    this.prefixIcon,
+    this.enabled = true,
+  });
+
+  final T value;
+  final String label;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final IconData? prefixIcon;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fill = isDark ? const Color(0xFF282D37) : const Color(0xFFF8FAFC);
+    final border = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+          ),
+        ),
+        const SizedBox(height: 6),
+        DropdownButtonFormField<T>(
+          value: value,
+          items: items,
+          onChanged: enabled ? onChanged : null,
+          style: TextStyle(
+            fontSize: 13.5,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+          dropdownColor: isDark ? const Color(0xFF232832) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          icon: Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: isDark ? Colors.white54 : const Color(0xFF64748B),
+          ),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: enabled
+                ? fill
+                : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
+            prefixIcon: prefixIcon != null
+                ? Icon(
+                    prefixIcon,
+                    size: 18,
+                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 11,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: border, width: 0.8),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: Color(0xFF0284C7),
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AppleErrorBanner extends StatelessWidget {
+  const _AppleErrorBanner({required this.error});
+  final String error;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEF4444).withValues(alpha: isDark ? 0.2 : 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFEF4444),
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              error,
+              style: TextStyle(
+                fontSize: 12.5,
+                color: isDark
+                    ? const Color(0xFFFCA5A5)
+                    : const Color(0xFFB91C1C),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PermissionToggleCard extends StatelessWidget {
+  const _PermissionToggleCard({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    required this.color,
+    this.disabled = false,
+  });
+
+  final String title;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final Color color;
+  final bool disabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final activeBg = color.withValues(alpha: isDark ? 0.18 : 0.1);
+    final inactiveBg = isDark ? const Color(0xFF282D37) : const Color(0xFFF8FAFC);
+    final activeBorder = color.withValues(alpha: 0.45);
+    final inactiveBorder = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: disabled ? null : () => onChanged?.call(!value),
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: value ? activeBg : inactiveBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: value ? activeBorder : inactiveBorder,
+              width: value ? 1.2 : 0.8,
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: value ? FontWeight.w700 : FontWeight.w500,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Transform.scale(
+                scale: 0.75,
+                child: Switch(
+                  value: value,
+                  activeColor: color,
+                  onChanged: disabled ? null : onChanged,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------- Admin Documents Tab ----------------
 
 class _AdminDocumentsTab extends ConsumerStatefulWidget {
@@ -591,21 +1182,36 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
     final controller = TextEditingController(text: document.fileName);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('إعادة تسمية الملف'),
-        content: TextField(
+      builder: (context) => _AppleAdminDialog(
+        badgeIcon: Icons.edit_note_rounded,
+        badgeColor: const Color(0xFF0284C7),
+        title: 'إعادة تسمية الملف',
+        subtitle: 'تعديل اسم الملف المعروض في قائمة المستندات',
+        content: _AppleTextField(
           controller: controller,
+          label: 'اسم الملف الجديد',
+          hint: 'اكتب اسم الملف...',
+          prefixIcon: Icons.description_outlined,
           autofocus: true,
-          decoration: _dialogInputDecoration('اسم الملف'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
+            style: TextButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
             child: const Text('إلغاء'),
           ),
-          FilledButton(
+          const SizedBox(width: 8),
+          FilledButton.icon(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('حفظ'),
+            icon: const Icon(Icons.check_rounded, size: 18),
+            label: const Text('حفظ التعديل'),
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
           ),
         ],
       ),
@@ -633,22 +1239,12 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
     final shouldDelete =
         await showDialog<bool>(
           context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('حذف الملف'),
-            content: Text('هل تريد حذف "${document.fileName}" نهائيًا؟'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('إلغاء'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.error,
-                ),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('حذف'),
-              ),
-            ],
+          builder: (context) => _AppleDangerDialog(
+            title: 'حذف الملف نهائياً',
+            subtitle: 'تأكيد إزالة المستند من الخادم',
+            message:
+                'هل أنت متأكد من حذف "${document.fileName}"؟ لن يتمكن الموظفون من الوصول إليه بعد الحذف.',
+            onConfirm: () => Navigator.pop(context, true),
           ),
         ) ??
         false;
@@ -962,23 +1558,15 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
   }
 
   Future<void> _deleteUser(BuildContext context, ManagedUser user) async {
+    final displayName = user.fullName.isEmpty ? user.username : user.fullName;
     final approved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('حذف المستخدم'),
-        content: Text(
-          'هل تريد حذف ${user.fullName.isEmpty ? user.username : user.fullName} نهائيا؟',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('حذف'),
-          ),
-        ],
+      builder: (context) => _AppleDangerDialog(
+        title: 'حذف المستخدم نهائياً',
+        subtitle: 'إزالة حساب $displayName من قاعدة البيانات',
+        message:
+            'هل أنت متأكد من حذف الحساب؟ سيتم إلغاء وصول الموظف وإزالة كافة الجلسات المرتبطة به.',
+        onConfirm: () => Navigator.pop(context, true),
       ),
     );
     if (approved != true) return;
@@ -999,23 +1587,16 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
   }
 
   Future<void> _forceLogoutAll(BuildContext context, ManagedUser user) async {
+    final displayName = user.fullName.isEmpty ? user.username : user.fullName;
     final approved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('تسجيل خروج من كل الأجهزة'),
-        content: Text(
-          'هل تريد فرض تسجيل الخروج لـ ${user.fullName.isEmpty ? user.username : user.fullName} من جميع الأجهزة النشطة؟',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('تأكيد'),
-          ),
-        ],
+      builder: (context) => _AppleDangerDialog(
+        title: 'تسجيل خروج من كل الأجهزة',
+        subtitle: 'إنهاء الجلسات النشطة لـ $displayName',
+        confirmLabel: 'تسجيل الخروج',
+        message:
+            'سيتم إبطال كافة مفاتيح الدخول الفعالة للمستخدم عبر كل أجهزة الكمبيوتر والهواتف فوراً.',
+        onConfirm: () => Navigator.pop(context, true),
       ),
     );
     if (approved != true) return;
@@ -1046,87 +1627,138 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     final userRepository = ref.read(userManagementRepositoryProvider);
     final passwordController = TextEditingController(text: '123456');
     var isSaving = false;
+    var obscure = false;
     String? errorText;
 
     await showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(
-            'إعادة تعيين كلمة المرور لـ ${user.fullName.isEmpty ? user.username : user.fullName}',
-          ),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
+        builder: (context, setLocalState) {
+          final displayName =
+              user.fullName.isEmpty ? user.username : user.fullName;
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+
+          return _AppleAdminDialog(
+            badgeIcon: Icons.key_rounded,
+            badgeColor: const Color(0xFFF59E0B),
+            title: 'إعادة تعيين كلمة المرور',
+            subtitle: 'تغيير رمز المرور لحساب: $displayName',
+            maxWidth: 460,
+            content: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
+                _AppleTextField(
                   controller: passwordController,
                   enabled: !isSaving,
-                  decoration: _dialogInputDecoration('كلمة المرور الجديدة'),
+                  obscureText: obscure,
+                  label: 'كلمة المرور الجديدة',
+                  hint: 'أدخل 6 أحرف أو أرقام على الأقل',
+                  prefixIcon: Icons.lock_outline_rounded,
+                  suffix: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'توليد كلمة مرور عشوائية',
+                        icon: const Icon(Icons.shuffle_rounded, size: 20),
+                        onPressed: isSaving
+                            ? null
+                            : () {
+                                final rnd = 100000 + math.Random().nextInt(900000);
+                                setLocalState(() {
+                                  passwordController.text = '$rnd';
+                                });
+                              },
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          obscure
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 20,
+                        ),
+                        onPressed: () => setLocalState(() => obscure = !obscure),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'سيتم إلزام المستخدم باستخدام كلمة المرور الجديدة لتسجيل الدخول التالي.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  ),
                 ),
                 if (errorText != null) ...[
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      errorText!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ),
+                  _AppleErrorBanner(error: errorText!),
                 ],
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(context),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton.icon(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      final password = passwordController.text.trim();
-                      if (password.length < 6) {
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                child: const Text('إلغاء'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final password = passwordController.text.trim();
+                        if (password.length < 6) {
+                          setLocalState(() {
+                            errorText =
+                                'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
+                          });
+                          return;
+                        }
                         setLocalState(() {
-                          errorText =
-                              'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
+                          isSaving = true;
+                          errorText = null;
                         });
-                        return;
-                      }
-                      setLocalState(() {
-                        isSaving = true;
-                        errorText = null;
-                      });
-                      try {
-                        await userRepository.resetPassword(
-                          userId: user.id,
-                          password: password,
-                        );
-                        if (!context.mounted) return;
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('تمت إعادة تعيين كلمة المرور بنجاح'),
-                          ),
-                        );
-                      } catch (error) {
-                        setLocalState(() {
-                          isSaving = false;
-                          errorText = error.toString();
-                        });
-                      }
-                    },
-              icon: const Icon(Icons.lock_reset_outlined),
-              label: isSaving
-                  ? const Text('جار الحفظ...')
-                  : const Text('إعادة التعيين'),
-            ),
-          ],
-        ),
+                        try {
+                          await userRepository.resetPassword(
+                            userId: user.id,
+                            password: password,
+                          );
+                          if (!context.mounted) return;
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('تمت إعادة تعيين كلمة المرور بنجاح'),
+                            ),
+                          );
+                        } catch (error) {
+                          setLocalState(() {
+                            isSaving = false;
+                            errorText = error.toString();
+                          });
+                        }
+                      },
+                icon: isSaving ? null : const Icon(Icons.check_rounded, size: 18),
+                label: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : const Text('تعيين كلمة المرور'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF59E0B),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1156,6 +1788,8 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
       text: user?.maxAttachmentSizeMB.toString() ?? '20',
     );
     final permissions = Map<String, bool>.from(user?.permissions ?? const {});
+    var obscurePassword = true;
+
     const permissionLabels = <String, String>{
       'canCreateUsers': 'إدارة المستخدمين',
       'canCreateDepartments': 'إدارة الأقسام',
@@ -1180,6 +1814,60 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
       'canViewSnipeit': 'عرض صفحة Snipe-IT',
       'canViewSystemMonitor': 'مراقبة النظام',
     };
+
+    final permissionCategories = [
+      (
+        title: 'صلاحيات المحادثات والملفات',
+        icon: Icons.chat_bubble_outline_rounded,
+        color: const Color(0xFF007AFF),
+        keys: [
+          'canCreateRooms',
+          'canSendBroadcast',
+          'canDeleteMessages',
+          'canUploadFiles',
+          'canModerateDepartment',
+          'canViewDepartmentLogs',
+          'canManageAnnouncements',
+          'canManageFiles',
+        ],
+      ),
+      (
+        title: 'صلاحيات الطابعات والتقارير',
+        icon: Icons.print_outlined,
+        color: const Color(0xFF34C759),
+        keys: [
+          'canViewPrinters',
+          'canManagePrinters',
+          'canSyncPrinters',
+          'canExportPrinterReports',
+        ],
+      ),
+      (
+        title: 'صلاحيات التذاكر والأصول والنظام',
+        icon: Icons.confirmation_number_outlined,
+        color: const Color(0xFFF59E0B),
+        keys: [
+          'canManageTickets',
+          'canViewSnipeit',
+          'canViewSystemMonitor',
+        ],
+      ),
+      (
+        title: 'صلاحيات الإدارة والتحكم الكامل',
+        icon: Icons.admin_panel_settings_outlined,
+        color: const Color(0xFF9333EA),
+        keys: [
+          'canCreateUsers',
+          'canCreateDepartments',
+          'canManageBranches',
+          'canManageRoles',
+          'canManageSystem',
+          'canManageUpdates',
+          'canManageBackups',
+        ],
+      ),
+    ];
+
     Map<String, bool> resolvePermissionsForRole() {
       if (role != 'admin') {
         return permissions;
@@ -1193,220 +1881,324 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) => AlertDialog(
-          title: Text(user == null ? 'إضافة مستخدم' : 'تعديل مستخدم'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: usernameController,
-                    enabled: !isSaving,
-                    decoration: _dialogInputDecoration('اسم المستخدم'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: fullNameController,
-                    enabled: !isSaving,
-                    decoration: _dialogInputDecoration('الاسم الكامل'),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: role,
-                    decoration: _dialogInputDecoration('الدور'),
-                    items: const [
-                      DropdownMenuItem(value: 'user', child: Text('user')),
-                      DropdownMenuItem(
-                        value: 'manager',
-                        child: Text('manager'),
-                      ),
-                      DropdownMenuItem(value: 'admin', child: Text('admin')),
-                    ],
-                    onChanged: isSaving
-                        ? null
-                        : (value) => setLocalState(() {
-                            role = value ?? role;
-                            if (role == 'admin') {
-                              for (final key in permissionLabels.keys) {
-                                permissions[key] = true;
+        builder: (context, setLocalState) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final isAdminRole = role == 'admin';
+
+          return _AppleAdminDialog(
+            badgeIcon: user == null ? Icons.person_add_rounded : Icons.manage_accounts_rounded,
+            badgeColor: const Color(0xFF0284C7),
+            title: user == null ? 'إضافة مستخدم جديد' : 'تعديل بيانات المستخدم',
+            subtitle: user == null
+                ? 'إنشاء حساب موظف جديد وتعيين الدور والصلاحيات المخصصة'
+                : 'تحديث بيانات الحساب وكلمة المرور وصلاحيات المنظومة',
+            maxWidth: 720,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Two Column Form Layout
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _AppleTextField(
+                            controller: usernameController,
+                            enabled: !isSaving,
+                            label: 'اسم المستخدم (Username)',
+                            hint: 'مثال: ahmed_ali',
+                            prefixIcon: Icons.alternate_email_rounded,
+                          ),
+                          const SizedBox(height: 12),
+                          _AppleTextField(
+                            controller: fullNameController,
+                            enabled: !isSaving,
+                            label: 'الاسم الكامل',
+                            hint: 'الاسم الكامل باللغة العربية',
+                            prefixIcon: Icons.badge_outlined,
+                          ),
+                          const SizedBox(height: 12),
+                          _AppleDropdown<String>(
+                            value: role,
+                            label: 'الدور (Role)',
+                            prefixIcon: Icons.shield_outlined,
+                            enabled: !isSaving,
+                            items: const [
+                              DropdownMenuItem(value: 'user', child: Text('مستخدم عادي (User)')),
+                              DropdownMenuItem(value: 'manager', child: Text('مدير قسم (Manager)')),
+                              DropdownMenuItem(value: 'admin', child: Text('مسؤول نظام (Admin)')),
+                            ],
+                            onChanged: (val) => setLocalState(() {
+                              role = val ?? role;
+                              if (role == 'admin') {
+                                for (final key in permissionLabels.keys) {
+                                  permissions[key] = true;
+                                }
                               }
-                            }
-                          }),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String?>(
-                    initialValue: departmentId,
-                    decoration: _dialogInputDecoration('القسم'),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('بدون قسم'),
+                            }),
+                          ),
+                        ],
                       ),
-                      ...widget.departments.map(
-                        (department) => DropdownMenuItem<String?>(
-                          value: department.id,
-                          child: Text(department.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: isSaving
-                        ? null
-                        : (value) => departmentId = value,
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String?>(
-                    initialValue: branchId,
-                    decoration: _dialogInputDecoration('الفرع'),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('بدون فرع'),
-                      ),
-                      ...widget.branches.map(
-                        (branch) => DropdownMenuItem<String?>(
-                          value: branch.id,
-                          child: Text(branch.name),
-                        ),
-                      ),
-                    ],
-                    onChanged: isSaving ? null : (value) => branchId = value,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: passwordController,
-                    enabled: !isSaving,
-                    decoration:
-                        _dialogInputDecoration(
-                          user == null
-                              ? 'كلمة المرور'
-                              : 'كلمة مرور جديدة أو إعادة تعيينها',
-                        ).copyWith(
-                          helperText: user == null
-                              ? 'اتركها فارغة لاستخدام 123456 أو اكتب 6 أحرف على الأقل'
-                              : 'اتركها فارغة لو لن تغيّر كلمة المرور',
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: maxAttachmentSizeMBController,
-                    enabled: !isSaving,
-                    keyboardType: TextInputType.number,
-                    decoration: _dialogInputDecoration('حجم المرفقات الأقصى (ميجا)'),
-                  ),
-                  const SizedBox(height: 12),
-                  ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    title: const Text('صلاحيات مخصصة للمستخدم'),
-                    children: [
-                      for (final entry in permissionLabels.entries)
-                        SwitchListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(entry.value),
-                          value: permissions[entry.key] == true,
-                          onChanged: isSaving
-                              ? null
-                              : (value) => setLocalState(
-                                  () => permissions[entry.key] = value,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _AppleDropdown<String?>(
+                            value: departmentId,
+                            label: 'القسم التابع له',
+                            prefixIcon: Icons.business_outlined,
+                            enabled: !isSaving,
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('بدون قسم'),
+                              ),
+                              ...widget.departments.map(
+                                (dept) => DropdownMenuItem<String?>(
+                                  value: dept.id,
+                                  child: Text(dept.name),
                                 ),
-                        ),
-                    ],
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        errorText!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
+                              ),
+                            ],
+                            onChanged: (val) => setLocalState(() => departmentId = val),
+                          ),
+                          const SizedBox(height: 12),
+                          _AppleDropdown<String?>(
+                            value: branchId,
+                            label: 'الفرع التابع له',
+                            prefixIcon: Icons.storefront_outlined,
+                            enabled: !isSaving,
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('بدون فرع'),
+                              ),
+                              ...widget.branches.map(
+                                (br) => DropdownMenuItem<String?>(
+                                  value: br.id,
+                                  child: Text(br.name),
+                                ),
+                              ),
+                            ],
+                            onChanged: (val) => setLocalState(() => branchId = val),
+                          ),
+                          const SizedBox(height: 12),
+                          _AppleTextField(
+                            controller: passwordController,
+                            enabled: !isSaving,
+                            obscureText: obscurePassword,
+                            label: user == null ? 'كلمة المرور' : 'كلمة مرور جديدة (اختياري)',
+                            hint: user == null ? 'افتراضي 123456 أو 6 أحرف' : 'اتركها فارغة لعدم التغيير',
+                            prefixIcon: Icons.lock_outline_rounded,
+                            suffix: IconButton(
+                              icon: Icon(
+                                obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                size: 19,
+                              ),
+                              onPressed: () => setLocalState(() => obscurePassword = !obscurePassword),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                _AppleTextField(
+                  controller: maxAttachmentSizeMBController,
+                  enabled: !isSaving,
+                  label: 'الحد الأقصى لحجم المرفقات (بالميجابايت)',
+                  hint: 'القيمة الافتراضية 20 ميجابايت',
+                  prefixIcon: Icons.attachment_rounded,
+                ),
+                const SizedBox(height: 18),
+
+                // ── Permissions Header & Notice ──
+                Row(
+                  children: [
+                    const Icon(Icons.tune_rounded, size: 18, color: Color(0xFF007AFF)),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'صلاحيات المستخدم المخصصة في النظام',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                    ),
+                    const Spacer(),
+                    if (isAdminRole)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEA580C).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'مسؤول النظام يمتلك كافة الصلاحيات تلقائياً',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFEA580C)),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // ── Categorized Grid of Toggle Cards ──
+                ...permissionCategories.map((category) {
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF232832) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(category.icon, size: 16, color: category.color),
+                            const SizedBox(width: 8),
+                            Text(
+                              category.title,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: category.color,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                            mainAxisExtent: 44,
+                          ),
+                          itemCount: category.keys.length,
+                          itemBuilder: (ctx, idx) {
+                            final key = category.keys[idx];
+                            final label = permissionLabels[key] ?? key;
+                            final isEnabled = isAdminRole ? true : (permissions[key] == true);
+
+                            return _PermissionToggleCard(
+                              title: label,
+                              value: isEnabled,
+                              color: category.color,
+                              disabled: isSaving || isAdminRole,
+                              onChanged: (val) {
+                                setLocalState(() => permissions[key] = val);
+                              },
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+
+                if (errorText != null) ...[
+                  const SizedBox(height: 12),
+                  _AppleErrorBanner(error: errorText!),
                 ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                child: const Text('إلغاء'),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSaving ? null : () => Navigator.pop(context),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      final username = usernameController.text.trim();
-                      final fullName = fullNameController.text.trim();
-                      final password = passwordController.text.trim();
-                      if (username.isEmpty) {
-                        setLocalState(() => errorText = 'اسم المستخدم مطلوب.');
-                        return;
-                      }
-                      if (fullName.isEmpty) {
-                        setLocalState(() => errorText = 'الاسم الكامل مطلوب.');
-                        return;
-                      }
-                      if (password.isNotEmpty && password.length < 6) {
-                        setLocalState(
-                          () => errorText =
-                              'كلمة المرور يجب أن تكون 6 أحرف على الأقل.',
-                        );
-                        return;
-                      }
-                      setLocalState(() {
-                        isSaving = true;
-                        errorText = null;
-                      });
-                      try {
-                        final effectivePermissions =
-                            resolvePermissionsForRole();
-                        final maxAttachmentSizeMB = int.tryParse(maxAttachmentSizeMBController.text.trim()) ?? 20;
-                        if (user == null) {
-                          await userRepository.createUser(
-                            username: username,
-                            fullName: fullName,
-                            password: password.isEmpty ? '123456' : password,
-                            role: role,
-                            departmentId: departmentId,
-                            branchId: branchId,
-                            maxAttachmentSizeMB: maxAttachmentSizeMB,
-                            permissions: effectivePermissions,
-                          );
-                        } else {
-                          await userRepository.updateUser(
-                            userId: user.id,
-                            username: username,
-                            fullName: fullName,
-                            password: password,
-                            role: role,
-                            departmentId: departmentId,
-                            branchId: branchId,
-                            maxAttachmentSizeMB: maxAttachmentSizeMB,
-                            permissions: effectivePermissions,
-                          );
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final username = usernameController.text.trim();
+                        final fullName = fullNameController.text.trim();
+                        final password = passwordController.text.trim();
+                        if (username.isEmpty) {
+                          setLocalState(() => errorText = 'اسم المستخدم مطلوب.');
+                          return;
                         }
-                        if (context.mounted) Navigator.pop(context, true);
-                      } catch (error) {
+                        if (fullName.isEmpty) {
+                          setLocalState(() => errorText = 'الاسم الكامل مطلوب.');
+                          return;
+                        }
+                        if (password.isNotEmpty && password.length < 6) {
+                          setLocalState(
+                            () => errorText =
+                                'كلمة المرور يجب أن تكون 6 أحرف على الأقل.',
+                          );
+                          return;
+                        }
                         setLocalState(() {
-                          isSaving = false;
-                          errorText = error.toString();
+                          isSaving = true;
+                          errorText = null;
                         });
-                      }
-                    },
-              child: isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: ButtonLoadingIndicator(),
-                    )
-                  : const Text('حفظ'),
-            ),
-          ],
-        ),
+                        try {
+                          final effectivePermissions =
+                              resolvePermissionsForRole();
+                          final maxAttachmentSizeMB = int.tryParse(maxAttachmentSizeMBController.text.trim()) ?? 20;
+                          if (user == null) {
+                            await userRepository.createUser(
+                              username: username,
+                              fullName: fullName,
+                              password: password.isEmpty ? '123456' : password,
+                              role: role,
+                              departmentId: departmentId,
+                              branchId: branchId,
+                              maxAttachmentSizeMB: maxAttachmentSizeMB,
+                              permissions: effectivePermissions,
+                            );
+                          } else {
+                            await userRepository.updateUser(
+                              userId: user.id,
+                              username: username,
+                              fullName: fullName,
+                              password: password,
+                              role: role,
+                              departmentId: departmentId,
+                              branchId: branchId,
+                              maxAttachmentSizeMB: maxAttachmentSizeMB,
+                              permissions: effectivePermissions,
+                            );
+                          }
+                          if (context.mounted) Navigator.pop(context, true);
+                        } catch (error) {
+                          setLocalState(() {
+                            isSaving = false;
+                            errorText = error.toString();
+                          });
+                        }
+                      },
+                icon: isSaving ? null : const Icon(Icons.check_rounded, size: 18),
+                label: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : Text(user == null ? 'إنشاء المستخدم' : 'حفظ التعديلات'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF007AFF),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (saved == true && context.mounted) {
@@ -2016,13 +2808,24 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
                         IconButton(
                           color: Theme.of(context).colorScheme.error,
                           onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => _AppleDangerDialog(
+                                title: 'حذف الفرع',
+                                subtitle: 'تأكيد إزالة الفرع من النظام',
+                                message:
+                                    'هل أنت متأكد من حذف فرع "${branch.name}" (${branch.code})؟ لن يتم حذف الأجهزة أو الموظفين.',
+                                onConfirm: () => Navigator.pop(ctx, true),
+                              ),
+                            );
+                            if (confirmed != true || !context.mounted) return;
                             try {
                               await ref
                                   .read(chatOverviewControllerProvider.notifier)
                                   .deleteBranch(branch.id);
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('تم حذف الفرع')),
+                                const SnackBar(content: Text('تم حذف الفرع بنجاح')),
                               );
                             } catch (error) {
                               if (!context.mounted) return;
@@ -2379,6 +3182,17 @@ class _AnnouncementsAdminTab extends ConsumerWidget {
                                   ).colorScheme.error,
                                 ),
                                 onPressed: () async {
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => _AppleDangerDialog(
+                                      title: 'حذف الإعلان',
+                                      subtitle: 'تأكيد إزالة الإعلان من النظام',
+                                      message:
+                                          'هل أنت متأكد من حذف إعلان "${announcement.title}" نهائياً؟',
+                                      onConfirm: () => Navigator.pop(ctx, true),
+                                    ),
+                                  );
+                                  if (confirmed != true || !context.mounted) return;
                                   await ref
                                       .read(announcementRepositoryProvider)
                                       .deleteAnnouncement(announcement.id);
@@ -2690,13 +3504,24 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
                         IconButton(
                           color: Theme.of(context).colorScheme.error,
                           onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => _AppleDangerDialog(
+                                title: 'حذف القسم',
+                                subtitle: 'تأكيد إزالة القسم من الهيكل الإداري',
+                                message:
+                                    'هل أنت متأكد من حذف قسم "${department.name}" (${department.code})؟ لن يتم حذف الموظفين.',
+                                onConfirm: () => Navigator.pop(ctx, true),
+                              ),
+                            );
+                            if (confirmed != true || !context.mounted) return;
                             try {
                               await ref
                                   .read(chatOverviewControllerProvider.notifier)
                                   .deleteDepartment(department.id);
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('تم حذف القسم')),
+                                const SnackBar(content: Text('تم حذف القسم بنجاح')),
                               );
                             } catch (error) {
                               if (!context.mounted) return;
