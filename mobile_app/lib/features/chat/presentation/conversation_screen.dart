@@ -51,6 +51,7 @@ import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/gif_picker_panel.dart';
 import 'widgets/poll_creator_dialog.dart';
 import 'widgets/scheduled_messages_list.dart';
+import 'widgets/whatsapp_reaction_picker.dart';
 
 /// خطوط احتياطية لعرض الإيموجي ملوّنًا (مهم على سطح المكتب/لينكس).
 const List<String> _kChatReactionEmojiFontFallbacks = <String>[
@@ -2899,10 +2900,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       barrierColor: Colors.black.withValues(alpha: 0.45),
       transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
-        return GestureDetector(
-          onTap: () => Navigator.of(dialogContext).pop(),
-          behavior: HitTestBehavior.opaque,
-          child: SafeArea(
+        final textTheme = Theme.of(context).textTheme;
+        return Material(
+          type: MaterialType.transparency,
+          child: DefaultTextStyle(
+            style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(
+              decoration: TextDecoration.none,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+            child: GestureDetector(
+              onTap: () => Navigator.of(dialogContext).pop(),
+              behavior: HitTestBehavior.opaque,
+              child: SafeArea(
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
               child: Center(
@@ -2969,7 +2978,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     ),
                                     child: Text(
                                       emoji,
-                                      style: const TextStyle(fontSize: 26),
+                                      style: const TextStyle(fontSize: 26, decoration: TextDecoration.none),
                                     ),
                                   ),
                                 );
@@ -3046,6 +3055,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                         color: Color(0xFF3390EC),
                                         fontSize: 12,
                                         fontWeight: FontWeight.w700,
+                                        decoration: TextDecoration.none,
                                       ),
                                     ),
                                   ),
@@ -3056,6 +3066,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   style: TextStyle(
                                     fontSize: 15,
                                     color: isDark ? Colors.white : Colors.black87,
+                                    decoration: TextDecoration.none,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -3289,7 +3300,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ),
             ),
           ),
-        );
+        ),
+      ),
+    );
       },
       transitionBuilder: (context, anim1, anim2, child) {
         return FadeTransition(
@@ -3329,6 +3342,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w400,
+                  decoration: TextDecoration.none,
                   color: isDestructive
                       ? CupertinoColors.systemRed
                       : (isDark ? Colors.white : Colors.black87),
@@ -3748,143 +3762,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _showFullReactionPicker(ChatMessage message) async {
-    final sections = buildPickerSections(
-      chatPickerAnimatedEmojis(),
-      const <String, int>{},
-    );
-    await showModalBottomSheet<void>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
-
-      useSafeArea: true,
-      builder: (sheetContext) => DraggableScrollableSheet(
-        initialChildSize: 0.55,
-        minChildSize: 0.32,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) {
-          final theme = Theme.of(context);
-          final titleSmall = theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w800,
+    final selectedEmoji = await WhatsAppReactionPickerSheet.show(context);
+    if (selectedEmoji != null && selectedEmoji.isNotEmpty && mounted) {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
+          .toggleReaction(
+            messageId: message.id,
+            emoji: selectedEmoji,
           );
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 4, 2),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'اختر تفاعلًا',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'إغلاق',
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                if (sections.frequentTop.isNotEmpty) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                    child: Text('الأكثر استخدامًا', style: titleSmall),
-                  ),
-                  SizedBox(
-                    height: 72,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: sections.frequentTop.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 2),
-                      itemBuilder: (context, i) {
-                        final data = sections.frequentTop[i];
-                        return SizedBox(
-                          width: 60,
-                          child: ChatAnimatedReactionOption(
-                            data: data,
-                            size: 44,
-                            onTap: () async {
-                              Navigator.of(sheetContext).pop();
-                              await ref
-                                  .read(
-                                    conversationMessagesControllerProvider(
-                                      widget.conversation.id,
-                                    ).notifier,
-                                  )
-                                  .toggleReaction(
-                                    messageId: message.id,
-                                    emoji: data.toUnicodeEmoji(),
-                                  );
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
-                    child: Text('باقي التفاعلات', style: titleSmall),
-                  ),
-                ],
-                Expanded(
-                  child: GridView.builder(
-                    controller: scrollController,
-                    padding: EdgeInsets.fromLTRB(
-                      8,
-                      sections.frequentTop.isEmpty ? 4 : 0,
-                      8,
-                      12,
-                    ),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 6,
-                          mainAxisSpacing: 2,
-                          crossAxisSpacing: 2,
-                          childAspectRatio: 1,
-                        ),
-                    itemCount: sections.gridRest.length,
-                    itemBuilder: (context, index) {
-                      final data = sections.gridRest[index];
-                      return ChatAnimatedReactionOption(
-                        data: data,
-                        size: 38,
-                        onTap: () async {
-                          Navigator.of(sheetContext).pop();
-                          await ref
-                              .read(
-                                conversationMessagesControllerProvider(
-                                  widget.conversation.id,
-                                ).notifier,
-                              )
-                              .toggleReaction(
-                                messageId: message.id,
-                                emoji: data.toUnicodeEmoji(),
-                              );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+    }
   }
 
   Future<bool> _confirmAction({
@@ -5590,13 +5480,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   child: Align(
                                     alignment: bubbleAlignment,
                                     child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
                                       onTap: _selectionMode
                                           ? () => _toggleMessageSelection(
                                               message.id,
                                             )
-                                          : () => _showActions(message),
-                                      onLongPress: () =>
-                                          _toggleMessageSelection(message.id),
+                                          : () {
+                                              FocusScope.of(context).unfocus();
+                                            },
+                                      onDoubleTap: () =>
+                                          _handleDoubleTapReaction(message),
+                                      onLongPress: () {
+                                        if (_selectionMode) {
+                                          _toggleMessageSelection(message.id);
+                                        } else {
+                                          _showWhatsAppContextMenu(message);
+                                        }
+                                      },
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         mainAxisAlignment: isMine
@@ -6054,14 +5954,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                     )
                                                                                   : message.isImageMessage
                                                                                   ? InkWell(
-                                                                                      onTap: () => _openAttachment(
-                                                                                        message,
-                                                                                      ),
-                                                                                      onLongPress: message.isStickerMessage
-                                                                                          ? () => _saveReceivedSticker(
-                                                                                              message,
-                                                                                            )
-                                                                                          : null,
+                                                                                      onTap: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _openAttachment(message),
+                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                      onLongPress: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : (message.isStickerMessage
+                                                                                              ? () => _saveReceivedSticker(message)
+                                                                                              : () => _showWhatsAppContextMenu(message)),
                                                                                       borderRadius: BorderRadius.circular(
                                                                                         14,
                                                                                       ),
@@ -6085,9 +5986,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       ),
                                                                                     )
                                                                                   : InkWell(
-                                                                                      onTap: () => _openAttachment(
-                                                                                        message,
-                                                                                      ),
+                                                                                      onTap: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _openAttachment(message),
+                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                      onLongPress: () {
+                                                                                        if (_selectionMode) {
+                                                                                          _toggleMessageSelection(message.id);
+                                                                                        } else {
+                                                                                          _showWhatsAppContextMenu(message);
+                                                                                        }
+                                                                                      },
                                                                                       borderRadius: BorderRadius.circular(
                                                                                         14,
                                                                                       ),
@@ -6291,6 +6200,40 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                         ),
                                                     ],
                                                   ),
+                                                   if (_pulsingHeartMessageId == message.id)
+                                                     Positioned.fill(
+                                                       child: Center(
+                                                         child: TweenAnimationBuilder<double>(
+                                                           tween: Tween(begin: 0.0, end: 1.0),
+                                                           duration: const Duration(milliseconds: 650),
+                                                           curve: Curves.elasticOut,
+                                                           builder: (context, val, child) {
+                                                             final scale = val <= 0.6
+                                                                 ? (val / 0.6 * 1.35)
+                                                                 : (1.35 - ((val - 0.6) / 0.4 * 0.35));
+                                                             final opacity = (1.0 - (val > 0.7 ? (val - 0.7) / 0.3 : 0.0)).clamp(0.0, 1.0);
+                                                             return Opacity(
+                                                               opacity: opacity,
+                                                               child: Transform.scale(
+                                                                 scale: scale,
+                                                                 child: const Icon(
+                                                                   CupertinoIcons.heart_fill,
+                                                                   color: Color(0xFFE53935),
+                                                                   size: 52,
+                                                                   shadows: [
+                                                                     BoxShadow(
+                                                                       color: Colors.black26,
+                                                                       blurRadius: 10,
+                                                                       offset: Offset(0, 3),
+                                                                     ),
+                                                                   ],
+                                                                 ),
+                                                               ),
+                                                             );
+                                                           },
+                                                         ),
+                                                       ),
+                                                     ),
                                                   if (_selectionMode)
                                                     Positioned(
                                                       top: -2,
