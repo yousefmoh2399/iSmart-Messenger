@@ -626,7 +626,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     var peerDevice = _remotePeerDevice;
     var ip = normalizeIpAddress(peerDevice?.localIp);
     if (ip.isEmpty) {
-      _showChatSnackBar('جارٍ البحث عن عنوان IP لجهاز المستخدم...');
+      _showChatSnackBar('جارٍ جلب عنوان IP لجهاز المستخدم...');
       peerDevice = await _refreshRemotePeerDevice();
       ip = normalizeIpAddress(peerDevice?.localIp);
     }
@@ -637,17 +637,13 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    // In Electron (kIsWeb) we cannot use Platform.isWindows or Process.start.
-    // Use the IPC bridge to open mstsc.exe via the main process instead.
     if (kIsWeb) {
       try {
         final ok = await web_bridge.electronOpenRdp(ip);
         if (ok) {
-          _showChatSnackBar('تم فتح Remote Desktop على $ip');
+          _showChatSnackBar('تم فتح Remote Desktop ($ip)');
         } else {
-          _showChatSnackBar(
-            'تعذر فتح Remote Desktop. تأكد إن RDP مفعّل وبورت 3389 مفتوح.',
-          );
+          _showChatSnackBar('تعذر فتح Remote Desktop.');
         }
       } catch (e) {
         _showChatSnackBar('خطأ: $e');
@@ -656,41 +652,14 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     if (!Platform.isWindows) {
-      _showChatSnackBar('فتح Remote Desktop التلقائي متاح على ويندوز فقط.');
+      _showChatSnackBar('فتح Remote Desktop متاح على ويندوز فقط.');
       return;
     }
     try {
-      final rdpReachable = await _isTcpPortReachable(
-        ip,
-        3389,
-        timeout: const Duration(seconds: 2),
-      );
-      if (!rdpReachable) {
-        _showChatSnackBar(
-          'الجهاز بيرد Ping، لكن Remote Desktop غير متاح. تأكد إن RDP مفعّل وبورت 3389 مفتوح في Firewall.',
-        );
-        return;
-      }
       await Process.start('mstsc.exe', ['/v:$ip'], runInShell: true);
-      _showChatSnackBar('تم فتح Remote Desktop على $ip');
+      _showChatSnackBar('تم فتح Remote Desktop ($ip)');
     } catch (error) {
       _showChatSnackBar(error.toString());
-    }
-  }
-
-  Future<bool> _isTcpPortReachable(
-    String host,
-    int port, {
-    required Duration timeout,
-  }) async {
-    Socket? socket;
-    try {
-      socket = await Socket.connect(host, port, timeout: timeout);
-      return true;
-    } catch (_) {
-      return false;
-    } finally {
-      socket?.destroy();
     }
   }
 
@@ -698,7 +667,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     var peerDevice = _remotePeerDevice;
     var ip = normalizeIpAddress(peerDevice?.localIp);
     if (ip.isEmpty) {
-      _showChatSnackBar('جارٍ البحث عن عنوان IP لجهاز المستخدم...');
+      _showChatSnackBar('جارٍ جلب عنوان IP لجهاز المستخدم...');
       peerDevice = await _refreshRemotePeerDevice();
       ip = normalizeIpAddress(peerDevice?.localIp);
     }
@@ -709,289 +678,34 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    if (!mounted) return;
-
-    bool pingOk = false;
-    String? latency;
-    bool rdpOk = false;
-    bool appOk = false;
-
-    if (kIsWeb && web_bridge.isElectron()) {
-      final res = await web_bridge.electronProbePeerStatus(ip);
-      pingOk = res['pingReachable'] == true;
-      latency = res['latency']?.toString();
-      rdpOk = res['rdpAvailable'] == true;
-      appOk = res['lanAppActive'] == true;
-    } else {
-      final result = await ref
-          .read(lanFileTransferServiceProvider)
-          .probeTargetIp(ip);
-      appOk = result.success;
-      if (!kIsWeb && Platform.isWindows) {
-        rdpOk = await _isTcpPortReachable(
-          ip,
-          3389,
-          timeout: const Duration(seconds: 2),
-        );
+    if (kIsWeb) {
+      try {
+        final ok = await web_bridge.electronOpenPing(ip);
+        if (ok) {
+          _showChatSnackBar('تم فتح نافذة الفحص (Ping $ip)...');
+        } else {
+          _showChatSnackBar('تعذر فتح نافذة Terminal.');
+        }
+      } catch (e) {
+        _showChatSnackBar('خطأ: $e');
       }
-      pingOk = appOk || rdpOk;
+      return;
     }
 
-    if (!mounted) return;
-
-    final isReachable = pingOk || rdpOk || appOk;
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        child: Container(
-          width: 440,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: isReachable
-                          ? (isDark
-                              ? const Color(0xFF1B382B)
-                              : const Color(0xFFE8F5E9))
-                          : (isDark
-                              ? const Color(0xFF3E2723)
-                              : const Color(0xFFFFEBEE)),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      isReachable
-                          ? Icons.wifi_rounded
-                          : Icons.wifi_off_rounded,
-                      color: isReachable
-                          ? const Color(0xFF2E7D32)
-                          : const Color(0xFFD32F2F),
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'فحص اتصال الجهاز',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          peerDevice?.displayLabel ?? ip,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white70 : Colors.black54,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-
-              // IP address chip with copy
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF2A2A2A)
-                      : const Color(0xFFF4F5F7),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.lan_rounded,
-                      size: 18,
-                      color: Color(0xFF007AFF),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        ip,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () {
-                        Clipboard.setData(ClipboardData(text: ip));
-                        _showChatSnackBar('تم نسخ عنوان IP ($ip)');
-                      },
-                      borderRadius: BorderRadius.circular(8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.copy_rounded,
-                          size: 16,
-                          color: isDark ? Colors.white60 : Colors.black45,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Status rows
-              _buildProbeStatusRow(
-                icon: Icons.speed_rounded,
-                title: 'اتصال الشبكة (Ping)',
-                status: pingOk
-                    ? (latency != null ? 'متاح ($latency)' : 'متاح')
-                    : 'لا يوجد رد',
-                isSuccess: pingOk,
-                isDark: isDark,
-              ),
-              const SizedBox(height: 10),
-              _buildProbeStatusRow(
-                icon: Icons.computer_rounded,
-                title: 'سطح المكتب البعيد (RDP)',
-                status: rdpOk
-                    ? 'جاهز للاتصال (Port 3389)'
-                    : 'المنفذ مغلق أو غير متاح',
-                isSuccess: rdpOk,
-                isDark: isDark,
-              ),
-              const SizedBox(height: 10),
-              _buildProbeStatusRow(
-                icon: Icons.chat_bubble_outline_rounded,
-                title: 'تطبيق المراسلة (iSmart)',
-                status: appOk ? 'متصل ونشط' : 'التطبيق غير مشغل على الجهاز',
-                isSuccess: appOk,
-                isDark: isDark,
-              ),
-
-              const SizedBox(height: 22),
-
-              // Actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: Text(
-                      'إغلاق',
-                      style: TextStyle(
-                        color: isDark ? Colors.white70 : Colors.black54,
-                      ),
-                    ),
-                  ),
-                  if (rdpOk) ...[
-                    const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop();
-                        unawaited(_openRemoteDesktopForPeer());
-                      },
-                      icon: const Icon(Icons.computer_rounded, size: 18),
-                      label: const Text('فتح Remote Desktop'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProbeStatusRow({
-    required IconData icon,
-    required String title,
-    required String status,
-    required bool isSuccess,
-    required bool isDark,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark
-            ? (isSuccess ? const Color(0xFF1B2A22) : const Color(0xFF261D1D))
-            : (isSuccess ? const Color(0xFFF1F8F4) : const Color(0xFFFAF2F2)),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: isSuccess
-                ? const Color(0xFF2E7D32)
-                : const Color(0xFFD32F2F),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-          ),
-          Text(
-            status,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: isSuccess
-                ? const Color(0xFF2E7D32)
-                : (isDark ? Colors.white54 : Colors.black45),
-            ),
-          ),
-        ],
-      ),
-    );
+    if (!Platform.isWindows) {
+      _showChatSnackBar('فحص الاتصال عبر Terminal متاح على ويندوز فقط.');
+      return;
+    }
+    try {
+      await Process.start(
+        'cmd.exe',
+        ['/c', 'start', 'cmd.exe', '/k', 'ping', ip],
+        runInShell: true,
+      );
+      _showChatSnackBar('تم فتح نافذة الفحص (Ping $ip)...');
+    } catch (error) {
+      _showChatSnackBar(error.toString());
+    }
   }
 
   // ── Scroll ─────────────────────────────────────────────────────────────────
@@ -5023,10 +4737,10 @@ class _ChatHeader extends StatelessWidget {
             ),
           if (!selectionMode && conversation.type == 'direct')
             _TgHeaderIcon(
-              icon: Icons.wifi_find_rounded,
+              icon: Icons.terminal_rounded,
               tooltip: hasRemotePeerDevice
-                  ? 'فحص اتصال جهاز المستخدم (${remotePeerDevice?.localIp ?? ''})'
-                  : 'فحص اتصال جهاز المستخدم (انقر للبحث عن IP)',
+                  ? 'فحص الاتصال عبر Terminal (${remotePeerDevice?.localIp ?? ''})'
+                  : 'فحص الاتصال (انقر للبحث عن IP)',
               color: hasRemotePeerDevice
                   ? iconColor
                   : iconColor.withValues(alpha: 0.65),

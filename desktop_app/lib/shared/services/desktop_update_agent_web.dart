@@ -95,7 +95,6 @@ class DesktopUpdateAgent {
   bool _disposed = false;
   bool _isHeartbeatRunning = false;
   bool _isTaskRunning = false;
-  Timer? _heartbeatTimer;
   String _connectionStatus = 'online';
   AppUser? _currentUser;
   String? _deviceUid;
@@ -129,15 +128,8 @@ class DesktopUpdateAgent {
     if (web_bridge.isElectron()) {
       await _reconcilePostRestartState();
       await _emitPreparedUpdateStateIfNeeded();
-      // Run immediate heartbeat so peer devices can discover our LAN IP:
+      // Register our device and LAN IP once on startup/login without background timers:
       unawaited(_runHeartbeat());
-      // Keep online status and LAN IP updated periodically:
-      _heartbeatTimer?.cancel();
-      _heartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
-        if (!_disposed && _currentUser != null) {
-          unawaited(_runHeartbeat());
-        }
-      });
     }
   }
 
@@ -154,8 +146,6 @@ class DesktopUpdateAgent {
   }
 
   void stop() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
     _isHeartbeatRunning = false;
     _isTaskRunning = false;
     _currentUser = null;

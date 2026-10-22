@@ -2830,6 +2830,23 @@ ipcMain.handle("shell:open-rdp", async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle("shell:open-ping", async (_event, payload = {}) => {
+  try {
+    const ip = String(payload.ip || "").trim();
+    if (!ip) {
+      return { success: false, error: "No IP provided." };
+    }
+    const { exec } = require("child_process");
+    exec(`start cmd.exe /k ping ${ip}`, (err) => {
+      if (err) console.warn("[electron] ping error", err.message);
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("[electron] shell:open-ping error", error);
+    return { success: false, error: String(error.message || error) };
+  }
+});
+
 ipcMain.handle("net:probe-peer-status", async (_event, payload = {}) => {
   const targetIp = normalizeLanIp(payload.ip || payload.targetIp);
   if (!targetIp) {

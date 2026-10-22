@@ -1151,6 +1151,11 @@ Future<bool> electronOpenRdp(String ip) async {
   return result['success'] == true;
 }
 
+Future<bool> electronOpenPing(String ip) async {
+  final result = _asStringMap(await _callElectron('openPing', {'ip': ip}));
+  return result['success'] == true;
+}
+
 Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async {
   if (!isElectron()) {
     return const <String, dynamic>{

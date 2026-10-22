@@ -317,6 +317,8 @@ Future<String?> electronCaptureScreen() async => null;
 
 Future<bool> electronOpenRdp(String ip) async => false;
 
+Future<bool> electronOpenPing(String ip) async => false;
+
 Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async =>
     const <String, dynamic>{
       'success': false,
