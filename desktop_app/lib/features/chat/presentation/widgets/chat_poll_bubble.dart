@@ -63,7 +63,6 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
     final question = pollData['question']?.toString() ?? 'استبيان';
@@ -88,18 +87,14 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
     final hasVoted = _selectedOptionIds.isNotEmpty;
     final showResults = (hasVoted || isClosed) && !isChecklist;
 
-    // Theme tokens
+    // High contrast tokens tailored for both Light and Dark mode
     final primaryAccent = isChecklist
-        ? const Color(0xFF10B981) // Emerald Green
-        : (widget.isMine ? colorScheme.primary : const Color(0xFF6366F1));
+        ? (isDark ? const Color(0xFF10B981) : const Color(0xFF059669))
+        : (isDark ? const Color(0xFF818CF8) : const Color(0xFF4F46E5));
 
-    final textColor = widget.isMine
-        ? colorScheme.onPrimary
-        : (isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A));
+    final textColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
 
-    final subTextColor = widget.isMine
-        ? colorScheme.onPrimary.withValues(alpha: 0.72)
-        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B));
+    final subTextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569);
 
     // Progress computation for Checklist
     final completedTasksCount = options.where((opt) {
@@ -124,10 +119,10 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: primaryAccent.withValues(alpha: widget.isMine ? 0.22 : 0.12),
+                  color: primaryAccent.withValues(alpha: isDark ? 0.20 : 0.10),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: primaryAccent.withValues(alpha: widget.isMine ? 0.4 : 0.25),
+                    color: primaryAccent.withValues(alpha: isDark ? 0.40 : 0.25),
                     width: 0.8,
                   ),
                 ),
@@ -138,7 +133,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                       isChecklist
                           ? Icons.task_alt_rounded
                           : (isAnonymous ? Icons.visibility_off_outlined : Icons.poll_rounded),
-                      color: widget.isMine ? textColor : primaryAccent,
+                      color: primaryAccent,
                       size: 14,
                     ),
                     const SizedBox(width: 5),
@@ -147,7 +142,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                           ? 'قائمة مهام'
                           : (isAnonymous ? 'استطلاع سري' : 'استطلاع رأي'),
                       style: TextStyle(
-                        color: widget.isMine ? textColor : primaryAccent,
+                        color: primaryAccent,
                         fontWeight: FontWeight.w700,
                         fontSize: 11.5,
                       ),
@@ -163,19 +158,17 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: isAllTasksCompleted
-                        ? const Color(0xFF10B981).withValues(alpha: widget.isMine ? 0.3 : 0.16)
-                        : (widget.isMine
-                            ? Colors.white.withValues(alpha: 0.12)
-                            : (isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.05))),
+                        ? const Color(0xFF10B981).withValues(alpha: isDark ? 0.25 : 0.12)
+                        : (isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06)),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     '$completedTasksCount من $totalTasksCount مكتملة',
                     style: TextStyle(
                       color: isAllTasksCompleted
-                          ? (widget.isMine ? textColor : const Color(0xFF10B981))
+                          ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669))
                           : subTextColor,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                       fontSize: 11,
                     ),
                   ),
@@ -184,9 +177,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
                   decoration: BoxDecoration(
-                    color: widget.isMine
-                        ? Colors.white.withValues(alpha: 0.12)
-                        : (isDark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.05)),
+                    color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
@@ -194,7 +185,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                     style: TextStyle(
                       color: subTextColor,
                       fontSize: 11,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -203,9 +194,15 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: isClosed
-                        ? Colors.orange.withValues(alpha: 0.15)
-                        : const Color(0xFF22C55E).withValues(alpha: 0.15),
+                        ? (isDark ? Colors.orange.withValues(alpha: 0.20) : const Color(0xFFFFF7ED))
+                        : (isDark ? const Color(0xFF22C55E).withValues(alpha: 0.20) : const Color(0xFFF0FDF4)),
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isClosed
+                          ? (isDark ? Colors.orange.withValues(alpha: 0.4) : const Color(0xFFFDBA74))
+                          : (isDark ? const Color(0xFF22C55E).withValues(alpha: 0.4) : const Color(0xFF86EFAC)),
+                      width: 0.8,
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -215,14 +212,14 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                         height: 6,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isClosed ? Colors.orange : const Color(0xFF22C55E),
+                          color: isClosed ? const Color(0xFFEA580C) : const Color(0xFF16A34A),
                         ),
                       ),
                       const SizedBox(width: 5),
                       Text(
                         isClosed ? 'مغلق' : 'نشط',
                         style: TextStyle(
-                          color: isClosed ? Colors.orange : const Color(0xFF22C55E),
+                          color: isClosed ? const Color(0xFFEA580C) : const Color(0xFF16A34A),
                           fontWeight: FontWeight.w700,
                           fontSize: 11,
                         ),
@@ -259,11 +256,13 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                   return LinearProgressIndicator(
                     value: val,
                     minHeight: 5,
-                    backgroundColor: widget.isMine
-                        ? Colors.white.withValues(alpha: 0.15)
-                        : (isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.08)),
+                    backgroundColor: isDark
+                        ? Colors.white.withValues(alpha: 0.10)
+                        : const Color(0xFFE2E8F0),
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      isAllTasksCompleted ? const Color(0xFF10B981) : primaryAccent,
+                      isAllTasksCompleted
+                          ? const Color(0xFF10B981)
+                          : (isDark ? const Color(0xFF34D399) : const Color(0xFF059669)),
                     ),
                   );
                 },
@@ -294,26 +293,18 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                 curve: Curves.easeOutCubic,
                 decoration: BoxDecoration(
                   color: isOptionActive
-                      ? (widget.isMine
-                          ? Colors.white.withValues(alpha: 0.16)
-                          : primaryAccent.withValues(alpha: isDark ? 0.14 : 0.08))
-                      : (widget.isMine
-                          ? Colors.black.withValues(alpha: 0.06)
-                          : (isDark
-                              ? const Color(0xFF242428)
-                              : const Color(0xFFF6F7F9))),
+                      ? primaryAccent.withValues(alpha: isDark ? 0.20 : 0.09)
+                      : (isDark
+                          ? const Color(0xFF242428)
+                          : const Color(0xFFF8FAFC)),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: isOptionActive
-                        ? (widget.isMine
-                            ? Colors.white.withValues(alpha: 0.35)
-                            : primaryAccent.withValues(alpha: 0.4))
-                        : (widget.isMine
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : (isDark
-                                ? Colors.white.withValues(alpha: 0.06)
-                                : Colors.black.withValues(alpha: 0.05))),
-                    width: isOptionActive ? 1.2 : 0.9,
+                        ? primaryAccent.withValues(alpha: isDark ? 0.60 : 0.45)
+                        : (isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : const Color(0xFFE2E8F0)),
+                    width: isOptionActive ? 1.4 : 1.0,
                   ),
                 ),
                 child: Material(
@@ -366,9 +357,9 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                                   widthFactor: value,
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      color: widget.isMine
-                                          ? Colors.white.withValues(alpha: isMyVote ? 0.22 : 0.12)
-                                          : primaryAccent.withValues(alpha: isMyVote ? 0.22 : 0.12),
+                                      color: primaryAccent.withValues(
+                                        alpha: isMyVote ? (isDark ? 0.28 : 0.18) : (isDark ? 0.16 : 0.10),
+                                      ),
                                       borderRadius: BorderRadius.circular(11),
                                     ),
                                   ),
@@ -404,8 +395,8 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                                               : Icons.radio_button_unchecked_rounded)),
                                   size: 21,
                                   color: isOptionActive
-                                      ? (widget.isMine ? textColor : primaryAccent)
-                                      : subTextColor.withValues(alpha: 0.7),
+                                      ? primaryAccent
+                                      : (isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -420,16 +411,18 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                                       optText,
                                       style: TextStyle(
                                         color: isTaskDone
-                                            ? subTextColor
+                                            ? (isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8))
                                             : textColor,
                                         fontSize: 13.5,
                                         fontWeight: isOptionActive
                                             ? FontWeight.w700
-                                            : FontWeight.w500,
+                                            : FontWeight.w600,
                                         decoration: isTaskDone
                                             ? TextDecoration.lineThrough
                                             : null,
-                                        decorationColor: subTextColor,
+                                        decorationColor: isDark
+                                            ? const Color(0xFF64748B)
+                                            : const Color(0xFF94A3B8),
                                       ),
                                     ),
                                     if (isTaskDone) ...[
@@ -439,9 +432,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                                           Icon(
                                             Icons.done_all_rounded,
                                             size: 13,
-                                            color: widget.isMine
-                                                ? textColor.withValues(alpha: 0.8)
-                                                : const Color(0xFF10B981),
+                                            color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
                                           ),
                                           const SizedBox(width: 4),
                                           Text(
@@ -455,9 +446,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                                             style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
-                                              color: widget.isMine
-                                                  ? textColor.withValues(alpha: 0.8)
-                                                  : const Color(0xFF10B981),
+                                              color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
                                             ),
                                           ),
                                         ],
@@ -477,7 +466,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                                     Text(
                                       '${(percentage * 100).toStringAsFixed(0)}%',
                                       style: TextStyle(
-                                        color: textColor,
+                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
                                         fontWeight: FontWeight.w800,
                                         fontSize: 13,
                                       ),
@@ -512,10 +501,10 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
               margin: const EdgeInsets.only(top: 4, bottom: 2),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withValues(alpha: widget.isMine ? 0.25 : 0.12),
+                color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.20 : 0.12),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                  color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.40 : 0.30),
                   width: 1,
                 ),
               ),
@@ -531,7 +520,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                   Text(
                     'اكتملت جميع مهام القائمة بنجاح! 🎉',
                     style: TextStyle(
-                      color: widget.isMine ? textColor : const Color(0xFF10B981),
+                      color: isDark ? const Color(0xFF34D399) : const Color(0xFF047857),
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
                     ),
@@ -565,14 +554,14 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                     icon: Icon(
                       Icons.file_download_outlined,
                       size: 15,
-                      color: widget.isMine ? textColor : primaryAccent,
+                      color: primaryAccent,
                     ),
                     label: Text(
                       'تصدير النتائج',
                       style: TextStyle(
-                        color: widget.isMine ? textColor : primaryAccent,
+                        color: primaryAccent,
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     style: TextButton.styleFrom(

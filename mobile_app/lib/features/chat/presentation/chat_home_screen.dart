@@ -34,6 +34,7 @@ import 'rooms_screen.dart';
 import 'widgets/chat_avatar.dart';
 import 'widgets/new_conversation_sheet.dart';
 import 'widgets/chat_folder_inline_item.dart';
+import 'widgets/create_chat_folder_dialog.dart';
 
 class ChatHomeScreen extends ConsumerStatefulWidget {
   const ChatHomeScreen({super.key});
@@ -486,12 +487,13 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   }
 
   Future<void> _showCreateFolderDialog() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const _CreateFolderDialog(),
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    await showCreateOrEditChatFolderDialog(
+      context,
+      availableConversations: overview?.conversations ?? const [],
+      currentUserId: authUser?.id,
     );
-    if (!mounted || name == null || name.isEmpty) return;
-    await ref.read(chatFoldersProvider.notifier).createFolder(name);
   }
 
   Future<void> _confirmLogout() async {
@@ -2044,46 +2046,7 @@ class _NavTabItem {
   final int badgeCount;
 }
 
-class _CreateFolderDialog extends StatefulWidget {
-  const _CreateFolderDialog();
 
-  @override
-  State<_CreateFolderDialog> createState() => _CreateFolderDialogState();
-}
-
-class _CreateFolderDialogState extends State<_CreateFolderDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    Navigator.of(context).pop(_controller.text.trim());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('مجلد جديد'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: 'اسم المجلد'),
-        onSubmitted: (_) => _submit(),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('إلغاء'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('إنشاء')),
-      ],
-    );
-  }
-}
 
 class _HomeSectionHeader extends StatelessWidget {
   const _HomeSectionHeader({

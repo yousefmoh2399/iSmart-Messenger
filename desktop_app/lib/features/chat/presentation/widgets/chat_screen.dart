@@ -22,7 +22,6 @@ import '../../../../shared/providers/providers.dart';
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../../shared/widgets/app_loading_placeholders.dart';
 import '../../../../shared/widgets/button_loading_indicator.dart';
-import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../../../shared/widgets/shimmer_skeleton.dart';
 import '../../../admin/models/update_management_models.dart';
@@ -42,6 +41,7 @@ import 'gif_picker_panel.dart';
 import 'message_bubble.dart';
 import 'poll_creator_dialog.dart';
 import 'scheduled_messages_list.dart';
+import 'chat_remote_search_dialog.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
@@ -508,36 +508,45 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     return null;
   }
 
-  Future<void> _refreshRemotePeerDevice() async {
+  Future<BranchPeerDevice?> _refreshRemotePeerDevice() async {
     final peer = _directPeerFromConversation(widget.conversation);
     if (peer == null) {
       if (mounted) {
         setState(() => _remotePeerDevice = null);
       }
-      return;
+      return null;
     }
     if (mounted) {
       setState(() => _isResolvingRemotePeer = true);
     }
     try {
-      final peers = await ref
+      var peers = await ref
           .read(updateManagementRepositoryProvider)
           .listBranchPeerDevices(
-            branchCode: peer.branchCode,
             userId: peer.id,
             includeSelf: true,
           );
-      if (!mounted) {
-        return;
+      if (peers.isEmpty && peer.branchCode.trim().isNotEmpty) {
+        peers = await ref
+            .read(updateManagementRepositoryProvider)
+            .listBranchPeerDevices(
+              branchCode: peer.branchCode,
+              userId: peer.id,
+              includeSelf: true,
+            );
       }
-      setState(() {
-        _remotePeerDevice = peers.isNotEmpty ? peers.first : null;
-      });
+      final resolved = peers.isNotEmpty ? peers.first : null;
+      if (mounted) {
+        setState(() {
+          _remotePeerDevice = resolved;
+        });
+      }
+      return resolved;
     } catch (_) {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() => _remotePeerDevice = null);
       }
-      setState(() => _remotePeerDevice = null);
+      return null;
     } finally {
       if (mounted) {
         setState(() => _isResolvingRemotePeer = false);
@@ -614,10 +623,17 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _openRemoteDesktopForPeer() async {
-    final peerDevice = _remotePeerDevice;
-    final ip = normalizeIpAddress(peerDevice?.localIp);
+    var peerDevice = _remotePeerDevice;
+    var ip = normalizeIpAddress(peerDevice?.localIp);
     if (ip.isEmpty) {
-      _showChatSnackBar('لا يوجد IP متاح لهذا المستخدم الآن.');
+      _showChatSnackBar('جارٍ البحث عن عنوان IP لجهاز المستخدم...');
+      peerDevice = await _refreshRemotePeerDevice();
+      ip = normalizeIpAddress(peerDevice?.localIp);
+    }
+    if (ip.isEmpty) {
+      _showChatSnackBar(
+        'لا يوجد عنوان IP مسجل لهذا المستخدم الآن. تأكد من تشغيل التطبيق على جهازه.',
+      );
       return;
     }
 
@@ -679,35 +695,299 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _probeRemotePeerConnectivity() async {
-    final peerDevice = _remotePeerDevice;
-    final ip = normalizeIpAddress(peerDevice?.localIp);
+    var peerDevice = _remotePeerDevice;
+    var ip = normalizeIpAddress(peerDevice?.localIp);
     if (ip.isEmpty) {
-      _showChatSnackBar('لا يوجد IP متاح لهذا المستخدم الآن.');
+      _showChatSnackBar('جارٍ البحث عن عنوان IP لجهاز المستخدم...');
+      peerDevice = await _refreshRemotePeerDevice();
+      ip = normalizeIpAddress(peerDevice?.localIp);
+    }
+    if (ip.isEmpty) {
+      _showChatSnackBar(
+        'لا يوجد عنوان IP مسجل لهذا المستخدم الآن. تأكد من تشغيل التطبيق على جهازه.',
+      );
       return;
     }
-    final result = await ref
-        .read(lanFileTransferServiceProvider)
-        .probeTargetIp(ip);
-    if (!mounted) {
-      return;
+
+    if (!mounted) return;
+
+    bool pingOk = false;
+    String? latency;
+    bool rdpOk = false;
+    bool appOk = false;
+
+    if (kIsWeb && web_bridge.isElectron()) {
+      final res = await web_bridge.electronProbePeerStatus(ip);
+      pingOk = res['pingReachable'] == true;
+      latency = res['latency']?.toString();
+      rdpOk = res['rdpAvailable'] == true;
+      appOk = res['lanAppActive'] == true;
+    } else {
+      final result = await ref
+          .read(lanFileTransferServiceProvider)
+          .probeTargetIp(ip);
+      appOk = result.success;
+      if (!kIsWeb && Platform.isWindows) {
+        rdpOk = await _isTcpPortReachable(
+          ip,
+          3389,
+          timeout: const Duration(seconds: 2),
+        );
+      }
+      pingOk = appOk || rdpOk;
     }
+
+    if (!mounted) return;
+
+    final isReachable = pingOk || rdpOk || appOk;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('فحص اتصال الجهاز'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(peerDevice?.displayLabel ?? ip),
-            const SizedBox(height: 10),
-            Text(result.message),
-          ],
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إغلاق'),
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        child: Container(
+          width: 440,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isReachable
+                          ? (isDark
+                              ? const Color(0xFF1B382B)
+                              : const Color(0xFFE8F5E9))
+                          : (isDark
+                              ? const Color(0xFF3E2723)
+                              : const Color(0xFFFFEBEE)),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isReachable
+                          ? Icons.wifi_rounded
+                          : Icons.wifi_off_rounded,
+                      color: isReachable
+                          ? const Color(0xFF2E7D32)
+                          : const Color(0xFFD32F2F),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'فحص اتصال الجهاز',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          peerDevice?.displayLabel ?? ip,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+
+              // IP address chip with copy
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : const Color(0xFFF4F5F7),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.lan_rounded,
+                      size: 18,
+                      color: Color(0xFF007AFF),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        ip,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: ip));
+                        _showChatSnackBar('تم نسخ عنوان IP ($ip)');
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.copy_rounded,
+                          size: 16,
+                          color: isDark ? Colors.white60 : Colors.black45,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Status rows
+              _buildProbeStatusRow(
+                icon: Icons.speed_rounded,
+                title: 'اتصال الشبكة (Ping)',
+                status: pingOk
+                    ? (latency != null ? 'متاح ($latency)' : 'متاح')
+                    : 'لا يوجد رد',
+                isSuccess: pingOk,
+                isDark: isDark,
+              ),
+              const SizedBox(height: 10),
+              _buildProbeStatusRow(
+                icon: Icons.computer_rounded,
+                title: 'سطح المكتب البعيد (RDP)',
+                status: rdpOk
+                    ? 'جاهز للاتصال (Port 3389)'
+                    : 'المنفذ مغلق أو غير متاح',
+                isSuccess: rdpOk,
+                isDark: isDark,
+              ),
+              const SizedBox(height: 10),
+              _buildProbeStatusRow(
+                icon: Icons.chat_bubble_outline_rounded,
+                title: 'تطبيق المراسلة (iSmart)',
+                status: appOk ? 'متصل ونشط' : 'التطبيق غير مشغل على الجهاز',
+                isSuccess: appOk,
+                isDark: isDark,
+              ),
+
+              const SizedBox(height: 22),
+
+              // Actions
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: Text(
+                      'إغلاق',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                  ),
+                  if (rdpOk) ...[
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(dialogContext).pop();
+                        unawaited(_openRemoteDesktopForPeer());
+                      },
+                      icon: const Icon(Icons.computer_rounded, size: 18),
+                      label: const Text('فتح Remote Desktop'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF007AFF),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProbeStatusRow({
+    required IconData icon,
+    required String title,
+    required String status,
+    required bool isSuccess,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark
+            ? (isSuccess ? const Color(0xFF1B2A22) : const Color(0xFF261D1D))
+            : (isSuccess ? const Color(0xFFF1F8F4) : const Color(0xFFFAF2F2)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: isSuccess
+                ? const Color(0xFF2E7D32)
+                : const Color(0xFFD32F2F),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+          ),
+          Text(
+            status,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isSuccess
+                ? const Color(0xFF2E7D32)
+                : (isDark ? Colors.white54 : Colors.black45),
+            ),
           ),
         ],
       ),
@@ -1036,140 +1316,26 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _showRemoteSearchDialog() async {
-    final notifier = ref.read(
-      conversationMessagesControllerProvider(_conversationId).notifier,
-    );
-    final controller = TextEditingController(text: _searchController.text);
-    List<ChatMessage> results = const <ChatMessage>[];
-    bool isLoading = false;
-    String? errorText;
-
-    Future<void> runSearch(StateSetter setDialogState) async {
-      final query = controller.text.trim();
-      if (query.isEmpty) {
-        setDialogState(() {
-          results = const <ChatMessage>[];
-          errorText = null;
-        });
-        return;
-      }
-
-      setDialogState(() {
-        isLoading = true;
-        errorText = null;
-      });
-
-      try {
-        final result = await notifier.searchMessages(query);
-        setDialogState(() {
-          results = result.messages;
-        });
-      } catch (error) {
-        setDialogState(() {
-          errorText = error.toString();
-        });
-      } finally {
-        setDialogState(() {
-          isLoading = false;
-        });
-      }
-    }
-
+    final query = _searchController.text.trim();
     if (!mounted) {
       return;
     }
 
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('بحث في كل رسائل المحادثة'),
-          content: SizedBox(
-            width: 520,
-            height: 460,
-            child: Column(
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => runSearch(setDialogState),
-                  decoration: InputDecoration(
-                    hintText: 'ابحث حتى في الرسائل غير المحمّلة',
-                    prefixIcon: const Icon(Icons.travel_explore_rounded),
-                    suffixIcon: IconButton(
-                      onPressed: () => runSearch(setDialogState),
-                      icon: const Icon(Icons.arrow_forward_rounded),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Expanded(
-                  child: isLoading
-                      ? const Center(child: AppLoadingIndicator(size: 28))
-                      : errorText != null
-                      ? Center(child: Text(errorText!))
-                      : results.isEmpty
-                      ? Center(
-                          child: Text(
-                            controller.text.trim().isEmpty
-                                ? 'اكتب كلمة أو جملة للبحث داخل كل الرسائل.'
-                                : 'لا توجد نتائج مطابقة.',
-                          ),
-                        )
-                      : ListView.separated(
-                          itemCount: results.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final message = results[index];
-                            final title =
-                                message.sender?.displayName.isNotEmpty == true
-                                ? message.sender!.displayName
-                                : 'رسالة';
-                            final preview = message.content.isNotEmpty
-                                ? message.content
-                                : (message.fileName ?? 'مرفق');
-                            return ListTile(
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              tileColor: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerLowest,
-                              title: Text(title),
-                              subtitle: Text(
-                                preview,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: Text(
-                                DateFormat(
-                                  'dd/MM • HH:mm',
-                                ).format(message.createdAt.toLocal()),
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                              onTap: () async {
-                                Navigator.of(dialogContext).pop();
-                                await _jumpToSearchMessage(
-                                  message,
-                                  query: controller.text,
-                                );
-                              },
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('إغلاق'),
-            ),
-          ],
-        ),
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => ChatRemoteSearchDialog(
+        conversationId: _conversationId,
+        initialQuery: query.isNotEmpty ? query : null,
+        onSelectMessage: (message) async {
+          Navigator.of(dialogContext).pop();
+          await _jumpToSearchMessage(
+            message,
+            query: _searchController.text.trim().isNotEmpty
+                ? _searchController.text.trim()
+                : null,
+          );
+        },
       ),
     );
   }
@@ -3862,6 +4028,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 hasRemotePeerDevice: normalizeIpAddress(
                   _remotePeerDevice?.localIp,
                 ).isNotEmpty,
+                remotePeerDevice: _remotePeerDevice,
                 isResolvingRemotePeer: _isResolvingRemotePeer,
                 selectionMode: _selectionMode,
                 onClearSelection: _clearSelection,
@@ -4688,6 +4855,7 @@ class _ChatHeader extends StatelessWidget {
     required this.onOpenRemoteDesktop,
     required this.onProbePeerConnection,
     required this.hasRemotePeerDevice,
+    this.remotePeerDevice,
     required this.isResolvingRemotePeer,
     required this.selectionMode,
     required this.onClearSelection,
@@ -4710,6 +4878,7 @@ class _ChatHeader extends StatelessWidget {
   final VoidCallback onOpenRemoteDesktop;
   final VoidCallback onProbePeerConnection;
   final bool hasRemotePeerDevice;
+  final BranchPeerDevice? remotePeerDevice;
   final bool isResolvingRemotePeer;
   final bool selectionMode;
   final VoidCallback onClearSelection;
@@ -4812,29 +4981,29 @@ class _ChatHeader extends StatelessWidget {
           ),
 
           // ── Action icons ──────────────────────────────────────────────────
-          if (!selectionMode)
+          if (!selectionMode && conversation.type == 'direct')
             _TgHeaderIcon(
               icon: isResolvingRemotePeer
                   ? Icons.sync_rounded
                   : Icons.computer_rounded,
               tooltip: hasRemotePeerDevice
-                  ? 'فتح Remote Desktop'
-                  : 'لا يوجد IP متاح للمستخدم الآن',
+                  ? 'فتح Remote Desktop (${remotePeerDevice?.localIp ?? ''})'
+                  : 'فتح Remote Desktop (انقر للبحث عن IP)',
               color: hasRemotePeerDevice
                   ? iconColor
-                  : iconColor.withValues(alpha: 0.42),
-              onPressed: hasRemotePeerDevice ? onOpenRemoteDesktop : null,
+                  : iconColor.withValues(alpha: 0.65),
+              onPressed: onOpenRemoteDesktop,
             ),
-          if (!selectionMode)
+          if (!selectionMode && conversation.type == 'direct')
             _TgHeaderIcon(
               icon: Icons.wifi_find_rounded,
               tooltip: hasRemotePeerDevice
-                  ? 'فحص اتصال جهاز المستخدم'
-                  : 'لا يوجد IP متاح للفحص',
+                  ? 'فحص اتصال جهاز المستخدم (${remotePeerDevice?.localIp ?? ''})'
+                  : 'فحص اتصال جهاز المستخدم (انقر للبحث عن IP)',
               color: hasRemotePeerDevice
                   ? iconColor
-                  : iconColor.withValues(alpha: 0.42),
-              onPressed: hasRemotePeerDevice ? onProbePeerConnection : null,
+                  : iconColor.withValues(alpha: 0.65),
+              onPressed: onProbePeerConnection,
             ),
           if (!selectionMode)
             _TgHeaderIcon(

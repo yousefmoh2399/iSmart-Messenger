@@ -52,6 +52,7 @@ import 'widgets/gif_picker_panel.dart';
 import 'widgets/poll_creator_dialog.dart';
 import 'widgets/scheduled_messages_list.dart';
 import 'widgets/whatsapp_reaction_picker.dart';
+import 'widgets/chat_remote_search_sheet.dart';
 
 /// خطوط احتياطية لعرض الإيموجي ملوّنًا (مهم على سطح المكتب/لينكس).
 const List<String> _kChatReactionEmojiFontFallbacks = <String>[
@@ -4384,177 +4385,21 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _showSearchSheet() async {
-    final notifier = ref.read(
-      conversationMessagesControllerProvider(widget.conversation.id).notifier,
-    );
-
-    final controller = TextEditingController();
-    List<ChatMessage> results = const <ChatMessage>[];
-    bool isLoading = false;
-    String? errorText;
-
-    Future<void> runSearch(StateSetter setSheetState) async {
-      final query = controller.text.trim();
-      if (query.isEmpty) {
-        setSheetState(() {
-          results = const <ChatMessage>[];
-          errorText = null;
-        });
-        return;
-      }
-
-      setSheetState(() {
-        isLoading = true;
-        errorText = null;
-      });
-
-      try {
-        final result = await notifier.searchMessages(query);
-        setSheetState(() {
-          results = result.messages;
-        });
-      } catch (error) {
-        setSheetState(() {
-          errorText = error.toString();
-        });
-      } finally {
-        setSheetState(() => isLoading = false);
-      }
-    }
-
     if (!mounted) {
       return;
     }
 
     await showModalBottomSheet<void>(
-      isScrollControlled: true,
       context: context,
-      showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              16 + MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: SizedBox(
-              height: MediaQuery.of(context).size.height * 0.8,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => runSearch(setSheetState),
-                    decoration: InputDecoration(
-                      hintText: 'ابحث في كل رسائل المحادثة',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      suffixIcon: IconButton(
-                        onPressed: () => runSearch(setSheetState),
-                        icon: const Icon(Icons.arrow_forward_rounded),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: isLoading
-                        ? const Center(child: AppLoadingIndicator(size: 28))
-                        : errorText != null
-                        ? Center(child: Text(errorText!))
-                        : results.isEmpty
-                        ? Center(
-                            child: Text(
-                              controller.text.trim().isEmpty
-                                  ? 'اكتب كلمة أو جملة للبحث داخل كل الرسائل.'
-                                  : 'لا توجد نتائج مطابقة.',
-                            ),
-                          )
-                        : ListView.separated(
-                            itemCount: results.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 8),
-                            itemBuilder: (context, index) {
-                              final message = results[index];
-                              final title =
-                                  message.sender?.displayName.isNotEmpty == true
-                                  ? message.sender!.displayName
-                                  : 'رسالة';
-                              final preview = message.content.isNotEmpty
-                                  ? message.content
-                                  : (message.fileName ?? 'مرفق');
-
-                              return InkWell(
-                                borderRadius: BorderRadius.circular(18),
-                                onTap: () async {
-                                  Navigator.of(context).pop();
-                                  await _jumpToSearchMessage(
-                                    message,
-                                    query: controller.text,
-                                  );
-                                },
-                                child: Ink(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.surface,
-                                    borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outlineVariant
-                                          .withValues(alpha: 0.42),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              title,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleSmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w800,
-                                                  ),
-                                            ),
-                                          ),
-                                          Text(
-                                            formatEgyptDateTime(
-                                              message.createdAt,
-                                              datePattern: 'dd/MM',
-                                              separator: ' • ',
-                                            ),
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.labelSmall,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        preview,
-                                        maxLines: 3,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      builder: (sheetContext) => ChatRemoteSearchSheet(
+        conversationId: widget.conversation.id,
+        onSelectMessage: (message) async {
+          Navigator.of(sheetContext).pop();
+          await _jumpToSearchMessage(message);
+        },
       ),
     );
   }

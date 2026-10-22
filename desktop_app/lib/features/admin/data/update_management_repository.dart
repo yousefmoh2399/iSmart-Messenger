@@ -272,6 +272,7 @@ class UpdateManagementRepository {
     required String connectionStatus,
     required bool autoUpdateEnabled,
     required bool silentInstallEnabled,
+    String platform = 'desktop_windows',
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/updates/devices/heartbeat',
@@ -283,6 +284,7 @@ class UpdateManagementRepository {
           'localIp': localIp.trim(),
         'branchCode': branchCode,
         'channel': channel,
+        'platform': platform,
         'appVersion': appVersion,
         'osName': osName,
         'osVersion': osVersion,

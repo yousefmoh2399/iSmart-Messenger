@@ -316,3 +316,9 @@ Future<String?> electronCaptureWindow(int windowId) async => null;
 Future<String?> electronCaptureScreen() async => null;
 
 Future<bool> electronOpenRdp(String ip) async => false;
+
+Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async =>
+    const <String, dynamic>{
+      'success': false,
+      'message': 'Not supported on this platform.',
+    };

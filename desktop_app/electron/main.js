@@ -598,18 +598,6 @@ function startWebAppServer() {
   });
 }
 
-function localIpv4s() {
-  const result = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry.family === "IPv4" && !entry.internal) {
-        result.push(entry.address);
-      }
-    }
-  }
-  return result;
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -624,6 +612,102 @@ function normalizeLanIp(value) {
     return "";
   }
   return parts.join(".");
+}
+
+const VIRTUAL_ADAPTER_REGEX =
+  /(vmware|virtualbox|vbox|vethernet|hyper-v|wsl|loopback|npcap|pcap|tap|tun|tailscale|zerotier|hamachi|wireguard|nordlynx|anyconnect|fortinet|pulse|cisco|vpn|bluetooth)/i;
+const PHYSICAL_ADAPTER_REGEX =
+  /(ethernet|wi-fi|wifi|wlan|eth|local area connection|شبكة)/i;
+const VIRTUAL_MAC_PREFIXES = [
+  "00:50:56",
+  "00:0c:29",
+  "00:05:69",
+  "08:00:27",
+  "00:15:5d",
+];
+
+function getRankedIpv4Addresses() {
+  const ifaces = os.networkInterfaces();
+  const candidates = [];
+
+  for (const [name, entries] of Object.entries(ifaces)) {
+    for (const entry of entries || []) {
+      const isIpv4 = entry.family === "IPv4" || entry.family === 4;
+      if (!isIpv4 || entry.internal) {
+        continue;
+      }
+      const rawIp = String(entry.address || "").trim();
+      const ip = normalizeLanIp(rawIp);
+      if (
+        !ip ||
+        ip.startsWith("127.") ||
+        ip.startsWith("169.254.") ||
+        ip === "0.0.0.0"
+      ) {
+        continue;
+      }
+
+      let score = 100;
+      const lowerName = name.toLowerCase();
+      const mac = (entry.mac || "").toLowerCase();
+
+      if (VIRTUAL_ADAPTER_REGEX.test(lowerName)) {
+        score -= 90;
+      }
+      if (VIRTUAL_MAC_PREFIXES.some((prefix) => mac.startsWith(prefix))) {
+        score -= 90;
+      }
+      if (PHYSICAL_ADAPTER_REGEX.test(lowerName)) {
+        score += 60;
+      }
+
+      // Priority for standard private branch / office subnets
+      if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) {
+        score += 30;
+      } else if (ip.startsWith("192.168.")) {
+        score += 20;
+      } else if (ip.startsWith("10.")) {
+        score += 15;
+      }
+
+      candidates.push({ name, ip, mac, score });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+function localIpv4s() {
+  const ranked = getRankedIpv4Addresses();
+  const seen = new Set();
+  const result = [];
+  for (const c of ranked) {
+    if (!seen.has(c.ip)) {
+      seen.add(c.ip);
+      result.push(c.ip);
+    }
+  }
+  if (result.length === 0) {
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) {
+        const isIpv4 = entry.family === "IPv4" || entry.family === 4;
+        if (isIpv4 && !entry.internal) {
+          const ip = normalizeLanIp(entry.address);
+          if (ip && !ip.startsWith("127.") && !seen.has(ip)) {
+            seen.add(ip);
+            result.push(ip);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function getBestLocalIpv4() {
+  const ips = localIpv4s();
+  return ips.length > 0 ? ips[0] : null;
 }
 
 function lanSubnetKey(value) {
@@ -2399,15 +2483,19 @@ async function printFile(target, printerName) {
   }
 }
 
-ipcMain.handle("app:get-device-info", async () => ({
-  hostName: os.hostname(),
-  localIp: localIpv4s()[0] || null,
-  localIps: localIpv4s(),
-  osName: process.platform,
-  osVersion: os.release(),
-  architecture: process.arch,
-  appVersion: app.getVersion(),
-}));
+ipcMain.handle("app:get-device-info", async () => {
+  const bestIp = getBestLocalIpv4();
+  const allIps = localIpv4s();
+  return {
+    hostName: os.hostname(),
+    localIp: bestIp || (allIps.length > 0 ? allIps[0] : null),
+    localIps: allIps,
+    osName: process.platform,
+    osVersion: os.release(),
+    architecture: process.arch,
+    appVersion: app.getVersion(),
+  };
+});
 
 ipcMain.handle("debug:log", async (_event, payload = {}) => {
   appendDebugLog(payload.scope, payload.message, payload.details);
@@ -2740,6 +2828,87 @@ ipcMain.handle("shell:open-rdp", async (_event, payload = {}) => {
     console.error("[electron] shell:open-rdp error", error);
     return { success: false, error: String(error.message || error) };
   }
+});
+
+ipcMain.handle("net:probe-peer-status", async (_event, payload = {}) => {
+  const targetIp = normalizeLanIp(payload.ip || payload.targetIp);
+  if (!targetIp) {
+    return {
+      success: false,
+      ip: "",
+      message: "عنوان IP غير صالح أو غير محدد.",
+    };
+  }
+
+  const { exec } = require("child_process");
+  const net = require("net");
+
+  // 1. ICMP Ping check (Windows ping -n 1 -w 1200)
+  const pingPromise = new Promise((resolve) => {
+    exec(`ping -n 1 -w 1200 ${targetIp}`, (err, stdout) => {
+      if (err) {
+        resolve({ reachable: false, latency: null });
+        return;
+      }
+      const text = String(stdout || "");
+      const match = text.match(/time[=<](\d+ms)/i) || text.match(/الوقت[=<](\d+ms)/i);
+      resolve({ reachable: true, latency: match ? match[1] : "<10ms" });
+    });
+  });
+
+  // 2. TCP RDP port check (3389)
+  const rdpPromise = new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1200);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(3389, targetIp);
+  });
+
+  // 3. LAN App check (iSmart Messenger HTTP port)
+  const lanAppPromise = probeLanPeerAtIp(targetIp, 1200).catch(() => ({ success: false }));
+
+  const [pingRes, rdpOpen, lanRes] = await Promise.all([pingPromise, rdpPromise, lanAppPromise]);
+
+  const isReachable = pingRes.reachable || rdpOpen || lanRes.success === true;
+  let summary = "";
+  if (isReachable) {
+    const parts = [];
+    if (pingRes.reachable) {
+      parts.push(`Ping: متاح (${pingRes.latency || '<10ms'})`);
+    }
+    if (rdpOpen) {
+      parts.push("Remote Desktop: جاهز (بورت 3389 مفتوح)");
+    } else {
+      parts.push("Remote Desktop: بورت 3389 مغلق");
+    }
+    if (lanRes.success === true) {
+      parts.push("تطبيق المراسلة: متصل ونشط");
+    }
+    summary = parts.join(" | ");
+  } else {
+    summary = "الجهاز لا يستجيب في الشبكة المحلية (Ping أو RDP غير متاح). تأكد من تشغيل الجهاز واتصاله بنفس الشبكة.";
+  }
+
+  return {
+    success: isReachable,
+    ip: targetIp,
+    pingReachable: pingRes.reachable,
+    latency: pingRes.latency,
+    rdpAvailable: rdpOpen,
+    lanAppActive: lanRes.success === true,
+    message: summary,
+  };
 });
 
 ipcMain.handle("http:fetch-base64", async (_event, payload = {}) => {

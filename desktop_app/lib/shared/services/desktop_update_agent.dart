@@ -102,6 +102,7 @@ class DesktopUpdateAgent {
   bool _disposed = false;
   bool _isHeartbeatRunning = false;
   bool _isTaskRunning = false;
+  Timer? _heartbeatTimer;
   String _connectionStatus = 'online';
   AppUser? _currentUser;
   String? _deviceUid;
@@ -143,6 +144,15 @@ class DesktopUpdateAgent {
     await _reconcilePostRestartState();
     await hasPreparedUpdate();
     await _emitPreparedUpdateStateIfNeeded();
+    // Run immediate heartbeat so peer devices can discover our LAN IP:
+    unawaited(_runHeartbeat());
+    // Keep online status and LAN IP updated periodically:
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (!_disposed && _currentUser != null) {
+        unawaited(_runHeartbeat());
+      }
+    });
   }
 
   Future<void> checkNow() async {
@@ -166,6 +176,8 @@ class DesktopUpdateAgent {
   }
 
   void stop() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _isHeartbeatRunning = false;
     _isTaskRunning = false;
     _currentUser = null;
@@ -741,16 +753,48 @@ class DesktopUpdateAgent {
         includeLoopback: false,
         type: InternetAddressType.IPv4,
       );
+      final virtualRegex = RegExp(
+        r'(vmware|virtualbox|vbox|vethernet|hyper-v|wsl|loopback|npcap|pcap|tap|tun|tailscale|zerotier|hamachi|wireguard|nordlynx|anyconnect|fortinet|pulse|cisco|vpn|bluetooth)',
+        caseSensitive: false,
+      );
+      final physicalRegex = RegExp(
+        r'(ethernet|wi-fi|wifi|wlan|eth|local area connection|شبكة)',
+        caseSensitive: false,
+      );
+
+      final candidates = <({String ip, int score})>[];
+
       for (final iface in interfaces) {
+        final lowerName = iface.name.toLowerCase();
         for (final address in iface.addresses) {
           if (address.type != InternetAddressType.IPv4 || address.isLoopback) {
             continue;
           }
-          final value = address.address.trim();
-          if (value.isNotEmpty) {
-            return value;
+          final ip = address.address.trim();
+          if (ip.isEmpty ||
+              ip.startsWith('127.') ||
+              ip.startsWith('169.254.') ||
+              ip == '0.0.0.0') {
+            continue;
           }
+          var score = 100;
+          if (virtualRegex.hasMatch(lowerName)) score -= 90;
+          if (physicalRegex.hasMatch(lowerName)) score += 60;
+          if (ip.startsWith('172.')) {
+            score += 30;
+          } else if (ip.startsWith('192.168.')) {
+            score += 20;
+          } else if (ip.startsWith('10.')) {
+            score += 15;
+          }
+
+          candidates.add((ip: ip, score: score));
         }
+      }
+
+      if (candidates.isNotEmpty) {
+        candidates.sort((a, b) => b.score.compareTo(a.score));
+        return candidates.first.ip;
       }
     } catch (_) {}
     return null;

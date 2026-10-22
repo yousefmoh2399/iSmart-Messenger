@@ -10,6 +10,7 @@ import '../../models/chat_models.dart';
 import '../../providers/chat_folders_provider.dart';
 import '../chat_appearance.dart';
 import 'chat_folder_inline_item.dart';
+import 'create_chat_folder_dialog.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
 
@@ -367,6 +368,8 @@ class ChatSidebar extends ConsumerWidget {
                   onOpenProfile: onOpenProfile,
                   onOpenFavoriteMessages: onOpenFavoriteMessages,
                   onToggleTheme: onToggleTheme,
+                  conversations: conversations,
+                  currentUserId: currentUserId,
                 ),
 
                 // ── Search field ────────────────────────────────────────────────
@@ -1153,8 +1156,12 @@ class _SidebarHeader extends ConsumerWidget {
     required this.onOpenProfile,
     required this.onOpenFavoriteMessages,
     required this.onToggleTheme,
+    this.conversations = const [],
+    this.currentUserId,
   });
 
+  final List<ChatConversation> conversations;
+  final String? currentUserId;
   final String userLabel;
   final int unreadTotal;
   final bool canOpenAdmin;
@@ -1280,41 +1287,15 @@ class _SidebarHeader extends ConsumerWidget {
               ),
               const SizedBox(width: 6),
               _TgIconButton(
-                tooltip: 'إنشاء مجلد',
+                tooltip: 'إنشاء مجلد محادثات',
                 icon: Icons.create_new_folder_rounded,
                 isDark: isDark,
                 accentColor: appearance.accent,
                 onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) {
-                      final controller = TextEditingController();
-                      return AlertDialog(
-                        title: const Text('مجلد جديد'),
-                        content: TextField(
-                          controller: controller,
-                          decoration:
-                              const InputDecoration(hintText: 'اسم المجلد'),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('إلغاء'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              if (controller.text.isNotEmpty) {
-                                ref
-                                    .read(chatFoldersProvider.notifier)
-                                    .createFolder(controller.text.trim());
-                              }
-                              Navigator.pop(context);
-                            },
-                            child: const Text('إنشاء'),
-                          ),
-                        ],
-                      );
-                    },
+                  showCreateOrEditChatFolderDialog(
+                    context,
+                    availableConversations: conversations,
+                    currentUserId: currentUserId,
                   );
                 },
                 dense: true,

@@ -73,7 +73,16 @@ router.post(
     body("hostName").optional().isString(),
     body("branchCode").optional().isString(),
     body("channel").optional().isString(),
-    body("platform").optional().isIn(["desktop_windows", "mobile_android"]),
+    body("platform")
+      .optional()
+      .isIn([
+        "desktop_windows",
+        "mobile_android",
+        "desktop",
+        "windows",
+        "desktop_electron",
+        "electron",
+      ]),
     body("appVersion").optional().isString(),
     body("osName").optional().isString(),
     body("osVersion").optional().isString(),

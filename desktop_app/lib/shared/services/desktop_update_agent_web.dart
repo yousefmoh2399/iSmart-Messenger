@@ -95,6 +95,7 @@ class DesktopUpdateAgent {
   bool _disposed = false;
   bool _isHeartbeatRunning = false;
   bool _isTaskRunning = false;
+  Timer? _heartbeatTimer;
   String _connectionStatus = 'online';
   AppUser? _currentUser;
   String? _deviceUid;
@@ -128,6 +129,15 @@ class DesktopUpdateAgent {
     if (web_bridge.isElectron()) {
       await _reconcilePostRestartState();
       await _emitPreparedUpdateStateIfNeeded();
+      // Run immediate heartbeat so peer devices can discover our LAN IP:
+      unawaited(_runHeartbeat());
+      // Keep online status and LAN IP updated periodically:
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+        if (!_disposed && _currentUser != null) {
+          unawaited(_runHeartbeat());
+        }
+      });
     }
   }
 
@@ -144,6 +154,8 @@ class DesktopUpdateAgent {
   }
 
   void stop() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _isHeartbeatRunning = false;
     _isTaskRunning = false;
     _currentUser = null;
@@ -171,15 +183,23 @@ class DesktopUpdateAgent {
       final appVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
       _deviceUid ??= await _loadOrCreateDeviceUid();
 
+      String? primaryIp = electronInfo['localIp']?.toString();
+      if ((primaryIp == null || primaryIp.trim().isEmpty) &&
+          electronInfo['localIps'] is List &&
+          (electronInfo['localIps'] as List).isNotEmpty) {
+        primaryIp = (electronInfo['localIps'] as List).first?.toString();
+      }
+
       final response = await _repository.heartbeatDevice(
         deviceUid: _deviceUid!,
         deviceName: electronInfo['hostName']?.toString() ?? 'Electron App',
         hostName: electronInfo['hostName']?.toString() ?? 'electron-host',
-        localIp: electronInfo['localIp']?.toString(),
+        localIp: primaryIp,
         branchCode: _currentUser!.branchCode.trim().toLowerCase().isEmpty
             ? 'main'
             : _currentUser!.branchCode.trim().toLowerCase(),
         channel: 'stable',
+        platform: 'desktop_windows',
         appVersion: appVersion,
         osName: 'electron-${electronInfo['osName'] ?? 'windows'}',
         osVersion: electronInfo['osVersion']?.toString() ?? 'unknown',
