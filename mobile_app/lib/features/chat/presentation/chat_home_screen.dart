@@ -1,3 +1,4 @@
+import '../../workspace/presentation/workspace_home_screen.dart';
 import 'dart:async';
 
 import 'package:animations/animations.dart';
@@ -409,6 +410,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       case 'chat':
         Navigator.of(context).popUntil((route) => route.isFirst);
         break;
+      case 'workspace':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const WorkspaceHomeScreen()),
+        );
+        break;
       case 'chatFolders':
         _showCreateFolderDialog();
         break;
@@ -600,7 +606,23 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                     )
                   : null,
               actions: [
-                if (_selectedNavIndex == 0 && authUser != null)
+                if (_selectedNavIndex == 0 && authUser != null) ...[
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 4),
+                    child: _HeaderIconButton(
+                      tooltip: 'مساحة العمل (Notion)',
+                      icon: Icons.edit_note_rounded,
+                      appearance: appearance,
+                      isDark: isDark,
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const WorkspaceHomeScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                   Padding(
                     padding: const EdgeInsetsDirectional.only(end: 4),
                     child: _HeaderIconButton(
@@ -611,6 +633,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                       onPressed: () => _showCreateDialog(authUser),
                     ),
                   ),
+                ],
                 Builder(
                   builder: (context) => Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -3326,6 +3349,12 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                         label: 'الرسائل المفضلة',
                         onTap: () => onSelected('favoriteMessages'),
                         iconColor: const Color(0xFFFFCC00), // Yellow
+                      ),
+                      _MenuItem(
+                        icon: Icons.edit_note_rounded,
+                        label: 'مساحة العمل (Notion)',
+                        onTap: () => onSelected('workspace'),
+                        iconColor: const Color(0xFF5856D6),
                       ),
                       _MenuItem(
                         icon: Icons.create_new_folder_outlined,

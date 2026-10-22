@@ -1,3 +1,4 @@
+import '../features/workspace/presentation/workspace_home_screen.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -158,6 +159,8 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
         return 6;
       case DesktopWorkspaceSection.systemMonitor:
         return 7;
+      case DesktopWorkspaceSection.workspace:
+        return 8;
     }
   }
 
@@ -256,6 +259,9 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                         : const SizedBox.shrink(),
                     _mountedTabIndices.contains(7)
                         ? const SystemMonitorScreen(isWrapped: true)
+                        : const SizedBox.shrink(),
+                    _mountedTabIndices.contains(8)
+                        ? const WorkspaceHomeScreen(isWrapped: true)
                         : const SizedBox.shrink(),
                   ],
                 ),

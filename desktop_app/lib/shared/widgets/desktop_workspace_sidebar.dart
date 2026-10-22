@@ -13,6 +13,7 @@ import '../../features/chat/presentation/chat_realtime_controller.dart';
 enum DesktopWorkspaceSection {
   chat,
   files,
+  workspace,
   profile,
   admin,
   printers,
@@ -34,6 +35,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
     required this.onOpenChat,
     required this.onRefresh,
     required this.onOpenFiles,
+    this.onOpenWorkspace,
     required this.onOpenServers,
     this.showServersShortcut = true,
     required this.onOpenProfile,
@@ -58,6 +60,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
   final VoidCallback onOpenChat;
   final VoidCallback onRefresh;
   final VoidCallback onOpenFiles;
+  final VoidCallback? onOpenWorkspace;
   final VoidCallback onOpenServers;
   final bool showServersShortcut;
   final VoidCallback onOpenProfile;
@@ -132,6 +135,15 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
         accentColor: accentColor,
         onPressed: onOpenFiles,
       ),
+      if (onOpenWorkspace != null)
+        _DesktopWorkspaceIconButton(
+          tooltip: 'مساحة العمل (Notion)',
+          icon: Icons.edit_note_rounded,
+          selected: activeSection == DesktopWorkspaceSection.workspace,
+          isDark: isDark,
+          accentColor: const Color(0xFF5856D6),
+          onPressed: onOpenWorkspace!,
+        ),
       if (showServersShortcut)
         _DesktopWorkspaceIconButton(
           tooltip: 'السيرفرات',
