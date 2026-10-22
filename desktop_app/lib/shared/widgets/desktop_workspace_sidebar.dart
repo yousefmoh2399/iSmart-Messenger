@@ -77,6 +77,12 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final chatState = ref.watch(chatOverviewControllerProvider);
     final unreadCount = chatState.valueOrNull?.totalUnread ?? 0;
+    final agent = ref.watch(desktopUpdateAgentProvider);
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: agent.hasPreparedUpdateNotifier,
+      builder: (context, hasPrepared, _) {
+        final showPulsing = hasPrepared || hasPulsingUpdate;
 
     final displayName = (user?.fullName.trim().isNotEmpty ?? false)
         ? user!.fullName.trim()
@@ -138,6 +144,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
           icon: Icons.system_update_alt_rounded,
           isDark: isDark,
           accentColor: accentColor,
+          hasPulsingBadge: showPulsing,
           onPressed: onOpenUpdates!,
         ),
       if (onOpenSystemMonitor != null)
@@ -248,6 +255,8 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
           ],
         ),
       ),
+    );
+      },
     );
   }
 }
@@ -419,6 +428,12 @@ class _DesktopWorkspaceIconButtonState
                           ),
                         ),
                       ),
+                    ),
+                  if (widget.hasPulsingBadge)
+                    const Positioned(
+                      top: 4,
+                      right: 4,
+                      child: _PulsingUpdateBadge(),
                     ),
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 220),

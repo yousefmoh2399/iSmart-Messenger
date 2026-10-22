@@ -141,6 +141,7 @@ class DesktopUpdateAgent {
     await DesktopUpdatePaths.ensureInitialized();
     _deviceUid ??= await _loadOrCreateDeviceUid();
     await _reconcilePostRestartState();
+    await hasPreparedUpdate();
     await _emitPreparedUpdateStateIfNeeded();
   }
 
@@ -364,6 +365,7 @@ class DesktopUpdateAgent {
         artifactPath: artifactPath,
         artifactSha256: digest,
       );
+      hasPreparedUpdateNotifier.value = true;
 
       await _emitAndReport(
         taskId: task.id,
@@ -996,9 +998,29 @@ class DesktopUpdateAgent {
       'ismart_messenger_updater.exe',
     );
     if (!File(helperExecutablePath).existsSync()) {
+      try {
+        final process = await Process.start(
+          invocation.executable,
+          invocation.attempts.isNotEmpty ? invocation.attempts.first : const <String>[],
+          mode: ProcessStartMode.detached,
+          runInShell: true,
+        );
+        if (process.pid > 0) {
+          return const _InstallerResult(
+            success: true,
+            message: 'تم تشغيل معالج التثبيت بنجاح. سيتم إغلاق التطبيق لإكمال التثبيت.',
+            completionHandledExternally: true,
+          );
+        }
+      } catch (e) {
+        return _InstallerResult(
+          success: false,
+          message: 'تعذر تشغيل ملف التثبيت المباشر: ' + e.toString(),
+        );
+      }
       return const _InstallerResult(
         success: false,
-        message: 'Windows update helper was not found next to the app.',
+        message: 'تعذر تشغيل معالج التثبيت.',
       );
     }
 

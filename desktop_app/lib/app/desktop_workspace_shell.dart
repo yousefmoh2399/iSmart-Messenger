@@ -266,6 +266,7 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                 currentThemeMode: themeMode,
                 isDark: isDark,
                 accentColor: Theme.of(context).colorScheme.primary,
+                hasPulsingUpdate: ref.watch(desktopUpdateAgentProvider).hasPreparedUpdateNotifier.value,
                 onOpenChat: () => _navigateTo(DesktopWorkspaceSection.chat),
                 onRefresh: () =>
                     ref.read(chatOverviewControllerProvider.notifier).refresh(),
