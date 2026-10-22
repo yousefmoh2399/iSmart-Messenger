@@ -694,38 +694,45 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
   const shouldPaginate =
     options.page !== undefined || options.limit !== undefined;
   const page = Math.max(1, Math.min(Number(options.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(options.limit || 50), 500));
+  const limit = Math.max(1, Math.min(Number(options.limit || 50), 5000));
   const skip = (page - 1) * limit;
   const query = {
     isActive: true,
     _id: { $ne: currentUser.id },
   };
-  if (currentUser.role === "user") {
-    query.role = { $ne: "admin" };
-  }
+
+  const andConditions = [];
 
   if (search) {
     const regex = new RegExp(escapeRegExp(search), "i");
-    query.$or = [
-      { username: regex },
-      { fullName: regex },
-      { branchCode: regex },
-    ];
+    andConditions.push({
+      $or: [
+        { username: regex },
+        { fullName: regex },
+        { branchCode: regex },
+        { jobTitle: regex },
+      ],
+    });
   }
   if (options.departmentId) {
-    const departmentMatch = [
-      { departmentId: options.departmentId },
-      { departmentIds: options.departmentId },
-    ];
-    if (query.$or) {
-      query.$and = [{ $or: query.$or }, { $or: departmentMatch }];
-      delete query.$or;
-    } else {
-      query.$or = departmentMatch;
-    }
+    andConditions.push({
+      $or: [
+        { departmentId: options.departmentId },
+        { departmentIds: options.departmentId },
+      ],
+    });
   }
   if (options.branchId) {
-    query.branchId = options.branchId;
+    andConditions.push({
+      $or: [
+        { branchId: options.branchId },
+        { branchCode: options.branchId },
+      ],
+    });
+  }
+
+  if (andConditions.length > 0) {
+    query.$and = andConditions;
   }
 
   const usersQuery = User.find(query).sort({

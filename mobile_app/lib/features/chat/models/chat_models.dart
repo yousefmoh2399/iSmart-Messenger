@@ -109,6 +109,7 @@ class ChatDirectoryUser {
     this.jobTitle = '',
     required this.role,
     required this.departmentId,
+    this.departmentIds = const [],
     required this.branchId,
     required this.branchCode,
     required this.isOnline,
@@ -125,6 +126,7 @@ class ChatDirectoryUser {
   final String jobTitle;
   final String role;
   final String? departmentId;
+  final List<String> departmentIds;
   final String? branchId;
   final String branchCode;
   final bool isOnline;
@@ -145,6 +147,9 @@ class ChatDirectoryUser {
       jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId']?.toString(),
+      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
+          .map((entry) => entry.toString())
+          .toList(),
       branchId: json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
@@ -168,6 +173,7 @@ class ChatDirectoryUser {
       'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
+      'departmentIds': departmentIds,
       'branchId': branchId,
       'branchCode': branchCode,
       'isOnline': isOnline,

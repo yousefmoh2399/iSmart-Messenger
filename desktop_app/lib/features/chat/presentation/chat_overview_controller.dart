@@ -109,20 +109,26 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }
 
-    late ChatDirectoryUsersPage usersPage;
+    final collectedUsers = <String, ChatDirectoryUser>{};
     try {
-      usersPage = await _guardAuth(() => repository.fetchUsersPage(limit: 250));
+      var currentPage = 1;
+      var hasMore = true;
+      while (hasMore) {
+        final page = await _guardAuth(
+          () => repository.fetchUsersPage(page: currentPage, limit: 500),
+        );
+        for (final u in page.users) {
+          collectedUsers[u.id] = u;
+        }
+        _usersPage = page.page;
+        _hasMoreUsers = page.hasMore;
+        hasMore = page.hasMore && page.users.isNotEmpty;
+        currentPage++;
+        if (currentPage > 20) break;
+      }
     } catch (error) {
       if (_isUnauthorized(error)) rethrow;
-      usersPage = const ChatDirectoryUsersPage(
-        users: [],
-        page: 1,
-        hasMore: false,
-        limit: 40,
-      );
     }
-    _usersPage = usersPage.page;
-    _hasMoreUsers = usersPage.hasMore;
 
     final departments = await safeList(repository.fetchDepartments);
     final branches = await safeList(repository.fetchBranches);
@@ -135,7 +141,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     return ChatOverviewData(
       conversations: conversations,
       manageableConversations: manageableConversations,
-      users: usersPage.users,
+      users: collectedUsers.values.toList(),
       departments: departments,
       branches: branches,
       roles: roles,
@@ -153,7 +159,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _loadingMoreUsers = true;
     try {
       final page = await _guardAuth(
-        () => _repository().fetchUsersPage(page: _usersPage + 1),
+        () => _repository().fetchUsersPage(page: _usersPage + 1, limit: 500),
       );
       _usersPage = page.page;
       _hasMoreUsers = page.hasMore;
@@ -166,6 +172,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       );
     } finally {
       _loadingMoreUsers = false;
+    }
+  }
+
+  Future<void> ensureAllUsersLoaded() async {
+    final current = state.valueOrNull;
+    if (current == null || !_hasMoreUsers) return;
+    while (_hasMoreUsers) {
+      final beforePage = _usersPage;
+      await loadMoreUsers();
+      if (_usersPage == beforePage) break;
     }
   }
 

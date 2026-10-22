@@ -1,3 +1,5 @@
+import 'package:flutter/gestures.dart';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,13 +28,16 @@ class _NewConversationDialogState
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _searchController = TextEditingController();
+  final _filterScrollController = ScrollController();
 
   final _selectedMembers = <String>{};
   final _selectedAdmins = <String>{};
 
   late String _selectedType; // 'direct', 'group', 'department', 'broadcast'
   ChatDirectoryUser? _selectedDirectUser;
+  String _filterCategory = 'department'; // 'department' or 'branch'
   String? _filterDepartmentId;
+  String? _filterBranchId;
   String? _departmentRoomDeptId;
   String _searchQuery = '';
   bool _isCreating = false;
@@ -56,6 +61,10 @@ class _NewConversationDialogState
       if (canSendBroadcast) 'broadcast',
     ];
     _selectedType = _availableTypes.first;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(chatOverviewControllerProvider.notifier).ensureAllUsersLoaded();
+    });
   }
 
   @override
@@ -63,6 +72,7 @@ class _NewConversationDialogState
     _nameController.dispose();
     _descriptionController.dispose();
     _searchController.dispose();
+    _filterScrollController.dispose();
     super.dispose();
   }
 
@@ -191,17 +201,57 @@ class _NewConversationDialogState
         .where((u) => u.id != widget.currentUser.id && u.isActive)
         .toList();
 
-    final departmentUsers = _filterDepartmentId == null
+    // Filter by branch
+    final branchFilteredUsers = _filterBranchId == null
         ? allUsers
-        : allUsers.where((u) => u.departmentId == _filterDepartmentId).toList();
+        : allUsers.where((u) {
+            final b = currentOverview.branches.firstWhere(
+              (branch) => branch.id == _filterBranchId,
+              orElse: () => BranchSummary(
+                id: _filterBranchId!,
+                name: '',
+                code: '',
+                description: '',
+                membersCount: 0,
+              ),
+            );
+            return u.branchId == _filterBranchId ||
+                (b.code.isNotEmpty &&
+                    u.branchCode.toUpperCase() == b.code.toUpperCase());
+          }).toList();
+
+    // Filter by department (matching both departmentId and departmentIds)
+    final departmentUsers = _filterDepartmentId == null
+        ? branchFilteredUsers
+        : branchFilteredUsers.where((u) {
+            return u.departmentId == _filterDepartmentId ||
+                u.departmentIds.contains(_filterDepartmentId);
+          }).toList();
 
     final filteredUsers = departmentUsers.where((u) {
       if (_searchQuery.isEmpty) return true;
       final q = _searchQuery.toLowerCase();
+      final branchName = currentOverview.branches
+          .where((b) =>
+              b.id == u.branchId ||
+              (b.code.isNotEmpty &&
+                  b.code.toUpperCase() == u.branchCode.toUpperCase()))
+          .firstOrNull
+          ?.name ??
+          '';
+      final deptName = currentOverview.departments
+          .where((d) =>
+              d.id == u.departmentId ||
+              u.departmentIds.contains(d.id))
+          .firstOrNull
+          ?.name ??
+          '';
       return u.displayName.toLowerCase().contains(q) ||
           u.username.toLowerCase().contains(q) ||
           u.jobTitle.toLowerCase().contains(q) ||
-          u.branchCode.toLowerCase().contains(q);
+          u.branchCode.toLowerCase().contains(q) ||
+          branchName.toLowerCase().contains(q) ||
+          deptName.toLowerCase().contains(q);
     }).toList();
 
     final dialogBg = isDark ? const Color(0xFF161C24) : Colors.white;
@@ -240,6 +290,7 @@ class _NewConversationDialogState
                       departmentUsers: departmentUsers,
                       filteredUsers: filteredUsers,
                       departments: currentOverview.departments,
+                      branches: currentOverview.branches,
                       cardBg: cardBg,
                       borderColor: borderColor,
                       isDark: isDark,
@@ -258,6 +309,7 @@ class _NewConversationDialogState
                     child: _buildDetailsColumn(
                       allUsers: allUsers,
                       departments: currentOverview.departments,
+                      branches: currentOverview.branches,
                       cardBg: cardBg,
                       borderColor: borderColor,
                       isDark: isDark,
@@ -392,6 +444,7 @@ class _NewConversationDialogState
     required List<ChatDirectoryUser> departmentUsers,
     required List<ChatDirectoryUser> filteredUsers,
     required List<DepartmentSummary> departments,
+    required List<BranchSummary> branches,
     required Color cardBg,
     required Color borderColor,
     required bool isDark,
@@ -401,7 +454,7 @@ class _NewConversationDialogState
       children: [
         // Search Input
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
           child: Container(
             height: 38,
             decoration: BoxDecoration(
@@ -413,7 +466,7 @@ class _NewConversationDialogState
               onChanged: (val) => setState(() => _searchQuery = val.trim()),
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'بحث بالاسم، المسمى، الفرع...',
+                hintText: 'بحث بالاسم، المسمى، الفرع، القسم...',
                 hintStyle: TextStyle(
                   fontSize: 12,
                   color: isDark ? Colors.white38 : Colors.black38,
@@ -435,55 +488,219 @@ class _NewConversationDialogState
           ),
         ),
 
-        // Department Filter Pills
-        SizedBox(
-          height: 34,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: departments.length + 1,
-            itemBuilder: (context, index) {
-              final isAll = index == 0;
-              final dept = isAll ? null : departments[index - 1];
-              final isSelected = isAll
-                  ? _filterDepartmentId == null
-                  : _filterDepartmentId == dept?.id;
-              final label = isAll ? 'كل الأقسام' : dept!.name;
-
-              return Padding(
-                padding: const EdgeInsets.only(left: 6),
-                child: InkWell(
-                  onTap: () => setState(() => _filterDepartmentId = dept?.id),
-                  borderRadius: BorderRadius.circular(8),
+        // Filter Category Switcher: [📁 الأقسام] [🏢 الفروع] + Reset Button
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              _buildCategoryTab(
+                label: '📁 الأقسام',
+                isSelected: _filterCategory == 'department',
+                isDark: isDark,
+                onTap: () {
+                  setState(() {
+                    _filterCategory = 'department';
+                    _filterBranchId = null;
+                  });
+                },
+              ),
+              const SizedBox(width: 6),
+              _buildCategoryTab(
+                label: '🏢 الفروع',
+                isSelected: _filterCategory == 'branch',
+                isDark: isDark,
+                onTap: () {
+                  setState(() {
+                    _filterCategory = 'branch';
+                    _filterDepartmentId = null;
+                  });
+                },
+              ),
+              const Spacer(),
+              if (_filterDepartmentId != null || _filterBranchId != null)
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _filterDepartmentId = null;
+                      _filterBranchId = null;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(6),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? const Color(0xFF00A884)
-                          : (isDark
-                              ? const Color(0xFF222C38)
-                              : const Color(0xFFEAEFF5)),
-                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
                     ),
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: isSelected
-                            ? Colors.white
-                            : (isDark ? Colors.white70 : Colors.black87),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.clear_rounded, size: 12, color: Colors.red),
+                        SizedBox(width: 3),
+                        Text(
+                          'إعادة ضبط',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: Colors.red,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // Horizontal Filter Pills with Mouse-Drag + Mouse-Wheel + Chevrons
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: SizedBox(
+            height: 32,
+            child: Row(
+              children: [
+                _buildScrollButton(
+                  icon: Icons.chevron_right_rounded,
+                  isDark: isDark,
+                  onTap: () {
+                    if (_filterScrollController.hasClients) {
+                      _filterScrollController.animateTo(
+                        (_filterScrollController.offset - 140).clamp(
+                          0.0,
+                          _filterScrollController.position.maxScrollExtent,
+                        ),
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOut,
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Listener(
+                    onPointerSignal: (pointerSignal) {
+                      if (pointerSignal is PointerScrollEvent &&
+                          _filterScrollController.hasClients) {
+                        final delta = pointerSignal.scrollDelta.dy != 0
+                            ? pointerSignal.scrollDelta.dy
+                            : pointerSignal.scrollDelta.dx;
+                        if (delta != 0) {
+                          final target = (_filterScrollController.offset + delta).clamp(
+                            0.0,
+                            _filterScrollController.position.maxScrollExtent,
+                          );
+                          _filterScrollController.jumpTo(target);
+                        }
+                      }
+                    },
+                    child: ScrollConfiguration(
+                      behavior: ScrollConfiguration.of(context).copyWith(
+                        dragDevices: {
+                          PointerDeviceKind.touch,
+                          PointerDeviceKind.mouse,
+                          PointerDeviceKind.trackpad,
+                          PointerDeviceKind.stylus,
+                        },
+                      ),
+                      child: ListView.builder(
+                        controller: _filterScrollController,
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        itemCount: _filterCategory == 'department'
+                            ? departments.length + 1
+                            : branches.length + 1,
+                        itemBuilder: (context, index) {
+                          if (_filterCategory == 'department') {
+                            final isAll = index == 0;
+                            final dept = isAll ? null : departments[index - 1];
+                            final isSelected = isAll
+                                ? _filterDepartmentId == null
+                                : _filterDepartmentId == dept?.id;
+                            final count = isAll
+                                ? null
+                                : departmentUsers
+                                    .where((u) =>
+                                        u.departmentId == dept?.id ||
+                                        u.departmentIds.contains(dept?.id))
+                                    .length;
+                            final label = isAll
+                                ? 'كل الأقسام'
+                                : (count != null && count > 0
+                                    ? '${dept!.name} ($count)'
+                                    : dept!.name);
+
+                            return _buildFilterPill(
+                              label: label,
+                              isSelected: isSelected,
+                              isDark: isDark,
+                              onTap: () => setState(() => _filterDepartmentId = dept?.id),
+                            );
+                          } else {
+                            final isAll = index == 0;
+                            final branch = isAll ? null : branches[index - 1];
+                            final isSelected = isAll
+                                ? _filterBranchId == null
+                                : _filterBranchId == branch?.id;
+                            final count = isAll
+                                ? null
+                                : departmentUsers
+                                    .where((u) =>
+                                        u.branchId == branch?.id ||
+                                        (branch != null &&
+                                            branch.code.isNotEmpty &&
+                                            u.branchCode.toUpperCase() ==
+                                                branch.code.toUpperCase()))
+                                    .length;
+                            final branchTitle = isAll
+                                ? 'كل الفروع'
+                                : (branch!.name.isNotEmpty
+                                    ? branch.name
+                                    : branch.code);
+                            final label = isAll
+                                ? branchTitle
+                                : (count != null && count > 0
+                                    ? '$branchTitle ($count)'
+                                    : branchTitle);
+
+                            return _buildFilterPill(
+                              label: label,
+                              isSelected: isSelected,
+                              isDark: isDark,
+                              onTap: () => setState(() => _filterBranchId = branch?.id),
+                            );
+                          }
+                        },
                       ),
                     ),
                   ),
                 ),
-              );
-            },
+                const SizedBox(width: 4),
+                _buildScrollButton(
+                  icon: Icons.chevron_left_rounded,
+                  isDark: isDark,
+                  onTap: () {
+                    if (_filterScrollController.hasClients) {
+                      _filterScrollController.animateTo(
+                        (_filterScrollController.offset + 140).clamp(
+                          0.0,
+                          _filterScrollController.position.maxScrollExtent,
+                        ),
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOut,
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
         ),
 
-        // Batch Select All In Department Banner (in group / broadcast mode)
+        // Batch Select All In Department/Branch Banner (in group / broadcast mode)
         if ((_selectedType == 'group' || _selectedType == 'broadcast') &&
             departmentUsers.isNotEmpty) ...[
           const SizedBox(height: 6),
@@ -516,9 +733,26 @@ class _NewConversationDialogState
                         ? _selectedDirectUser?.id == user.id
                         : _selectedMembers.contains(user.id);
                     final deptName = departments
-                        .where((d) => d.id == user.departmentId)
+                        .where((d) => d.id == user.departmentId || user.departmentIds.contains(d.id))
                         .firstOrNull
                         ?.name;
+                    final branch = branches.firstWhere(
+                      (b) =>
+                          b.id == user.branchId ||
+                          (b.code.isNotEmpty &&
+                              b.code.toUpperCase() ==
+                                  user.branchCode.toUpperCase()),
+                      orElse: () => BranchSummary(
+                        id: '',
+                        name: user.branchCode,
+                        code: user.branchCode,
+                        description: '',
+                        membersCount: 0,
+                      ),
+                    );
+                    final branchDisplayName = branch.name.isNotEmpty
+                        ? branch.name
+                        : user.branchCode;
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 6),
@@ -592,6 +826,47 @@ class _NewConversationDialogState
                                 ),
                               ),
                             ),
+                            if (user.role == 'admin') ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'مسؤول',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    color: Colors.amber,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ] else if (user.role == 'manager') ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF3B82F6).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'مدير',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    color: Color(0xFF3B82F6),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
                             if (deptName != null && deptName.isNotEmpty) ...[
                               const SizedBox(width: 4),
                               Container(
@@ -617,17 +892,23 @@ class _NewConversationDialogState
                             ],
                           ],
                         ),
-                        subtitle: Text(
-                          [
-                            if (user.jobTitle.isNotEmpty) user.jobTitle,
-                            if (user.branchCode.isNotEmpty) user.branchCode,
-                          ].join(' • '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDark ? Colors.white54 : Colors.black54,
-                          ),
+                        subtitle: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                [
+                                  if (user.jobTitle.isNotEmpty) user.jobTitle,
+                                  if (branchDisplayName.isNotEmpty) '🏢 $branchDisplayName',
+                                ].join(' • '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? Colors.white54 : Colors.black54,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         trailing: isDirect
                             ? Icon(
@@ -656,6 +937,106 @@ class _NewConversationDialogState
     );
   }
 
+  Widget _buildCategoryTab({
+    required String label,
+    required bool isSelected,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (isDark ? const Color(0xFF2E3B4B) : const Color(0xFFDCE4ED))
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF00A884)
+                : (isDark ? Colors.white10 : Colors.black12),
+            width: isSelected ? 1.2 : 0.8,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected
+                ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                : (isDark ? Colors.white54 : Colors.black54),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterPill({
+    required String label,
+    required bool isSelected,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF00A884)
+                : (isDark
+                    ? const Color(0xFF222C38)
+                    : const Color(0xFFEAEFF5)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              color: isSelected
+                  ? Colors.white
+                  : (isDark ? Colors.white70 : Colors.black87),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollButton({
+    required IconData icon,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: 24,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF222C38) : const Color(0xFFEAEFF5),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Icon(
+          icon,
+          size: 16,
+          color: isDark ? Colors.white70 : Colors.black87,
+        ),
+      ),
+    );
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Department Batch Select Banner
   // ─────────────────────────────────────────────────────────────────────────
@@ -665,6 +1046,12 @@ class _NewConversationDialogState
   ) {
     final deptUserIds = deptUsers.map((u) => u.id).toSet();
     final allSelected = deptUserIds.every(_selectedMembers.contains);
+    final count = deptUsers.length;
+    final title = _filterBranchId != null
+        ? (allSelected ? 'إلغاء تحديد أعضاء الفرع ($count)' : 'تحديد جميع أعضاء الفرع ($count)')
+        : _filterDepartmentId != null
+            ? (allSelected ? 'إلغاء تحديد أعضاء القسم ($count)' : 'تحديد جميع أعضاء القسم ($count)')
+            : (allSelected ? 'إلغاء تحديد جميع الزملاء المعروضين ($count)' : 'تحديد جميع الزملاء المعروضين ($count)');
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -685,9 +1072,7 @@ class _NewConversationDialogState
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              allSelected
-                  ? 'إلغاء تحديد أعضاء القسم (${deptUsers.length})'
-                  : 'تحديد جميع أعضاء القسم (${deptUsers.length})',
+              title,
               style: const TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 11.5,
@@ -725,12 +1110,13 @@ class _NewConversationDialogState
   Widget _buildDetailsColumn({
     required List<ChatDirectoryUser> allUsers,
     required List<DepartmentSummary> departments,
+    required List<BranchSummary> branches,
     required Color cardBg,
     required Color borderColor,
     required bool isDark,
   }) {
     if (_selectedType == 'direct') {
-      return _buildDirectDetailsPane(departments, isDark);
+      return _buildDirectDetailsPane(departments, branches, isDark);
     }
 
     if (_selectedType == 'department') {
@@ -750,6 +1136,7 @@ class _NewConversationDialogState
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildDirectDetailsPane(
     List<DepartmentSummary> departments,
+    List<BranchSummary> branches,
     bool isDark,
   ) {
     if (_selectedDirectUser == null) {
@@ -794,9 +1181,24 @@ class _NewConversationDialogState
 
     final user = _selectedDirectUser!;
     final deptName = departments
-        .where((d) => d.id == user.departmentId)
+        .where((d) => d.id == user.departmentId || user.departmentIds.contains(d.id))
         .firstOrNull
         ?.name;
+    final branch = branches.firstWhere(
+      (b) =>
+          b.id == user.branchId ||
+          (b.code.isNotEmpty &&
+              b.code.toUpperCase() == user.branchCode.toUpperCase()),
+      orElse: () => BranchSummary(
+        id: '',
+        name: user.branchCode,
+        code: user.branchCode,
+        description: '',
+        membersCount: 0,
+      ),
+    );
+    final branchDisplayName =
+        branch.name.isNotEmpty ? branch.name : user.branchCode;
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -845,8 +1247,8 @@ class _NewConversationDialogState
                   _buildInfoRow('المسمى الوظيفي', user.jobTitle, isDark),
                 if (deptName != null)
                   _buildInfoRow('القسم', deptName, isDark),
-                if (user.branchCode.isNotEmpty)
-                  _buildInfoRow('الفرع', user.branchCode, isDark),
+                if (branchDisplayName.isNotEmpty)
+                  _buildInfoRow('الفرع', branchDisplayName, isDark),
               ],
             ),
           ),

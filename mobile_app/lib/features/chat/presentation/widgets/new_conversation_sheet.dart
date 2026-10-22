@@ -57,6 +57,9 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
   void initState() {
     super.initState();
     _departmentRoomDeptId = widget.currentUser.departmentId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(chatOverviewControllerProvider.notifier).ensureAllUsersLoaded();
+    });
   }
 
   @override
@@ -290,12 +293,14 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
         .where((u) => u.id != widget.currentUser.id && u.isActive)
         .toList();
 
-    // Filter by department
+    // Filter by department (matching both departmentId and departmentIds)
     final departmentUsers = _filterDepartmentId == null
         ? allUsers
-        : allUsers.where((u) => u.departmentId == _filterDepartmentId).toList();
+        : allUsers.where((u) =>
+            u.departmentId == _filterDepartmentId ||
+            u.departmentIds.contains(_filterDepartmentId)).toList();
 
-    // Filter by search query
+    // Filter by search query (including branch and department names)
     final filteredUsers = departmentUsers.where((u) {
       if (_searchQuery.isEmpty) return true;
       final query = _searchQuery.toLowerCase();
@@ -303,10 +308,25 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
       final username = u.username.toLowerCase();
       final job = u.jobTitle.toLowerCase();
       final branch = u.branchCode.toLowerCase();
+      final branchName = overview.branches
+          .where((b) =>
+              b.id == u.branchId ||
+              (b.code.isNotEmpty &&
+                  b.code.toUpperCase() == u.branchCode.toUpperCase()))
+          .firstOrNull
+          ?.name ??
+          '';
+      final deptName = overview.departments
+          .where((d) => d.id == u.departmentId || u.departmentIds.contains(d.id))
+          .firstOrNull
+          ?.name ??
+          '';
       return name.contains(query) ||
           username.contains(query) ||
           job.contains(query) ||
-          branch.contains(query);
+          branch.contains(query) ||
+          branchName.toLowerCase().contains(query) ||
+          deptName.toLowerCase().contains(query);
     }).toList();
 
     final sheetBg = isDark

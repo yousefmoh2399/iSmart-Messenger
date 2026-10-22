@@ -435,8 +435,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final auth = ref.read(authControllerProvider);
     if (auth.status != AuthStatus.authenticated) {
       Future<void>.delayed(const Duration(milliseconds: 600), () {
-        if (mounted && _pendingAndroidShare != null)
+        if (mounted && _pendingAndroidShare != null) {
           _presentIncomingShare(_pendingAndroidShare!);
+        }
       });
       return;
     }
@@ -445,8 +446,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         const [];
     if (conversations.isEmpty) {
       Future<void>.delayed(const Duration(milliseconds: 600), () {
-        if (mounted && _pendingAndroidShare != null)
+        if (mounted && _pendingAndroidShare != null) {
           _presentIncomingShare(_pendingAndroidShare!);
+        }
       });
       return;
     }
@@ -532,8 +534,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final mediaGroupId = content.paths.length > 1
         ? 'album_${DateTime.now().microsecondsSinceEpoch}'
         : null;
-    if (content.text.trim().isNotEmpty)
+    if (content.text.trim().isNotEmpty) {
       await controller.sendMessage(content: content.text.trim());
+    }
     for (final path in content.paths) {
       await controller.sendFile(
         path,

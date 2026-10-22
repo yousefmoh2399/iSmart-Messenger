@@ -178,6 +178,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
   }
 
+  Future<void> ensureAllUsersLoaded() async {
+    final current = state.valueOrNull;
+    if (current == null || !_hasMoreUsers) return;
+    while (_hasMoreUsers) {
+      final beforePage = _usersPage;
+      await loadMoreUsers();
+      if (_usersPage == beforePage) break;
+    }
+  }
+
   void _listenToSocket() {
     _eventsSubscription?.cancel();
     final socketService = _chatSocketService;

@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
@@ -27,6 +28,18 @@ import '../shared/widgets/loading_indicator.dart';
 import 'desktop_workspace_shell.dart';
 
 
+class AppDesktopScrollBehavior extends MaterialScrollBehavior {
+  const AppDesktopScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+}
+
 class WorkplaceDesktopApp extends ConsumerWidget {
   const WorkplaceDesktopApp({super.key});
 
@@ -46,6 +59,7 @@ class WorkplaceDesktopApp extends ConsumerWidget {
     unawaited(web_bridge.setElectronWindowTheme(effectiveWindowTheme));
 
     return MaterialApp(
+      scrollBehavior: const AppDesktopScrollBehavior(),
       debugShowCheckedModeBanner: false,
       title: "iSmart Messenger",
       locale: const Locale('ar'),
