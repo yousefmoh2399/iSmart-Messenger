@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -65,6 +66,7 @@ class _GroupManagementScreenState
         SnackBar(
           content: Text(error.toString()),
           behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
     } finally {
@@ -75,11 +77,93 @@ class _GroupManagementScreenState
   // ──────────────────────────────────────────────────────────────────────────
   // Avatar Management
   // ──────────────────────────────────────────────────────────────────────────
-  Future<void> _pickAndUploadAvatar() async {
+  Future<void> _showAvatarOptionsSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 4, bottom: 12),
+                width: 36,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(CupertinoIcons.camera_fill, color: Color(0xFF007AFF), size: 19),
+                ),
+                title: const Text('التقاط صورة بالكاميرا', style: TextStyle(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadAvatar(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF34C759).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(CupertinoIcons.photo_fill_on_rectangle_fill, color: Color(0xFF34C759), size: 19),
+                ),
+                title: const Text('اختيار من معرض الصور', style: TextStyle(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickAndUploadAvatar(ImageSource.gallery);
+                },
+              ),
+              if (_conversation.avatarUrl != null) ...[
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF3B30).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(CupertinoIcons.trash_fill, color: Color(0xFFFF3B30), size: 19),
+                  ),
+                  title: const Text(
+                    'إزالة الصورة الحالية',
+                    style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF3B30)),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _removeAvatar();
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndUploadAvatar(ImageSource source) async {
     try {
       final picker = ImagePicker();
       final picked = await picker.pickImage(
-        source: ImageSource.gallery,
+        source: source,
         maxWidth: 1024,
         maxHeight: 1024,
         imageQuality: 85,
@@ -107,7 +191,7 @@ class _GroupManagementScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('تم تحديث صورة المجموعة بنجاح'),
+          content: Text('تم تحديث صورة المجموعة بنجاح! 🎉'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -126,21 +210,26 @@ class _GroupManagementScreenState
   Future<void> _removeAvatar() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('إزالة صورة المجموعة'),
-        content: const Text('هل أنت متأكد من حذف صورة المجموعة؟'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('حذف الصورة'),
-          ),
-        ],
-      ),
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          title: const Text('إزالة صورة المجموعة'),
+          content: const Text('هل أنت متأكد من حذف صورة المجموعة؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF3B30)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('حذف الصورة'),
+            ),
+          ],
+        );
+      },
     );
 
     if (confirm != true || !mounted) return;
@@ -156,42 +245,153 @@ class _GroupManagementScreenState
   Future<void> _editGroupInfo() async {
     final nameCtrl = TextEditingController(text: _conversation.name);
     final descCtrl = TextEditingController(text: _conversation.description);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final saved = await showDialog<bool>(
+    final saved = await showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('تعديل معلومات المجموعة'),
-        content: Column(
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          16,
+          20,
+          MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'اسم المجموعة',
-                border: OutlineInputBorder(),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
               ),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: descCtrl,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'الوصف',
-                border: OutlineInputBorder(),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(CupertinoIcons.pencil, color: Color(0xFF007AFF), size: 18),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'تعديل معلومات المجموعة',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'اسم المجموعة',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
               ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                  width: 0.8,
+                ),
+              ),
+              child: TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                style: TextStyle(
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  fontSize: 14,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'اكتب اسم المجموعة...',
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'الوصف (اختياري)',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                  width: 0.8,
+                ),
+              ),
+              child: TextField(
+                controller: descCtrl,
+                maxLines: 3,
+                style: TextStyle(
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  fontSize: 13.5,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'أضف وصفاً يوضح أهداف المجموعة...',
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('إلغاء'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF007AFF),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('حفظ التعديلات', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('حفظ التعديلات'),
-          ),
-        ],
       ),
     );
 
@@ -223,34 +423,117 @@ class _GroupManagementScreenState
   Future<void> _upsertPinnedMessage({required bool edit}) async {
     final currentText = _conversation.pinnedMessage?.content ?? '';
     final controller = TextEditingController(text: edit ? currentText : '');
-    final value = await showDialog<String>(
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final value = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(edit ? 'تعديل الرسالة المثبتة' : 'إضافة رسالة مثبتة'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 4,
-          minLines: 2,
-          decoration: const InputDecoration(
-            hintText: 'اكتب الرسالة التي ستظهر لكل أعضاء المجموعة',
-          ),
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          16,
+          20,
+          MediaQuery.of(ctx).viewInsets.bottom + 20,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('حفظ'),
-          ),
-        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(CupertinoIcons.pin_fill, color: Color(0xFF007AFF), size: 18),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  edit ? 'تعديل الرسالة المثبتة' : 'تثبيت رسالة جديدة',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                  width: 0.8,
+                ),
+              ),
+              child: TextField(
+                controller: controller,
+                autofocus: true,
+                maxLines: 4,
+                minLines: 2,
+                style: TextStyle(
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  fontSize: 14,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'اكتب نص الرسالة التي ستظهر مثبتة لجميع الأعضاء...',
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.all(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('إلغاء'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF007AFF),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+                    child: Text(edit ? 'حفظ التعديل' : 'تثبيت الآن', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
-    if (!mounted || value == null || value.isEmpty) {
-      return;
-    }
+
+    if (!mounted || value == null || value.isEmpty) return;
 
     await _run(
       () => ref
@@ -265,21 +548,26 @@ class _GroupManagementScreenState
   Future<void> _removePinnedMessage() async {
     final shouldDelete = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('حذف الرسالة المثبتة'),
-        content: const Text('هل تريد حذف الرسالة المثبتة الحالية؟'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('حذف'),
-          ),
-        ],
-      ),
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          title: const Text('حذف الرسالة المثبتة'),
+          content: const Text('هل تريد بالتأكيد إلغاء تثبيت وحذف الرسالة الحالية؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFF3B30)),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('حذف التثبيت'),
+            ),
+          ],
+        );
+      },
     );
     if (shouldDelete != true || !mounted) return;
 
@@ -287,6 +575,163 @@ class _GroupManagementScreenState
       () => ref
           .read(chatOverviewControllerProvider.notifier)
           .clearGroupPinnedMessage(conversationId: _conversation.id),
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Member Actions Sheet (iOS Style)
+  // ──────────────────────────────────────────────────────────────────────────
+  Future<void> _showMemberActionSheet({
+    required ChatDirectoryUser member,
+    required bool isMemberAdmin,
+    required bool canModerate,
+  }) async {
+    if (!canModerate) return;
+    HapticFeedback.lightImpact();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 4, bottom: 12),
+                width: 36,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+
+              // Member info preview header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                child: Row(
+                  children: [
+                    ChatAvatar(
+                      radius: 22,
+                      backgroundColor: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                      avatarUrl: member.avatarUrl,
+                      fallback: Text(
+                        member.displayName.isNotEmpty ? member.displayName[0] : '?',
+                        style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            member.displayName,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
+                          ),
+                          Text(
+                            member.jobTitle.isNotEmpty
+                                ? '${member.jobTitle} • @${member.username}'
+                                : '@${member.username}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white54 : Colors.black45,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Divider(height: 1, indent: 16, endIndent: 16),
+
+              // Action 1: Toggle Admin
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    isMemberAdmin ? CupertinoIcons.person_badge_minus : CupertinoIcons.person_badge_plus,
+                    color: const Color(0xFF007AFF),
+                    size: 19,
+                  ),
+                ),
+                title: Text(
+                  isMemberAdmin ? 'إلغاء صفة المشرف' : 'تعيين كمشرف للمجموعة',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _run(() => isMemberAdmin
+                      ? ref.read(chatOverviewControllerProvider.notifier).demoteGroupAdmin(
+                            conversationId: _conversation.id,
+                            userId: member.id,
+                          )
+                      : ref.read(chatOverviewControllerProvider.notifier).promoteGroupAdmin(
+                            conversationId: _conversation.id,
+                            userId: member.id,
+                          ));
+                },
+              ),
+
+              // Action 2: Remove from Group
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF9500).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(CupertinoIcons.person_crop_circle_badge_minus, color: Color(0xFFFF9500), size: 19),
+                ),
+                title: const Text('إزالة من المجموعة', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF9500))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _run(() => ref.read(chatOverviewControllerProvider.notifier).removeGroupMember(
+                        conversationId: _conversation.id,
+                        userId: member.id,
+                      ));
+                },
+              ),
+
+              // Action 3: Block member
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF3B30).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(CupertinoIcons.slash_circle, color: Color(0xFFFF3B30), size: 19),
+                ),
+                title: const Text('حظر العضو من المجموعة', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF3B30))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _run(() => ref.read(chatOverviewControllerProvider.notifier).blockGroupMember(
+                        conversationId: _conversation.id,
+                        userId: member.id,
+                      ));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -306,16 +751,13 @@ class _GroupManagementScreenState
 
     final primaryColor = const Color(0xFF007AFF);
     final surfaceCardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    final surfaceBgColor =
-        isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
-    final dividerColor = isDark ? Colors.white12 : const Color(0xFFE5E5EA);
+    final surfaceBgColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+    final dividerColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
 
     if (currentUserId == null || !canManage) {
       return Scaffold(
         backgroundColor: surfaceBgColor,
-        appBar: AppBar(
-          title: const Text('إدارة المجموعة'),
-        ),
+        appBar: AppBar(title: const Text('إدارة المجموعة')),
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
@@ -359,20 +801,20 @@ class _GroupManagementScreenState
         backgroundColor: surfaceBgColor,
         appBar: AppBar(
           backgroundColor: surfaceCardColor,
-          elevation: 0.5,
+          elevation: 0,
+          scrolledUnderElevation: 0.5,
           leading: IconButton(
             icon: const Icon(CupertinoIcons.back),
             onPressed: () => Navigator.pop(context, _conversation),
           ),
           title: Text(
-            _conversation.type == 'broadcast'
-                ? 'إدارة قناة البث'
-                : 'إدارة المجموعة',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+            _conversation.type == 'broadcast' ? 'إدارة قناة البث' : 'إدارة المجموعة',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
           ),
           actions: [
             IconButton(
-              icon: const Icon(CupertinoIcons.pencil),
+              icon: const Icon(CupertinoIcons.pencil_circle_fill, size: 24),
+              color: primaryColor,
               tooltip: 'تعديل اسم ووصف المجموعة',
               onPressed: _editGroupInfo,
             ),
@@ -382,27 +824,30 @@ class _GroupManagementScreenState
           children: [
             Column(
               children: [
-                // ── Group Header Card (Avatar + Stats) ───────────────────
+                // ── Group Header Card (Apple Inset Profile) ──────────────
                 Container(
                   width: double.infinity,
                   color: surfaceCardColor,
-                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                   child: Column(
                     children: [
                       // Avatar with camera badge
                       Stack(
                         clipBehavior: Clip.none,
                         children: [
-                          ChatAvatar(
-                            radius: 46,
-                            backgroundColor: primaryColor.withValues(alpha: 0.12),
-                            avatarUrl: _conversation.avatarUrl,
-                            fallback: Icon(
-                              _conversation.type == 'broadcast'
-                                  ? CupertinoIcons.radiowaves_right
-                                  : CupertinoIcons.person_3_fill,
-                              color: primaryColor,
-                              size: 42,
+                          GestureDetector(
+                            onTap: _showAvatarOptionsSheet,
+                            child: ChatAvatar(
+                              radius: 44,
+                              backgroundColor: primaryColor.withValues(alpha: 0.12),
+                              avatarUrl: _conversation.avatarUrl,
+                              fallback: Icon(
+                                _conversation.type == 'broadcast'
+                                    ? CupertinoIcons.radiowaves_right
+                                    : CupertinoIcons.person_3_fill,
+                                color: primaryColor,
+                                size: 40,
+                              ),
                             ),
                           ),
                           if (_uploadingAvatar)
@@ -420,27 +865,33 @@ class _GroupManagementScreenState
                           Positioned(
                             bottom: -2,
                             left: -2,
-                            child: Material(
-                              color: primaryColor,
-                              shape: const CircleBorder(),
-                              elevation: 2,
-                              child: InkWell(
-                                customBorder: const CircleBorder(),
-                                onTap: _uploadingAvatar ? null : _pickAndUploadAvatar,
-                                child: const Padding(
-                                  padding: EdgeInsets.all(7),
-                                  child: Icon(
-                                    CupertinoIcons.camera_fill,
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
+                            child: GestureDetector(
+                              onTap: _showAvatarOptionsSheet,
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: primaryColor,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: surfaceCardColor, width: 2),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.18),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  CupertinoIcons.camera_fill,
+                                  color: Colors.white,
+                                  size: 14,
                                 ),
                               ),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // Title & Description
                       Text(
@@ -449,10 +900,8 @@ class _GroupManagementScreenState
                             : 'مجموعة بدون اسم',
                         style: TextStyle(
                           fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: isDark
-                              ? const Color(0xFFE2E8F0)
-                              : const Color(0xFF0F172A),
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -461,8 +910,9 @@ class _GroupManagementScreenState
                         Text(
                           _conversation.description,
                           style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white60 : Colors.black54,
+                            fontSize: 12.5,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            height: 1.3,
                           ),
                           textAlign: TextAlign.center,
                           maxLines: 2,
@@ -471,39 +921,30 @@ class _GroupManagementScreenState
                       ],
                       const SizedBox(height: 10),
 
-                      // Status Chips
+                      // Apple Inset Status Badges
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _buildChip(
+                          _buildApplePill(
+                            icon: CupertinoIcons.person_2_fill,
                             text: '${_conversation.members.length} عضو',
-                            color: const Color(0xFF3390EC),
+                            color: const Color(0xFF007AFF),
                             isDark: isDark,
                           ),
                           const SizedBox(width: 8),
-                          _buildChip(
+                          _buildApplePill(
+                            icon: CupertinoIcons.shield_fill,
                             text: '${_conversation.admins.length} مشرف',
-                            color: const Color(0xFF19A974),
+                            color: const Color(0xFF34C759),
                             isDark: isDark,
                           ),
                           if (blockedUsers.isNotEmpty) ...[
                             const SizedBox(width: 8),
-                            _buildChip(
+                            _buildApplePill(
+                              icon: CupertinoIcons.slash_circle,
                               text: '${blockedUsers.length} محظور',
-                              color: const Color(0xFFF59E0B),
+                              color: const Color(0xFFFF9500),
                               isDark: isDark,
-                            ),
-                          ],
-                          if (_conversation.avatarUrl != null) ...[
-                            const SizedBox(width: 8),
-                            InkWell(
-                              onTap: _removeAvatar,
-                              borderRadius: BorderRadius.circular(6),
-                              child: _buildChip(
-                                text: 'حذف الصورة',
-                                color: Colors.redAccent,
-                                isDark: isDark,
-                              ),
                             ),
                           ],
                         ],
@@ -514,11 +955,10 @@ class _GroupManagementScreenState
 
                 // ── Apple Segmented TabBar ───────────────────────────────
                 Container(
-                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  margin: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                  height: 44,
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF2C2C2E)
-                        : const Color(0xFFE5E5EA),
+                    color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   padding: const EdgeInsets.all(3),
@@ -529,7 +969,7 @@ class _GroupManagementScreenState
                       borderRadius: BorderRadius.circular(10),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
+                          color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
                           blurRadius: 4,
                           offset: const Offset(0, 1),
                         ),
@@ -538,16 +978,19 @@ class _GroupManagementScreenState
                     indicatorSize: TabBarIndicatorSize.tab,
                     dividerColor: Colors.transparent,
                     labelColor: isDark ? Colors.white : const Color(0xFF0F172A),
-                    unselectedLabelColor:
-                        isDark ? Colors.white54 : Colors.black45,
+                    unselectedLabelColor: isDark ? Colors.white54 : Colors.black54,
                     labelStyle: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    unselectedLabelStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
                     ),
                     tabs: [
                       Tab(text: 'الأعضاء (${_conversation.members.length})'),
-                      const Tab(text: 'إضافة'),
-                      const Tab(text: 'المثبتة'),
+                      const Tab(text: 'إضافة +'),
+                      const Tab(text: 'المثبتة 📌'),
                       Tab(text: 'المحظورون (${blockedUsers.length})'),
                     ],
                   ),
@@ -567,10 +1010,12 @@ class _GroupManagementScreenState
                         surfaceCardColor: surfaceCardColor,
                         dividerColor: dividerColor,
                         primaryColor: primaryColor,
+                        canManage: canManage,
                       ),
 
                       // TAB 2: Add Members
                       _buildAddMembersTab(
+                        allUsers: allUsers,
                         addableUsers: addableUsers,
                         isDark: isDark,
                         surfaceCardColor: surfaceCardColor,
@@ -611,10 +1056,11 @@ class _GroupManagementScreenState
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Sub-widgets
+  // Sub-widgets & Tabs
   // ──────────────────────────────────────────────────────────────────────────
 
-  Widget _buildChip({
+  Widget _buildApplePill({
+    required IconData icon,
     required String text,
     required Color color,
     required bool isDark,
@@ -622,16 +1068,27 @@ class _GroupManagementScreenState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.2 : 0.1),
+        color: color.withValues(alpha: isDark ? 0.22 : 0.10),
         borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: color,
+        border: Border.all(
+          color: color.withValues(alpha: isDark ? 0.35 : 0.20),
+          width: 0.8,
         ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -644,17 +1101,18 @@ class _GroupManagementScreenState
     required Color surfaceCardColor,
     required Color dividerColor,
     required Color primaryColor,
+    required bool canManage,
   }) {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: CupertinoSearchTextField(
             controller: _membersSearchController,
-            placeholder: 'ابحث في أعضاء المجموعة...',
+            placeholder: 'بحث في الأعضاء...',
             style: TextStyle(
               color: isDark ? Colors.white : Colors.black87,
-              fontSize: 13,
+              fontSize: 13.5,
             ),
             onChanged: (val) => setState(() => _membersSearchQuery = val),
           ),
@@ -662,15 +1120,27 @@ class _GroupManagementScreenState
         Expanded(
           child: filteredMembers.isEmpty
               ? Center(
-                  child: Text(
-                    'لا يوجد أعضاء مطابقين للبحث',
-                    style: TextStyle(
-                      color: isDark ? Colors.white54 : Colors.black45,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        CupertinoIcons.person_2,
+                        size: 40,
+                        color: isDark ? Colors.white24 : Colors.black12,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'لا يوجد أعضاء مطابقين للبحث',
+                        style: TextStyle(
+                          color: isDark ? Colors.white54 : Colors.black45,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 )
               : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 4),
                   itemCount: filteredMembers.length,
                   separatorBuilder: (_, __) => Divider(
                     height: 0.5,
@@ -683,25 +1153,51 @@ class _GroupManagementScreenState
                     final isMemberOwner = member.id == ownerId;
                     final isMemberAdmin = _isAdmin(member.id);
                     final isMe = member.id == currentUserId;
+                    final canModerateThisMember = canManage && !isMemberOwner && !isMe;
 
                     return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 2,
-                      ),
-                      leading: ChatAvatar(
-                        radius: 20,
-                        backgroundColor: primaryColor.withValues(alpha: 0.12),
-                        avatarUrl: member.avatarUrl,
-                        fallback: Text(
-                          member.displayName.isNotEmpty
-                              ? member.displayName.substring(0, 1)
-                              : '?',
-                          style: TextStyle(
-                            color: primaryColor,
-                            fontWeight: FontWeight.bold,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                      onTap: canModerateThisMember
+                          ? () => _showMemberActionSheet(
+                                member: member,
+                                isMemberAdmin: isMemberAdmin,
+                                canModerate: canModerateThisMember,
+                              )
+                          : null,
+                      leading: Stack(
+                        children: [
+                          ChatAvatar(
+                            radius: 20,
+                            backgroundColor: primaryColor.withValues(alpha: 0.12),
+                            avatarUrl: member.avatarUrl,
+                            fallback: Text(
+                              member.displayName.isNotEmpty
+                                  ? member.displayName[0]
+                                  : '?',
+                              style: TextStyle(
+                                color: primaryColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
-                        ),
+                          if (member.isOnline)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF34C759),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: surfaceCardColor,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       title: Row(
                         children: [
@@ -709,43 +1205,36 @@ class _GroupManagementScreenState
                             child: Text(
                               member.displayName,
                               style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                                color: isDark
-                                    ? const Color(0xFFE2E8F0)
-                                    : const Color(0xFF0F172A),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13.5,
+                                color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A),
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (isMe)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              child: Text(
-                                '(أنت)',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: primaryColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                          if (isMe) ...[
+                            Text(
+                              '(أنت)',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: primaryColor,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
+                            const SizedBox(width: 6),
+                          ],
                           if (isMemberOwner)
-                            _buildChip(
+                            _buildApplePill(
+                              icon: CupertinoIcons.star_fill,
                               text: 'مالك',
-                              color: Colors.amber.shade800,
+                              color: const Color(0xFFF59E0B),
                               isDark: isDark,
                             )
                           else if (isMemberAdmin)
-                            _buildChip(
+                            _buildApplePill(
+                              icon: CupertinoIcons.shield_fill,
                               text: 'مشرف',
                               color: primaryColor,
-                              isDark: isDark,
-                            )
-                          else
-                            _buildChip(
-                              text: 'عضو',
-                              color: Colors.grey,
                               isDark: isDark,
                             ),
                         ],
@@ -755,113 +1244,17 @@ class _GroupManagementScreenState
                             ? '${member.jobTitle} • @${member.username}'
                             : '@${member.username}',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11.5,
                           color: isDark ? Colors.white54 : Colors.black45,
                         ),
                       ),
-                      trailing: isMemberOwner
-                          ? null
-                          : PopupMenuButton<String>(
-                              icon: const Icon(CupertinoIcons.ellipsis, size: 18),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              onSelected: (action) {
-                                if (action == 'toggle_admin') {
-                                  _run(() => isMemberAdmin
-                                      ? ref
-                                          .read(
-                                            chatOverviewControllerProvider
-                                                .notifier,
-                                          )
-                                          .demoteGroupAdmin(
-                                            conversationId: _conversation.id,
-                                            userId: member.id,
-                                          )
-                                      : ref
-                                          .read(
-                                            chatOverviewControllerProvider
-                                                .notifier,
-                                          )
-                                          .promoteGroupAdmin(
-                                            conversationId: _conversation.id,
-                                            userId: member.id,
-                                          ));
-                                } else if (action == 'remove') {
-                                  _run(() => ref
-                                      .read(
-                                        chatOverviewControllerProvider
-                                            .notifier,
-                                      )
-                                      .removeGroupMember(
-                                        conversationId: _conversation.id,
-                                        userId: member.id,
-                                      ));
-                                } else if (action == 'block') {
-                                  _run(() => ref
-                                      .read(
-                                        chatOverviewControllerProvider
-                                            .notifier,
-                                      )
-                                      .blockGroupMember(
-                                        conversationId: _conversation.id,
-                                        userId: member.id,
-                                      ));
-                                }
-                              },
-                              itemBuilder: (_) => [
-                                PopupMenuItem(
-                                  value: 'toggle_admin',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        isMemberAdmin
-                                            ? CupertinoIcons.person_badge_minus
-                                            : CupertinoIcons.person_badge_plus,
-                                        size: 18,
-                                        color: primaryColor,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        isMemberAdmin
-                                            ? 'إلغاء الإشراف'
-                                            : 'تعيين كمشرف',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const PopupMenuDivider(),
-                                const PopupMenuItem(
-                                  value: 'remove',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        CupertinoIcons
-                                            .person_crop_circle_badge_minus,
-                                        size: 18,
-                                        color: Colors.redAccent,
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text('إزالة من المجموعة'),
-                                    ],
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'block',
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        CupertinoIcons.slash_circle,
-                                        size: 18,
-                                        color: Colors.red,
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text('حظر العضو'),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
+                      trailing: canModerateThisMember
+                          ? Icon(
+                              CupertinoIcons.chevron_forward,
+                              size: 14,
+                              color: isDark ? Colors.white30 : Colors.black26,
+                            )
+                          : null,
                     );
                   },
                 ),
@@ -871,34 +1264,123 @@ class _GroupManagementScreenState
   }
 
   Widget _buildAddMembersTab({
+    required List<ChatDirectoryUser> allUsers,
     required List<ChatDirectoryUser> addableUsers,
     required bool isDark,
     required Color surfaceCardColor,
     required Color dividerColor,
     required Color primaryColor,
   }) {
+    // Map selected IDs to users for carousel tray
+    final selectedUsers = allUsers.where((u) => _selectedToAdd.contains(u.id)).toList();
+
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
           child: CupertinoSearchTextField(
             controller: _addSearchController,
-            placeholder: 'ابحث بالاسم أو اسم المستخدم...',
+            placeholder: 'بحث بالاسم أو اسم المستخدم...',
             style: TextStyle(
               color: isDark ? Colors.white : Colors.black87,
-              fontSize: 13,
+              fontSize: 13.5,
             ),
             onChanged: (val) => setState(() => _addSearchQuery = val),
           ),
         ),
+
+        // ── Selected Users Tray (Carousel) ───────────────────────────
+        if (selectedUsers.isNotEmpty)
+          Container(
+            height: 78,
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC),
+              border: Border(bottom: BorderSide(color: dividerColor, width: 0.5)),
+            ),
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: selectedUsers.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final user = selectedUsers[index];
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ChatAvatar(
+                          radius: 20,
+                          backgroundColor: primaryColor.withValues(alpha: 0.12),
+                          avatarUrl: user.avatarUrl,
+                          fallback: Text(
+                            user.displayName.isNotEmpty ? user.displayName[0] : '?',
+                            style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        SizedBox(
+                          width: 52,
+                          child: Text(
+                            user.displayName.split(' ').first,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() => _selectedToAdd.remove(user.id));
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFFF3B30),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(CupertinoIcons.clear, size: 10, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+
+        // ── Addable Users List ───────────────────────────────────────
         Expanded(
           child: addableUsers.isEmpty
               ? Center(
-                  child: Text(
-                    'لا يوجد جهات اتصال متاحة للإضافة',
-                    style: TextStyle(
-                      color: isDark ? Colors.white54 : Colors.black45,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        CupertinoIcons.person_badge_plus,
+                        size: 40,
+                        color: isDark ? Colors.white24 : Colors.black12,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'لا توجد جهات اتصال متاحة للإضافة',
+                        style: TextStyle(
+                          color: isDark ? Colors.white54 : Colors.black45,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 )
               : ListView.separated(
@@ -914,17 +1396,24 @@ class _GroupManagementScreenState
                     final user = addableUsers[index];
                     final isSelected = _selectedToAdd.contains(user.id);
 
-                    return CheckboxListTile(
-                      value: isSelected,
-                      activeColor: primaryColor,
-                      secondary: ChatAvatar(
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() {
+                          if (isSelected) {
+                            _selectedToAdd.remove(user.id);
+                          } else {
+                            _selectedToAdd.add(user.id);
+                          }
+                        });
+                      },
+                      leading: ChatAvatar(
                         radius: 20,
                         backgroundColor: primaryColor.withValues(alpha: 0.12),
                         avatarUrl: user.avatarUrl,
                         fallback: Text(
-                          user.displayName.isNotEmpty
-                              ? user.displayName.substring(0, 1)
-                              : '?',
+                          user.displayName.isNotEmpty ? user.displayName[0] : '?',
                           style: TextStyle(
                             color: primaryColor,
                             fontWeight: FontWeight.bold,
@@ -934,11 +1423,9 @@ class _GroupManagementScreenState
                       title: Text(
                         user.displayName,
                         style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          color: isDark
-                              ? const Color(0xFFE2E8F0)
-                              : const Color(0xFF0F172A),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                          color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A),
                         ),
                       ),
                       subtitle: Text(
@@ -946,50 +1433,80 @@ class _GroupManagementScreenState
                             ? '${user.jobTitle} • @${user.username}'
                             : '@${user.username}',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11.5,
                           color: isDark ? Colors.white54 : Colors.black45,
                         ),
                       ),
-                      onChanged: (checked) {
-                        setState(() {
-                          if (checked == true) {
-                            _selectedToAdd.add(user.id);
-                          } else {
-                            _selectedToAdd.remove(user.id);
-                          }
-                        });
-                      },
+                      trailing: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: isSelected ? primaryColor : Colors.transparent,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelected ? primaryColor : (isDark ? Colors.white30 : Colors.black26),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: isSelected
+                            ? const Icon(CupertinoIcons.checkmark, size: 14, color: Colors.white)
+                            : null,
+                      ),
                     );
                   },
                 ),
         ),
+
+        // ── Floating Action Bar ──────────────────────────────────────
         Container(
           padding: EdgeInsets.fromLTRB(
             16,
-            8,
+            10,
             16,
             MediaQuery.paddingOf(context).bottom + 12,
           ),
           decoration: BoxDecoration(
             color: surfaceCardColor,
             border: Border(top: BorderSide(color: dividerColor, width: 0.5)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
           child: Row(
             children: [
-              Text(
-                'المحدد: ${_selectedToAdd.length}',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'الأعضاء المحددون',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                  ),
+                  Text(
+                    '${_selectedToAdd.length} عضو',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
+                ],
               ),
               const Spacer(),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: primaryColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
                 onPressed: _selectedToAdd.isEmpty
@@ -1008,10 +1525,19 @@ class _GroupManagementScreenState
                             _addSearchQuery = '';
                           });
                           _tabController.animateTo(0);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('تمت إضافة الأعضاء بنجاح! 🎉'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
                         }
                       },
-                icon: const Icon(CupertinoIcons.person_badge_plus, size: 16),
-                label: Text('إضافة (${_selectedToAdd.length})'),
+                icon: const Icon(CupertinoIcons.person_badge_plus, size: 17),
+                label: Text(
+                  'إضافة إلى المجموعة',
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                ),
               ),
             ],
           ),
@@ -1029,8 +1555,8 @@ class _GroupManagementScreenState
     final pinned = _conversation.pinnedMessage;
     final hasPinned = pinned != null && pinned.content.isNotEmpty;
 
-    return Padding(
-      padding: const EdgeInsets.all(20),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1039,31 +1565,45 @@ class _GroupManagementScreenState
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: surfaceCardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: dividerColor, width: 0.5),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: dividerColor, width: 0.8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Icon(CupertinoIcons.pin_fill, color: primaryColor, size: 18),
-                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: primaryColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(CupertinoIcons.pin_fill, color: primaryColor, size: 18),
+                    ),
+                    const SizedBox(width: 10),
                     Text(
-                      'الرسالة المثبتة',
+                      'الرسالة المثبتة الحالية',
                       style: TextStyle(
                         fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : Colors.black87,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 Text(
                   hasPinned
                       ? pinned.content
-                      : 'لا توجد رسالة مثبتة حالياً. يمكنك تثبيت رسالة هامة لتظهر في أعلى المحادثة لجميع الأعضاء.',
+                      : 'لا توجد رسالة مثبتة حالياً. يمكنك تثبيت رسالة هامة لتظهر في شريط علوي بارز لجميع أعضاء المجموعة.',
                   style: TextStyle(
                     fontSize: 13.5,
                     height: 1.5,
@@ -1073,13 +1613,19 @@ class _GroupManagementScreenState
                   ),
                 ),
                 if (hasPinned && pinned.setByName.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    'تم التثبيت بواسطة: ${pinned.setByName}',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: isDark ? Colors.white38 : Colors.black38,
-                    ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(CupertinoIcons.person_crop_circle, size: 13, color: isDark ? Colors.white38 : Colors.black38),
+                      const SizedBox(width: 4),
+                      Text(
+                        'تم التثبيت بواسطة: ${pinned.setByName}',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: isDark ? Colors.white38 : Colors.black38,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -1088,33 +1634,42 @@ class _GroupManagementScreenState
           const SizedBox(height: 16),
           Row(
             children: [
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+              Expanded(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () => _upsertPinnedMessage(edit: hasPinned),
+                  icon: Icon(
+                    hasPinned ? CupertinoIcons.pencil : CupertinoIcons.pin_fill,
+                    size: 16,
+                  ),
+                  label: Text(
+                    hasPinned ? 'تعديل الرسالة' : 'تثبيت رسالة',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                onPressed: () => _upsertPinnedMessage(edit: hasPinned),
-                icon: Icon(
-                  hasPinned ? CupertinoIcons.pencil : CupertinoIcons.pin_fill,
-                  size: 16,
-                ),
-                label: Text(hasPinned ? 'تعديل الرسالة' : 'تثبيت رسالة'),
               ),
               if (hasPinned) ...[
                 const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.redAccent,
-                    side: const BorderSide(color: Colors.redAccent),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFF3B30),
+                      side: const BorderSide(color: Color(0xFFFF3B30), width: 0.8),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
+                    onPressed: _removePinnedMessage,
+                    icon: const Icon(CupertinoIcons.trash, size: 16),
+                    label: const Text('إلغاء التثبيت', style: TextStyle(fontWeight: FontWeight.w700)),
                   ),
-                  onPressed: _removePinnedMessage,
-                  icon: const Icon(CupertinoIcons.trash, size: 16),
-                  label: const Text('إلغاء التثبيت'),
                 ),
               ],
             ],
@@ -1135,18 +1690,36 @@ class _GroupManagementScreenState
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              CupertinoIcons.checkmark_shield,
-              size: 48,
-              color: isDark ? Colors.white24 : Colors.black12,
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: (isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7)),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                CupertinoIcons.checkmark_shield_fill,
+                size: 32,
+                color: Color(0xFF34C759),
+              ),
             ),
             const SizedBox(height: 12),
             Text(
               'لا يوجد أعضاء محظورون',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'الأعضاء المحظورون من المجموعة سيظهرون هنا ويمكنك إلغاء حظرهم.',
+              style: TextStyle(
+                fontSize: 12,
                 color: isDark ? Colors.white54 : Colors.black45,
               ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -1154,7 +1727,7 @@ class _GroupManagementScreenState
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       itemCount: blockedUsers.length,
       separatorBuilder: (_, __) => Divider(
         height: 0.5,
@@ -1165,20 +1738,36 @@ class _GroupManagementScreenState
       itemBuilder: (context, index) {
         final user = blockedUsers[index];
         return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: Colors.grey.withValues(alpha: 0.2),
-            child: Text(
-              user.displayName.isNotEmpty
-                  ? user.displayName.substring(0, 1)
-                  : '?',
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: ChatAvatar(
+            radius: 20,
+            backgroundColor: const Color(0xFFFF3B30).withValues(alpha: 0.12),
+            avatarUrl: user.avatarUrl,
+            fallback: Text(
+              user.displayName.isNotEmpty ? user.displayName[0] : '?',
+              style: const TextStyle(color: Color(0xFFFF3B30), fontWeight: FontWeight.bold),
             ),
           ),
           title: Text(
             user.displayName,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 13.5,
+              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A),
+            ),
           ),
-          subtitle: Text('@${user.username}'),
+          subtitle: Text(
+            '@${user.username}',
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+          ),
           trailing: FilledButton.tonal(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
             onPressed: () => _run(
               () => ref
                   .read(chatOverviewControllerProvider.notifier)
@@ -1187,7 +1776,7 @@ class _GroupManagementScreenState
                     userId: user.id,
                   ),
             ),
-            child: const Text('إلغاء الحظر'),
+            child: const Text('إلغاء الحظر', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
           ),
         );
       },
