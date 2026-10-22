@@ -192,13 +192,13 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
       textDirection: TextDirection.rtl,
       child: SafeArea(
         top: false,
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.88,
-          decoration: BoxDecoration(
-            color: sheetBgColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
+        child: Material(
+          color: sheetBgColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.88,
+            child: Column(
             children: [
               // ── Drag Handle ──────────────────────────────────────────────
               Center(
@@ -596,7 +596,8 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildDepartmentsTab({
@@ -690,22 +691,25 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
               final isChecked =
                   _sendToAll || _selectedDepartmentIds.contains(dept.id);
 
-              return Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                decoration: BoxDecoration(
-                  color: isChecked && !_sendToAll
-                      ? const Color(0xFFFF9500).withValues(alpha: 0.08)
-                      : (isDark
-                          ? const Color(0xFF242426)
-                          : const Color(0xFFF8F9FA)),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isChecked && !_sendToAll
-                        ? const Color(0xFFFF9500).withValues(alpha: 0.3)
-                        : borderColor,
+              final deptBgColor = isChecked && !_sendToAll
+                  ? const Color(0xFFFF9500).withValues(alpha: 0.08)
+                  : (isDark
+                      ? const Color(0xFF242426)
+                      : const Color(0xFFF8F9FA));
+              final deptBorderColor = isChecked && !_sendToAll
+                  ? const Color(0xFFFF9500).withValues(alpha: 0.3)
+                  : borderColor;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Material(
+                  color: deptBgColor,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: deptBorderColor),
                   ),
-                ),
-                child: CheckboxListTile(
+                  clipBehavior: Clip.antiAlias,
+                  child: CheckboxListTile(
                   value: isChecked,
                   onChanged: (val) {
                     setState(() {
@@ -761,7 +765,8 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                     ),
                   ),
                 ),
-              );
+              ),
+            );
             },
           ),
         ),
@@ -863,22 +868,25 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
               final deptName = departmentsById[user.departmentId]?.name ?? '';
               final isOnline = user.isOnline || user.presenceStatus == 'online';
 
-              return Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                decoration: BoxDecoration(
-                  color: isChecked && !_sendToAll
-                      ? const Color(0xFFFF9500).withValues(alpha: 0.08)
-                      : (isDark
-                          ? const Color(0xFF242426)
-                          : const Color(0xFFF8F9FA)),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isChecked && !_sendToAll
-                        ? const Color(0xFFFF9500).withValues(alpha: 0.3)
-                        : borderColor,
+              final deptBgColor = isChecked && !_sendToAll
+                  ? const Color(0xFFFF9500).withValues(alpha: 0.08)
+                  : (isDark
+                      ? const Color(0xFF242426)
+                      : const Color(0xFFF8F9FA));
+              final deptBorderColor = isChecked && !_sendToAll
+                  ? const Color(0xFFFF9500).withValues(alpha: 0.3)
+                  : borderColor;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Material(
+                  color: deptBgColor,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: deptBorderColor),
                   ),
-                ),
-                child: CheckboxListTile(
+                  clipBehavior: Clip.antiAlias,
+                  child: CheckboxListTile(
                   value: isChecked,
                   onChanged: (val) {
                     setState(() {
@@ -991,7 +999,8 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
                     ),
                   ),
                 ),
-              );
+              ),
+            );
             },
           ),
         ),

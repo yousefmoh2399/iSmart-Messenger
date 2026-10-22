@@ -152,13 +152,14 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
     if (overview == null) {
       return Directionality(
         textDirection: TextDirection.rtl,
-        child: Container(
-          height: 300,
-          decoration: BoxDecoration(
-            color: sheetBgColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: Material(
+          color: sheetBgColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          clipBehavior: Clip.antiAlias,
+          child: const SizedBox(
+            height: 300,
+            child: Center(child: CircularProgressIndicator.adaptive()),
           ),
-          child: const Center(child: CircularProgressIndicator.adaptive()),
         ),
       );
     }
@@ -246,13 +247,13 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
       textDirection: TextDirection.rtl,
       child: SafeArea(
         top: false,
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.88,
-          decoration: BoxDecoration(
-            color: sheetBgColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
+        child: Material(
+          color: sheetBgColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.88,
+            child: Column(
             children: [
               // ── Drag Handle ──────────────────────────────────────────────
               Center(
@@ -525,7 +526,8 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   // ── Tab 1: Recent Conversations ──────────────────────────────────────────
@@ -737,24 +739,28 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
           departmentUsers: deptUsers,
         );
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            color: isDeptSelected
-                ? const Color(0xFF007AFF).withValues(alpha: isDark ? 0.12 : 0.06)
-                : (isDark ? const Color(0xFF242426) : const Color(0xFFF8F9FA)),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDeptSelected
-                  ? const Color(0xFF007AFF).withValues(alpha: 0.4)
-                  : borderColor,
-              width: isDeptSelected ? 1.5 : 1,
+        final deptBgColor = isDeptSelected
+            ? const Color(0xFF007AFF).withValues(alpha: isDark ? 0.12 : 0.06)
+            : (isDark ? const Color(0xFF242426) : const Color(0xFFF8F9FA));
+        final deptBorderColor = isDeptSelected
+            ? const Color(0xFF007AFF).withValues(alpha: 0.4)
+            : borderColor;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
+            color: deptBgColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(
+                color: deptBorderColor,
+                width: isDeptSelected ? 1.5 : 1,
+              ),
             ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              InkWell(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                InkWell(
                 onTap: () => _toggleTarget(target),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -921,7 +927,8 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
               ],
             ],
           ),
-        );
+        ),
+      );
       },
     );
   }
@@ -1000,47 +1007,52 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
     required String subtitle,
     Widget? trailingBadge,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFF007AFF).withValues(alpha: isDark ? 0.12 : 0.06)
-            : (isDark ? const Color(0xFF242426) : const Color(0xFFF8F9FA)),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isSelected
-              ? const Color(0xFF007AFF).withValues(alpha: 0.4)
-              : borderColor,
-          width: isSelected ? 1.5 : 1,
+    final bgColor = isSelected
+        ? const Color(0xFF007AFF).withValues(alpha: isDark ? 0.12 : 0.06)
+        : (isDark ? const Color(0xFF242426) : const Color(0xFFF8F9FA));
+    final activeBorderColor = isSelected
+        ? const Color(0xFF007AFF).withValues(alpha: 0.4)
+        : borderColor;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: bgColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: activeBorderColor,
+            width: isSelected ? 1.5 : 1,
+          ),
         ),
-      ),
-      child: CheckboxListTile(
-        value: isSelected,
-        onChanged: (_) => onTap(),
-        activeColor: const Color(0xFF007AFF),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-        secondary: leading,
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+        clipBehavior: Clip.antiAlias,
+        child: CheckboxListTile(
+          value: isSelected,
+          onChanged: (_) => onTap(),
+          activeColor: const Color(0xFF007AFF),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          secondary: leading,
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                ),
               ),
+              if (trailingBadge != null) trailingBadge,
+            ],
+          ),
+          subtitle: Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11.5,
+              color: isDark ? Colors.white54 : Colors.black54,
             ),
-            if (trailingBadge != null) trailingBadge,
-          ],
-        ),
-        subtitle: Text(
-          subtitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11.5,
-            color: isDark ? Colors.white54 : Colors.black54,
           ),
         ),
       ),

@@ -610,11 +610,10 @@ class _ConversationDetailsScreenState
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              child: Material(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     // Mute Notifications Tile
@@ -720,11 +719,10 @@ class _ConversationDetailsScreenState
                         ),
                       ),
                     ),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: cardColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                    Material(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(12),
+                      clipBehavior: Clip.antiAlias,
                       child: Column(
                         children: [
                           if (_conversation.createdBy == currentUserId)
@@ -822,11 +820,10 @@ class _ConversationDetailsScreenState
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              child: Material(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     if (_isGroup) ...[
@@ -1097,11 +1094,10 @@ class _MediaGalleryScreen extends StatelessWidget {
                       final file = files[index];
                       final isPdf = file.fileName?.toLowerCase().endsWith('.pdf') == true;
 
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                      return Material(
+                        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        clipBehavior: Clip.antiAlias,
                         child: ListTile(
                           leading: Container(
                             padding: const EdgeInsets.all(10),
@@ -1141,11 +1137,10 @@ class _MediaGalleryScreen extends StatelessWidget {
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final url = links[index];
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                      return Material(
+                        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        clipBehavior: Clip.antiAlias,
                         child: ListTile(
                           leading: Container(
                             padding: const EdgeInsets.all(10),
