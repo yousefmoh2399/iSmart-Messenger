@@ -359,8 +359,11 @@ function normalizeMediaUrl(value) {
 }
 
 function serializeReceipt(entry) {
+  const userId = entry.userId?._id
+    ? entry.userId._id.toString()
+    : (entry.userId?.toString?.() || "");
   return {
-    userId: entry.userId.toString(),
+    userId,
     at: entry.at,
   };
 }
@@ -452,10 +455,13 @@ function serializeMessage(message, sender = null) {
   if (clientMessageId && !metadata.clientMessageId) {
     metadata.clientMessageId = clientMessageId;
   }
+  const senderId = message.senderId?._id
+    ? message.senderId._id.toString()
+    : (message.senderId?.toString?.() || "");
   return {
     id: message._id.toString(),
     conversationId: message.conversationId.toString(),
-    senderId: message.senderId.toString(),
+    senderId,
     sender: sender ? serializeUserLite(sender) : null,
     content: message.content,
     clientMessageId,
@@ -466,6 +472,8 @@ function serializeMessage(message, sender = null) {
     mimeType: message.mimeType || null,
     replyToMessageId: message.replyToMessageId?.toString?.() || null,
     isDeleted: message.isDeleted === true,
+    isScheduled: message.isScheduled === true,
+    scheduledFor: message.scheduledFor || null,
     metadata: Object.keys(metadata).length > 0 ? metadata : null,
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,

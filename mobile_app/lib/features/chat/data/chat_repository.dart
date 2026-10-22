@@ -543,6 +543,15 @@ class ChatRepository {
     );
   }
 
+  Future<ChatMessage> sendScheduledMessageNow(String messageId) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/send-now',
+    );
+    final data = response.data?['data'] ?? response.data;
+    final msgJson = (data is Map<String, dynamic> ? data['message'] : null) ?? data;
+    return ChatMessage.fromJson(msgJson as Map<String, dynamic>);
+  }
+
   Future<void> removeMessage(String messageId) async {
     await _apiClient.dio.delete<Map<String, dynamic>>(
       '/api/chat/messages/$messageId',

@@ -4268,30 +4268,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        maxChildSize: 0.9,
-        builder: (context, scrollController) => Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              AppBar(
-                title: const Text('الرسائل المجدولة'),
-                leading: const CloseButton(),
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-              ),
-              Expanded(
-                child: ScheduledMessagesList(
-                  conversationId: widget.conversation.id,
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (context) => ScheduledMessagesSheet(
+        conversationId: widget.conversation.id,
+        onMessageSent: () {
+          ref
+              .read(
+                conversationMessagesControllerProvider(
+                  widget.conversation.id,
+                ).notifier,
+              )
+              .refresh();
+        },
       ),
     );
   }
@@ -4879,6 +4866,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ? 'يكتب الآن...'
               : '${_typingUsers.values.join('، ')} يكتب الآن...');
 
+    final peerJobAndBranch = [
+      if (peer != null && peer.jobTitle.trim().isNotEmpty) peer.jobTitle.trim(),
+      if (peer != null && peer.branchCode.trim().isNotEmpty) 'فرع ${peer.branchCode.trim()}',
+    ].join(' • ');
+
+    final chatSubtitleText = typingIndicatorText ??
+        (peerJobAndBranch.isNotEmpty
+            ? '$peerJobAndBranch | $effectiveStatusText'
+            : effectiveStatusText);
+
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
@@ -4966,9 +4963,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             ),
                             const SizedBox(height: 1),
                             Text(
-                              effectiveStatusText,
+                              chatSubtitleText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: statusColor,
+                                color: typingIndicatorText != null
+                                    ? const Color(0xFF34C759)
+                                    : statusColor,
                                 fontWeight: FontWeight.w500,
                                 fontSize: 12,
                               ),
@@ -4992,21 +4993,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 tooltip: 'إلغاء التحديد',
               ),
             ] else ...[
-              IconButton(
-                onPressed: () => _showScheduledMessagesSheet(),
-                icon: const Icon(Icons.schedule_rounded),
-                tooltip: 'الرسائل المجدولة',
-              ),
-              IconButton(
-                onPressed: () => _showSearchSheet(),
-                icon: const Icon(Icons.search_rounded),
-                tooltip: 'بحث',
-              ),
-              IconButton(
-                onPressed: () => _showSharedMediaSheet(loadedMessages, token),
-                icon: const Icon(Icons.perm_media_outlined),
-                tooltip: 'الوسائط',
-              ),
               if (_data.type == 'group' && _data.createdBy == authUser?.id)
                 IconButton(
                   onPressed: () async {
@@ -5026,6 +5012,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 ),
               PopupMenuButton<String>(
                 onSelected: (value) async {
+                  if (value == 'search') {
+                    _showSearchSheet();
+                    return;
+                  }
+                  if (value == 'media') {
+                    _showSharedMediaSheet(loadedMessages, token);
+                    return;
+                  }
+                  if (value == 'scheduled') {
+                    _showScheduledMessagesSheet();
+                    return;
+                  }
                   if (value == 'clear') {
                     await _clearConversationForMe();
                     return;
@@ -5075,6 +5073,37 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   setState(() => _conversation = updated);
                 },
                 itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'search',
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded, size: 20),
+                        SizedBox(width: 10),
+                        Text('بحث في المحادثة'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'media',
+                    child: Row(
+                      children: [
+                        Icon(Icons.perm_media_outlined, size: 20),
+                        SizedBox(width: 10),
+                        Text('الوسائط والمستندات'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'scheduled',
+                    child: Row(
+                      children: [
+                        Icon(Icons.schedule_rounded, size: 20),
+                        SizedBox(width: 10),
+                        Text('الرسائل المجدولة'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'pin',
                     child: Text(

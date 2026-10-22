@@ -33,6 +33,7 @@ const {
   markSeen,
   markSingleMessageSeen,
   removeMessage,
+  sendScheduledMessage,
   searchChatMessages,
   getFavoriteChatMessages,
   getPresence,
@@ -341,6 +342,13 @@ router.delete(
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
   removeMessage,
+);
+
+router.post(
+  "/messages/:id/send-now",
+  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
+  validateRequest,
+  sendScheduledMessage,
 );
 
 router.post(

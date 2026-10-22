@@ -224,6 +224,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           if (_fullNameController.text.isEmpty) {
             _fullNameController.text = user.fullName;
           }
+          if (_jobTitleController.text.isEmpty && user.jobTitle.isNotEmpty) {
+            _jobTitleController.text = user.jobTitle;
+          }
 
           final preferences =
               userPreferencesState.valueOrNull ?? UserPreferences.defaults();
@@ -267,6 +270,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             }
                             return null;
                           },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _jobTitleController,
+                          decoration: const InputDecoration(
+                            labelText: 'المسمى الوظيفي',
+                            hintText: 'مثال: محاسب، مدير فرع، مهندس دعم...',
+                            prefixIcon: Icon(Icons.badge_outlined, size: 20),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          initialValue: user.branchCode.isNotEmpty ? user.branchCode : 'الرئيسي',
+                          enabled: false,
+                          decoration: const InputDecoration(
+                            labelText: 'الفرع',
+                            prefixIcon: Icon(Icons.business_rounded, size: 20),
+                          ),
                         ),
                         const SizedBox(height: 12),
                         TextFormField(
@@ -673,6 +694,71 @@ class _ProfileHero extends StatelessWidget {
           ),
           textAlign: TextAlign.center,
         ),
+        if (user.jobTitle.trim().isNotEmpty || user.branchCode.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (user.jobTitle.trim().isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.badge_outlined,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          user.jobTitle.trim(),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (user.branchCode.trim().isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.business_outlined,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'فرع: ${user.branchCode.trim()}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
         const SizedBox(height: 24),
       ],
     );

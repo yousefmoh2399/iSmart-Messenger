@@ -48,6 +48,7 @@ const {
 } = require("../services/chat.service");
 const { listAuditLogs } = require("../services/audit.service");
 const { listSystemErrors } = require("../services/system-error.service");
+const { sendScheduledNow } = require("../../services/scheduler.service");
 const {
   createChatTransfer,
   getChatTransferForUser,
@@ -749,6 +750,15 @@ const removeMessage = asyncHandler(async (req, res) => {
   });
 });
 
+const sendScheduledMessage = asyncHandler(async (req, res) => {
+  const io = req.app.get("io");
+  const message = await sendScheduledNow(req.user, req.params.id, io);
+  sendChatResponse(res, {
+    data: { message },
+    legacy: { message },
+  });
+});
+
 const searchChatMessages = asyncHandler(async (req, res) => {
   const result = await searchMessages(req.user, {
     q: req.query.q,
@@ -961,6 +971,7 @@ module.exports = {
   markSeen,
   markSingleMessageSeen,
   removeMessage,
+  sendScheduledMessage,
   searchChatMessages,
   getFavoriteChatMessages,
   getPresence,
