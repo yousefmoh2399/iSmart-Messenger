@@ -59,9 +59,16 @@ const List<String> _kChatReactionEmojiFontFallbacks = <String>[
 ];
 
 class ConversationScreen extends ConsumerStatefulWidget {
-  const ConversationScreen({super.key, required this.conversation});
+  const ConversationScreen({
+    super.key,
+    required this.conversation,
+    this.initialTargetMessage,
+    this.initialMessageId,
+  });
 
   final ChatConversation conversation;
+  final ChatMessage? initialTargetMessage;
+  final String? initialMessageId;
 
   @override
   ConsumerState<ConversationScreen> createState() => _ConversationScreenState();
@@ -276,7 +283,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _container = ProviderScope.containerOf(context, listen: false);
     _conversation = widget.conversation;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (widget.initialTargetMessage != null) {
+      _focusedMessageId = widget.initialTargetMessage!.id;
+    } else if (widget.initialMessageId != null) {
+      _focusedMessageId = widget.initialMessageId;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       _container.read(activeConversationIdProvider.notifier).state =
           widget.conversation.id;
@@ -288,6 +301,33 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ).notifier,
           )
           .markSeen();
+
+      final target = widget.initialTargetMessage;
+      final targetId = target?.id ?? widget.initialMessageId;
+      if (targetId != null) {
+        if (target != null) {
+          await ref
+              .read(
+                conversationMessagesControllerProvider(
+                  widget.conversation.id,
+                ).notifier,
+              )
+              .hydrateMessages([target]);
+        }
+        if (!mounted) return;
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+        if (!mounted) return;
+        await _scrollToMessageById(targetId);
+
+        Future<void>.delayed(const Duration(milliseconds: 2800), () {
+          if (!mounted) return;
+          if (_focusedMessageId == targetId) {
+            setState(() {
+              _focusedMessageId = null;
+            });
+          }
+        });
+      }
     });
 
     _scrollController.addListener(_onScroll);
@@ -2304,37 +2344,43 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _scrollToMessageById(String messageId) async {
-    var key = _messageKeys[messageId];
-    var targetContext = key?.currentContext;
-    if (targetContext == null && _scrollController.hasClients) {
-      final messages = ref
-          .read(conversationMessagesControllerProvider(widget.conversation.id))
-          .valueOrNull
-          ?.messages;
-      if (messages != null && messages.isNotEmpty) {
-        final targetIndex = messages.indexWhere((m) => m.id == messageId);
-        if (targetIndex >= 0) {
-          final maxExt = _scrollController.position.maxScrollExtent;
-          if (maxExt > 0) {
-            final ratio = (targetIndex / messages.length).clamp(0.0, 1.0);
-            _scrollController.jumpTo(ratio * maxExt);
-            await WidgetsBinding.instance.endOfFrame;
-            if (!mounted) return;
-            key = _messageKeys[messageId];
-            targetContext = key?.currentContext;
+    for (int attempt = 0; attempt < 6; attempt++) {
+      var key = _messageKeys[messageId];
+      var targetContext = key?.currentContext;
+      if ((targetContext == null || !targetContext.mounted) &&
+          _scrollController.hasClients) {
+        final messages = ref
+            .read(conversationMessagesControllerProvider(widget.conversation.id))
+            .valueOrNull
+            ?.messages;
+        if (messages != null && messages.isNotEmpty) {
+          final targetIndex = messages.indexWhere((m) => m.id == messageId);
+          if (targetIndex >= 0) {
+            final maxExt = _scrollController.position.maxScrollExtent;
+            if (maxExt > 0) {
+              final ratio = (targetIndex / messages.length).clamp(0.0, 1.0);
+              _scrollController.jumpTo(ratio * maxExt);
+              await WidgetsBinding.instance.endOfFrame;
+              await Future<void>.delayed(const Duration(milliseconds: 40));
+              if (!mounted) return;
+              key = _messageKeys[messageId];
+              targetContext = key?.currentContext;
+            }
           }
         }
       }
+      if (targetContext != null && targetContext.mounted) {
+        await Scrollable.ensureVisible(
+          targetContext,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          alignment: 0.25,
+        );
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 70));
+      if (!mounted) return;
     }
-    if (targetContext == null || !targetContext.mounted) {
-      return;
-    }
-    await Scrollable.ensureVisible(
-      targetContext,
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
-      alignment: 0.2,
-    );
   }
 
   Map<String, dynamic>? _replyMetadata(ChatMessage? replyTarget) {
@@ -4650,6 +4696,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             message.id,
                           );
                           final isFocused = _focusedMessageId == message.id;
+                          final isFavorited = message.isFavoritedBy(authUser?.id);
                           final albumMessages = _albumFor(message, messages);
                           final stableItemKey =
                               message.metadata?['clientMessageId']
@@ -4760,9 +4807,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                     alpha: 0.14,
                                                                   )
                                                                 : (isFocused
-                                                                      ? const Color(
-                                                                          0xFFFDF3C7,
-                                                                        )
+                                                                      ? (isDark
+                                                                          ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
+                                                                          : const Color(0xFFFEF3C7))
                                                                       : bubbleColor),
                                                             gradient:
                                                                 !isSelected &&
@@ -5280,7 +5327,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       MainAxisSize
                                                                           .min,
                                                                   children: [
-                                                                    Text(
+                                                                    if (isFavorited) ...[
+                                                                        const Icon(
+                                                                          Icons.star_rounded,
+                                                                          size: 13,
+                                                                          color: Color(0xFFF59E0B),
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          width: 3,
+                                                                        ),
+                                                                      ],
+                                                                      Text(
                                                                       formatEgyptTime(
                                                                         messageLocalDate,
                                                                       ),
