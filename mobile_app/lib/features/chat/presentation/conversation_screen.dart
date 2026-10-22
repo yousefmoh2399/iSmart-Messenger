@@ -1200,10 +1200,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) return;
 
-    final pollData = await showDialog<Map<String, dynamic>>(
+    final pollData = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      builder: (_) =>
-          const PollCreatorDialog(), // Will fix the import using prefix or direct
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const PollCreatorDialog(),
     );
 
     if (pollData == null || !mounted) return;
@@ -1245,8 +1246,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) return;
 
-    final pollData = await showDialog<Map<String, dynamic>>(
+    final pollData = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (_) => const PollCreatorDialog(isChecklistMode: true),
     );
 
