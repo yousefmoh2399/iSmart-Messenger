@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
 
 import '../models/report_template_models.dart';
 import 'report_templates_controller.dart';
@@ -122,9 +124,23 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
       }
 
       if (bytes != null) {
-        final ext = (file.extension ?? 'png').toLowerCase();
-        final mimeType = (ext == 'jpg' || ext == 'jpeg') ? 'image/jpeg' : 'image/png';
-        final base64Str = 'data:$mimeType;base64,${base64Encode(bytes)}';
+        Uint8List processedBytes = Uint8List.fromList(bytes);
+        try {
+          final decoded = img.decodeImage(processedBytes);
+          if (decoded != null) {
+            if (decoded.width > 400 || decoded.height > 400) {
+              final resized = img.copyResize(
+                decoded,
+                width: decoded.width >= decoded.height ? 400 : null,
+                height: decoded.height > decoded.width ? 400 : null,
+                interpolation: img.Interpolation.linear,
+              );
+              processedBytes = Uint8List.fromList(img.encodePng(resized));
+            }
+          }
+        } catch (_) {}
+
+        final base64Str = 'data:image/png;base64,${base64Encode(processedBytes)}';
 
         setState(() {
           if (logoIndex == 1) {
@@ -370,7 +386,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
     );
   }
 
-  Widget _buildLogoWidget(String? customLogo, bool showLogo, {double size = 64}) {
+  Widget _buildLogoWidget(String? customLogo, bool showLogo, {int logoIndex = 1, double size = 64}) {
     if (!showLogo) {
       return Container(
         width: size,
@@ -409,14 +425,28 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
       } catch (_) {}
     }
 
+    final defaultAsset = logoIndex == 2
+        ? 'assets/images/logo2.png'
+        : 'assets/images/logo1.png';
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Image.asset(
-        'assets/images/logo.png',
+        defaultAsset,
         width: size,
         height: size,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => Icon(Icons.corporate_fare_rounded, size: size * 0.7, color: Colors.grey),
+        errorBuilder: (_, __, ___) => Image.asset(
+          'assets/images/logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => Icon(
+            Icons.corporate_fare_rounded,
+            size: size * 0.7,
+            color: Colors.grey,
+          ),
+        ),
       ),
     );
   }
@@ -1152,7 +1182,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                     children: [
                       Row(
                         children: [
-                          _buildLogoWidget(_customLogo1, _showLogo1, size: 64),
+                          _buildLogoWidget(_customLogo1, _showLogo1, logoIndex: 1, size: 64),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
@@ -1164,7 +1194,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  _customLogo1 != null ? 'شعار مخصص تم رفعه' : 'الشعار الافتراضي للنظام',
+                                  _customLogo1 != null ? 'شعار مخصص تم رفعه' : 'الشعار الافتراضي (جمعية رجال الأعمال)',
                                   style: TextStyle(
                                     fontSize: 11.5,
                                     color: _customLogo1 != null ? const Color(0xFF4F46E5) : Colors.grey,
@@ -1196,9 +1226,10 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                           ),
                           if (_customLogo1 != null) ...[
                             const SizedBox(width: 8),
-                            IconButton(
-                              tooltip: 'استعادة الشعار الافتراضي',
-                              icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                              icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                              label: const Text('استعادة الافتراضي', style: TextStyle(fontSize: 12)),
                               onPressed: () => _resetLogo(1),
                             ),
                           ],
@@ -1226,7 +1257,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                     children: [
                       Row(
                         children: [
-                          _buildLogoWidget(_customLogo2, _showLogo2, size: 64),
+                          _buildLogoWidget(_customLogo2, _showLogo2, logoIndex: 2, size: 64),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
@@ -1238,7 +1269,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  _customLogo2 != null ? 'شعار مخصص تم رفعه' : 'الشعار الافتراضي للنظام',
+                                  _customLogo2 != null ? 'شعار مخصص تم رفعه' : 'الشعار الافتراضي (تنمية المنشآت)',
                                   style: TextStyle(
                                     fontSize: 11.5,
                                     color: _customLogo2 != null ? const Color(0xFF4F46E5) : Colors.grey,
@@ -1270,9 +1301,10 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                           ),
                           if (_customLogo2 != null) ...[
                             const SizedBox(width: 8),
-                            IconButton(
-                              tooltip: 'استعادة الشعار الافتراضي',
-                              icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                              icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                              label: const Text('استعادة الافتراضي', style: TextStyle(fontSize: 12)),
                               onPressed: () => _resetLogo(2),
                             ),
                           ],
@@ -1588,7 +1620,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Right Logo
-                          _buildLogoWidget(_customLogo1, _showLogo1, size: 70),
+                          _buildLogoWidget(_customLogo1, _showLogo1, logoIndex: 1, size: 70),
                           const SizedBox(width: 16),
 
                           // Center Organization Titles
@@ -1635,7 +1667,7 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                           const SizedBox(width: 16),
 
                           // Left Logo
-                          _buildLogoWidget(_customLogo2, _showLogo2, size: 70),
+                          _buildLogoWidget(_customLogo2, _showLogo2, logoIndex: 2, size: 70),
                         ],
                       ),
 

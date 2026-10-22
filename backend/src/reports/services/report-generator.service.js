@@ -50,12 +50,18 @@ function parseCustomLogoBuffer(customLogo) {
 function resolveLogos(headerConfig = {}) {
   const candidates1 = [
     path.join(__dirname, "../../assets/logo1.png"),
+    path.join(__dirname, "../../assets/logo1.jpg"),
     path.join(__dirname, "../../../assets/logo1.png"),
+    path.join(__dirname, "../../../assets/logo1.jpg"),
+    path.join(__dirname, "../../../../desktop_app/assets/images/logo1.png"),
     path.join(__dirname, "../../../../desktop_app/assets/images/logo.png"),
   ];
   const candidates2 = [
     path.join(__dirname, "../../assets/logo2.png"),
+    path.join(__dirname, "../../assets/logo2.jpg"),
     path.join(__dirname, "../../../assets/logo2.png"),
+    path.join(__dirname, "../../../assets/logo2.jpg"),
+    path.join(__dirname, "../../../../desktop_app/assets/images/logo2.png"),
   ];
   const logo1Path = candidates1.find((p) => fs.existsSync(p)) || candidates1[0];
   const logo2Path = candidates2.find((p) => fs.existsSync(p)) || candidates2[0];
