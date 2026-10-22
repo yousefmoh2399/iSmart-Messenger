@@ -1826,6 +1826,7 @@ class ConversationMessagesController
 
   Future<void> sendFile(
     String filePath, {
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -1836,6 +1837,7 @@ class ConversationMessagesController
       () => _repository().sendFileMessage(
         conversationId: arg,
         filePath: filePath,
+        content: content,
         replyToMessageId: replyToMessageId,
         customFileName: customFileName,
         metadata: metadata,

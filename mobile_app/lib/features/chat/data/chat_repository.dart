@@ -415,6 +415,7 @@ class ChatRepository {
   Future<ChatPostResult> sendFileMessage({
     required String conversationId,
     required String filePath,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -431,6 +432,8 @@ class ChatRepository {
     final uploadTimeout = _uploadTimeoutForBytes(fileLength);
     final formData = FormData.fromMap({
       'conversationId': conversationId,
+      if (content != null && content.trim().isNotEmpty)
+        'content': content.trim(),
       if (replyToMessageId != null && replyToMessageId.isNotEmpty)
         'replyToMessageId': replyToMessageId,
       if (safeCustomName != null && safeCustomName.isNotEmpty)

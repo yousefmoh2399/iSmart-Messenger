@@ -415,6 +415,7 @@ class ChatRepository {
     required String filePath,
     Uint8List? fileBytes,
     String? sourceFileName,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -438,6 +439,8 @@ class ChatRepository {
         : await MultipartFile.fromFile(filePath, filename: resolvedFileName);
     final formData = FormData.fromMap({
       'conversationId': conversationId,
+      if (content != null && content.trim().isNotEmpty)
+        'content': content.trim(),
       if (replyToMessageId != null && replyToMessageId.isNotEmpty)
         'replyToMessageId': replyToMessageId,
       if (safeCustomName != null && safeCustomName.isNotEmpty)

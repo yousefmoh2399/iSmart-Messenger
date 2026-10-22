@@ -141,6 +141,9 @@ function normalizeMessageMetadata(metadata) {
       allowForward: rawPolicy.allowForward !== false,
     };
   }
+  if (nextMetadata.allowForward === false || rawPolicy?.allowForward === false) {
+    nextMetadata.allowForward = false;
+  }
   return nextMetadata;
 }
 
@@ -1542,13 +1545,12 @@ async function createMessage(currentUser, payload, file) {
         : null;
 
     if (
-      forwardedMessage.storedFilePath &&
-      sourcePolicy &&
-      sourcePolicy.allowForward === false
+      (sourcePolicy && sourcePolicy.allowForward === false) ||
+      (forwardedMessage.metadata && forwardedMessage.metadata.allowForward === false)
     ) {
       throw new ApiError(
         403,
-        "This attachment cannot be forwarded by sender policy.",
+        "This message cannot be forwarded by sender policy.",
       );
     }
   }

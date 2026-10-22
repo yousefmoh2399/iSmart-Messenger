@@ -1831,6 +1831,7 @@ class ConversationMessagesController
     String filePath, {
     Uint8List? fileBytes,
     String? sourceFileName,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -1843,6 +1844,7 @@ class ConversationMessagesController
         filePath: filePath,
         fileBytes: fileBytes,
         sourceFileName: sourceFileName,
+        content: content,
         replyToMessageId: replyToMessageId,
         customFileName: customFileName,
         metadata: metadata,

@@ -698,11 +698,13 @@ class ChatMessage {
 
   bool get attachmentDownloadAllowed =>
       _attachmentPolicy?['allowDownload'] != false;
-  bool get attachmentForwardAllowed =>
-      _attachmentPolicy?['allowForward'] != false;
+  bool get attachmentForwardAllowed {
+    if (metadata?['allowForward'] == false) return false;
+    return _attachmentPolicy?['allowForward'] != false;
+  }
   bool get isAttachmentViewOnly =>
-      hasAttachment &&
-      (!attachmentDownloadAllowed || !attachmentForwardAllowed);
+      !attachmentForwardAllowed ||
+      (hasAttachment && !attachmentDownloadAllowed);
   List<String> get broadcastTargetDepartmentIds {
     final broadcastTargets = metadata?['broadcastTargets'];
     if (broadcastTargets is! Map) {

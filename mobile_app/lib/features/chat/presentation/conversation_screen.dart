@@ -645,6 +645,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       sendPath: sendDraft.filePath,
       displayName: sendDraft.displayName,
       restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+      caption: sendDraft.caption,
     );
   }
 
@@ -1024,6 +1025,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -1115,6 +1117,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -1188,11 +1191,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (mounted) _showChatAttachmentSizeExceededSnackbar();
       return;
     }
+    if (!mounted) return;
+
+    final sendDraft = await showAttachmentSendDialog(context, photo.path);
+    if (sendDraft == null) return;
 
     await _sendPreparedFile(
-      sendPath: photo.path,
-      displayName: p.basename(photo.path),
-      restrictForwardAndDownload: false,
+      sendPath: sendDraft.filePath,
+      displayName: sendDraft.displayName,
+      restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+      caption: sendDraft.caption,
     );
   }
 
@@ -1415,6 +1423,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     required String sendPath,
     required String displayName,
     required bool restrictForwardAndDownload,
+    String? caption,
     Map<String, dynamic>? extraMetadata,
     Map<String, dynamic>? fixedBroadcastMetadata,
   }) async {
@@ -1454,6 +1463,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         'allowDownload': !restrictForwardAndDownload,
         'allowForward': !restrictForwardAndDownload,
       },
+      if (restrictForwardAndDownload)
+        'allowForward': false,
     };
 
     setState(() {
@@ -1471,6 +1482,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           )
           .sendFile(
             sendPath,
+            content: caption,
             replyToMessageId: _replyingTo?.id,
             customFileName: displayName,
             metadata: metadata,
@@ -1598,7 +1610,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       CheckboxListTile(
                         value: restrictForwardAndDownload,
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('منع إعادة التوجيه والتحميل'),
+                        title: const Text('🔒 محتوى محمي (لهذه الملفات فقط)'),
+                        subtitle: const Text('منع إعادة التوجيه والتحميل للملفات المحددة فقط دون التأثير على المحادثة'),
                         onChanged: (value) => setDialogState(() {
                           restrictForwardAndDownload = value == true;
                         }),
@@ -2772,7 +2785,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     var skippedRestrictedCount = 0;
     final validMessages = <ChatMessage>[];
     for (final message in selectedMessages) {
-      if (message.hasAttachment && !message.attachmentForwardAllowed) {
+      if (!message.attachmentForwardAllowed || message.metadata?['allowForward'] == false) {
         skippedRestrictedCount++;
       } else {
         validMessages.add(message);
@@ -2784,7 +2797,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تم تخطي $skippedRestrictedCount مرفق لأن المرسل منع إعادة توجيهه.',
+              skippedRestrictedCount == 1
+                  ? 'المرسل منع إعادة توجيه هذه الرسالة.'
+                  : 'تم تخطي $skippedRestrictedCount رسائل لأن المرسل منع إعادة توجيهها.',
             ),
           ),
         );
@@ -5796,6 +5811,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       MainAxisSize
                                                                           .min,
                                                                   children: [
+                                                                    if (message.isAttachmentViewOnly ||
+                                                                        !message.attachmentForwardAllowed ||
+                                                                        message.metadata?['allowForward'] == false) ...[
+                                                                      const Tooltip(
+                                                                        message: 'محتوى محمي: غير مسموح بإعادة التوجيه',
+                                                                        child: Icon(
+                                                                          Icons.lock_rounded,
+                                                                          size: 11.5,
+                                                                          color: Color(0xFF10B981),
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(width: 3),
+                                                                    ],
                                                                     if (isFavorited) ...[
                                                                         const Icon(
                                                                           Icons.star_rounded,

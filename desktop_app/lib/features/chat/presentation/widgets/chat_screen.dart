@@ -1096,7 +1096,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     var skippedRestrictedCount = 0;
     final validMessages = <ChatMessage>[];
     for (final message in messagesToForward) {
-      if (message.hasAttachment && !message.attachmentForwardAllowed) {
+      if (!message.attachmentForwardAllowed || message.metadata?['allowForward'] == false) {
         skippedRestrictedCount++;
       } else {
         validMessages.add(message);
@@ -1108,7 +1108,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تم تخطي $skippedRestrictedCount مرفق لأن المرسل منع إعادة توجيهه.',
+              skippedRestrictedCount == 1
+                  ? 'المرسل منع إعادة توجيه هذه الرسالة.'
+                  : 'تم تخطي $skippedRestrictedCount رسائل لأن المرسل منع إعادة توجيهها.',
             ),
           ),
         );
@@ -1801,6 +1803,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -1911,6 +1914,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -2627,6 +2631,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     required String sendPath,
     required String displayName,
     required bool restrictForwardAndDownload,
+    String? caption,
     Uint8List? fileBytes,
     String? sourceFileName,
     int? knownFileSize,
@@ -2669,6 +2674,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         'allowDownload': !restrictForwardAndDownload,
         'allowForward': !restrictForwardAndDownload,
       },
+      if (restrictForwardAndDownload)
+        'allowForward': false,
       if (isSticker) 'sticker': true,
     };
 
@@ -2687,6 +2694,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
             sendPath,
             fileBytes: fileBytes,
             sourceFileName: sourceFileName ?? displayName,
+            content: caption,
             replyToMessageId: _replyingTo?.id,
             customFileName: displayName,
             metadata: metadata,

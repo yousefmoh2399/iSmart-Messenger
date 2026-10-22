@@ -672,6 +672,19 @@ class _MessageBubbleState extends State<MessageBubble> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (widget.message.isAttachmentViewOnly ||
+                          !widget.message.attachmentForwardAllowed ||
+                          widget.message.metadata?['allowForward'] == false) ...[
+                        const Tooltip(
+                          message: 'محتوى محمي: غير مسموح بإعادة التوجيه',
+                          child: Icon(
+                            Icons.lock_rounded,
+                            size: 11.5,
+                            color: Color(0xFF10B981),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       Text(
                         formatEgyptTime(widget.message.createdAt),
                         style: TextStyle(
