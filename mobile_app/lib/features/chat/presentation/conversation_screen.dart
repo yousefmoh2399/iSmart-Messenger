@@ -4182,11 +4182,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             _data.displayTitle(authUser?.id ?? ''),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
                           ),
+                          const SizedBox(height: 1),
                           Text(
                             effectiveStatusText,
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: statusColor,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 12,
                             ),
                           ),
                         ],
@@ -4354,6 +4361,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ),
             ],
           ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(0.5),
+            child: Divider(
+              height: 0.5,
+              thickness: 0.5,
+              color: colorScheme.outlineVariant.withValues(alpha: 0.25),
+            ),
+          ),
         ),
         body: Stack(
           children: [
@@ -4721,89 +4736,97 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                         MainAxisSize.min,
                                                     children: [
                                                       AnimatedContainer(
-                                                        duration:
-                                                            const Duration(
-                                                              milliseconds: 180,
-                                                            ),
-                                                        margin: EdgeInsets.only(
-                                                          bottom: 10,
-                                                          left: isMine ? 34 : 0,
-                                                          right: isMine
-                                                              ? 0
-                                                              : 34,
-                                                        ),
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 14,
-                                                              vertical: 10,
-                                                            ),
-                                                        decoration: BoxDecoration(
-                                                          color: isSelected
-                                                              ? const Color(
-                                                                  0xFF3390EC,
-                                                                ).withValues(
-                                                                  alpha: 0.14,
-                                                                )
-                                                              : (isFocused
-                                                                    ? const Color(
-                                                                        0xFFFDF3C7,
-                                                                      )
-                                                                    : bubbleColor),
-                                                          gradient:
-                                                              !isSelected &&
-                                                                  !isFocused &&
-                                                                  isMine &&
-                                                                  resolved
-                                                                      .hasOutgoingGradient
-                                                              ? LinearGradient(
-                                                                  begin: Alignment
-                                                                      .topLeft,
-                                                                  end: Alignment
-                                                                      .bottomRight,
-                                                                  colors: resolved
-                                                                      .outgoingBubbleColors,
-                                                                )
-                                                              : null,
-                                                          borderRadius: BorderRadius.only(
-                                                            topLeft:
-                                                                const Radius.circular(
-                                                                  22,
-                                                                ),
-                                                            topRight:
-                                                                const Radius.circular(
-                                                                  22,
-                                                                ),
-                                                            bottomLeft:
-                                                                Radius.circular(
-                                                                  isMine
-                                                                      ? 22
-                                                                      : 6,
-                                                                ),
-                                                            bottomRight:
-                                                                Radius.circular(
-                                                                  isMine
-                                                                      ? 6
-                                                                      : 22,
-                                                                ),
+                                                          duration:
+                                                              const Duration(
+                                                                milliseconds: 180,
+                                                              ),
+                                                          margin: EdgeInsets.only(
+                                                            bottom: 6,
+                                                            left: isMine ? 34 : 0,
+                                                            right: isMine
+                                                                ? 0
+                                                                : 34,
                                                           ),
-                                                          border: Border.all(
+                                                          padding:
+                                                              const EdgeInsets.symmetric(
+                                                                horizontal: 14,
+                                                                vertical: 8,
+                                                              ),
+                                                          decoration: BoxDecoration(
                                                             color: isSelected
                                                                 ? const Color(
                                                                     0xFF3390EC,
+                                                                  ).withValues(
+                                                                    alpha: 0.14,
                                                                   )
                                                                 : (isFocused
                                                                       ? const Color(
-                                                                          0xFFF59E0B,
+                                                                          0xFFFDF3C7,
                                                                         )
-                                                                      : bubbleBorderColor),
-                                                            width:
-                                                                isSelected ||
-                                                                    isFocused
-                                                                ? 1.4
-                                                                : 1,
+                                                                      : bubbleColor),
+                                                            gradient:
+                                                                !isSelected &&
+                                                                    !isFocused &&
+                                                                    isMine &&
+                                                                    resolved
+                                                                        .hasOutgoingGradient
+                                                                ? LinearGradient(
+                                                                    begin: Alignment
+                                                                        .topLeft,
+                                                                    end: Alignment
+                                                                        .bottomRight,
+                                                                    colors: resolved
+                                                                        .outgoingBubbleColors,
+                                                                  )
+                                                                : null,
+                                                            borderRadius: BorderRadius.only(
+                                                              topLeft:
+                                                                  const Radius.circular(
+                                                                    18,
+                                                                  ),
+                                                              topRight:
+                                                                  const Radius.circular(
+                                                                    18,
+                                                                  ),
+                                                              bottomLeft:
+                                                                  Radius.circular(
+                                                                    isMine
+                                                                        ? 18
+                                                                        : 4,
+                                                                  ),
+                                                              bottomRight:
+                                                                  Radius.circular(
+                                                                    isMine
+                                                                        ? 4
+                                                                        : 18,
+                                                                  ),
+                                                            ),
+                                                            border: isSelected
+                                                                ? Border.all(
+                                                                    color: const Color(
+                                                                      0xFF3390EC,
+                                                                    ),
+                                                                    width: 1.5,
+                                                                  )
+                                                                : (isFocused
+                                                                      ? Border.all(
+                                                                          color: const Color(
+                                                                            0xFFF59E0B,
+                                                                          ),
+                                                                          width: 1.5,
+                                                                        )
+                                                                      : (isMine
+                                                                          ? null
+                                                                          : Border.all(
+                                                                              color: colorScheme
+                                                                                  .outlineVariant
+                                                                                  .withValues(
+                                                                                    alpha: 0.25,
+                                                                                  ),
+                                                                              width: 0.5,
+                                                                            ))),
                                                           ),
-                                                        ),
-                                                        child: IntrinsicWidth(
+                                                          child: IntrinsicWidth(
                                                           child: Column(
                                                             crossAxisAlignment:
                                                                 CrossAxisAlignment
@@ -5248,61 +5271,68 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       ),
                                                               ),
                                                               const SizedBox(
-                                                                height: 8,
+                                                                height: 3,
                                                               ),
-                                                              Row(
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .min,
-                                                                children: [
-                                                                  Text(
-                                                                    formatEgyptTime(
-                                                                      messageLocalDate,
-                                                                    ),
-                                                                    style: TextStyle(
-                                                                      color:
-                                                                          subTextColor,
-                                                                      fontSize:
-                                                                          12,
-                                                                    ),
-                                                                  ),
-                                                                  if (message
-                                                                      .isEdited) ...[
-                                                                    const SizedBox(
-                                                                      width: 6,
-                                                                    ),
+                                                              Align(
+                                                                alignment: AlignmentDirectional.bottomEnd,
+                                                                child: Row(
+                                                                  mainAxisSize:
+                                                                      MainAxisSize
+                                                                          .min,
+                                                                  children: [
                                                                     Text(
-                                                                      'معدلة',
+                                                                      formatEgyptTime(
+                                                                        messageLocalDate,
+                                                                      ),
                                                                       style: TextStyle(
                                                                         color:
                                                                             subTextColor,
                                                                         fontSize:
-                                                                            12,
+                                                                            11,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
                                                                       ),
                                                                     ),
-                                                                  ],
-                                                                  if (status !=
-                                                                      null) ...[
-                                                                    const SizedBox(
-                                                                      width: 6,
-                                                                    ),
-                                                                    if (message.metadata?['status'] == 'failed')
-                                                                      GestureDetector(
-                                                                        onTap: () => _showActions(message),
-                                                                        child: Icon(
+                                                                    if (message
+                                                                        .isEdited) ...[
+                                                                      const SizedBox(
+                                                                        width: 4,
+                                                                      ),
+                                                                      Text(
+                                                                        'معدلة',
+                                                                        style: TextStyle(
+                                                                          color:
+                                                                              subTextColor,
+                                                                          fontSize:
+                                                                              11,
+                                                                          fontWeight:
+                                                                              FontWeight.w500,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                    if (status !=
+                                                                        null) ...[
+                                                                      const SizedBox(
+                                                                        width: 4,
+                                                                      ),
+                                                                      if (message.metadata?['status'] == 'failed')
+                                                                        GestureDetector(
+                                                                          onTap: () => _showActions(message),
+                                                                          child: Icon(
+                                                                            status.icon,
+                                                                            size: 15,
+                                                                            color: status.color,
+                                                                          ),
+                                                                        )
+                                                                      else
+                                                                        Icon(
                                                                           status.icon,
-                                                                          size: 16,
+                                                                          size: 15,
                                                                           color: status.color,
                                                                         ),
-                                                                      )
-                                                                    else
-                                                                      Icon(
-                                                                        status.icon,
-                                                                        size: 16,
-                                                                        color: status.color,
-                                                                      ),
+                                                                    ],
                                                                   ],
-                                                                ],
+                                                                ),
                                                               ),
                                                             ],
                                                           ),
@@ -6783,18 +6813,21 @@ class _MessageComposerState extends State<_MessageComposer> {
     final showVoiceActionButtons = isVoiceRecordingActive;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+        padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
         decoration: BoxDecoration(
-          color: colorScheme.surface.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: colorScheme.outlineVariant),
+          color: colorScheme.surface.withValues(alpha: 0.98),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+            width: 0.5,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 18,
-              offset: const Offset(0, 10),
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
@@ -6827,7 +6860,7 @@ class _MessageComposerState extends State<_MessageComposer> {
                   ),
                   const SizedBox(width: 4),
                   IconButton.filledTonal(
-                    tooltip: 'Ø§Ù„ÙƒØ§Ù…ÙŠØ±Ø§',
+                    tooltip: 'الكاميرا',
                     onPressed: enabled && !isUploading
                         ? widget.onTakePhoto
                         : null,
