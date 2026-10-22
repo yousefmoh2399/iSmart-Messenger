@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart' hide RefreshCallback;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -116,6 +117,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   DateTime? _lastLoadMoreAt;
   bool _didSendTyping = false;
   String? _focusedMessageId;
+  String? _pulsingHeartMessageId;
   bool _isUploadingAttachment = false;
   double _uploadProgress = 0;
   String? _uploadingFileName;
@@ -2383,6 +2385,72 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
   }
 
+
+  Future<void> _jumpToRepliedMessage(String replyId) async {
+    await _scrollToMessageById(replyId);
+    if (!mounted) return;
+    setState(() => _focusedMessageId = replyId);
+    await Future<void>.delayed(const Duration(milliseconds: 240));
+    if (!mounted) return;
+    setState(() => _focusedMessageId = null);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    setState(() => _focusedMessageId = replyId);
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    if (!mounted) return;
+    if (_focusedMessageId == replyId) {
+      setState(() => _focusedMessageId = null);
+    }
+  }
+
+  void _handleDoubleTapReaction(ChatMessage message) {
+    HapticFeedback.mediumImpact();
+    ref
+        .read(
+          conversationMessagesControllerProvider(
+            widget.conversation.id,
+          ).notifier,
+        )
+        .toggleReaction(
+          messageId: message.id,
+          emoji: '❤️',
+        );
+
+    setState(() {
+      _pulsingHeartMessageId = message.id;
+    });
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted && _pulsingHeartMessageId == message.id) {
+        setState(() => _pulsingHeartMessageId = null);
+      }
+    });
+  }
+
+  String _formatReceiptDateTime(DateTime? dateTime) {
+    if (dateTime == null) return '—';
+    final local = dateTime.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(local.year, local.month, local.day);
+    final diff = today.difference(target).inDays;
+    final hour = local.hour > 12 ? local.hour - 12 : (local.hour == 0 ? 12 : local.hour);
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour >= 12 ? 'م' : 'ص';
+    final timeStr = '$hour:$minute $period';
+
+    if (diff == 0) {
+      return 'اليوم في $timeStr';
+    } else if (diff == 1) {
+      return 'أمس في $timeStr';
+    } else {
+      const months = [
+        'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+      ];
+      return '${local.day} ${months[local.month - 1]} ${local.year}، $timeStr';
+    }
+  }
+
   Map<String, dynamic>? _replyMetadata(ChatMessage? replyTarget) {
     if (replyTarget == null) {
       return null;
@@ -2798,7 +2866,500 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
   }
 
+  Future<void> _showWhatsAppContextMenu(ChatMessage message) async {
+    final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
+    if (_isReadOnlyFor(authUserId)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_readOnlyTextFor(authUserId))));
+      return;
+    }
+
+    HapticFeedback.heavyImpact();
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    final senderId = message.sender?.id ?? message.senderId;
+    final isMine = authUser?.id.toString() == senderId.toString();
+    final canDelete = isMine || authUser?.can('canDeleteMessages') == true;
+    final canEdit = isMine && !message.hasAttachment && !message.isDeleted;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isFailed = message.metadata?['status'] == 'failed';
+    final previewText = message.content.isNotEmpty
+        ? message.content
+        : (message.fileName ?? 'مرفق');
+
+    final quickEmojis = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
+    final statusObj = authUser == null || !isMine ? null : _status(message, authUser.id);
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return GestureDetector(
+          onTap: () => Navigator.of(dialogContext).pop(),
+          behavior: HitTestBehavior.opaque,
+          child: SafeArea(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  child: GestureDetector(
+                    onTap: () {}, // Prevent tap through
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment:
+                          isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                      children: [
+                        // 1. Floating Reactions Capsule (WhatsApp iOS Style)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                            borderRadius: BorderRadius.circular(32),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.18),
+                                blurRadius: 18,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ...quickEmojis.map((emoji) {
+                                final isReacted = _reactionEntries(message).any((entry) => entry.key == emoji && _reactionHasUser(entry.value, authUser?.id));
+                                return GestureDetector(
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    Navigator.of(dialogContext).pop();
+                                    ref
+                                        .read(
+                                          conversationMessagesControllerProvider(
+                                            widget.conversation.id,
+                                          ).notifier,
+                                        )
+                                        .toggleReaction(
+                                          messageId: message.id,
+                                          emoji: emoji,
+                                        );
+                                  },
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 150),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isReacted
+                                          ? (isDark
+                                              ? Colors.white24
+                                              : const Color(0xFFE5E5EA))
+                                          : Colors.transparent,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text(
+                                      emoji,
+                                      style: const TextStyle(fontSize: 26),
+                                    ),
+                                  ),
+                                );
+                              }),
+                              // Add reaction (+) button
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.of(dialogContext).pop();
+                                  _showFullReactionPicker(message);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(7),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white12
+                                        : const Color(0xFFF2F2F7),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    CupertinoIcons.add,
+                                    size: 19,
+                                    color: isDark ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 2. Elevated Bubble Preview (WhatsApp iOS Style)
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth:
+                                MediaQuery.of(dialogContext).size.width * 0.78,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isMine
+                                  ? (isDark
+                                      ? const Color(0xFF005D4B)
+                                      : const Color(0xFFE7FFDB))
+                                  : (isDark
+                                      ? const Color(0xFF262D31)
+                                      : Colors.white),
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(18),
+                                topRight: const Radius.circular(18),
+                                bottomLeft: Radius.circular(isMine ? 18 : 4),
+                                bottomRight: Radius.circular(isMine ? 4 : 18),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.22),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!isMine &&
+                                    message.sender?.displayName != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      message.sender!.displayName,
+                                      style: const TextStyle(
+                                        color: Color(0xFF3390EC),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                Text(
+                                  previewText,
+                                  maxLines: 5,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: isDark ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      DateFormat('hh:mm a').format(
+                                        message.createdAt.toLocal(),
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark
+                                            ? Colors.white54
+                                            : Colors.black45,
+                                      ),
+                                    ),
+                                    if (statusObj != null) ...[
+                                      const SizedBox(width: 4),
+                                      Icon(
+                                        statusObj.icon,
+                                        size: 14,
+                                        color: statusObj.color,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // 3. iOS Inset Context Menu Card
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            width: 250,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF2C2C2E)
+                                  : Colors.white.withValues(alpha: 0.96),
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isFailed) ...[
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'إعادة إرسال',
+                                    icon: CupertinoIcons.arrow_clockwise,
+                                    isDestructive: true,
+                                    onTap: () => _retryMessage(message),
+                                  ),
+                                  _buildWhatsAppMenuDivider(isDark),
+                                ],
+                                _buildWhatsAppContextMenuItem(
+                                  title: 'الرد',
+                                  icon: CupertinoIcons.arrowshape_turn_up_left,
+                                  onTap: () {
+                                    setState(() {
+                                      _replyingTo = message;
+                                      _editingMessage = null;
+                                    });
+                                  },
+                                ),
+                                if (message.content.trim().isNotEmpty) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'نسخ',
+                                    icon: CupertinoIcons.doc_on_doc,
+                                    onTap: () {
+                                      Clipboard.setData(
+                                        ClipboardData(text: message.content),
+                                      );
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('تم نسخ النص إلى الحافظة'),
+                                          duration: Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
+                                  title: message.isFavoritedBy(authUser?.id)
+                                      ? 'إلغاء التمييز بنجمة'
+                                      : 'تمييز بنجمة',
+                                  icon: message.isFavoritedBy(authUser?.id)
+                                      ? CupertinoIcons.star_slash
+                                      : CupertinoIcons.star,
+                                  onTap: () {
+                                    ref
+                                        .read(
+                                          conversationMessagesControllerProvider(
+                                            widget.conversation.id,
+                                          ).notifier,
+                                        )
+                                        .toggleFavoriteMessage(
+                                          messageId: message.id,
+                                        );
+                                  },
+                                ),
+                                if (isMine) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'معلومات الرسالة',
+                                    icon: CupertinoIcons.info,
+                                    onTap: () => _showMessageDetails(message),
+                                  ),
+                                ],
+                                if (!message.hasAttachment ||
+                                    message.attachmentForwardAllowed) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'إعادة توجيه',
+                                    icon: CupertinoIcons.arrowshape_turn_up_right,
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedMessageIds
+                                          ..clear()
+                                          ..add(message.id);
+                                      });
+                                      _forwardSelectedMessages(
+                                        ref
+                                                .read(
+                                                  conversationMessagesControllerProvider(
+                                                    widget.conversation.id,
+                                                  ),
+                                                )
+                                                .valueOrNull
+                                                ?.messages ??
+                                            const <ChatMessage>[],
+                                      );
+                                    },
+                                  ),
+                                ],
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
+                                  title: 'تحديد',
+                                  icon: CupertinoIcons.checkmark_circle,
+                                  onTap: () =>
+                                      _toggleMessageSelection(message.id),
+                                ),
+                                if (message.isPrintableAttachment) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'طباعة عبر الكمبيوتر',
+                                    icon: CupertinoIcons.printer,
+                                    onTap: () =>
+                                        _requestAttachmentPrint(message),
+                                  ),
+                                ],
+                                if (message.hasAttachment &&
+                                    message.attachmentDownloadAllowed) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'تنزيل من جديد',
+                                    icon: CupertinoIcons.arrow_down_to_line,
+                                    onTap: () =>
+                                        _downloadAttachment(message),
+                                  ),
+                                ],
+                                if (_canManagePinnedMessage(authUser?.id)) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'تثبيت الرسالة',
+                                    icon: CupertinoIcons.pin,
+                                    onTap: () {
+                                      ref
+                                          .read(
+                                            chatOverviewControllerProvider.notifier,
+                                          )
+                                          .setGroupPinnedMessage(
+                                            conversationId: widget.conversation.id,
+                                            content: previewText,
+                                            messageId: message.id,
+                                          );
+                                    },
+                                  ),
+                                ],
+                                if (canEdit) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'تعديل',
+                                    icon: CupertinoIcons.pencil,
+                                    onTap: () {
+                                      setState(() {
+                                        _editingMessage = message;
+                                        _replyingTo = null;
+                                        _messageController.text = message.content;
+                                      });
+                                    },
+                                  ),
+                                ],
+                                if (canDelete && !message.isDeleted) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'حذف',
+                                    icon: CupertinoIcons.trash,
+                                    isDestructive: true,
+                                    onTap: () {
+                                      ref
+                                          .read(
+                                            conversationMessagesControllerProvider(
+                                              widget.conversation.id,
+                                            ).notifier,
+                                          )
+                                          .deleteMessage(message.id);
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWhatsAppContextMenuItem({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).pop();
+          onTap();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w400,
+                  color: isDestructive
+                      ? CupertinoColors.systemRed
+                      : (isDark ? Colors.white : Colors.black87),
+                ),
+              ),
+              Icon(
+                icon,
+                size: 20,
+                color: isDestructive
+                    ? CupertinoColors.systemRed
+                    : (isDark ? Colors.white70 : Colors.black54),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWhatsAppMenuDivider(bool isDark) {
+    return Divider(
+      height: 0.5,
+      thickness: 0.5,
+      indent: 16,
+      color: isDark ? Colors.white12 : Colors.black12,
+    );
+  }
+
   Future<void> _showActions(ChatMessage message) async {
+    return _showWhatsAppContextMenu(message);
+  }
+  Future<void> _oldShowActions(ChatMessage message) async {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) {
       if (!mounted) return;
@@ -3459,38 +4020,108 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   void _showMessageDetails(ChatMessage message) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final previewText = message.content.isNotEmpty
+        ? message.content
+        : (message.fileName ?? 'مرفق');
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
+        initialChildSize: 0.75,
+        maxChildSize: 0.95,
+        minChildSize: 0.45,
         builder: (context, scrollController) => Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
+            color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
+              // iOS drag handle
               Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 36,
+                height: 5,
+                margin: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
+                  color: isDark ? Colors.white24 : Colors.black26,
+                  borderRadius: BorderRadius.circular(2.5),
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text(
-                  'من شاهد الرسالة',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'معلومات الرسالة',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: Icon(
+                        CupertinoIcons.clear_circled_solid,
+                        color: isDark ? Colors.white38 : Colors.black26,
+                        size: 22,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Divider(),
+              // Message Preview Card
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        previewText,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: Text(
+                          DateFormat('hh:mm a').format(
+                            message.createdAt.toLocal(),
+                          ),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white38 : Colors.black38,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Receipts Sections (FutureBuilder)
               Expanded(
                 child: FutureBuilder<Map<String, dynamic>>(
                   future: ref
@@ -3498,48 +4129,107 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       .getReadReceipts(message.id),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
+                      return const Center(
+                        child: CircularProgressIndicator.adaptive(),
+                      );
                     }
-                    if (snapshot.hasError) {
-                      return Center(child: Text('خطأ: ${snapshot.error}'));
-                    }
+                    final data = snapshot.data ?? {};
                     final seenBy =
-                        snapshot.data?['seenBy'] as List<dynamic>? ?? [];
-                    if (seenBy.isEmpty) {
-                      return const Center(child: Text('لم يشاهدها أحد بعد.'));
+                        (data['seenBy'] as List<dynamic>? ?? []);
+                    final deliveredTo =
+                        (data['deliveredTo'] as List<dynamic>? ?? []);
+                    final isDirect = widget.conversation.type == 'direct';
+
+                    DateTime? directReadTime;
+                    if (seenBy.isNotEmpty && seenBy.first['seenAt'] != null) {
+                      directReadTime = DateTime.tryParse(
+                        seenBy.first['seenAt'].toString(),
+                      );
                     }
-                    return ListView.builder(
+                    DateTime? directDeliveredTime;
+                    if (deliveredTo.isNotEmpty &&
+                        deliveredTo.first['deliveredAt'] != null) {
+                      directDeliveredTime = DateTime.tryParse(
+                        deliveredTo.first['deliveredAt'].toString(),
+                      );
+                    }
+
+                    return ListView(
                       controller: scrollController,
-                      itemCount: seenBy.length,
-                      itemBuilder: (context, index) {
-                        final user = seenBy[index] as Map<String, dynamic>;
-                        return ListTile(
-                          leading: ChatAvatar(
-                            avatarUrl: user['avatarUrl']?.toString() ?? '',
-                            radius: 20,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer,
-                            fallback: Text(
-                              user['displayName']?.toString().isNotEmpty == true
-                                  ? user['displayName']
-                                        .toString()[0]
-                                        .toUpperCase()
-                                  : '?',
-                            ),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      children: [
+                        // Section 1: قُرِئت (Read)
+                        _buildReceiptsGroupCard(
+                          isDark: isDark,
+                          icon: Icons.done_all_rounded,
+                          iconColor: const Color(0xFF34B7F1), // WhatsApp Blue Check
+                          title: 'قُرِئت',
+                          subtitle: isDirect
+                              ? (directReadTime != null
+                                  ? _formatReceiptDateTime(directReadTime)
+                                  : 'لم تُقرأ بعد')
+                              : (seenBy.isNotEmpty
+                                  ? '${seenBy.length} من الأعضاء'
+                                  : 'لم يشاهدها أحد بعد'),
+                          receipts: isDirect ? [] : seenBy,
+                          timeField: 'seenAt',
+                        ),
+                        const SizedBox(height: 16),
+                        // Section 2: سُلِّمت (Delivered)
+                        _buildReceiptsGroupCard(
+                          isDark: isDark,
+                          icon: Icons.done_all_rounded,
+                          iconColor: const Color(0xFF8E8E93), // WhatsApp Grey Double Check
+                          title: 'سُلِّمت',
+                          subtitle: isDirect
+                              ? (directDeliveredTime != null
+                                  ? _formatReceiptDateTime(directDeliveredTime)
+                                  : 'لم تُسلّم بعد')
+                              : (deliveredTo.isNotEmpty
+                                  ? '${deliveredTo.length} من الأعضاء'
+                                  : 'لم تُسلّم لأحد بعد'),
+                          receipts: isDirect ? [] : deliveredTo,
+                          timeField: 'deliveredAt',
+                        ),
+                        const SizedBox(height: 16),
+                        // Section 3: أُرسِلت (Sent)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
                           ),
-                          title: Text(
-                            user['displayName']?.toString() ?? 'مستخدم',
+                          decoration: BoxDecoration(
+                            color:
+                                isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          subtitle: user['seenAt'] != null
-                              ? Text(
-                                  DateTime.parse(
-                                    user['seenAt'].toString(),
-                                  ).toLocal().toString(),
-                                )
-                              : null,
-                        );
-                      },
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.done_rounded,
+                                color: Color(0xFF8E8E93),
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              const Text(
+                                'أُرسِلت',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                _formatReceiptDateTime(message.createdAt),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark ? Colors.white60 : Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -3550,6 +4240,137 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       ),
     );
   }
+
+  Widget _buildReceiptsGroupCard({
+    required bool isDark,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required List<dynamic> receipts,
+    required String timeField,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, color: iconColor, size: 20),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (receipts.isNotEmpty) ...[
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 16,
+              color: isDark ? Colors.white12 : Colors.black12,
+            ),
+            ...receipts.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final user = entry.value as Map<String, dynamic>;
+              final rawTime =
+                  user[timeField] ?? user['seenAt'] ?? user['deliveredAt'];
+              DateTime? itemTime;
+              if (rawTime != null) {
+                itemTime = DateTime.tryParse(rawTime.toString());
+              }
+              final isLast = idx == receipts.length - 1;
+
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        ChatAvatar(
+                          avatarUrl: user['avatarUrl']?.toString() ?? '',
+                          radius: 18,
+                          backgroundColor: isDark
+                              ? Colors.white12
+                              : const Color(0xFFE5E5EA),
+                          fallback: Text(
+                            user['displayName']?.toString().isNotEmpty == true
+                                ? user['displayName'].toString()[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            user['displayName']?.toString() ??
+                                user['username']?.toString() ??
+                                'مستخدم',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        if (itemTime != null)
+                          Text(
+                            _formatReceiptDateTime(itemTime),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white38 : Colors.black38,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (!isLast)
+                    Divider(
+                      height: 0.5,
+                      thickness: 0.5,
+                      indent: 58,
+                      color: isDark ? Colors.white12 : Colors.black12,
+                    ),
+                ],
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
 
   void _showScheduledMessagesSheet() {
     showModalBottomSheet(
@@ -4995,63 +5816,72 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                 ),
                                                               if (replyPreview !=
                                                                   null)
-                                                                Container(
-                                                                  width: double
-                                                                      .infinity,
-                                                                  margin:
-                                                                      const EdgeInsets.only(
-                                                                        bottom:
-                                                                            8,
-                                                                      ),
-                                                                  padding:
-                                                                      const EdgeInsets.all(
-                                                                        10,
-                                                                      ),
-                                                                  decoration: BoxDecoration(
-                                                                    color:
-                                                                        replyBgColor,
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                          14,
+                                                                GestureDetector(
+                                                                  behavior: HitTestBehavior.opaque,
+                                                                  onTap: () {
+                                                                    final replyId = message.replyToMessageId;
+                                                                    if (replyId != null && replyId.isNotEmpty) {
+                                                                      _jumpToRepliedMessage(replyId);
+                                                                    }
+                                                                  },
+                                                                  child: Container(
+                                                                    width: double
+                                                                        .infinity,
+                                                                    margin:
+                                                                        const EdgeInsets.only(
+                                                                          bottom:
+                                                                              8,
                                                                         ),
-                                                                  ),
-                                                                  child: Column(
-                                                                    crossAxisAlignment:
-                                                                        CrossAxisAlignment
-                                                                            .start,
-                                                                    children: [
-                                                                      if (replyPreviewSender !=
-                                                                          null)
-                                                                        Padding(
-                                                                          padding: const EdgeInsets.only(
-                                                                            bottom:
-                                                                                3,
+                                                                    padding:
+                                                                        const EdgeInsets.all(
+                                                                          10,
+                                                                        ),
+                                                                    decoration: BoxDecoration(
+                                                                      color:
+                                                                          replyBgColor,
+                                                                      borderRadius:
+                                                                          BorderRadius.circular(
+                                                                            14,
                                                                           ),
-                                                                          child: Text(
-                                                                            replyPreviewSender,
-                                                                            maxLines:
-                                                                                1,
-                                                                            overflow:
-                                                                                TextOverflow.ellipsis,
-                                                                            style: TextStyle(
-                                                                              color: resolved.accent,
-                                                                              fontSize: 12,
-                                                                              fontWeight: FontWeight.w700,
+                                                                    ),
+                                                                    child: Column(
+                                                                      crossAxisAlignment:
+                                                                          CrossAxisAlignment
+                                                                              .start,
+                                                                      children: [
+                                                                        if (replyPreviewSender !=
+                                                                            null)
+                                                                          Padding(
+                                                                            padding: const EdgeInsets.only(
+                                                                              bottom:
+                                                                                  3,
+                                                                            ),
+                                                                            child: Text(
+                                                                              replyPreviewSender,
+                                                                              maxLines:
+                                                                                  1,
+                                                                              overflow:
+                                                                                  TextOverflow.ellipsis,
+                                                                              style: TextStyle(
+                                                                                color: resolved.accent,
+                                                                                fontSize: 12,
+                                                                                fontWeight: FontWeight.w700,
+                                                                              ),
                                                                             ),
                                                                           ),
+                                                                        Text(
+                                                                          replyPreview,
+                                                                          maxLines:
+                                                                              2,
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
+                                                                          style: TextStyle(
+                                                                            color:
+                                                                                subTextColor,
+                                                                          ),
                                                                         ),
-                                                                      Text(
-                                                                        replyPreview,
-                                                                        maxLines:
-                                                                            2,
-                                                                        overflow:
-                                                                            TextOverflow.ellipsis,
-                                                                        style: TextStyle(
-                                                                          color:
-                                                                              subTextColor,
-                                                                        ),
-                                                                      ),
-                                                                    ],
+                                                                      ],
+                                                                    ),
                                                                   ),
                                                                 ),
                                                               AnimatedSwitcher(
