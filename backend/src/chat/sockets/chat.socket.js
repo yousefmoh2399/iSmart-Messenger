@@ -96,7 +96,7 @@ function unregisterUserSocket(userId, socketId) {
 function hasLiveSocketId(io, socketId) {
   const registry = io?.sockets?.sockets;
   if (!registry) {
-    return true;
+    return false;
   }
   if (typeof registry.has === "function") {
     return registry.has(socketId);
@@ -107,7 +107,7 @@ function hasLiveSocketId(io, socketId) {
   if (typeof registry === "object") {
     return Boolean(registry[socketId]);
   }
-  return true;
+  return false;
 }
 
 function pruneUserSockets(io, userId) {
@@ -463,6 +463,7 @@ function initializeChatSocketServer(httpServer) {
       credentials: true,
     },
   });
+  activeIOInstance = io;
 
   // On server restart, clear stale online flags from previous process lifetime.
   User.updateMany(
@@ -1525,7 +1526,46 @@ function initializeChatSocketServer(httpServer) {
   return io;
 }
 
+function getLiveSocketMetrics() {
+  const io = activeIOInstance;
+  let liveSocketCount = 0;
+  if (io?.sockets?.sockets) {
+    if (typeof io.sockets.sockets.size === "number") {
+      liveSocketCount = io.sockets.sockets.size;
+    } else if (typeof io.sockets.sockets === "object") {
+      liveSocketCount = Object.keys(io.sockets.sockets).length;
+    }
+  } else {
+    for (const sockets of userSockets.values()) {
+      liveSocketCount += sockets.size;
+    }
+  }
+
+  const liveUserCount = userSockets.size;
+
+  return {
+    liveSocketCount,
+    liveUserCount,
+    isSocketConnected(socketId) {
+      if (!socketId) return false;
+      return hasLiveSocketId(io, String(socketId));
+    },
+    isUserOnline(userId) {
+      if (!userId) return false;
+      const uid = String(userId._id || userId);
+      const sockets = userSockets.get(uid);
+      if (!sockets || !sockets.size) return false;
+      if (!io) return sockets.size > 0;
+      for (const sId of sockets) {
+        if (hasLiveSocketId(io, sId)) return true;
+      }
+      return false;
+    },
+  };
+}
+
 module.exports = {
   initializeChatSocketServer,
   getUserDeliveryContext,
+  getLiveSocketMetrics,
 };
