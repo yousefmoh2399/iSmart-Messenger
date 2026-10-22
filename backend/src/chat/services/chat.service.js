@@ -32,9 +32,25 @@ const { classifyAttachment } = require("./chat-attachment.service");
 
 function getObjectIdString(value) {
   if (!value) return null;
-  if (typeof value === "string") return value;
-  if (value._id) return value._id.toString();
-  if (value.toString) return value.toString();
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^[a-fA-F0-9]{24}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/['"]?_?id['"]?\s*[:=]\s*(?:new\s+ObjectId\(['"])?([a-fA-F0-9]{24})['"]?\)?/i);
+    if (match && match[1]) return match[1];
+    return null;
+  }
+  if (value._id) {
+    const str = value._id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (value.id) {
+    const str = value.id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (typeof value.toString === "function") {
+    const str = value.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
   return null;
 }
 

@@ -5,10 +5,25 @@ const asyncHandler = require("../../utils/async-handler");
 const DeviceSession = require("../../models/device-session.model");
 const ClientError = require("../../models/client-error.model");
 const User = require("../../models/user.model");
-const { getLiveSocketMetrics } = require("../../chat/sockets/chat.socket");
+function safeGetLiveSocketMetrics() {
+  try {
+    const chatSocket = require("../../chat/sockets/chat.socket");
+    if (typeof chatSocket?.getLiveSocketMetrics === "function") {
+      return chatSocket.getLiveSocketMetrics();
+    }
+  } catch (_) {}
+  return {
+    totalConnections: 0,
+    usersOnline: 0,
+    desktopSockets: 0,
+    mobileSockets: 0,
+    webSockets: 0,
+    otherSockets: 0,
+  };
+}
 
 const getSystemStats = asyncHandler(async (req, res) => {
-  const liveMetrics = getLiveSocketMetrics();
+  const liveMetrics = safeGetLiveSocketMetrics();
 
   // OS & Hardware Metrics
   const totalMem = os.totalmem();
@@ -108,7 +123,7 @@ const getConnections = asyncHandler(async (req, res) => {
   const clientType = req.query.clientType;
   const search = req.query.search;
 
-  const liveMetrics = getLiveSocketMetrics();
+  const liveMetrics = safeGetLiveSocketMetrics();
 
   let query = {};
 

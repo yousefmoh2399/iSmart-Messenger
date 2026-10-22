@@ -233,6 +233,17 @@ async function buildDynamicPdfReport({
     if (fs.existsSync(fontRegular)) doc.registerFont("Arabic", fontRegular);
     if (fs.existsSync(fontBold)) doc.registerFont("ArabicBold", fontBold);
 
+    function setFont(bold = false) {
+      if (bold && doc._registeredFonts?.ArabicBold) {
+        doc.font("ArabicBold");
+      } else if (doc._registeredFonts?.Arabic) {
+        doc.font("Arabic");
+      } else {
+        doc.font(bold ? "Helvetica-Bold" : "Helvetica");
+      }
+      return doc;
+    }
+
     function drawHeaderAndBranding() {
       // Logos
       if (headerConfig.showLogo1 !== false && logo1) {
@@ -247,7 +258,8 @@ async function buildDynamicPdfReport({
       }
 
       // Organization Header text
-      doc.font("ArabicBold").fontSize(14);
+      setFont(true);
+      doc.fontSize(14);
       if (headerConfig.line1) {
         doc.text(processArabicText(headerConfig.line1), 0, 36, {
           width: pageWidth,
@@ -271,7 +283,7 @@ async function buildDynamicPdfReport({
 
       // Main Report Title
       doc.moveDown(1.5);
-      doc.font("ArabicBold").fontSize(15);
+      setFont(true).fontSize(15);
       doc.text(processArabicText(finalTitle), 0, 102, {
         width: pageWidth,
         align: "center",
@@ -279,7 +291,7 @@ async function buildDynamicPdfReport({
 
       // Secondary Static Note / Disclaimer
       if (headerConfig.secondaryNote && headerConfig.secondaryNote.trim()) {
-        doc.font("Arabic").fontSize(9.5).fillColor("#64748B");
+        setFont(false).fontSize(9.5).fillColor("#64748B");
         doc.text(processArabicText(headerConfig.secondaryNote.trim()), margin, 122, {
           width: availableWidth,
           align: "center",
@@ -295,7 +307,7 @@ async function buildDynamicPdfReport({
 
     function drawRow(y, rowData, isHeader = false, isTotal = false) {
       doc
-        .font(isHeader || isTotal ? "ArabicBold" : "Arabic")
+        
         .fontSize(isHeader ? 11 : isTotal ? 10.5 : 10);
 
       let currentX = pageWidth - margin;
@@ -389,7 +401,7 @@ async function buildDynamicPdfReport({
     const hasFooter = headerConfig.footerNote || headerConfig.preparedByLabel || headerConfig.approvedByLabel;
     if (hasFooter && currentY + 45 <= pageHeight - margin) {
       currentY += 16;
-      doc.font("Arabic").fontSize(9.5).fillColor("#475569");
+      setFont(false).fontSize(9.5).fillColor("#475569");
 
       if (headerConfig.preparedByLabel || headerConfig.approvedByLabel) {
         if (headerConfig.preparedByLabel) {
