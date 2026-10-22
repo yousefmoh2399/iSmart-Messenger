@@ -578,7 +578,11 @@ class ChatReceipt {
 
   factory ChatReceipt.fromJson(Map<String, dynamic> json) {
     return ChatReceipt(
-      userId: json['userId'] as String,
+      userId: (json['userId'] is Map
+              ? (json['userId']['_id'] ?? json['userId']['id'])
+              : json['userId'])
+          ?.toString() ??
+          '',
       at: json['at'] is String ? DateTime.tryParse(json['at'] as String) : null,
     );
   }
@@ -871,8 +875,10 @@ class ChatMessage {
       id: (json['_id'] ?? json['id'])?.toString() ?? '',
       conversationId: json['conversationId']?.toString() ?? '',
       senderId: json['senderId']?.toString() ?? '',
-      sender: json['sender'] is Map<String, dynamic>
-          ? ChatDirectoryUser.fromJson(json['sender'] as Map<String, dynamic>)
+      sender: json['sender'] is Map
+          ? ChatDirectoryUser.fromJson(
+              Map<String, dynamic>.from(json['sender'] as Map),
+            )
           : null,
       content: json['content'] as String? ?? '',
       messageType: json['messageType'] as String? ?? 'text',
@@ -904,12 +910,12 @@ class ChatMessage {
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       seenBy: (json['seenBy'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       deliveredTo: (json['deliveredTo'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
     );
   }

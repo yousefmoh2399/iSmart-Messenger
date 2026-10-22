@@ -208,11 +208,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(activeConversationIdProvider.notifier).state = _conversationId;
-      ref
-          .read(
-            conversationMessagesControllerProvider(_conversationId).notifier,
-          )
-          .markSeen();
+      final controller = ref.read(
+        conversationMessagesControllerProvider(_conversationId).notifier,
+      );
+      controller.markSeen();
+      controller.refresh();
       _messageFocusNode.requestFocus();
     });
   }
@@ -254,11 +254,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(activeConversationIdProvider.notifier).state = _conversationId;
-        ref
-            .read(
-              conversationMessagesControllerProvider(_conversationId).notifier,
-            )
-            .markSeen();
+        final controller = ref.read(
+          conversationMessagesControllerProvider(_conversationId).notifier,
+        );
+        controller.markSeen();
+        controller.refresh();
         _messageFocusNode.requestFocus();
       });
       unawaited(_refreshRemotePeerDevice());
@@ -3902,12 +3902,16 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                 final older = index < renderedMessages.length - 1
                                     ? renderedMessages[index + 1]
                                     : null;
-                                final isMine =
-                                    message.sender?.id ==
-                                    widget.currentUser?.id;
+                                final senderId =
+                                    message.sender?.id ?? message.senderId;
+                                final olderSenderId =
+                                    older?.sender?.id ?? older?.senderId;
+                                final isMine = widget.currentUser?.id != null &&
+                                    (senderId == widget.currentUser!.id ||
+                                        message.sender?.id == widget.currentUser!.id);
                                 final shouldBreakGroup =
                                     older == null ||
-                                    older.sender?.id != message.sender?.id ||
+                                    olderSenderId != senderId ||
                                     message.createdAt
                                             .difference(older.createdAt)
                                             .inMinutes >
@@ -3916,9 +3920,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                 final newer = index > 0
                                     ? renderedMessages[index - 1]
                                     : null;
+                                final newerSenderId =
+                                    newer?.sender?.id ?? newer?.senderId;
                                 final isLastInGroup =
                                     newer == null ||
-                                    newer.sender?.id != message.sender?.id ||
+                                    newerSenderId != senderId ||
                                     newer.createdAt
                                             .difference(message.createdAt)
                                             .inMinutes >
@@ -3929,8 +3935,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                         true
                                     ? message.sender!.displayName
                                     : (isMine ? 'أنت' : 'عضو');
-                                final senderId =
-                                    message.sender?.id ?? message.senderId;
                                 final canEdit =
                                     senderId == widget.currentUser?.id &&
                                     !isReadOnly &&

@@ -139,13 +139,13 @@ class ChatDirectoryUser {
 
   factory ChatDirectoryUser.fromJson(Map<String, dynamic> json) {
     return ChatDirectoryUser(
-      id: json['id'] as String,
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
       username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
       jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
-      departmentId: json['departmentId'] as String?,
-      branchId: json['branchId'] as String?,
+      departmentId: json['departmentId']?.toString(),
+      branchId: json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       presenceStatus: json['presenceStatus'] as String? ?? 'offline',
@@ -564,7 +564,11 @@ class ChatReceipt {
 
   factory ChatReceipt.fromJson(Map<String, dynamic> json) {
     return ChatReceipt(
-      userId: json['userId'] as String,
+      userId: (json['userId'] is Map
+              ? (json['userId']['_id'] ?? json['userId']['id'])
+              : json['userId'])
+          ?.toString() ??
+          '',
       at: json['at'] is String ? DateTime.tryParse(json['at'] as String) : null,
     );
   }
@@ -864,19 +868,25 @@ class ChatMessage {
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
-      id: json['id'] as String,
-      conversationId: json['conversationId'] as String,
-      senderId: json['senderId'] as String,
-      sender: json['sender'] is Map<String, dynamic>
-          ? ChatDirectoryUser.fromJson(json['sender'] as Map<String, dynamic>)
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      conversationId: json['conversationId']?.toString() ?? '',
+      senderId: (json['senderId'] is Map
+              ? (json['senderId']['_id'] ?? json['senderId']['id'])
+              : json['senderId'])
+          ?.toString() ??
+          '',
+      sender: json['sender'] is Map
+          ? ChatDirectoryUser.fromJson(
+              Map<String, dynamic>.from(json['sender'] as Map),
+            )
           : null,
       content: json['content'] as String? ?? '',
       messageType: json['messageType'] as String? ?? 'text',
       fileUrl: resolveMediaUrl(json['fileUrl'] as String?),
       fileName: json['fileName'] as String?,
-      fileSize: json['fileSize'] as int?,
+      fileSize: (json['fileSize'] as num?)?.toInt(),
       mimeType: json['mimeType'] as String?,
-      replyToMessageId: json['replyToMessageId'] as String?,
+      replyToMessageId: json['replyToMessageId']?.toString(),
       isDeleted: json['isDeleted'] == true,
       isScheduled: json['isScheduled'] == true,
       scheduledFor: json['scheduledFor'] is String
@@ -904,12 +914,12 @@ class ChatMessage {
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       seenBy: (json['seenBy'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       deliveredTo: (json['deliveredTo'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
     );
   }

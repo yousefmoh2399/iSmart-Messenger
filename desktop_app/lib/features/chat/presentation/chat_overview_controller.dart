@@ -523,11 +523,35 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
+  Future<void> _upsertIncomingMessageInCache(ChatMessage message) async {
+    try {
+      final cached = await _repository().getCachedMessages(message.conversationId);
+      if (cached != null) {
+        final updated = sortAndDedupeChatMessages([...cached.messages, message]);
+        final jsonList = updated.map((m) => m.toJson()).toList();
+        await _repository().cache.saveRawJson('messages_${message.conversationId}', {
+          'messages': jsonList,
+          'meta': {
+            'nextCursor': cached.nextCursor,
+            'hasMore': cached.hasMore,
+            'limit': cached.limit,
+          },
+        });
+      }
+    } catch (_) {}
+  }
+
   void _applyIncomingMessage(ChatMessage message) {
+    unawaited(_upsertIncomingMessageInCache(message));
+
     final current = state.valueOrNull;
     if (current == null) {
       return;
     }
+
+    final effectiveSenderId = message.sender?.id ?? message.senderId;
+    final isFromCurrentUser =
+        effectiveSenderId.isNotEmpty && effectiveSenderId == _currentUserId;
 
     final index = current.conversations.indexWhere(
       (conversation) => conversation.id == message.conversationId,
@@ -550,7 +574,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
           final inserted = conversation.copyWith(
             lastMessage: _buildLastMessage(message),
-            unreadCount: message.sender?.id == _currentUserId ? 0 : 1,
+            unreadCount: isFromCurrentUser ? 0 : 1,
             updatedAt: message.createdAt,
           );
 
@@ -576,7 +600,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final existing = updated[index];
     updated[index] = existing.copyWith(
       lastMessage: _buildLastMessage(message),
-      unreadCount: message.sender?.id == _currentUserId || isActiveConversation
+      unreadCount: isFromCurrentUser || isActiveConversation
           ? 0
           : existing.unreadCount + 1,
       updatedAt: message.createdAt,
@@ -589,7 +613,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       ),
     );
 
-    if (isActiveConversation && message.sender?.id != _currentUserId) {
+    if (isActiveConversation && !isFromCurrentUser) {
       Future<void>.microtask(() async {
         if (_disposed) {
           return;
@@ -1157,6 +1181,7 @@ class ConversationMessagesController
   ChatRepository? _chatRepository;
   bool _isRefreshing = false;
   bool _disposed = false;
+  bool _isInitialBuildFetchingNetwork = false;
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
@@ -1227,8 +1252,13 @@ class ConversationMessagesController
       );
     }
 
-    final page = await _guardAuth(() => _repository().fetchMessages(arg));
-    return ConversationMessagesState.initial(_dedupePage(page));
+    _isInitialBuildFetchingNetwork = true;
+    try {
+      final page = await _guardAuth(() => _repository().fetchMessages(arg));
+      return ConversationMessagesState.initial(_dedupePage(page));
+    } finally {
+      _isInitialBuildFetchingNetwork = false;
+    }
   }
 
   void _listenToSocket(String conversationId) {
@@ -1245,14 +1275,21 @@ class ConversationMessagesController
       }
 
       if (event.type == 'receive_message') {
-        final message = ChatMessage.fromJson(event.payload);
-        if (message.conversationId == conversationId) {
-          _setStateAndCache(
-            current.copyWith(
-              messages: _upsertMessage(current.messages, message),
-            ),
-          );
-        }
+        try {
+          final message = ChatMessage.fromJson(event.payload);
+          if (message.conversationId == conversationId) {
+            final current = state.valueOrNull;
+            if (current != null) {
+              _setStateAndCache(
+                current.copyWith(
+                  messages: _upsertMessage(current.messages, message),
+                ),
+              );
+            } else {
+              unawaited(refresh());
+            }
+          }
+        } catch (_) {}
         return;
       }
 
@@ -1474,10 +1511,7 @@ class ConversationMessagesController
   }
 
   Future<void> refresh() async {
-    if (_isRefreshing || _disposed) {
-      return;
-    }
-    if (state.isLoading && state.valueOrNull == null) {
+    if (_isRefreshing || _disposed || _isInitialBuildFetchingNetwork) {
       return;
     }
     if (!await _waitForAuthenticatedSession()) {

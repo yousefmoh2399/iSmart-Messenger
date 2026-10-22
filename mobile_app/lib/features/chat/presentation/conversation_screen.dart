@@ -298,13 +298,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       _container.read(activeConversationIdProvider.notifier).state =
           widget.conversation.id;
       _container.read(chatSocketServiceProvider).markActivity();
-      ref
-          .read(
-            conversationMessagesControllerProvider(
-              widget.conversation.id,
-            ).notifier,
-          )
-          .markSeen();
+      final controller = ref.read(
+        conversationMessagesControllerProvider(
+          widget.conversation.id,
+        ).notifier,
+      );
+      controller.markSeen();
+      controller.refresh();
 
       final target = widget.initialTargetMessage;
       final targetId = target?.id ?? widget.initialMessageId;
@@ -392,7 +392,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         return;
       }
 
-      if (event.payload['conversationId'] != widget.conversation.id) {
+      if (event.payload['conversationId']?.toString() != widget.conversation.id) {
         return;
       }
 
