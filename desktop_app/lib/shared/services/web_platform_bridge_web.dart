@@ -1165,3 +1165,17 @@ Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async {
   }
   return _asStringMap(await _callElectron('probePeerStatus', {'ip': ip}));
 }
+
+Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}) async {
+  if (!isElectron()) return const <String, dynamic>{'success': false};
+  return _asStringMap(await _callElectron('getStorageBreakdown', {'directoryPath': directoryPath}));
+}
+
+Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(await _callElectron('clearStorageCache', {
+    'category': category,
+    'directoryPath': directoryPath,
+  }));
+  return result['success'] == true;
+}

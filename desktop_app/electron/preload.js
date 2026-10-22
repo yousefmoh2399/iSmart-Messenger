@@ -178,6 +178,8 @@ contextBridge.exposeInMainWorld("electronBridge", {
   captureScreen: () => ipcRenderer.invoke("window:capture-screen"),
   openRdp: (payload) => ipcRenderer.invoke("shell:open-rdp", payload),
   openPing: (payload) => ipcRenderer.invoke("shell:open-ping", payload),
+  getStorageBreakdown: (payload) => ipcRenderer.invoke("storage:get-breakdown", payload),
+  clearStorageCache: (payload) => ipcRenderer.invoke("storage:clear-cache", payload),
   probePeerStatus: (payload) => ipcRenderer.invoke("net:probe-peer-status", payload),
 });
 console.log("[preload] electronBridge exposed");

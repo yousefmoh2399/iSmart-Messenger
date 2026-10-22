@@ -324,3 +324,9 @@ Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async =>
       'success': false,
       'message': 'Not supported on this platform.',
     };
+
+Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}) async =>
+    const <String, dynamic>{'success': false};
+
+Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async =>
+    false;

@@ -1,3 +1,4 @@
+import 'storage_management_screen.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -469,6 +470,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+              Material(
+                color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: ListTile(
+                  leading: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF5856D6).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: const Icon(
+                      Icons.cleaning_services_rounded,
+                      color: Color(0xFF5856D6),
+                      size: 18,
+                    ),
+                  ),
+                  title: const Text(
+                    'إدارة مساحة التخزين والكاش',
+                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text(
+                    'تفريغ الذاكرة المؤقتة وتسريع الهاتف دون المساس بالمحادثات',
+                    style: TextStyle(fontSize: 11.5),
+                  ),
+                  trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 15),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const StorageManagementScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 14),
               Material(
                 color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
                 borderRadius: BorderRadius.circular(12),

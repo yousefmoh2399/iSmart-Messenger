@@ -3045,6 +3045,146 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
   return { success: true, path: outputPath };
 });
 
+
+const STORAGE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".ico"]);
+const STORAGE_AUDIO_EXTS = new Set([".m4a", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".flac"]);
+const STORAGE_DOC_EXTS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".zip", ".rar"]);
+
+function scanDirectoryStorage(dirPath) {
+  let appCache = 0;
+  let media = 0;
+  let audio = 0;
+  let docs = 0;
+
+  if (!fs.existsSync(dirPath)) {
+    return { appCache, media, audio, docs };
+  }
+
+  function walk(current) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (entry.isFile()) {
+          const size = fs.statSync(full).size;
+          const ext = path.extname(entry.name).toLowerCase();
+          if (STORAGE_IMAGE_EXTS.has(ext)) {
+            media += size;
+          } else if (STORAGE_AUDIO_EXTS.has(ext)) {
+            audio += size;
+          } else if (STORAGE_DOC_EXTS.has(ext)) {
+            docs += size;
+          } else {
+            appCache += size;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  walk(dirPath);
+  return { appCache, media, audio, docs };
+}
+
+ipcMain.handle("storage:get-breakdown", async (_event, payload = {}) => {
+  try {
+    const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
+    const tempDir = path.join(app.getPath("temp"), APP_NAME);
+
+    const s1 = scanDirectoryStorage(cacheDir);
+    const s2 = scanDirectoryStorage(tempDir);
+
+    const appCacheBytes = s1.appCache + s2.appCache;
+    const mediaBytes = s1.media + s2.media;
+    const audioBytes = s1.audio + s2.audio;
+    const documentsBytes = s1.docs + s2.docs;
+
+    return {
+      success: true,
+      appCacheBytes,
+      mediaBytes,
+      audioBytes,
+      documentsBytes,
+      totalBytes: appCacheBytes + mediaBytes + audioBytes + documentsBytes,
+    };
+  } catch (err) {
+    console.error("[electron] storage:get-breakdown error", err);
+    return {
+      success: false,
+      appCacheBytes: 0,
+      mediaBytes: 0,
+      audioBytes: 0,
+      documentsBytes: 0,
+      totalBytes: 0,
+    };
+  }
+});
+
+ipcMain.handle("storage:clear-cache", async (_event, payload = {}) => {
+  try {
+    const category = String(payload.category || "all").toLowerCase();
+    const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
+    const tempDir = path.join(app.getPath("temp"), APP_NAME);
+
+    function cleanDir(dirPath) {
+      if (!fs.existsSync(dirPath)) return;
+      function walkDelete(current) {
+        let entries;
+        try {
+          entries = fs.readdirSync(current, { withFileTypes: true });
+        } catch (_) {
+          return;
+        }
+        for (const entry of entries) {
+          const full = path.join(current, entry.name);
+          try {
+            if (entry.isDirectory()) {
+              walkDelete(full);
+              try { fs.rmdirSync(full); } catch (_) {}
+            } else if (entry.isFile()) {
+              const ext = path.extname(entry.name).toLowerCase();
+              let del = false;
+              if (category === "all") del = true;
+              else if (category === "appcache" && !STORAGE_IMAGE_EXTS.has(ext) && !STORAGE_AUDIO_EXTS.has(ext) && !STORAGE_DOC_EXTS.has(ext)) del = true;
+              else if (category === "media" && STORAGE_IMAGE_EXTS.has(ext)) del = true;
+              else if (category === "audio" && STORAGE_AUDIO_EXTS.has(ext)) del = true;
+              else if (category === "documents" && STORAGE_DOC_EXTS.has(ext)) del = true;
+              if (del) {
+                fs.unlinkSync(full);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      walkDelete(dirPath);
+    }
+
+    cleanDir(cacheDir);
+    cleanDir(tempDir);
+
+    if (category === "all" || category === "appcache") {
+      try {
+        const { session } = require("electron");
+        if (session && session.defaultSession) {
+          await session.defaultSession.clearCache();
+        }
+      } catch (_) {}
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("[electron] storage:clear-cache error", err);
+    return { success: false, error: String(err.message || err) };
+  }
+});
+
 ipcMain.handle("files:cache-chat-attachment", async (_event, payload = {}) => {
   const outputPath = chatAttachmentCachePath(
     payload.messageId,

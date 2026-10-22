@@ -1,3 +1,4 @@
+import 'storage_management_screen.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -651,6 +652,52 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     child: const Text('تغيير'),
                                   ),
                                 ),
+                                 const Divider(height: 0.5, indent: 52),
+                                 ListTile(
+                                   leading: Container(
+                                     width: 36,
+                                     height: 36,
+                                     decoration: BoxDecoration(
+                                       color: const Color(0xFF5856D6).withValues(alpha: 0.14),
+                                       borderRadius: BorderRadius.circular(10),
+                                     ),
+                                     child: const Icon(
+                                       Icons.cleaning_services_rounded,
+                                       color: Color(0xFF5856D6),
+                                       size: 20,
+                                     ),
+                                   ),
+                                   title: const Text(
+                                     'إدارة مساحة التخزين والذاكرة المؤقتة (Cache Cleaner)',
+                                     style: TextStyle(
+                                       fontSize: 14,
+                                       fontWeight: FontWeight.w600,
+                                     ),
+                                   ),
+                                   subtitle: Text(
+                                     'تفريغ كاش البرنامج ومصغرات الصور والملفات المؤقتة لتسريع الكمبيوتر',
+                                     style: TextStyle(
+                                       fontSize: 11,
+                                       color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                     ),
+                                   ),
+                                   trailing: FilledButton.tonal(
+                                     onPressed: () {
+                                       Navigator.of(context).push(
+                                         MaterialPageRoute(
+                                           builder: (_) => const DesktopStorageManagementScreen(),
+                                         ),
+                                       );
+                                     },
+                                     style: FilledButton.styleFrom(
+                                       padding: const EdgeInsets.symmetric(horizontal: 14),
+                                       shape: RoundedRectangleBorder(
+                                         borderRadius: BorderRadius.circular(8),
+                                       ),
+                                     ),
+                                     child: const Text('إدارة الذاكرة'),
+                                   ),
+                                 ),
                                 const Divider(height: 0.5, indent: 52),
                                 ListTile(
                                   leading: Container(
