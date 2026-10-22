@@ -3,6 +3,7 @@ const rateLimit = require("express-rate-limit");
 const { body, param, query } = require("express-validator");
 const { chatUpload } = require("../utils/chat-upload");
 const { chatTransferUpload } = require("../utils/chat-transfer-upload");
+const { conversationAvatarUpload } = require("../utils/conversation-avatar-upload");
 const {
   getChatDirectoryUsers,
   getChatRoles,
@@ -10,6 +11,9 @@ const {
   getManageableConversations,
   createChatConversation,
   updateChatConversation,
+  uploadConversationAvatar,
+  deleteConversationAvatar,
+  downloadConversationAvatar,
   updateChatConversationPreferences,
   setGroupPinnedMessage,
   clearGroupPinnedMessage,
@@ -63,6 +67,13 @@ const messageLimiter = rateLimit({
   },
 });
 
+router.get(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  downloadConversationAvatar,
+);
+
 router.use(requireAuth);
 
 router.get("/users", getChatDirectoryUsers);
@@ -113,6 +124,21 @@ router.put(
   ],
   validateRequest,
   updateChatConversation,
+);
+
+router.post(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  conversationAvatarUpload.single("avatar"),
+  uploadConversationAvatar,
+);
+
+router.delete(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  deleteConversationAvatar,
 );
 
 router.patch(

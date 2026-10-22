@@ -47,6 +47,10 @@ const conversationSchema = new mongoose.Schema(
       trim: true,
       maxlength: 500,
     },
+    avatarUrl: {
+      type: String,
+      default: null,
+    },
     departmentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Department",

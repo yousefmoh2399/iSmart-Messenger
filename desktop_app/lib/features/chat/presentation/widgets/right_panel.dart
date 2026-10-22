@@ -551,28 +551,22 @@ class _IdentityCard extends StatelessWidget {
         ? _conversationSubtitle(conversation.type)
         : conversation.description;
     final accent = conversationTypeAccent(conversation.type);
+    final peer = conversation.type == 'direct'
+        ? conversation.members.where((u) => u.id != currentUser?.id).firstOrNull
+        : null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: Row(
         children: [
           // Telegram-style large avatar for info panel
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [accent.withValues(alpha: 0.9), accent],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(
-              conversationTypeIcon(conversation.type),
-              color: Colors.white,
-              size: 26,
-            ),
+          SafeNetworkAvatar(
+            radius: 26,
+            backgroundColor: accent,
+            imageUrl: (conversation.type == 'direct' ? peer?.avatarUrl : conversation.avatarUrl) ?? conversation.avatarUrl ?? peer?.avatarUrl,
+            fallbackIcon: conversationTypeIcon(conversation.type),
+            fallbackIconSize: 26,
+            fallbackIconColor: Colors.white,
           ),
           const SizedBox(width: 12),
           Expanded(

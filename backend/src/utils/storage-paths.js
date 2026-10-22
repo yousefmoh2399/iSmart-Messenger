@@ -226,6 +226,7 @@ module.exports = {
   getChatUploadsDir,
   getChatTransferUploadsDir,
   getAvatarUploadsDir,
+  getConversationAvatarUploadsDir,
   getDocumentsUploadsDir,
   ensureDirectory,
   fileExists,

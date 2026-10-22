@@ -13,6 +13,9 @@ const {
   getConversationSnapshotForUserId,
   createConversation,
   updateConversation,
+  updateConversationAvatar,
+  removeConversationAvatar,
+  getConversationAvatarFilePath,
   updateConversationPreferences,
   setConversationPinnedMessage,
   clearConversationPinnedMessage,
@@ -286,6 +289,48 @@ const updateChatConversation = asyncHandler(async (req, res) => {
   sendChatResponse(res, {
     data: { conversation },
     legacy: { conversation },
+  });
+});
+
+
+const uploadConversationAvatar = asyncHandler(async (req, res) => {
+  const conversation = await updateConversationAvatar(
+    req.user,
+    req.params.id,
+    req.file,
+  );
+  const io = req.app.get("io");
+  if (io) {
+    emitConversationToMembers(io, conversation.id);
+  }
+  sendChatResponse(res, {
+    data: { conversation },
+    legacy: { conversation },
+  });
+});
+
+const deleteConversationAvatar = asyncHandler(async (req, res) => {
+  const conversation = await removeConversationAvatar(
+    req.user,
+    req.params.id,
+  );
+  const io = req.app.get("io");
+  if (io) {
+    emitConversationToMembers(io, conversation.id);
+  }
+  sendChatResponse(res, {
+    data: { conversation },
+    legacy: { conversation },
+  });
+});
+
+const downloadConversationAvatar = asyncHandler(async (req, res) => {
+  const filePath = await getConversationAvatarFilePath(req.params.id);
+  await sendUploadFile(res, filePath, {
+    cacheControl: "private, max-age=300",
+    disposition: "inline",
+    notFoundMessage: "Avatar not found.",
+    logLabel: "conversation-avatar-download",
   });
 });
 
@@ -956,6 +1001,9 @@ module.exports = {
   getManageableConversations,
   createChatConversation,
   updateChatConversation,
+  uploadConversationAvatar,
+  deleteConversationAvatar,
+  downloadConversationAvatar,
   updateChatConversationPreferences,
   setGroupPinnedMessage,
   clearGroupPinnedMessage,

@@ -12,6 +12,7 @@ const exceljs = require("exceljs");
 const {
   ensureDirectory,
   fileExists,
+  getConversationAvatarUploadsDir,
   resolveStoredUploadPath,
   toRelativeUploadPath,
 } = require("../../utils/storage-paths");
@@ -425,6 +426,7 @@ async function serializeConversation(conversation, currentUserId) {
     type: conversation.type,
     name: conversation.name,
     description: conversation.description || "",
+    avatarUrl: conversation.avatarUrl ? normalizeMediaUrl(conversation.avatarUrl) : null,
     departmentId: conversation.departmentId
       ? conversation.departmentId._id
         ? conversation.departmentId._id.toString()
@@ -836,7 +838,8 @@ async function assertConversationManagementAccess(currentUser, conversation) {
     entry._id ? entry._id.toString() : entry.toString(),
   );
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
-  if (currentUserId && adminIds.includes(currentUserId)) {
+  const createdById = getObjectIdString(conversation.createdBy);
+  if (currentUserId && (adminIds.includes(currentUserId) || createdById === currentUserId)) {
     return;
   }
 
@@ -1063,6 +1066,7 @@ async function createConversation(currentUser, payload) {
       type,
       name,
       description,
+      avatarUrl: payload.avatarUrl || null,
       createdBy: currentUser.id,
       members,
       admins: [currentUser.id],
@@ -1097,6 +1101,7 @@ async function createConversation(currentUser, payload) {
       type,
       name: name || `${department.name} room`,
       description,
+      avatarUrl: payload.avatarUrl || null,
       departmentId: department._id,
       createdBy: currentUser.id,
       members: memberIds,
@@ -1144,6 +1149,7 @@ async function createConversation(currentUser, payload) {
     type,
     name: name || "Broadcast",
     description,
+    avatarUrl: payload.avatarUrl || null,
     createdBy: currentUser.id,
     members,
     admins: adminIds,
@@ -1169,6 +1175,9 @@ async function updateConversation(currentUser, conversationId, payload) {
   }
   if (payload.description != null) {
     conversation.description = sanitizeText(payload.description, 500);
+  }
+  if (payload.avatarUrl !== undefined) {
+    conversation.avatarUrl = payload.avatarUrl;
   }
   if (payload.isArchived != null) {
     conversation.isArchived = Boolean(payload.isArchived);
@@ -3249,7 +3258,110 @@ async function exportPollToExcel(currentUser, messageId) {
   };
 }
 
+
+async function updateConversationAvatar(currentUser, conversationId, file) {
+  if (!file) {
+    throw new ApiError(400, "صورة المحادثة مطلوبة.");
+  }
+  const conversation = await Conversation.findOne({
+    _id: conversationId,
+    deletedAt: null,
+  });
+  if (!conversation) {
+    throw new ApiError(404, "المحادثة غير موجودة.");
+  }
+  await assertConversationManagementAccess(currentUser, conversation);
+
+  conversation.avatarUrl = `/api/chat/conversations/${conversationId}/avatar?v=${Date.now()}`;
+  await conversation.save();
+
+  const avatarDirectory = getConversationAvatarUploadsDir(conversationId);
+  try {
+    const entries = await fs.promises.readdir(avatarDirectory);
+    for (const entry of entries) {
+      const candidatePath = path.join(avatarDirectory, entry);
+      if (candidatePath !== resolveStoredUploadPath(file.path)) {
+        await deleteFileIfExists(candidatePath);
+      }
+    }
+  } catch (_) {}
+
+  await logAuditEvent({
+    actorId: currentUser.id,
+    action: "conversation.avatar.updated",
+    entityType: "Conversation",
+    entityId: conversation._id,
+    payload: { avatarUrl: conversation.avatarUrl },
+  });
+
+  return serializeConversation(conversation, currentUser.id);
+}
+
+async function removeConversationAvatar(currentUser, conversationId) {
+  const conversation = await Conversation.findOne({
+    _id: conversationId,
+    deletedAt: null,
+  });
+  if (!conversation) {
+    throw new ApiError(404, "المحادثة غير موجودة.");
+  }
+  await assertConversationManagementAccess(currentUser, conversation);
+
+  conversation.avatarUrl = null;
+  await conversation.save();
+
+  const avatarDirectory = getConversationAvatarUploadsDir(conversationId);
+  try {
+    const entries = await fs.promises.readdir(avatarDirectory);
+    for (const entry of entries) {
+      const candidatePath = path.join(avatarDirectory, entry);
+      await deleteFileIfExists(candidatePath);
+    }
+  } catch (_) {}
+
+  await logAuditEvent({
+    actorId: currentUser.id,
+    action: "conversation.avatar.removed",
+    entityType: "Conversation",
+    entityId: conversation._id,
+    payload: {},
+  });
+
+  return serializeConversation(conversation, currentUser.id);
+}
+
+async function getConversationAvatarFilePath(conversationId) {
+  const conversation = await Conversation.findOne({
+    _id: conversationId,
+    deletedAt: null,
+  }).lean();
+  if (!conversation) {
+    throw new ApiError(404, "Avatar not found.");
+  }
+
+  const avatarDirectory = getConversationAvatarUploadsDir(conversationId);
+  let entries = [];
+  try {
+    entries = await fs.promises.readdir(avatarDirectory);
+  } catch (_) {
+    throw new ApiError(404, "Avatar not found.");
+  }
+  if (!entries.length) {
+    throw new ApiError(404, "Avatar not found.");
+  }
+  const latestEntry = entries
+    .map((fileName) => ({
+      fileName,
+      filePath: path.join(avatarDirectory, fileName),
+    }))
+    .sort((a, b) => (a.fileName < b.fileName ? 1 : -1))[0];
+  return latestEntry.filePath;
+}
+
 module.exports = {
+  updateConversationAvatar,
+  removeConversationAvatar,
+  getConversationAvatarFilePath,
   votePollMessage,
   exportPollToExcel,
   serializeUserLite,

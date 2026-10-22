@@ -4760,7 +4760,7 @@ class _ChatHeader extends StatelessWidget {
             backgroundColor: conversationTypeAccent(
               conversation.type,
             ).withValues(alpha: 0.18),
-            imageUrl: peer?.avatarUrl,
+            imageUrl: (conversation.type == 'direct' ? peer?.avatarUrl : conversation.avatarUrl) ?? conversation.avatarUrl ?? peer?.avatarUrl,
             fallbackIcon: conversationTypeIcon(conversation.type),
             fallbackIconSize: 18,
             fallbackIconColor: conversationTypeAccent(conversation.type),

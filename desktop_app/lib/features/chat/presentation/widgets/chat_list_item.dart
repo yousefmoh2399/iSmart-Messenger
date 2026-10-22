@@ -147,7 +147,7 @@ class _ChatListItemState extends State<ChatListItem> {
                           SafeNetworkAvatar(
                             radius: avatarRadius,
                             backgroundColor: accent.withValues(alpha: 0.16),
-                            imageUrl: peer?.avatarUrl,
+                            imageUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
                             fallbackText: avatarLabel.isEmpty
                                 ? '?'
                                 : avatarLabel.substring(0, 1).toUpperCase(),

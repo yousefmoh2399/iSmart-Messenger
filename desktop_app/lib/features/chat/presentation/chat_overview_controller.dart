@@ -864,6 +864,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -873,6 +874,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       type: type,
       name: name,
       description: description,
+      avatarUrl: avatarUrl,
       memberIds: memberIds,
       adminIds: adminIds,
       departmentId: departmentId,
@@ -1101,6 +1103,46 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final repository = _repository();
     await repository.deleteManagedConversation(conversationId);
     await refresh();
+  }
+
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final conversation = await _repository().uploadConversationAvatar(
+      conversationId: conversationId,
+      filePath: filePath,
+      fileBytes: fileBytes,
+      fileName: fileName,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
+  Future<ChatConversation> removeConversationAvatar({
+    required String conversationId,
+  }) async {
+    final conversation = await _repository().removeConversationAvatar(
+      conversationId,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
+  Future<ChatConversation> updateGroupInfo({
+    required String conversationId,
+    String? name,
+    String? description,
+  }) async {
+    final conversation = await _repository().updateManagedConversation(
+      conversationId: conversationId,
+      name: name,
+      description: description,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
   }
 
   Future<ChatConversation> addGroupMembers({

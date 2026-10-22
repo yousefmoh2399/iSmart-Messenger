@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -41,6 +44,9 @@ class _NewConversationDialogState
   String? _departmentRoomDeptId;
   String _searchQuery = '';
   bool _isCreating = false;
+  Uint8List? _pickedAvatarBytes;
+  String? _pickedAvatarPath;
+  String? _pickedAvatarName;
 
   late List<String> _availableTypes;
 
@@ -65,6 +71,115 @@ class _NewConversationDialogState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatOverviewControllerProvider.notifier).ensureAllUsersLoaded();
     });
+  }
+
+
+  Future<void> _pickAvatar() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+      final picked = result?.files.single;
+      if (picked == null) return;
+
+      Uint8List? bytes = picked.bytes;
+      if (bytes == null && picked.path != null && picked.path!.isNotEmpty) {
+        final file = File(picked.path!);
+        if (await file.exists()) {
+          bytes = await file.readAsBytes();
+        }
+      }
+
+      setState(() {
+        _pickedAvatarBytes = bytes;
+        _pickedAvatarPath = picked.path;
+        _pickedAvatarName = picked.name;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل اختيار الصورة: $e')),
+      );
+    }
+  }
+
+  Widget _buildAvatarPicker(bool isDark) {
+    return Center(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          GestureDetector(
+            onTap: _pickAvatar,
+            child: Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                image: _pickedAvatarBytes != null
+                    ? DecorationImage(
+                        image: MemoryImage(_pickedAvatarBytes!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
+                border: Border.all(
+                  color: isDark ? Colors.white12 : Colors.black12,
+                  width: 1.5,
+                ),
+              ),
+              child: _pickedAvatarBytes == null
+                  ? Icon(
+                      _selectedType == 'broadcast'
+                          ? Icons.campaign_rounded
+                          : Icons.group_rounded,
+                      size: 36,
+                      color: isDark ? Colors.white38 : Colors.black38,
+                    )
+                  : null,
+            ),
+          ),
+          Positioned(
+            bottom: -2,
+            left: -2,
+            child: Material(
+              color: Theme.of(context).colorScheme.primary,
+              shape: const CircleBorder(),
+              elevation: 2,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: _pickAvatar,
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          if (_pickedAvatarBytes != null)
+            Positioned(
+              top: -2,
+              right: -2,
+              child: GestureDetector(
+                onTap: () => setState(() {
+                  _pickedAvatarBytes = null;
+                  _pickedAvatarPath = null;
+                  _pickedAvatarName = null;
+                }),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.redAccent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close_rounded, size: 12, color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -173,6 +288,19 @@ class _NewConversationDialogState
           memberIds: _selectedMembers.toList(),
           adminIds: _selectedAdmins.toList(),
         );
+      }
+
+
+      if (_pickedAvatarBytes != null ||
+          (_pickedAvatarPath != null && _pickedAvatarPath!.isNotEmpty)) {
+        try {
+          conversation = await controller.uploadConversationAvatar(
+            conversationId: conversation.id,
+            filePath: _pickedAvatarPath,
+            fileBytes: _pickedAvatarBytes,
+            fileName: _pickedAvatarName ?? 'avatar.jpg',
+          );
+        } catch (_) {}
       }
 
       if (mounted) {
@@ -1302,6 +1430,8 @@ class _NewConversationDialogState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _buildAvatarPicker(isDark),
+          const SizedBox(height: 16),
           TextField(
             controller: _nameController,
             decoration: InputDecoration(
@@ -1560,6 +1690,8 @@ class _NewConversationDialogState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _buildAvatarPicker(isDark),
+          const SizedBox(height: 16),
           TextField(
             controller: _nameController,
             decoration: InputDecoration(

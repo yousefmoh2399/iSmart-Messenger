@@ -241,6 +241,7 @@ class ChatRepository {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -251,6 +252,7 @@ class ChatRepository {
         'type': type,
         'name': name,
         'description': description,
+        if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
         'memberIds': memberIds,
         'adminIds': adminIds,
         if (departmentId != null && departmentId.isNotEmpty)
@@ -1214,6 +1216,58 @@ class ChatRepository {
 
   Future<void> deleteManagedConversation(String conversationId) async {
     await deleteConversation(conversationId, deleteForEveryone: true);
+  }
+
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final token = await _authRepository?.getToken();
+    final resolvedFileName = fileName?.trim().isNotEmpty == true
+        ? fileName!.trim()
+        : (filePath != null ? p.basename(filePath) : 'avatar.jpg');
+
+    final MultipartFile multipartFile;
+    if (fileBytes != null) {
+      multipartFile = MultipartFile.fromBytes(fileBytes, filename: resolvedFileName);
+    } else if (filePath != null && filePath.isNotEmpty) {
+      multipartFile = await MultipartFile.fromFile(filePath, filename: resolvedFileName);
+    } else {
+      throw ArgumentError('Either filePath or fileBytes must be provided');
+    }
+
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      data: FormData.fromMap({
+        'avatar': multipartFile,
+      }),
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        contentType: 'multipart/form-data',
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
+  }
+
+  Future<ChatConversation> removeConversationAvatar(String conversationId) async {
+    final token = await _authRepository?.getToken();
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
   }
 
   Future<ChatConversation> addGroupMembers({

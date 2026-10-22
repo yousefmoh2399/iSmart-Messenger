@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'package:image_picker/image_picker.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -52,6 +54,8 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
   String? _departmentRoomDeptId;
   String _searchQuery = '';
   bool _isCreating = false;
+  XFile? _pickedAvatarFile;
+  Uint8List? _pickedAvatarBytes;
 
   @override
   void initState() {
@@ -60,6 +64,30 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatOverviewControllerProvider.notifier).ensureAllUsersLoaded();
     });
+  }
+
+
+  Future<void> _pickAvatar() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      setState(() {
+        _pickedAvatarFile = picked;
+        _pickedAvatarBytes = bytes;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل اختيار الصورة: $e')),
+      );
+    }
   }
 
   @override
@@ -112,6 +140,20 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
       final conv = await ref
           .read(chatOverviewControllerProvider.notifier)
           .createDirectConversation(targetUser.id);
+
+      if (_pickedAvatarFile != null) {
+        try {
+          await ref
+              .read(chatOverviewControllerProvider.notifier)
+              .uploadConversationAvatar(
+                conversationId: conv.id,
+                filePath: _pickedAvatarFile!.path,
+                fileBytes: _pickedAvatarBytes,
+                fileName: _pickedAvatarFile!.name,
+              );
+        } catch (_) {}
+      }
+
       if (mounted) {
         Navigator.of(context).pop(conv);
       }
@@ -868,31 +910,79 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        // Group Icon Placeholder
+        // Group Avatar Picker
         Center(
-          child: Container(
-            width: 76,
-            height: 76,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF00A884), Color(0xFF054640)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF00A884).withValues(alpha: 0.35),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              GestureDetector(
+                onTap: _pickAvatar,
+                child: Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                    image: _pickedAvatarBytes != null
+                        ? DecorationImage(
+                            image: MemoryImage(_pickedAvatarBytes!),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF00A884).withValues(alpha: 0.25),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: _pickedAvatarBytes == null
+                      ? const Icon(
+                          Icons.camera_alt_rounded,
+                          color: Color(0xFF00A884),
+                          size: 34,
+                        )
+                      : null,
                 ),
-              ],
-            ),
-            child: const Icon(
-              Icons.camera_alt_rounded,
-              color: Colors.white,
-              size: 32,
-            ),
+              ),
+              Positioned(
+                bottom: -2,
+                left: -2,
+                child: Material(
+                  color: const Color(0xFF00A884),
+                  shape: const CircleBorder(),
+                  elevation: 2,
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: _pickAvatar,
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(Icons.edit_rounded, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+              if (_pickedAvatarBytes != null)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _pickedAvatarBytes = null;
+                      _pickedAvatarFile = null;
+                    }),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.redAccent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close_rounded, size: 12, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
 

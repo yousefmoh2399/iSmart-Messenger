@@ -380,6 +380,7 @@ class ChatConversation {
     required this.type,
     required this.name,
     required this.description,
+    this.avatarUrl,
     required this.departmentId,
     required this.createdBy,
     required this.members,
@@ -403,6 +404,7 @@ class ChatConversation {
   final String type;
   final String name;
   final String description;
+  final String? avatarUrl;
   final String? departmentId;
   final String? createdBy;
   final List<ChatDirectoryUser> members;
@@ -439,6 +441,7 @@ class ChatConversation {
   ChatConversation copyWith({
     String? name,
     String? description,
+    String? avatarUrl,
     List<ChatDirectoryUser>? members,
     List<ChatDirectoryUser>? admins,
     List<String>? broadcastPublisherIds,
@@ -460,6 +463,7 @@ class ChatConversation {
       type: type,
       name: name ?? this.name,
       description: description ?? this.description,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
       departmentId: departmentId,
       createdBy: createdBy,
       members: members ?? this.members,
@@ -490,6 +494,7 @@ class ChatConversation {
       'type': type,
       'name': name,
       'description': description,
+      'avatarUrl': avatarUrl,
       'departmentId': departmentId,
       'createdBy': createdBy,
       'members': members.map((e) => e.toJson()).toList(),
@@ -516,6 +521,7 @@ class ChatConversation {
       type: json['type'] as String? ?? 'direct',
       name: json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
+      avatarUrl: json['avatarUrl'] as String?,
       departmentId: json['departmentId'] as String?,
       createdBy: json['createdBy'] as String?,
       members: (json['members'] as List<dynamic>? ?? const [])

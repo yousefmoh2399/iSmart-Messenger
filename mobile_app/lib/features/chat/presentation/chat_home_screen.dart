@@ -2802,7 +2802,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
               ChatAvatar(
                 radius: 22,
                 backgroundColor: accent.withValues(alpha: 0.14),
-                avatarUrl: peer?.avatarUrl,
+                avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
                 fallback: Text(
                   peer != null
                       ? _avatarLabel(peer.displayName)
@@ -2912,7 +2912,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                   ChatAvatar(
                     radius: 26,
                     backgroundColor: accent.withValues(alpha: 0.14),
-                    avatarUrl: peer?.avatarUrl,
+                    avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
                     fallback: Text(
                       peer != null
                           ? _avatarLabel(peer.displayName)

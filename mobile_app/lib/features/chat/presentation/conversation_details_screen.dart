@@ -252,7 +252,7 @@ class _ConversationDetailsScreenState
     final currentUserId = authUser?.id ?? '';
 
     final title = _conversation.displayTitle(currentUserId);
-    final avatarUrl = _isGroup ? null : widget.peer?.avatarUrl;
+    final avatarUrl = (widget.peer != null ? widget.peer?.avatarUrl : _conversation.avatarUrl) ?? _conversation.avatarUrl;
     final folders = ref.watch(chatFoldersProvider).value ?? [];
     final currentFolders = folders
         .where((f) => f.conversationIds.contains(_conversation.id))
@@ -281,7 +281,7 @@ class _ConversationDetailsScreenState
               onPressed: () => Navigator.pop(context, _conversation),
             ),
             actions: [
-              if (_isGroup && _conversation.createdBy == currentUserId)
+              if (_isGroup && (_conversation.createdBy == currentUserId || _conversation.admins.any((a) => a.id == currentUserId) || authUser?.role == 'admin'))
                 IconButton(
                   icon: const Icon(CupertinoIcons.ellipsis_circle),
                   onPressed: () async {

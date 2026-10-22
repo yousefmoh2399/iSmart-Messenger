@@ -5022,10 +5022,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       CircleAvatar(
                         radius: 20,
                         backgroundColor: colorScheme.surfaceContainerHighest,
-                        child: peer?.avatarUrl?.isNotEmpty == true
+                        child: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)?.isNotEmpty == true
                             ? ClipOval(
                                 child: CachedNetworkImage(
-                                  imageUrl: peer!.avatarUrl!,
+                                  imageUrl: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)!,
                                   width: 40,
                                   height: 40,
                                   fit: BoxFit.cover,
