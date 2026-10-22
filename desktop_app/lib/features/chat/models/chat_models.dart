@@ -647,7 +647,8 @@ class ChatMessage {
 
   /// Sticker files are regular local image attachments, marked in metadata to
   /// stay compatible with older servers and clients.
-  bool get isStickerMessage => metadata?['sticker'] == true;
+  bool get isStickerMessage =>
+      metadata?['sticker'] == true || metadata?['isSticker'] == true;
   bool get isPollMessage => messageType == 'poll' || messageType == 'checklist';
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';

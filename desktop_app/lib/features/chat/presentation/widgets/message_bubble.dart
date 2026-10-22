@@ -252,13 +252,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                     color: Color(0xFF2E7D32),
                   ),
                 ),
-              if (widget.message.isStickerMessage && widget.onSaveSticker != null)
+              if (widget.onSaveSticker != null)
                 const PopupMenuItem(
                   value: _BubbleMenuAction.saveSticker,
                   child: _PopupActionRow(
-                    icon: Icons.sticky_note_2_outlined,
+                    icon: Icons.auto_awesome_motion_rounded,
                     label: 'حفظ ضمن الملصقات',
-                    color: Color(0xFF7B61FF),
+                    color: Color(0xFF007AFF),
                   ),
                 ),
               if (widget.onEdit != null)
@@ -660,6 +660,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     textColor: textColor,
                                     onOpen: widget.onOpenAttachment,
                                     onPrint: widget.onPrintAttachment,
+                                    onSaveSticker: widget.onSaveSticker,
                                     token: widget.token,
                                     isMine: widget.isMine,
                                   ),
@@ -921,6 +922,7 @@ class _AttachmentPreview extends StatelessWidget {
     required this.token,
     required this.isMine,
     this.onPrint,
+    this.onSaveSticker,
   });
 
   final ChatMessage message;
@@ -929,6 +931,7 @@ class _AttachmentPreview extends StatelessWidget {
   final String? token;
   final bool isMine;
   final VoidCallback? onPrint;
+  final VoidCallback? onSaveSticker;
 
   @override
   Widget build(BuildContext context) {
@@ -936,6 +939,88 @@ class _AttachmentPreview extends StatelessWidget {
 
     if (message.fileUrl == null || message.fileUrl!.isEmpty) {
       return const SizedBox.shrink();
+    }
+
+    if (message.isStickerMessage) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          InkWell(
+            onTap: onSaveSticker ?? onOpen,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(
+                maxWidth: 180,
+                maxHeight: 180,
+              ),
+              child: Hero(
+                tag: 'image_${message.id}',
+                child: AuthenticatedAttachmentImage(
+                  message: message,
+                  fit: BoxFit.contain,
+                  errorFallback: Container(
+                    height: 120,
+                    width: 120,
+                    alignment: Alignment.center,
+                    color: Colors.transparent,
+                    child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (onSaveSticker != null)
+            Positioned(
+              bottom: 2,
+              left: 2,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onSaveSticker,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: (isDark ? const Color(0xFF1C1C1E) : Colors.white).withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                        width: 0.8,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome_motion_rounded,
+                          size: 12,
+                          color: Color(0xFF007AFF),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'حفظ كملصق',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
     }
 
     if (message.isImageMessage) {

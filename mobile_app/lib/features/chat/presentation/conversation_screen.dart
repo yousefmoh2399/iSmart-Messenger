@@ -2283,18 +2283,44 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _saveReceivedSticker(ChatMessage message) async {
-    if (!message.attachmentDownloadAllowed) return;
+    if (!message.attachmentDownloadAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('غير مسموح بحفظ هذا المرفق.')),
+        );
+      }
+      return;
+    }
     try {
-      final path = await ref
+      Uint8List? bytes;
+      try {
+        final path = await ref
+            .read(chatRepositoryProvider)
+            .downloadAttachment(message);
+        final file = File(path);
+        if (await file.exists()) {
+          bytes = await file.readAsBytes();
+        }
+      } catch (_) {}
+
+      bytes ??= await ref
           .read(chatRepositoryProvider)
-          .downloadAttachment(message);
+          .fetchAttachmentBytes(message);
+
+      if (bytes.isEmpty) {
+        throw Exception('ملف الملصق فارغ');
+      }
+
       await saveLocalSticker(
-        name: message.fileName ?? 'sticker.png',
-        bytes: await File(path).readAsBytes(),
+        name: message.fileName ?? 'sticker_${message.id.substring(0, 6)}.png',
+        bytes: bytes,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الملصق في مكتبتك.')),
+          const SnackBar(
+            content: Text('تمت إضافة الملصق إلى مكتبة ملصقاتك بنجاح! ⭐'),
+            duration: Duration(seconds: 2),
+          ),
         );
       }
     } catch (_) {
@@ -3339,6 +3365,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     icon: CupertinoIcons.arrow_down_to_line,
                                     onTap: () =>
                                         _downloadAttachment(message),
+                                  ),
+                                ],
+                                if ((message.isStickerMessage || message.isImageMessage) &&
+                                    message.attachmentDownloadAllowed) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'حفظ ضمن الملصقات',
+                                    icon: CupertinoIcons.sparkles,
+                                    onTap: () => _saveReceivedSticker(message),
                                   ),
                                 ],
                                 if (_canManagePinnedMessage(authUser?.id)) ...[
@@ -5930,6 +5965,83 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       messages: albumMessages,
                                                                                       width: maxBubbleWidth,
                                                                                       onOpen: _showImagePreview,
+                                                                                    )
+                                                                                  : message.isStickerMessage
+                                                                                  ? InkWell(
+                                                                                      onTap: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _saveReceivedSticker(message),
+                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                      onLongPress: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _showWhatsAppContextMenu(message),
+                                                                                      borderRadius: BorderRadius.circular(14),
+                                                                                      child: Stack(
+                                                                                        children: [
+                                                                                          Container(
+                                                                                            padding: const EdgeInsets.all(4),
+                                                                                            constraints: const BoxConstraints(
+                                                                                              maxWidth: 170,
+                                                                                              maxHeight: 170,
+                                                                                            ),
+                                                                                            child: Hero(
+                                                                                              tag: 'image_$stableItemKey',
+                                                                                              child: _ChatAttachmentImage(
+                                                                                                message: message,
+                                                                                                fit: BoxFit.contain,
+                                                                                              ),
+                                                                                            ),
+                                                                                          ),
+                                                                                          Positioned(
+                                                                                            bottom: 2,
+                                                                                            left: 2,
+                                                                                            child: InkWell(
+                                                                                              onTap: () => _saveReceivedSticker(message),
+                                                                                              borderRadius: BorderRadius.circular(12),
+                                                                                              child: Container(
+                                                                                                padding: const EdgeInsets.symmetric(
+                                                                                                  horizontal: 6,
+                                                                                                  vertical: 3,
+                                                                                                ),
+                                                                                                decoration: BoxDecoration(
+                                                                                                  color: (isDark ? const Color(0xFF1C1C1E) : Colors.white).withValues(alpha: 0.92),
+                                                                                                  borderRadius: BorderRadius.circular(12),
+                                                                                                  border: Border.all(
+                                                                                                    color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                                                                                                    width: 0.8,
+                                                                                                  ),
+                                                                                                  boxShadow: [
+                                                                                                    BoxShadow(
+                                                                                                      color: Colors.black.withValues(alpha: 0.12),
+                                                                                                      blurRadius: 4,
+                                                                                                      offset: const Offset(0, 1),
+                                                                                                    ),
+                                                                                                  ],
+                                                                                                ),
+                                                                                                child: Row(
+                                                                                                  mainAxisSize: MainAxisSize.min,
+                                                                                                  children: [
+                                                                                                    const Icon(
+                                                                                                      Icons.auto_awesome_motion_rounded,
+                                                                                                      size: 11,
+                                                                                                      color: Color(0xFF007AFF),
+                                                                                                    ),
+                                                                                                    const SizedBox(width: 3),
+                                                                                                    Text(
+                                                                                                      'حفظ كملصق',
+                                                                                                      style: TextStyle(
+                                                                                                        fontSize: 9.5,
+                                                                                                        fontWeight: FontWeight.w700,
+                                                                                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                                                                                      ),
+                                                                                                    ),
+                                                                                                  ],
+                                                                                                ),
+                                                                                              ),
+                                                                                            ),
+                                                                                          ),
+                                                                                        ],
+                                                                                      ),
                                                                                     )
                                                                                   : message.isImageMessage
                                                                                   ? InkWell(

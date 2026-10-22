@@ -3219,18 +3219,44 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _saveReceivedSticker(ChatMessage message) async {
-    if (!message.attachmentDownloadAllowed) return;
+    if (!message.attachmentDownloadAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('غير مسموح بحفظ هذا المرفق.')),
+        );
+      }
+      return;
+    }
     try {
-      final path = await ref
+      Uint8List? bytes;
+      try {
+        final path = await ref
+            .read(chatRepositoryProvider)
+            .downloadAttachment(message);
+        final file = File(path);
+        if (await file.exists()) {
+          bytes = await file.readAsBytes();
+        }
+      } catch (_) {}
+
+      bytes ??= await ref
           .read(chatRepositoryProvider)
-          .downloadAttachment(message);
+          .fetchAttachmentBytes(message);
+
+      if (bytes.isEmpty) {
+        throw Exception('ملف الملصق فارغ');
+      }
+
       await saveLocalSticker(
-        name: message.fileName ?? 'sticker.png',
-        bytes: await File(path).readAsBytes(),
+        name: message.fileName ?? 'sticker_${message.id.substring(0, 6)}.png',
+        bytes: bytes,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الملصق في مكتبتك.')),
+          const SnackBar(
+            content: Text('تمت إضافة الملصق إلى مكتبة ملصقاتك بنجاح! ⭐'),
+            duration: Duration(seconds: 2),
+          ),
         );
       }
     } catch (_) {
@@ -4516,7 +4542,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                             )
                                           : null,
                                       onSaveSticker:
-                                          message.isStickerMessage &&
+                                          (message.isStickerMessage ||
+                                                  message.isImageMessage) &&
                                               message.attachmentDownloadAllowed
                                           ? () => _saveReceivedSticker(message)
                                           : null,
