@@ -63,6 +63,13 @@ class _ChatAdminManagementScreenState
       backgroundColor: scaffoldBg,
       appBar: AppBar(
         title: const Text('لوحة تحكم الشات'),
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'رجوع',
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         backgroundColor: scaffoldBg,
         scrolledUnderElevation: 0,
         actions: [

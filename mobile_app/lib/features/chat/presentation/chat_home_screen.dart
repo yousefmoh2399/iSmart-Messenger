@@ -1,7 +1,13 @@
 import 'dart:async';
 
 import 'package:animations/animations.dart';
+import 'dart:ui';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../files/presentation/pending_uploads_screen.dart';
+import '../../printers/presentation/printer_monitoring_screen.dart';
+import '../../scanner/presentation/scanner_session_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -768,6 +774,21 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           context,
         ).push(MaterialPageRoute(builder: (_) => const ChatAppearanceScreen()));
         break;
+      case 'localFiles':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const PendingUploadsScreen()),
+        );
+        break;
+      case 'scanner':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ScannerSessionScreen()),
+        );
+        break;
+      case 'printers':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const MobilePrinterMonitoringScreen()),
+        );
+        break;
       case 'tickets':
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -929,57 +950,12 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
             authUser?.can('canCreateDepartments') == true,
         themeMode: themeMode,
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          border: Border(
-            top: BorderSide(
-              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
-              width: 0.5,
-            ),
-          ),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _selectedNavIndex,
-          onTap: (index) => setState(() => _selectedNavIndex = index),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          type: BottomNavigationBarType.fixed,
-          selectedItemColor: appearance.accent,
-          unselectedItemColor: isDark ? Colors.white54 : const Color(0xFF8E8E93),
-          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
-          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
-          items: [
-            BottomNavigationBarItem(
-              icon: Badge(
-                isLabelVisible: (overviewState.valueOrNull?.totalUnread ?? 0) > 0,
-                label: Text('${overviewState.valueOrNull?.totalUnread ?? 0}'),
-                child: const Icon(Icons.chat_bubble_outline_rounded),
-              ),
-              activeIcon: Badge(
-                isLabelVisible: (overviewState.valueOrNull?.totalUnread ?? 0) > 0,
-                label: Text('${overviewState.valueOrNull?.totalUnread ?? 0}'),
-                child: const Icon(Icons.chat_bubble_rounded),
-              ),
-              label: 'المحادثات',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.people_alt_outlined),
-              activeIcon: Icon(Icons.people_alt_rounded),
-              label: 'الدليل',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.document_scanner_outlined),
-              activeIcon: Icon(Icons.document_scanner_rounded),
-              label: 'الماسح والملفات',
-            ),
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.grid_view_outlined),
-              activeIcon: Icon(Icons.grid_view_rounded),
-              label: 'المزيد',
-            ),
-          ],
-        ),
+      bottomNavigationBar: _AppleBottomNavigationBar(
+        currentIndex: _selectedNavIndex,
+        onTap: (index) => setState(() => _selectedNavIndex = index),
+        totalUnread: overviewState.valueOrNull?.totalUnread ?? 0,
+        accentColor: appearance.accent,
+        isDark: isDark,
       ),
       body: SafeArea(
         child: overviewState.when(
@@ -1807,173 +1783,339 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         ? user!.fullName.trim()
         : (user?.username ?? 'المستخدم');
 
+    final canAdmin = user?.can('canCreateUsers') == true ||
+        user?.can('canCreateDepartments') == true ||
+        user?.role == 'admin';
+    final canPrinters = user?.canViewPrinterModule == true || user?.role == 'admin';
+    final canItAssets = user?.canScanItAssets == true ||
+        user?.canScanItSpareParts == true ||
+        user?.canScanItInventory == true ||
+        user?.role == 'admin';
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              ChatAvatar(
-                radius: 28,
-                backgroundColor: appearance.accent.withOpacity(0.15),
-                avatarUrl: user?.avatarUrl,
-                fallback: Text(
-                  _avatarLabel(displayName),
-                  style: TextStyle(
-                    color: appearance.accent,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 20,
-                  ),
+        // ── 1. Apple ID-Style Profile Card ──
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _handleWorkspaceAction('profile'),
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                  width: 0.5,
                 ),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      displayName,
+              child: Row(
+                children: [
+                  ChatAvatar(
+                    radius: 28,
+                    backgroundColor: appearance.accent.withValues(alpha: 0.15),
+                    avatarUrl: user?.avatarUrl,
+                    fallback: Text(
+                      _avatarLabel(displayName),
                       style: TextStyle(
-                        fontSize: 17,
+                        color: appearance.accent,
                         fontWeight: FontWeight.w800,
-                        color: textColor,
+                        fontSize: 20,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      user?.role == 'admin'
-                          ? 'مسؤول النظام (Admin)'
-                          : (user?.jobTitle.isNotEmpty == true
-                              ? user!.jobTitle
-                              : 'حساب موظف'),
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: subtitleColor,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          user?.role == 'admin'
+                              ? 'مسؤول النظام (Admin)'
+                              : (user?.jobTitle.isNotEmpty == true
+                                  ? user!.jobTitle
+                                  : 'حساب موظف'),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: subtitleColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        if (user?.username.isNotEmpty == true) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            '@${user!.username}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: subtitleColor.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.chevron_left_rounded,
+                      size: 18,
+                      color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
-        const SizedBox(height: 20),
-        _buildMenuGroup(
+        const SizedBox(height: 18),
+
+        // ── 2. Files & Productivity Group ──
+        _buildSectionHeader('الملفات والإنتاجية', isDark),
+        _buildAppleMenuGroup(
           cardColor: cardColor,
           dividerColor: dividerColor,
-          items: [
-            _MenuItem(
-              icon: Icons.support_agent_rounded,
-              label: 'تذاكر الدعم الفني',
-              onTap: () => _handleWorkspaceAction('tickets'),
-              iconColor: const Color(0xFFFF2D55),
-            ),
-            _MenuItem(
-              icon: Icons.star_rounded,
-              label: 'الرسائل المفضلة',
-              onTap: () => _handleWorkspaceAction('favoriteMessages'),
-              iconColor: const Color(0xFFFFCC00),
-            ),
-            _MenuItem(
-              icon: Icons.create_new_folder_rounded,
-              label: 'مجلدات المحادثات',
-              onTap: () => _handleWorkspaceAction('chatFolders'),
+          children: [
+            _AppleMenuTile(
+              icon: CupertinoIcons.folder_fill,
+              label: 'ملفاتي ومستنداتي السحابية',
+              subtitle: 'استعراض وإدارة كافة الملفات المرفوعة',
               iconColor: const Color(0xFF007AFF),
+              onTap: () => _handleWorkspaceAction('files'),
             ),
-            if (user?.canScanItAssets == true ||
-                user?.canScanItSpareParts == true ||
-                user?.canScanItInventory == true)
-              _MenuItem(
-                icon: Icons.qr_code_scanner_rounded,
-                label: 'ماسح أصول IT',
-                onTap: () => _handleWorkspaceAction('itAssetsScanner'),
-                iconColor: const Color(0xFF00C7BE),
-              ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.archivebox_fill,
+              label: 'الملفات المحلية',
+              subtitle: 'المستندات المحفوظة على ذاكرة الهاتف',
+              iconColor: const Color(0xFFFF9500),
+              onTap: () => _handleWorkspaceAction('localFiles'),
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.device_laptop,
+              label: 'إرسال ملف إلى الكمبيوتر',
+              subtitle: 'نقل سريع ومباشر للكمبيوتر عبر الشبكة',
+              iconColor: const Color(0xFF5856D6),
+              onTap: () => _handleWorkspaceAction('sendDesktop'),
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.viewfinder,
+              label: 'الماسح الضوئي للمستندات',
+              subtitle: 'التقاط صور وإنشاء PDF ممسوح بالكاميرا',
+              iconColor: const Color(0xFF30B0C7),
+              onTap: () => _handleWorkspaceAction('scanner'),
+            ),
           ],
         ),
-        const SizedBox(height: 20),
-        _buildMenuGroup(
+        const SizedBox(height: 18),
+
+        // ── 3. Chat & Communication Group ──
+        _buildSectionHeader('التواصل والمحادثات', isDark),
+        _buildAppleMenuGroup(
           cardColor: cardColor,
           dividerColor: dividerColor,
-          items: [
-            _MenuItem(
-              icon: Icons.color_lens_rounded,
-              label: 'مظهر المحادثات والخلفيات',
-              onTap: () => _handleWorkspaceAction('appearance'),
-              iconColor: const Color(0xFFAF52DE),
+          children: [
+            _AppleMenuTile(
+              icon: CupertinoIcons.star_fill,
+              label: 'الرسائل المفضلة',
+              subtitle: 'الرسائل المحفوظة للرجوع السريع إليها',
+              iconColor: const Color(0xFFFFCC00),
+              onTap: () => _handleWorkspaceAction('favoriteMessages'),
             ),
-            _MenuItem(
-              icon: isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-              label: 'تبديل المظهر الليلي',
-              onTap: () => _handleWorkspaceAction('theme'),
-              iconColor: const Color(0xFFFF9500),
+            _AppleMenuTile(
+              icon: CupertinoIcons.folder_badge_plus,
+              label: 'مجلدات وتصنيفات الشات',
+              subtitle: 'إنشاء مجلدات مخصصة لتنظيم المحادثات',
+              iconColor: const Color(0xFF34C759),
+              onTap: () => _handleWorkspaceAction('chatFolders'),
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.headphones,
+              label: 'تذاكر الدعم والشكاوى',
+              subtitle: 'إرسال ومتابعة بلاغات IT والمقترحات',
+              iconColor: const Color(0xFFFF2D55),
+              onTap: () => _handleWorkspaceAction('tickets'),
             ),
           ],
         ),
-        const SizedBox(height: 20),
-        if (user?.can('canCreateUsers') == true ||
-            user?.can('canCreateDepartments') == true) ...[
-          _buildMenuGroup(
+        const SizedBox(height: 18),
+
+        // ── 4. Appearance & System Group ──
+        _buildSectionHeader('المظهر والنظام', isDark),
+        _buildAppleMenuGroup(
+          cardColor: cardColor,
+          dividerColor: dividerColor,
+          children: [
+            _AppleMenuTile(
+              icon: isDark ? CupertinoIcons.moon_fill : CupertinoIcons.sun_max_fill,
+              label: 'الوضع الداكن (Dark Mode)',
+              subtitle: isDark ? 'الوضع الليلي مفعل حاليًا' : 'الوضع النهاري مفعل حاليًا',
+              iconColor: const Color(0xFFFF9500),
+              trailing: CupertinoSwitch(
+                value: isDark,
+                activeColor: const Color(0xFF007AFF),
+                onChanged: (val) {
+                  ref.read(themeModeControllerProvider.notifier).setThemeMode(
+                    val ? ThemeMode.dark : ThemeMode.light,
+                  );
+                },
+              ),
+              onTap: () {
+                ref.read(themeModeControllerProvider.notifier).setThemeMode(
+                  isDark ? ThemeMode.light : ThemeMode.dark,
+                );
+              },
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.paintbrush_fill,
+              label: 'مظهر وخلفيات المحادثات',
+              subtitle: 'تخصيص ثيمات الشات وفقاعات الرسائل',
+              iconColor: const Color(0xFFAF52DE),
+              onTap: () => _handleWorkspaceAction('appearance'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // ── 5. Admin & Hardware Tools (if permitted) ──
+        if (canAdmin || canPrinters || canItAssets) ...[
+          _buildSectionHeader('الأدوات الإدارية والشبكة', isDark),
+          _buildAppleMenuGroup(
             cardColor: cardColor,
             dividerColor: dividerColor,
-            items: [
-              _MenuItem(
-                icon: Icons.admin_panel_settings_rounded,
-                label: 'لوحة إدارة الشات والأقسام',
-                onTap: () => _handleWorkspaceAction('admin'),
-                iconColor: const Color(0xFF34C759),
+            children: [
+              if (canAdmin)
+                _AppleMenuTile(
+                  icon: CupertinoIcons.shield_fill,
+                  label: 'لوحة إدارة الشات والمستخدمين',
+                  subtitle: 'إدارة المستخدمين والأقسام وسجلات التدقيق',
+                  iconColor: const Color(0xFF34C759),
+                  onTap: () => _handleWorkspaceAction('admin'),
+                ),
+              if (canPrinters)
+                _AppleMenuTile(
+                  icon: CupertinoIcons.printer_fill,
+                  label: 'مراقبة أسطول الطابعات',
+                  subtitle: 'فحص الطابعات والعدادات ومستويات الأحبار',
+                  iconColor: const Color(0xFF007AFF),
+                  onTap: () => _handleWorkspaceAction('printers'),
+                ),
+              if (canItAssets)
+                _AppleMenuTile(
+                  icon: CupertinoIcons.barcode_viewfinder,
+                  label: 'ماسح أصول IT والمخزون',
+                  subtitle: 'جرد العتاد وقطع الغيار بالكاميرا والباركود',
+                  iconColor: const Color(0xFF00C7BE),
+                  onTap: () => _handleWorkspaceAction('itAssetsScanner'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 18),
+        ],
+
+        // ── 6. Account & Session ──
+        _buildSectionHeader('الحساب والأمان', isDark),
+        _buildAppleMenuGroup(
+          cardColor: cardColor,
+          dividerColor: dividerColor,
+          children: [
+            _AppleMenuTile(
+              icon: CupertinoIcons.person_crop_circle_fill,
+              label: 'إعدادات الملف الشخصي',
+              subtitle: 'تعديل البيانات، الصورة الشخصية، وكلمة المرور',
+              iconColor: const Color(0xFF007AFF),
+              onTap: () => _handleWorkspaceAction('profile'),
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.square_arrow_right,
+              label: 'تسجيل الخروج',
+              subtitle: 'إنهاء الجلسة والخروج من الحساب الحالي',
+              iconColor: const Color(0xFFFF3B30),
+              onTap: () => _handleWorkspaceAction('logout'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // ── 7. App Info Footer ──
+        Center(
+          child: Column(
+            children: [
+              Text(
+                'iSmart Messenger',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'الإصدار 2.0.0 (Apple Minimalist Edition)',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: isDark ? Colors.white24 : const Color(0xFFA1A1A6),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
-        ],
-        _buildMenuGroup(
-          cardColor: cardColor,
-          dividerColor: dividerColor,
-          items: [
-            _MenuItem(
-              icon: Icons.logout_rounded,
-              label: 'تسجيل الخروج',
-              onTap: () => _handleWorkspaceAction('logout'),
-              iconColor: const Color(0xFFFF3B30),
-            ),
-          ],
         ),
       ],
     );
   }
 
-  Widget _buildMenuGroup({
+  Widget _buildSectionHeader(String title, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 12, left: 12, bottom: 6),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: isDark ? Colors.white54 : const Color(0xFF6E6E73),
+          letterSpacing: -0.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppleMenuGroup({
     required Color cardColor,
     required Color dividerColor,
-    required List<_MenuItem> items,
+    required List<Widget> children,
   }) {
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: dividerColor,
+          width: 0.5,
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        children: List.generate(items.length, (index) {
-          final item = items[index];
-          final isLast = index == items.length - 1;
+        children: List.generate(children.length, (index) {
+          final isLast = index == children.length - 1;
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _DrawerTile(
-                icon: item.icon,
-                label: item.label,
-                onTap: item.onTap,
-                iconColor: item.iconColor,
-              ),
+              children[index],
               if (!isLast)
                 Padding(
                   padding: const EdgeInsetsDirectional.only(start: 56.0),
@@ -1989,7 +2131,232 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       ),
     );
   }
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Apple Minimalist Navigation & Menu Components
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AppleMenuTile extends StatelessWidget {
+  const _AppleMenuTile({
+    required this.icon,
+    required this.label,
+    required this.iconColor,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color iconColor;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
+    final subtitleColor = isDark ? Colors.white54 : const Color(0xFF8E8E93);
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: iconColor,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Icon(icon, color: Colors.white, size: 18),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: textColor,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: subtitleColor,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (trailing != null)
+              trailing!
+            else
+              Icon(
+                Icons.chevron_left_rounded,
+                size: 20,
+                color: isDark ? Colors.white24 : const Color(0xFFC7C7CC),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleBottomNavigationBar extends StatelessWidget {
+  const _AppleBottomNavigationBar({
+    required this.currentIndex,
+    required this.onTap,
+    required this.totalUnread,
+    required this.accentColor,
+    required this.isDark,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  final int totalUnread;
+  final Color accentColor;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final items = [
+      _NavTabItem(
+        label: 'المحادثات',
+        icon: CupertinoIcons.chat_bubble_2,
+        activeIcon: CupertinoIcons.chat_bubble_2_fill,
+        badgeCount: totalUnread,
+      ),
+      const _NavTabItem(
+        label: 'الدليل',
+        icon: CupertinoIcons.person_2,
+        activeIcon: CupertinoIcons.person_2_fill,
+      ),
+      const _NavTabItem(
+        label: 'المستندات',
+        icon: CupertinoIcons.doc_text,
+        activeIcon: CupertinoIcons.doc_text_fill,
+      ),
+      const _NavTabItem(
+        label: 'المزيد',
+        icon: CupertinoIcons.ellipsis_circle,
+        activeIcon: CupertinoIcons.ellipsis_circle_fill,
+      ),
+    ];
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF161618).withValues(alpha: 0.88)
+                : Colors.white.withValues(alpha: 0.90),
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.06),
+                width: 0.5,
+              ),
+            ),
+          ),
+          padding: EdgeInsets.only(bottom: bottomPadding > 0 ? bottomPadding : 6, top: 8),
+          child: Row(
+            children: List.generate(items.length, (index) {
+              final item = items[index];
+              final isSelected = currentIndex == index;
+              final color = isSelected
+                  ? accentColor
+                  : (isDark ? Colors.white38 : const Color(0xFF8E8E93));
+
+              return Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (!isSelected) {
+                      HapticFeedback.selectionClick();
+                      onTap(index);
+                    }
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Badge(
+                        isLabelVisible: item.badgeCount > 0,
+                        backgroundColor: const Color(0xFFFF3B30),
+                        label: Text(
+                          '${item.badgeCount}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 180),
+                          child: Icon(
+                            isSelected ? item.activeIcon : item.icon,
+                            key: ValueKey('${item.label}_$isSelected'),
+                            size: 24,
+                            color: color,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        item.label,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                          color: color,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavTabItem {
+  const _NavTabItem({
+    required this.label,
+    required this.icon,
+    required this.activeIcon,
+    this.badgeCount = 0,
+  });
+
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+  final int badgeCount;
 }
 
 class _CreateFolderDialog extends StatefulWidget {

@@ -38,6 +38,13 @@ class ChatAppearanceScreen extends ConsumerWidget {
       backgroundColor: scaffoldBg,
       appBar: AppBar(
         title: const Text('مظهر المحادثات'),
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'رجوع',
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         backgroundColor: scaffoldBg,
         scrolledUnderElevation: 0,
       ),

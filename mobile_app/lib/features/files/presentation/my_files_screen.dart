@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -90,6 +91,7 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
   // ── Folder navigation ──────────────────────────────────────────────────────
   /// null = root (no folder selected)
   String? _currentFolderId;
+  int _selectedFilterIndex = 0; // 0: الكل, 1: المجلدات, 2: PDF, 3: صور, 4: محلية
 
   // ── Drag-to-folder selection ──────────────────────────────────────────────
 
@@ -2134,178 +2136,257 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         ),
     ];
 
-    // ── Header action card ────────────────────────────────────────────────────
-    final headerCard = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: isDark ? colorScheme.surfaceContainer : Colors.white,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: isDark
-                ? colorScheme.outlineVariant.withValues(alpha: 0.4)
-                : const Color(0xFFF1F5F9),
-          ),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: _sendLocalFileToDesktop,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(50),
-              backgroundColor: colorScheme.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-            ),
-            icon: const Icon(Icons.computer_rounded),
-            label: const Text('إرسال ملف إلى الكمبيوتر'),
-          ),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _printLocalFileFromDevice,
-                style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
-                ),
-                icon: const Icon(Icons.print_outlined),
-                label: const Text('طباعة من الجهاز'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: refreshDocuments,
-                style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
-                ),
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('تحديث الملفات'),
-              ),
-            ),
-          ]),
-        ]),
-      ),
-    );
-
-    // ── Search field ──────────────────────────────────────────────────────────
+    // ── Apple Top Control Bar (Search + Categories + Quick Actions) ─────────
     final searchField = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
       child: Container(
+        height: 44,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: isDark
-              ? colorScheme.surfaceContainer
-              : const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: isDark
-                ? colorScheme.outlineVariant.withValues(alpha: 0.2)
-                : const Color(0xFFE2E8F0),
-          ),
+          color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE5E5EA),
+          borderRadius: BorderRadius.circular(12),
         ),
-        child: TextField(
-          controller: _searchController,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            hintText: 'ابحث باسم الملف',
-            hintStyle: TextStyle(
-              color: isDark ? Colors.white54 : colorScheme.onSurfaceVariant,
+        child: Row(
+          children: [
+            Icon(
+              CupertinoIcons.search,
+              size: 18,
+              color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
             ),
-            prefixIcon: Icon(Icons.search, color: colorScheme.primary),
-            suffixIcon: _searchController.text.trim().isEmpty
-                ? null
-                : IconButton(
-                    tooltip: 'مسح',
-                    onPressed: () {
-                      _searchController.clear();
-                      setState(() {});
-                    },
-                    icon: const Icon(Icons.close_rounded),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                onChanged: (_) => setState(() {}),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'البحث في الملفات والمجلدات...',
+                  hintStyle: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
                   ),
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-          ),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            if (_searchController.text.trim().isNotEmpty)
+              GestureDetector(
+                onTap: () {
+                  _searchController.clear();
+                  setState(() {});
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black26,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                ),
+              ),
+          ],
         ),
       ),
     );
 
-    // ── Toolbar: grid/list toggle + folder breadcrumb ─────────────────────────
+    // ── Category Filter Pills ──────────────────────────────────────────────
+    final filterChips = [
+      {'label': 'الكل', 'icon': CupertinoIcons.square_grid_2x2},
+      {'label': 'المجلدات (${visibleFolders.length})', 'icon': CupertinoIcons.folder_fill},
+      {'label': 'مستندات PDF', 'icon': CupertinoIcons.doc_text_fill},
+      {'label': 'الصور', 'icon': CupertinoIcons.photo_fill},
+      {'label': 'المحلية (${pendingDocs.length})', 'icon': CupertinoIcons.archivebox_fill},
+    ];
+
+    final categoryFilterBar = SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: filterChips.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, idx) {
+          final isSelected = _selectedFilterIndex == idx;
+          final chip = filterChips[idx];
+          return GestureDetector(
+            onTap: () => setState(() => _selectedFilterIndex = idx),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF007AFF)
+                    : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isSelected
+                      ? const Color(0xFF007AFF)
+                      : (isDark
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.black.withValues(alpha: 0.08)),
+                  width: 0.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    chip['icon'] as IconData,
+                    size: 14,
+                    color: isSelected
+                        ? Colors.white
+                        : (isDark ? Colors.white70 : const Color(0xFF6E6E73)),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    chip['label'] as String,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.white : const Color(0xFF1C1C1E)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    // ── Compact Quick Action Bar ───────────────────────────────────────────
     final currentFolder = _currentFolderId == null
         ? null
         : allFolders.where((f) => f.id == _currentFolderId).firstOrNull;
 
-    final toolbar = Padding(
+    final actionToolbar = Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
       child: Row(
         children: [
-          // Breadcrumb / folder name
+          // Folder breadcrumb or root label
           if (currentFolder != null) ...[
             GestureDetector(
               onTap: _goBack,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.arrow_back_ios_new_rounded,
-                    size: 14, color: colorScheme.primary),
-                const SizedBox(width: 4),
-                Text('رجوع',
-                    style: TextStyle(
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13)),
-              ]),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.arrow_back_ios_new_rounded, size: 13, color: Color(0xFF007AFF)),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'رجوع',
+                    style: TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right_rounded, size: 16,
-                color: colorScheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_left_rounded, size: 16, color: isDark ? Colors.white38 : Colors.black38),
             const SizedBox(width: 4),
-            Icon(Icons.folder_rounded, size: 16,
-                color: const Color(0xFFF59E0B)),
-            const SizedBox(width: 4),
+            Icon(CupertinoIcons.folder_fill, size: 16, color: const Color(0xFFF59E0B)),
+            const SizedBox(width: 6),
             Expanded(
               child: Text(
                 currentFolder.name,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700),
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ] else
             Expanded(
-              child: Text('ملفاتي',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700)),
+              child: Row(
+                children: [
+                  Text(
+                    'كافة المستندات',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${remoteDocs.length + pendingDocs.length}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
 
-          // Grid / List toggle
+          // Action 1: Send to Desktop
+          Tooltip(
+            message: 'إرسال ملف إلى الكمبيوتر',
+            child: InkWell(
+              onTap: _sendLocalFileToDesktop,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.08),
+                    width: 0.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(CupertinoIcons.device_laptop, size: 14, color: const Color(0xFF5856D6)),
+                    const SizedBox(width: 5),
+                    const Text('للكمبيوتر', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Action 2: View toggle (Grid / List)
           Container(
             decoration: BoxDecoration(
-              color: isDark ? colorScheme.surfaceContainer : const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(10),
+              color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE5E5EA),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              _ViewToggleButton(
-                icon: Icons.view_list_rounded,
-                selected: !_isGridView,
-                onTap: () => setState(() => _isGridView = false),
-              ),
-              _ViewToggleButton(
-                icon: Icons.grid_view_rounded,
-                selected: _isGridView,
-                onTap: () => setState(() => _isGridView = true),
-              ),
-            ]),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ViewToggleButton(
+                  icon: CupertinoIcons.list_bullet,
+                  selected: !_isGridView,
+                  onTap: () => setState(() => _isGridView = false),
+                ),
+                _ViewToggleButton(
+                  icon: CupertinoIcons.square_grid_2x2,
+                  selected: _isGridView,
+                  onTap: () => setState(() => _isGridView = true),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
 
-    // ── Build list/grid content ───────────────────────────────────────────────
+    // ── Build Content ──────────────────────────────────────────────────────
     Widget buildContent() {
       final isLoading = documentsState.isLoading || pendingState.isLoading;
       if (isLoading &&
@@ -2314,19 +2395,28 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         return ListView(
           padding: const EdgeInsets.only(bottom: 80),
           children: [
-            headerCard, ...banners, searchField, toolbar,
-            ...List.generate(6, (_) => Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: const Card(child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  ShimmerSkeleton(width: 180, height: 14),
-                  SizedBox(height: 10),
-                  ShimmerSkeleton(width: 260, height: 12),
-                  SizedBox(height: 8),
-                  ShimmerSkeleton(width: 220, height: 12),
-                ]),
-              )),
+            searchField,
+            const SizedBox(height: 8),
+            categoryFilterBar,
+            actionToolbar,
+            ...banners,
+            ...List.generate(5, (_) => Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ShimmerSkeleton(width: 180, height: 14),
+                    SizedBox(height: 10),
+                    ShimmerSkeleton(width: 240, height: 12),
+                  ],
+                ),
+              ),
             )),
           ],
         );
@@ -2336,23 +2426,24 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         return ListView(
           padding: const EdgeInsets.only(bottom: 80),
           children: [
-            headerCard, ...banners, searchField, toolbar,
+            searchField,
+            const SizedBox(height: 8),
+            categoryFilterBar,
+            actionToolbar,
+            ...banners,
             Padding(
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(40),
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.folder_off_outlined,
+                      CupertinoIcons.folder_badge_minus,
                       size: 48,
-                      color: colorScheme.outline,
+                      color: isDark ? Colors.white38 : Colors.black38,
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      'تعذر تحميل الملفات',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    const Text('تعذر تحميل الملفات', style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 12),
                     FilledButton.tonalIcon(
                       onPressed: refreshDocuments,
@@ -2368,13 +2459,12 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
       }
 
       final query = _searchController.text.trim().toLowerCase();
+      final isInsideFolder = _currentFolderId != null && currentFolder != null;
 
-      
-      // ── UNIFIED VIEW ────────────────────────────────────────────────────────
+      // Filter base
       List<RemoteDocument> filteredRemote;
       List<PendingUpload> filteredPending;
       List<DocumentFolder> filteredFolders;
-      final isInsideFolder = _currentFolderId != null && currentFolder != null;
 
       if (query.isNotEmpty) {
         filteredRemote = remoteDocs.where((d) => d.fileName.toLowerCase().contains(query)).toList();
@@ -2391,6 +2481,28 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         filteredFolders = allFolders.where((f) => f.parentId == null).toList();
       }
 
+      // Apply category filter
+      if (_selectedFilterIndex == 1) {
+        // Folders only
+        filteredRemote = [];
+        filteredPending = [];
+      } else if (_selectedFilterIndex == 2) {
+        // PDF only
+        filteredFolders = [];
+        filteredRemote = filteredRemote.where((d) => d.fileName.toLowerCase().endsWith('.pdf') || d.mimeType.contains('pdf')).toList();
+        filteredPending = filteredPending.where((d) => d.fileName.toLowerCase().endsWith('.pdf')).toList();
+      } else if (_selectedFilterIndex == 3) {
+        // Images only
+        filteredFolders = [];
+        final imageExts = ['.png', '.jpg', '.jpeg', '.webp', '.heic'];
+        filteredRemote = filteredRemote.where((d) => imageExts.any((ext) => d.fileName.toLowerCase().endsWith(ext)) || d.mimeType.contains('image')).toList();
+        filteredPending = filteredPending.where((d) => imageExts.any((ext) => d.fileName.toLowerCase().endsWith(ext))).toList();
+      } else if (_selectedFilterIndex == 4) {
+        // Local only
+        filteredFolders = [];
+        filteredRemote = [];
+      }
+
       final merged = <dynamic>[...filteredPending, ...filteredRemote];
       merged.sort((a, b) {
         final aDate = a is PendingUpload ? a.createdAt : (a as RemoteDocument).createdAt;
@@ -2405,114 +2517,217 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         child: _isGridView
             ? CustomScrollView(
                 slivers: [
-                  SliverToBoxAdapter(child: Column(children: [
-                    headerCard, ...banners, searchField, toolbar,
-                  ])),
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        searchField,
+                        const SizedBox(height: 8),
+                        categoryFilterBar,
+                        actionToolbar,
+                        ...banners,
+                      ],
+                    ),
+                  ),
                   if (isEmpty)
-                    const SliverToBoxAdapter(child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: Center(child: Text('لا توجد ملفات')),
-                    ))
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(50),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(
+                                CupertinoIcons.tray,
+                                size: 48,
+                                color: isDark ? Colors.white30 : const Color(0xFFC7C7CC),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'لا توجد مستندات تطابق الفلتر المحدد',
+                                style: TextStyle(
+                                  color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
                   else
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
                       sliver: SliverGrid(
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
-                            // Folders first
                             if (i < filteredFolders.length) {
-                              return _buildFolderCard(
-                                  ctx, filteredFolders[i], remoteDocs);
+                              return _buildFolderCard(ctx, filteredFolders[i], remoteDocs);
                             }
                             final doc = merged[i - filteredFolders.length];
                             if (doc is PendingUpload) {
-                              return _buildPendingCard(
-                                ctx,
-                                doc,
-                                isInFolder: isInsideFolder,
-                              );
+                              return _buildPendingCard(ctx, doc, isInFolder: isInsideFolder);
                             }
-                            return _buildDocumentGridCard(
-                              ctx,
-                              doc as RemoteDocument,
-                              isInFolder: isInsideFolder,
-                            );
+                            return _buildDocumentGridCard(ctx, doc as RemoteDocument, isInFolder: isInsideFolder);
                           },
                           childCount: filteredFolders.length + merged.length,
                         ),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
-                          childAspectRatio: 0.85,
+                          childAspectRatio: 0.88,
                         ),
                       ),
                     ),
                 ],
               )
             : ListView(
-                padding: const EdgeInsets.only(bottom: 80),
+                padding: const EdgeInsets.only(bottom: 100),
                 children: [
-                  headerCard, ...banners, searchField, toolbar,
+                  searchField,
+                  const SizedBox(height: 8),
+                  categoryFilterBar,
+                  actionToolbar,
+                  ...banners,
+
                   if (isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(40),
-                      child: Center(child: Text('لا توجد ملفات')),
+                    Padding(
+                      padding: const EdgeInsets.all(60),
+                      child: Center(
+                        child: Column(
+                          children: [
+                            Icon(
+                              CupertinoIcons.tray,
+                              size: 48,
+                              color: isDark ? Colors.white30 : const Color(0xFFC7C7CC),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'لا توجد مستندات في هذا العرض',
+                              style: TextStyle(
+                                color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     )
                   else ...[
-                    // ── Folders section ──
-                    if (filteredFolders.isNotEmpty)
+                    // ── Folders Section ──
+                    if (filteredFolders.isNotEmpty) ...[
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                        child: Container(
-                          clipBehavior: Clip.antiAlias,
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                            borderRadius: BorderRadius.circular(10),
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+                        child: Text(
+                          'المجلدات (${filteredFolders.length})',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? Colors.white54 : const Color(0xFF6E6E73),
                           ),
-                          child: Column(children: filteredFolders
-                              .map((f) => _buildFolderListTile(context, f))
-                              .toList()),
                         ),
                       ),
-                    // ── Files section ──
-                    if (merged.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Container(
                           clipBehavior: Clip.antiAlias,
                           decoration: BoxDecoration(
                             color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+                              width: 0.5,
+                            ),
                           ),
-                          child: Column(children: merged.map((doc) {
-                            if (doc is PendingUpload) {
-                              return _buildPendingCard(
-                                context,
-                                doc,
-                                isInFolder: isInsideFolder,
+                          child: Column(
+                            children: List.generate(filteredFolders.length, (idx) {
+                              final f = filteredFolders[idx];
+                              final isLast = idx == filteredFolders.length - 1;
+                              return Column(
+                                children: [
+                                  _buildFolderListTile(context, f),
+                                  if (!isLast)
+                                    Padding(
+                                      padding: const EdgeInsetsDirectional.only(start: 64.0),
+                                      child: Divider(
+                                        height: 0.5,
+                                        thickness: 0.5,
+                                        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                                      ),
+                                    ),
+                                ],
                               );
-                            }
-                            return _buildDocumentCard(
-                              context,
-                              doc as RemoteDocument,
-                              isInFolder: isInsideFolder,
-                            );
-                          }).toList()),
+                            }),
+                          ),
                         ),
                       ),
-                  ],
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: OutlinedButton.icon(
-                      onPressed: () => ref
-                          .read(remoteDocumentsControllerProvider.notifier)
-                          .loadMore(),
-                      icon: const Icon(Icons.expand_more_rounded),
-                      label: const Text('تحميل المزيد'),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // ── Files Section ──
+                    if (merged.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+                        child: Text(
+                          'المستندات والملفات (${merged.length})',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? Colors.white54 : const Color(0xFF6E6E73),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Container(
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+                              width: 0.5,
+                            ),
+                          ),
+                          child: Column(
+                            children: List.generate(merged.length, (idx) {
+                              final doc = merged[idx];
+                              final isLast = idx == merged.length - 1;
+                              Widget card = doc is PendingUpload
+                                  ? _buildPendingCard(context, doc, isInFolder: isInsideFolder)
+                                  : _buildDocumentCard(context, doc as RemoteDocument, isInFolder: isInsideFolder);
+
+                              return Column(
+                                children: [
+                                  card,
+                                  if (!isLast)
+                                    Padding(
+                                      padding: const EdgeInsetsDirectional.only(start: 64.0),
+                                      child: Divider(
+                                        height: 0.5,
+                                        thickness: 0.5,
+                                        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                      child: Center(
+                        child: TextButton.icon(
+                          onPressed: () => ref.read(remoteDocumentsControllerProvider.notifier).loadMore(),
+                          icon: const Icon(Icons.expand_more_rounded, size: 18),
+                          label: const Text('تحميل المزيد من الملفات القديمة'),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
       );
@@ -2529,9 +2744,16 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         leading: currentFolder != null
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'رجوع للمجلد الرئيسي',
                 onPressed: _goBack,
               )
-            : null,
+            : (Navigator.canPop(context)
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                    tooltip: 'رجوع',
+                    onPressed: () => Navigator.of(context).pop(),
+                  )
+                : null),
         actions: [
           IconButton(
             tooltip: 'طباعة ملف من الجهاز',

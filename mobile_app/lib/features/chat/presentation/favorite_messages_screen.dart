@@ -143,7 +143,16 @@ class _FavoriteMessagesScreenState
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('الرسائل المفضلة')),
+      appBar: AppBar(
+        title: const Text('الرسائل المفضلة'),
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'رجوع',
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
+      ),
       body: RefreshIndicator(
         onRefresh: _loadInitial,
         child: _isLoading

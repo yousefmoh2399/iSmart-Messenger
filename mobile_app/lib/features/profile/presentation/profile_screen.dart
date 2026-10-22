@@ -187,7 +187,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('الملف الشخصي'), centerTitle: false),
+      appBar: AppBar(
+        title: const Text('الملف الشخصي'),
+        centerTitle: false,
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'رجوع',
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
+      ),
       body: authState.when(
         loading: () => ListView(
           padding: const EdgeInsets.all(16),

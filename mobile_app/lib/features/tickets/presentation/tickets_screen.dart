@@ -412,6 +412,13 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
           if (!widget.embedded)
             SliverAppBar(
               pinned: true,
+              leading: Navigator.canPop(context)
+                  ? IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                      tooltip: 'رجوع',
+                      onPressed: () => Navigator.of(context).pop(),
+                    )
+                  : null,
               title: const Text('جاري التحميل...'),
               backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
               surfaceTintColor: Colors.transparent,
@@ -470,6 +477,13 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
               if (!widget.embedded)
                 SliverAppBar(
                   pinned: true,
+                  leading: Navigator.canPop(context)
+                      ? IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                          tooltip: 'رجوع',
+                          onPressed: () => Navigator.of(context).pop(),
+                        )
+                      : null,
                   title: Text(switch (_activeTab) {
                     TicketTab.tickets => 'تذاكر الدعم',
                     TicketTab.complaints => 'الشكاوى',

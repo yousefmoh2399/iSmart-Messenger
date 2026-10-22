@@ -50,6 +50,13 @@ class PendingUploadsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('الملفات المحلية'),
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                tooltip: 'رجوع',
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         actions: [
           IconButton(
             onPressed: () =>
