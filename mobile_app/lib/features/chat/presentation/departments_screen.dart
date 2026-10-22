@@ -151,11 +151,11 @@ class _DepartmentGroupCardState extends State<_DepartmentGroupCard> {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
+    return Material(
+      color: cardColor,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
+        side: BorderSide(
           color: colorScheme.outlineVariant.withValues(alpha: 0.25),
           width: 0.5,
         ),

@@ -1106,6 +1106,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
             if (_selectedNavIndex == 1) {
               // ── Tab 1: Directory ──
               return DefaultTabController(
+                key: const ValueKey('chat_home_directory_tab_controller'),
                 length: 3,
                 child: Column(
                   children: [
@@ -1232,6 +1233,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
 
             // ── Tab 0: Chats ──
             return DefaultTabController(
+              key: const ValueKey('chat_home_chats_tab_controller'),
               length: 4,
               child: Column(
                 children: [
@@ -1734,7 +1736,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         ),
         child: TabBar(
           isScrollable: false,
-          indicatorAnimation: TabIndicatorAnimation.elastic,
+          indicatorAnimation: TabIndicatorAnimation.linear,
           indicatorSize: TabBarIndicatorSize.tab,
           splashFactory: NoSplash.splashFactory,
           labelColor: isDark ? Colors.white : Colors.black,
@@ -2823,14 +2825,13 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Material(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
@@ -2953,7 +2954,8 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 
   void _showMoveToFolderSheet(BuildContext context) {
