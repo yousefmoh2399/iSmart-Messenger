@@ -73,6 +73,7 @@ router.put(
     body("chatPreferences").optional().isObject(),
     body("chatPreferences.themeId").optional().isString(),
     body("chatPreferences.wallpaperId").optional().isString(),
+    body("chatPreferences.doodles").optional().isBoolean(),
     body("chatPreferences.customTheme").optional().isObject(),
     body("chatPreferences.customTheme.accentColorHex").optional().isString(),
     body("chatPreferences.customTheme.incomingBubbleColorHex")

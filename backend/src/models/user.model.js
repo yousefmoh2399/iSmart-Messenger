@@ -133,6 +133,7 @@ const userSchema = new mongoose.Schema(
         {
           themeId: { type: String, default: "system" },
           wallpaperId: { type: String, default: "default" },
+          doodles: { type: Boolean, default: true },
           customTheme: {
             type: new mongoose.Schema(
               {

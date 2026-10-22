@@ -95,6 +95,7 @@ function serializeUser(user, permissions = null) {
     chatPreferences: {
       themeId: user.chatPreferences?.themeId || "system",
       wallpaperId: user.chatPreferences?.wallpaperId || "default",
+      doodles: user.chatPreferences?.doodles !== false,
       customTheme,
     },
     createdAt: user.createdAt,
@@ -642,6 +643,10 @@ async function updateProfile(actor, payload) {
         rawWallpaperId != null
           ? String(rawWallpaperId).trim().slice(0, 60)
           : user.chatPreferences?.wallpaperId || "default",
+      doodles:
+        typeof payload.chatPreferences.doodles === "boolean"
+          ? payload.chatPreferences.doodles
+          : user.chatPreferences?.doodles !== false,
       customTheme: {
         accentColorHex: normalizeColorHex(
           incomingCustomTheme?.accentColorHex,
