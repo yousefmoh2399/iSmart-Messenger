@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/app_user.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/providers/providers.dart';
 import '../../reports/presentation/custom_report_export_dialog.dart';
 import '../../reports/presentation/report_templates_controller.dart';
@@ -225,6 +226,139 @@ class _PrinterMonitoringScreenState
     if (mounted) {
       await ref.read(printerControllerProvider.notifier).refresh();
       await _refreshSelectedDashboard();
+    }
+  }
+
+
+  String _generateDesktopThermalTestReceiptHtml({
+    required String printerName,
+    required String ipAddress,
+    required String branchName,
+    required String status,
+    required num totalPages,
+  }) {
+    final now = DateTime.now();
+    final timestampStr =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+
+    return '''
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>اختبار الطابعة الحرارية</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    width: 72mm; max-width: 290px; margin: 0 auto; padding: 8px 6px;
+    color: #000; background: #fff; font-size: 12px; line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+  }
+  .receipt-header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 6px; margin-bottom: 8px; }
+  .brand-title { font-size: 17px; font-weight: 900; letter-spacing: 0.5px; margin: 2px 0; }
+  .brand-sub { font-size: 11px; font-weight: 600; color: #333; }
+  .receipt-title {
+    font-size: 13px; font-weight: 800; margin-top: 6px; padding: 2px 4px;
+    background: #000; color: #fff; display: inline-block; border-radius: 3px;
+  }
+  .data-grid { margin: 8px 0; }
+  .data-row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 11.5px; }
+  .data-row .k { font-weight: 700; color: #222; }
+  .data-row .v { font-weight: 600; direction: ltr; text-align: left; }
+  .dash-sep { border-top: 1px dashed #000; margin: 7px 0; }
+  .test-box { border: 1px solid #000; padding: 6px 4px; margin: 7px 0; text-align: center; background: #fafafa; }
+  .test-title { font-size: 10.5px; font-weight: bold; margin-bottom: 4px; }
+  .test-sample { font-family: 'Courier New', Courier, monospace; font-size: 10px; letter-spacing: 0.5px; line-height: 1.25; }
+  .solid-bar { background: #000; height: 9px; margin: 6px 0 2px 0; }
+  .bar-caption { font-size: 9px; color: #444; }
+  .status-verdict { text-align: center; font-size: 12px; font-weight: 900; border: 2px solid #000; padding: 5px; margin: 8px 0; letter-spacing: 0.5px; }
+  .receipt-footer { text-align: center; border-top: 2px dashed #000; padding-top: 6px; margin-top: 6px; font-size: 10px; color: #333; }
+</style>
+</head>
+<body>
+  <div class="receipt-header">
+    <div class="brand-title">iSmart Messenger</div>
+    <div class="brand-sub">نظام إدارة ومراقبة الطابعات الذكية</div>
+    <div class="receipt-title">ورقة اختبار حرارية فورية</div>
+  </div>
+  <div class="data-grid">
+    <div class="data-row"><span class="k">الطابعة:</span><span class="v">$printerName</span></div>
+    <div class="data-row"><span class="k">عنوان IP:</span><span class="v">$ipAddress</span></div>
+    <div class="data-row"><span class="k">الفرع:</span><span class="v">$branchName</span></div>
+    <div class="data-row"><span class="k">الحالة:</span><span class="v">$status</span></div>
+    <div class="data-row"><span class="k">العداد الإجمالي:</span><span class="v">$totalPages ورقة</span></div>
+    <div class="data-row"><span class="k">تاريخ الاختبار:</span><span class="v">$timestampStr</span></div>
+  </div>
+  <div class="dash-sep"></div>
+  <div class="test-box">
+    <div class="test-title">[ فحص محاذاة وجودة الرأس الحراري ]</div>
+    <div class="test-sample">
+      0123456789 - ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>
+      أ ب ت ث ج ح خ د ذ ر ز س ش ص ض ط ظ ع غ<br>
+      !@#\$%^&*()_+=-[]{};':",./&lt;&gt;?
+    </div>
+    <div class="solid-bar"></div>
+    <div class="bar-caption">فحص كثافة الحبر والخطوط الحرارية 100%</div>
+  </div>
+  <div class="status-verdict">[ ✓ PRINTER HARDWARE TEST PASSED ]</div>
+  <div class="receipt-footer">
+    تم إصدار ورقة الفحص بنجاح بنقرة واحدة من لوحة التحكم<br>
+    iSmart Unified Desktop Print Engine
+  </div>
+</body>
+</html>
+''';
+  }
+
+  Future<void> _printTestReceipt(PrinterItem printer) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final totalPages = printer.lifetimeCounters['totalPages'] ?? 0;
+      final html = _generateDesktopThermalTestReceiptHtml(
+        printerName: printer.name,
+        ipAddress: printer.ipAddress,
+        branchName: printer.branchName,
+        status: printer.status == 'online' ? '🟢 متصلة وجاهزة' : '🔴 غير متصلة',
+        totalPages: totalPages,
+      );
+      final bytes = utf8.encode(html);
+      await web_bridge.printBytes(
+        bytes: bytes,
+        fileName: 'thermal_test_${printer.name.replaceAll(' ', '_')}.html',
+        mimeType: 'text/html',
+        printerName: printer.name,
+      );
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            backgroundColor: const Color(0xFF10B981),
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Text('تم إرسال ورقة الاختبار الحرارية إلى الطابعة "${printer.name}" بنجاح.'),
+              ],
+            ),
+          ),
+        );
+    } catch (err) {
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            backgroundColor: const Color(0xFFDC2626),
+            content: Text('تعذر إرسال أمر الطباعة: $err'),
+          ),
+        );
     }
   }
 
@@ -635,6 +769,7 @@ class _PrinterContent extends StatelessWidget {
     required this.onDiscover,
     required this.onSyncPrinter,
     required this.onDeletePrinter,
+    this.onTestPrint,
     this.onOpenReportTemplates,
   });
 
@@ -666,6 +801,7 @@ class _PrinterContent extends StatelessWidget {
   final ValueChanged<String>? onDiscover;
   final ValueChanged<String>? onSyncPrinter;
   final ValueChanged<String>? onDeletePrinter;
+  final ValueChanged<PrinterItem>? onTestPrint;
   final VoidCallback? onOpenReportTemplates;
 
   @override
@@ -882,6 +1018,7 @@ class _PrinterContent extends StatelessWidget {
                       onSelected: onPrinterSelected,
                       onSyncPrinter: onSyncPrinter,
                       onDeletePrinter: onDeletePrinter,
+                      onTestPrint: onTestPrint,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -924,6 +1061,124 @@ class _PrinterDetailsScreenState extends ConsumerState<PrinterDetailsScreen> {
   int _selectedTab = 0;
   bool _isSyncing = false;
   bool _isExporting = false;
+  bool _isPrintingTestReceipt = false;
+
+  Future<void> _printThermalTestReceipt() async {
+    if (_isPrintingTestReceipt) return;
+    setState(() => _isPrintingTestReceipt = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final totalPages = _printer.lifetimeCounters['totalPages'] ?? 0;
+      final html = '''
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<title>اختبار الطابعة الحرارية</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    width: 72mm; max-width: 290px; margin: 0 auto; padding: 8px 6px;
+    color: #000; background: #fff; font-size: 12px; line-height: 1.35;
+    -webkit-print-color-adjust: exact;
+  }
+  .receipt-header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 6px; margin-bottom: 8px; }
+  .brand-title { font-size: 17px; font-weight: 900; letter-spacing: 0.5px; margin: 2px 0; }
+  .brand-sub { font-size: 11px; font-weight: 600; color: #333; }
+  .receipt-title {
+    font-size: 13px; font-weight: 800; margin-top: 6px; padding: 2px 4px;
+    background: #000; color: #fff; display: inline-block; border-radius: 3px;
+  }
+  .data-grid { margin: 8px 0; }
+  .data-row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 11.5px; }
+  .data-row .k { font-weight: 700; color: #222; }
+  .data-row .v { font-weight: 600; direction: ltr; text-align: left; }
+  .dash-sep { border-top: 1px dashed #000; margin: 7px 0; }
+  .test-box { border: 1px solid #000; padding: 6px 4px; margin: 7px 0; text-align: center; background: #fafafa; }
+  .test-title { font-size: 10.5px; font-weight: bold; margin-bottom: 4px; }
+  .test-sample { font-family: 'Courier New', Courier, monospace; font-size: 10px; letter-spacing: 0.5px; line-height: 1.25; }
+  .solid-bar { background: #000; height: 9px; margin: 6px 0 2px 0; }
+  .bar-caption { font-size: 9px; color: #444; }
+  .status-verdict { text-align: center; font-size: 12px; font-weight: 900; border: 2px solid #000; padding: 5px; margin: 8px 0; letter-spacing: 0.5px; }
+  .receipt-footer { text-align: center; border-top: 2px dashed #000; padding-top: 6px; margin-top: 6px; font-size: 10px; color: #333; }
+</style>
+</head>
+<body>
+  <div class="receipt-header">
+    <div class="brand-title">iSmart Messenger</div>
+    <div class="brand-sub">نظام إدارة ومراقبة الطابعات الذكية</div>
+    <div class="receipt-title">ورقة اختبار حرارية فورية</div>
+  </div>
+  <div class="data-grid">
+    <div class="data-row"><span class="k">الطابعة:</span><span class="v">${_printer.name}</span></div>
+    <div class="data-row"><span class="k">عنوان IP:</span><span class="v">${_printer.ipAddress}</span></div>
+    <div class="data-row"><span class="k">الفرع:</span><span class="v">${_printer.branchName}</span></div>
+    <div class="data-row"><span class="k">الحالة:</span><span class="v">${_printer.status == 'online' ? '🟢 متصلة وجاهزة' : '🔴 غير متصلة'}</span></div>
+    <div class="data-row"><span class="k">العداد الإجمالي:</span><span class="v">$totalPages ورقة</span></div>
+    <div class="data-row"><span class="k">تاريخ الاختبار:</span><span class="v">${DateTime.now().toString().split('.')[0]}</span></div>
+  </div>
+  <div class="dash-sep"></div>
+  <div class="test-box">
+    <div class="test-title">[ فحص محاذاة وجودة الرأس الحراري ]</div>
+    <div class="test-sample">
+      0123456789 - ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>
+      أ ب ت ث ج ح خ د ذ ر ز س ش ص ض ط ظ ع غ<br>
+      !@#\$%^&*()_+=-[]{};':",./&lt;&gt;?
+    </div>
+    <div class="solid-bar"></div>
+    <div class="bar-caption">فحص كثافة الحبر والخطوط الحرارية 100%</div>
+  </div>
+  <div class="status-verdict">[ ✓ PRINTER HARDWARE TEST PASSED ]</div>
+  <div class="receipt-footer">
+    تم إصدار ورقة الفحص بنجاح بنقرة واحدة من لوحة التحكم<br>
+    iSmart Unified Desktop Print Engine
+  </div>
+</body>
+</html>
+''';
+      final bytes = utf8.encode(html);
+      await web_bridge.printBytes(
+        bytes: bytes,
+        fileName: 'thermal_test_${_printer.name.replaceAll(' ', '_')}.html',
+        mimeType: 'text/html',
+        printerName: _printer.name,
+      );
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            backgroundColor: const Color(0xFF10B981),
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Text('تم إرسال ورقة الاختبار الحرارية إلى الطابعة "${_printer.name}" بنجاح.'),
+              ],
+            ),
+          ),
+        );
+    } catch (err) {
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            backgroundColor: const Color(0xFFDC2626),
+            content: Text('تعذر إرسال أمر الطباعة: $err'),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _isPrintingTestReceipt = false);
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -1300,6 +1555,34 @@ class _PrinterDetailsScreenState extends ConsumerState<PrinterDetailsScreen> {
                       : const Color(0xFFE5E5EA),
                   foregroundColor: isDark ? Colors.white : Colors.black87,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Instant Thermal Test Print Button
+              FilledButton.icon(
+                onPressed: _isPrintingTestReceipt ? null : _printThermalTestReceipt,
+                icon: _isPrintingTestReceipt
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.receipt_long_rounded, size: 17),
+                label: Text(
+                  _isPrintingTestReceipt ? 'جارِ الطباعة...' : 'طباعة ورقة اختبار حرارية',
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -3722,6 +4005,7 @@ class _PrinterTable extends StatelessWidget {
     required this.onSelected,
     required this.onSyncPrinter,
     required this.onDeletePrinter,
+    this.onTestPrint,
   });
 
   final List<PrinterItem> printers;
@@ -3729,6 +4013,7 @@ class _PrinterTable extends StatelessWidget {
   final ValueChanged<PrinterItem> onSelected;
   final ValueChanged<String>? onSyncPrinter;
   final ValueChanged<String>? onDeletePrinter;
+  final ValueChanged<PrinterItem>? onTestPrint;
 
   Widget _buildVendorAvatar(PrinterItem printer, bool isOnline) {
     final brand = (printer.model + ' ' + printer.name).toLowerCase();
@@ -4039,6 +4324,16 @@ class _PrinterTable extends StatelessWidget {
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  if (onTestPrint != null)
+                                    IconButton(
+                                      iconSize: 20,
+                                      tooltip: 'طباعة ورقة اختبار حرارية فورية',
+                                      icon: const Icon(
+                                        Icons.receipt_long_rounded,
+                                        color: Color(0xFF10B981),
+                                      ),
+                                      onPressed: () => onTestPrint!(printer),
+                                    ),
                                   if (onSyncPrinter != null)
                                     IconButton(
                                       iconSize: 20,
