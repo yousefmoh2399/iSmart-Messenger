@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -101,6 +102,24 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
     _tabController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  Widget _buildTabCountBadge(int count, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: isDark ? Colors.white70 : const Color(0xFF6E6E73),
+        ),
+      ),
+    );
   }
 
   bool _isTargetSelected(String id) {
@@ -341,71 +360,76 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
                 ),
               ),
 
-              // ── Tab Bar ─────────────────────────────────────────────────
+              // ── Tab Bar (Scrollable & Anti-overlapping) ─────────────────
               Container(
+                height: 42,
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                decoration: BoxDecoration(
-                  color: searchBgColor,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.all(2.5),
                 child: TabBar(
                   controller: _tabController,
-                  indicatorSize: TabBarIndicatorSize.tab,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
                   dividerColor: Colors.transparent,
+                  indicatorSize: TabBarIndicatorSize.tab,
                   indicator: BoxDecoration(
-                    color: sheetBgColor,
-                    borderRadius: BorderRadius.circular(8),
+                    color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                    borderRadius: BorderRadius.circular(10),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.05),
+                        color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
                         blurRadius: 4,
                         offset: const Offset(0, 1),
                       ),
                     ],
                   ),
                   labelColor: isDark ? Colors.white : const Color(0xFF1C1C1E),
-                  unselectedLabelColor: isDark ? Colors.white54 : Colors.black54,
-                  labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                  unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  unselectedLabelColor: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 10),
                   tabs: [
                     Tab(
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.chat_bubble_outline_rounded, size: 14),
-                          const SizedBox(width: 4),
-                          Text('المحادثات (${recentConversations.length})'),
+                          const Icon(CupertinoIcons.chat_bubble_2_fill, size: 14),
+                          const SizedBox(width: 6),
+                          const Text('المحادثات', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          const SizedBox(width: 5),
+                          _buildTabCountBadge(recentConversations.length, isDark),
                         ],
                       ),
                     ),
                     Tab(
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.person_outline_rounded, size: 14),
-                          const SizedBox(width: 4),
-                          Text('الزملاء (${filteredUsers.length})'),
+                          const Icon(CupertinoIcons.person_2_fill, size: 14),
+                          const SizedBox(width: 6),
+                          const Text('الزملاء', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          const SizedBox(width: 5),
+                          _buildTabCountBadge(filteredUsers.length, isDark),
                         ],
                       ),
                     ),
                     Tab(
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.corporate_fare_rounded, size: 14),
-                          const SizedBox(width: 4),
-                          Text('الأقسام (${filteredDepartments.length})'),
+                          const Icon(CupertinoIcons.building_2_fill, size: 14),
+                          const SizedBox(width: 6),
+                          const Text('الأقسام', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          const SizedBox(width: 5),
+                          _buildTabCountBadge(filteredDepartments.length, isDark),
                         ],
                       ),
                     ),
                     Tab(
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.groups_outlined, size: 14),
-                          const SizedBox(width: 4),
-                          Text('المجموعات (${filteredGroups.length})'),
+                          const Icon(CupertinoIcons.person_3_fill, size: 14),
+                          const SizedBox(width: 6),
+                          const Text('المجموعات', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          const SizedBox(width: 5),
+                          _buildTabCountBadge(filteredGroups.length, isDark),
                         ],
                       ),
                     ),

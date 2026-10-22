@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/utils/formatters.dart';
@@ -27,6 +28,7 @@ class ContactsScreen extends StatefulWidget {
 
 class _ContactsScreenState extends State<ContactsScreen> {
   final TextEditingController _searchController = TextEditingController();
+  int _selectedFilterIndex = 0; // 0: الكل, 1: متصل الآن, 2+: departments
 
   @override
   void dispose() {
@@ -34,349 +36,462 @@ class _ContactsScreenState extends State<ContactsScreen> {
     super.dispose();
   }
 
+  Future<void> _startConversation(ChatDirectoryUser user) async {
+    try {
+      final conversation = await widget.onStartDirectConversation(user.id);
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ConversationScreen(conversation: conversation),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
     final query = _searchController.text.trim().toLowerCase();
+
     final directoryUsers = widget.users
         .where((user) => user.id != widget.currentUser?.id)
         .toList();
+
     final departmentById = {
       for (final department in widget.departments) department.id: department,
     };
 
-    if (directoryUsers.isEmpty) {
-      return _ContactsEmptyState(colorScheme: colorScheme);
-    }
+    final onlineUsers = directoryUsers
+        .where((u) => u.presenceStatus == 'online' || u.isOnline)
+        .toList();
 
-    final groupedUsers = <String?, List<ChatDirectoryUser>>{};
-    for (final user in directoryUsers) {
-      final department = departmentById[user.departmentId];
-      final matches =
-          query.isEmpty ||
-          user.displayName.toLowerCase().contains(query) ||
-          user.username.toLowerCase().contains(query) ||
-          (department?.name.toLowerCase().contains(query) ?? false);
-      if (!matches) {
-        continue;
-      }
-      groupedUsers
-          .putIfAbsent(user.departmentId, () => <ChatDirectoryUser>[])
-          .add(user);
-    }
+    // Departments that actually have users
+    final activeDepartments = widget.departments
+        .where((dept) => directoryUsers.any((u) => u.departmentId == dept.id))
+        .toList();
 
-    final groups = <_ContactDepartmentGroup>[
-      for (final department in widget.departments)
-        if (groupedUsers[department.id]?.isNotEmpty == true)
-          _ContactDepartmentGroup(
-            id: department.id,
-            title: department.name,
-            subtitle: department.description.isEmpty
-                ? 'كود القسم: ${department.code}'
-                : department.description,
-            users: groupedUsers[department.id]!,
-          ),
-      if (groupedUsers[null]?.isNotEmpty == true)
-        _ContactDepartmentGroup(
-          id: null,
-          title: 'بدون قسم',
-          subtitle: 'المستخدمون غير المرتبطين بقسم محدد.',
-          users: groupedUsers[null]!,
-        ),
+    // ── Build Filter Pills ──
+    final filterPills = <Map<String, dynamic>>[
+      {
+        'label': 'الكل',
+        'count': directoryUsers.length,
+        'icon': CupertinoIcons.person_2_fill,
+      },
+      {
+        'label': 'متصل الآن',
+        'count': onlineUsers.length,
+        'icon': CupertinoIcons.circle_fill,
+        'isOnline': true,
+      },
+      for (final dept in activeDepartments)
+        {
+          'label': dept.name,
+          'count': directoryUsers.where((u) => u.departmentId == dept.id).length,
+          'icon': CupertinoIcons.building_2_fill,
+          'deptId': dept.id,
+        },
     ];
 
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
-      itemCount: groups.length + 1,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _ContactsHeaderCard(
-            controller: _searchController,
-            onChanged: (_) => setState(() {}),
-            departmentsCount: groups.length,
-            usersCount: groupedUsers.values.fold<int>(
-              0,
-              (sum, items) => sum + items.length,
-            ),
-          );
-        }
+    if (_selectedFilterIndex >= filterPills.length) {
+      _selectedFilterIndex = 0;
+    }
 
-        final group = groups[index - 1];
-        final orderedUsers = [...group.users]
-          ..sort((a, b) => a.displayName.compareTo(b.displayName));
-        return _ContactDepartmentCard(
-          key: ValueKey('${group.id ?? 'none'}-$query'),
-          title: group.title,
-          subtitle: group.subtitle,
-          users: orderedUsers,
-          initiallyExpanded: query.isNotEmpty,
-          onStartConversation: (user) async {
-            try {
-              final conversation = await widget.onStartDirectConversation(
-                user.id,
-              );
-              if (!context.mounted) {
-                return;
-              }
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      ConversationScreen(conversation: conversation),
+    // ── Apple Top Search Bar ──
+    final searchBar = Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE5E5EA),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            CupertinoIcons.search,
+            size: 18,
+            color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              onChanged: (_) => setState(() {}),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              decoration: InputDecoration(
+                hintText: 'البحث في دليل الموظفين والأقسام...',
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
                 ),
-              );
-            } catch (error) {
-              if (!context.mounted) {
-                return;
-              }
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text(error.toString())));
-            }
-          },
-        );
-      },
-    );
-  }
-}
-
-class _ContactsHeaderCard extends StatelessWidget {
-  const _ContactsHeaderCard({
-    required this.controller,
-    required this.onChanged,
-    required this.departmentsCount,
-    required this.usersCount,
-  });
-
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-  final int departmentsCount;
-  final int usersCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: const Color(0xFF3390EC).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: const Icon(
-                Icons.people_alt_outlined,
-                color: Color(0xFF3390EC),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          ),
+          if (_searchController.text.trim().isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                _searchController.clear();
+                setState(() {});
+              },
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black26,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    // ── Horizontal Filter Bar ──
+    final filterBar = SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: filterPills.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, idx) {
+          final isSelected = _selectedFilterIndex == idx;
+          final pill = filterPills[idx];
+          final isOnlinePill = pill['isOnline'] == true;
+
+          return GestureDetector(
+            onTap: () => setState(() => _selectedFilterIndex = idx),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF007AFF)
+                    : (isDark ? const Color(0xFF1C1C1E) : Colors.white),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isSelected
+                      ? const Color(0xFF007AFF)
+                      : (isDark
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.black.withValues(alpha: 0.08)),
+                  width: 0.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(
+                    pill['icon'] as IconData,
+                    size: isOnlinePill ? 8 : 13,
+                    color: isSelected
+                        ? Colors.white
+                        : (isOnlinePill
+                            ? const Color(0xFF22C55E)
+                            : (isDark ? Colors.white70 : const Color(0xFF6E6E73))),
+                  ),
+                  const SizedBox(width: 6),
                   Text(
-                    'الأفراد',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
+                    '${pill['label']}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.white : const Color(0xFF1C1C1E)),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$usersCount فردًا داخل $departmentsCount مجموعة مرتبة حسب الأقسام.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
+                  const SizedBox(width: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? Colors.white.withValues(alpha: 0.25)
+                          : (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06)),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${pill['count']}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: isSelected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF6E6E73)),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          );
+        },
+      ),
+    );
+
+    // ── Content builder ──
+    List<Widget> contentWidgets = [];
+
+    if (directoryUsers.isEmpty) {
+      contentWidgets.add(_buildEmptyDirectoryState(isDark));
+    } else if (query.isNotEmpty) {
+      final searchResults = directoryUsers.where((u) {
+        final dept = departmentById[u.departmentId];
+        return u.displayName.toLowerCase().contains(query) ||
+            u.username.toLowerCase().contains(query) ||
+            u.jobTitle.toLowerCase().contains(query) ||
+            (dept?.name.toLowerCase().contains(query) ?? false);
+      }).toList();
+
+      if (searchResults.isEmpty) {
+        contentWidgets.add(_buildEmptySearchState(query, isDark));
+      } else {
+        contentWidgets.add(
+          _buildSectionHeader('نتائج البحث', searchResults.length, isDark),
+        );
+        contentWidgets.add(
+          _buildUserGroupCard(searchResults, departmentById, cardBg, isDark),
+        );
+      }
+    } else if (_selectedFilterIndex == 1) {
+      // Online users
+      if (onlineUsers.isEmpty) {
+        contentWidgets.add(_buildNoOnlineUsersState(isDark));
+      } else {
+        contentWidgets.add(
+          _buildSectionHeader('المتصلون الآن', onlineUsers.length, isDark),
+        );
+        contentWidgets.add(
+          _buildUserGroupCard(onlineUsers, departmentById, cardBg, isDark),
+        );
+      }
+    } else if (_selectedFilterIndex >= 2) {
+      // Specific department
+      final selectedPill = filterPills[_selectedFilterIndex];
+      final deptId = selectedPill['deptId'] as String?;
+      final deptUsers = directoryUsers.where((u) => u.departmentId == deptId).toList();
+      contentWidgets.add(
+        _buildSectionHeader(selectedPill['label'] as String, deptUsers.length, isDark),
+      );
+      contentWidgets.add(
+        _buildUserGroupCard(deptUsers, departmentById, cardBg, isDark),
+      );
+    } else {
+      // All - grouped by department
+      for (final dept in activeDepartments) {
+        final deptUsers = directoryUsers.where((u) => u.departmentId == dept.id).toList();
+        if (deptUsers.isEmpty) continue;
+        deptUsers.sort((a, b) => a.displayName.compareTo(b.displayName));
+
+        contentWidgets.add(
+          _buildSectionHeader(dept.name, deptUsers.length, isDark),
+        );
+        contentWidgets.add(
+          _buildUserGroupCard(deptUsers, departmentById, cardBg, isDark),
+        );
+        contentWidgets.add(const SizedBox(height: 14));
+      }
+
+      // Users without department
+      final noDeptUsers = directoryUsers.where((u) => u.departmentId == null).toList();
+      if (noDeptUsers.isNotEmpty) {
+        noDeptUsers.sort((a, b) => a.displayName.compareTo(b.displayName));
+        contentWidgets.add(
+          _buildSectionHeader('بدون قسم', noDeptUsers.length, isDark),
+        );
+        contentWidgets.add(
+          _buildUserGroupCard(noDeptUsers, departmentById, cardBg, isDark),
+        );
+      }
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 120),
+      children: [
+        searchBar,
+        const SizedBox(height: 10),
+        filterBar,
         const SizedBox(height: 14),
-        TextField(
-          controller: controller,
-          onChanged: onChanged,
-          decoration: InputDecoration(
-            hintText: 'ابحث بالاسم أو اسم المستخدم أو القسم',
-            prefixIcon: const Icon(Icons.search_rounded),
-            suffixIcon: controller.text.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: 'مسح',
-                    onPressed: () {
-                      controller.clear();
-                      onChanged('');
-                    },
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-          ),
-        ),
+        ...contentWidgets,
       ],
     );
   }
-}
 
-class _ContactDepartmentGroup {
-  const _ContactDepartmentGroup({
-    required this.id,
-    required this.title,
-    required this.subtitle,
-    required this.users,
-  });
-
-  final String? id;
-  final String title;
-  final String subtitle;
-  final List<ChatDirectoryUser> users;
-}
-
-class _ContactDepartmentCard extends StatefulWidget {
-  const _ContactDepartmentCard({
-    super.key,
-    required this.title,
-    required this.subtitle,
-    required this.users,
-    required this.initiallyExpanded,
-    required this.onStartConversation,
-  });
-
-  final String title;
-  final String subtitle;
-  final List<ChatDirectoryUser> users;
-  final bool initiallyExpanded;
-  final Future<void> Function(ChatDirectoryUser user) onStartConversation;
-
-  @override
-  State<_ContactDepartmentCard> createState() => _ContactDepartmentCardState();
-}
-
-class _ContactDepartmentCardState extends State<_ContactDepartmentCard> {
-  late bool _isExpanded = widget.initiallyExpanded;
-
-  @override
-  void didUpdateWidget(covariant _ContactDepartmentCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.initiallyExpanded != widget.initiallyExpanded &&
-        widget.initiallyExpanded) {
-      _isExpanded = true;
-    }
+  Widget _buildSectionHeader(String title, int count, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      child: Row(
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white70 : const Color(0xFF6E6E73),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white60 : const Color(0xFF8E8E93),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+  Widget _buildUserGroupCard(
+    List<ChatDirectoryUser> users,
+    Map<String, DepartmentSummary> departmentById,
+    Color cardBg,
+    bool isDark,
+  ) {
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: cardColor,
+        color: cardBg,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.25),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
           width: 0.5,
         ),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          initiallyExpanded: _isExpanded,
-          onExpansionChanged: (value) {
-            setState(() {
-              _isExpanded = value;
-            });
-          },
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          childrenPadding: EdgeInsets.zero,
-          leading: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFF007AFF).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.groups_2_rounded,
-              color: Color(0xFF007AFF),
-              size: 22,
-            ),
-          ),
-          title: Text(
-            widget.title,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-          ),
-          subtitle: Text(
-            widget.subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12.5,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+      child: Column(
+        children: List.generate(users.length, (idx) {
+          final user = users[idx];
+          final isLast = idx == users.length - 1;
+          final dept = departmentById[user.departmentId];
+
+          return Column(
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF007AFF).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${widget.users.length}',
-                  style: const TextStyle(
-                    color: Color(0xFF007AFF),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+              _AppleContactTile(
+                user: user,
+                departmentName: dept?.name,
+                isDark: isDark,
+                onTap: () => _startConversation(user),
+              ),
+              if (!isLast)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 68.0),
+                  child: Divider(
+                    height: 0.5,
+                    thickness: 0.5,
+                    color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              AnimatedRotation(
-                turns: _isExpanded ? 0.5 : 0,
-                duration: const Duration(milliseconds: 180),
-                child: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
             ],
-          ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildEmptySearchState(String query, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.all(40),
+      child: Center(
+        child: Column(
           children: [
-            Divider(
-              height: 0.5,
-              thickness: 0.5,
-              color: colorScheme.outlineVariant.withValues(alpha: 0.25),
+            Icon(
+              CupertinoIcons.search,
+              size: 48,
+              color: isDark ? Colors.white30 : const Color(0xFFC7C7CC),
             ),
-            ...List.generate(widget.users.length, (idx) {
-              final user = widget.users[idx];
-              final isLast = idx == widget.users.length - 1;
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ContactUserTile(
-                    user: user,
-                    onTap: () => widget.onStartConversation(user),
-                  ),
-                  if (!isLast)
-                    Padding(
-                      padding: const EdgeInsetsDirectional.only(start: 70.0),
-                      child: Divider(
-                        height: 0.5,
-                        thickness: 0.5,
-                        color: colorScheme.outlineVariant.withValues(alpha: 0.25),
-                      ),
-                    ),
-                ],
-              );
-            }),
+            const SizedBox(height: 12),
+            const Text(
+              'لا توجد نتائج بحث',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'لم يتم العثور على موظف يطابق "$query"',
+              style: TextStyle(
+                color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoOnlineUsersState(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.all(40),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              CupertinoIcons.moon_fill,
+              size: 46,
+              color: isDark ? Colors.white30 : const Color(0xFFC7C7CC),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'لا يوجد زملاء متصلون الآن',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'جميع الموظفين غير متصلين حالياً أو خاملين',
+              style: TextStyle(
+                color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyDirectoryState(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.all(50),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              CupertinoIcons.person_2,
+              size: 52,
+              color: isDark ? Colors.white30 : const Color(0xFFC7C7CC),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'دليل الموظفين فارغ',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'حين يتم إنشاء وتفعيل حسابات الموظفين ستظهر هنا تلقائياً.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
@@ -384,31 +499,39 @@ class _ContactDepartmentCardState extends State<_ContactDepartmentCard> {
   }
 }
 
-class _ContactUserTile extends StatelessWidget {
-  const _ContactUserTile({required this.user, required this.onTap});
+class _AppleContactTile extends StatelessWidget {
+  const _AppleContactTile({
+    required this.user,
+    this.departmentName,
+    required this.isDark,
+    required this.onTap,
+  });
 
   final ChatDirectoryUser user;
+  final String? departmentName;
+  final bool isDark;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final isOnline = user.presenceStatus == 'online' || user.isOnline;
+    final isIdle = user.presenceStatus == 'idle';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
             children: [
+              // Avatar with presence badge
               Stack(
                 children: [
                   ChatAvatar(
                     radius: 22,
-                    backgroundColor: const Color(
-                      0xFF007AFF,
-                    ).withValues(alpha: 0.12),
                     avatarUrl: user.avatarUrl,
+                    backgroundColor: const Color(0xFF007AFF).withValues(alpha: isDark ? 0.2 : 0.12),
                     fallback: Text(
                       _avatarLabel(user.displayName),
                       style: const TextStyle(
@@ -418,25 +541,28 @@ class _ContactUserTile extends StatelessWidget {
                       ),
                     ),
                   ),
-                  PositionedDirectional(
-                    end: 0,
-                    bottom: 0,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: _presenceColor(user.presenceStatus),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.surface,
-                          width: 2,
+                  if (isOnline || isIdle)
+                    PositionedDirectional(
+                      end: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: isOnline ? const Color(0xFF22C55E) : const Color(0xFFF59E0B),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                            width: 2,
+                          ),
                         ),
                       ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(width: 12),
+
+              // Name + Job/Department
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -446,25 +572,54 @@ class _ContactUserTile extends StatelessWidget {
                       user.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 15,
+                        fontSize: 14.5,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      user.jobTitle.isNotEmpty ? user.jobTitle : '@${user.username}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            user.jobTitle.isNotEmpty
+                                ? user.jobTitle
+                                : (departmentName ?? '@${user.username}'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white54 : const Color(0xFF8E8E93),
+                            ),
+                          ),
+                        ),
+                        if (departmentName != null && user.jobTitle.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              departmentName!,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white60 : const Color(0xFF6E6E73),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 8),
+
+              // Presence text + Quick chat button
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
@@ -473,26 +628,24 @@ class _ContactUserTile extends StatelessWidget {
                     _presenceText(user),
                     style: TextStyle(
                       fontSize: 11,
-                      color: colorScheme.onSurfaceVariant,
+                      fontWeight: isOnline ? FontWeight.w600 : FontWeight.w400,
+                      color: isOnline
+                          ? const Color(0xFF22C55E)
+                          : (isDark ? Colors.white38 : const Color(0xFF8E8E93)),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
+                    width: 30,
+                    height: 30,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF007AFF).withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
+                      color: const Color(0xFF007AFF).withValues(alpha: isDark ? 0.18 : 0.1),
+                      shape: BoxShape.circle,
                     ),
-                    child: const Text(
-                      'محادثة',
-                      style: TextStyle(
-                        color: Color(0xFF007AFF),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    child: const Icon(
+                      CupertinoIcons.chat_bubble_fill,
+                      size: 14,
+                      color: Color(0xFF007AFF),
                     ),
                   ),
                 ],
@@ -505,66 +658,11 @@ class _ContactUserTile extends StatelessWidget {
   }
 }
 
-class _ContactsEmptyState extends StatelessWidget {
-  const _ContactsEmptyState({required this.colorScheme});
-
-  final ColorScheme colorScheme;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 40, 16, 120),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(28),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.45),
-            ),
-          ),
-          child: Column(
-            children: [
-              CircleAvatar(
-                radius: 34,
-                backgroundColor: const Color(
-                  0xFF3390EC,
-                ).withValues(alpha: 0.12),
-                child: const Icon(
-                  Icons.people_outline,
-                  size: 30,
-                  color: Color(0xFF3390EC),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'لا يوجد أفراد متاحون حاليًا',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'حين تتوفر حسابات نشطة ستظهر هنا لتبدأ معها محادثات مباشرة.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 String _presenceText(ChatDirectoryUser user) {
-  if (user.presenceStatus == 'online') return 'متصل الآن';
+  if (user.presenceStatus == 'online' || user.isOnline) return 'متصل الآن';
   if (user.presenceStatus == 'idle') {
     final at = user.lastActiveAt ?? user.lastSeen;
-    return at == null ? 'خامل' : 'خامل منذ ${formatEgyptTime(at)}';
+    return at == null ? 'خامل' : 'خامل ${formatEgyptTime(at)}';
   }
   final lastSeen = user.lastSeen ?? user.lastActiveAt;
   return lastSeen == null
@@ -579,9 +677,3 @@ String _avatarLabel(String value) {
   }
   return trimmed.substring(0, 1).toUpperCase();
 }
-
-Color _presenceColor(String status) => switch (status) {
-  'online' => const Color(0xFF22C55E),
-  'idle' => const Color(0xFFF59E0B),
-  _ => const Color(0xFF94A3B8),
-};
