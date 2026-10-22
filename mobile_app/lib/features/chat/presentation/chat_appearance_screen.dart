@@ -16,6 +16,7 @@ class ChatAppearanceScreen extends ConsumerStatefulWidget {
 
 class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
   int _selectedTabIndex = 0; // 0: الخلفيات, 1: الثيمات, 2: تخصيص يدوي
+  bool? _previewIsDark;
 
   Future<void> _save(ChatPreferences next) async {
     HapticFeedback.lightImpact();
@@ -73,13 +74,14 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
     final user = ref.watch(authControllerProvider).valueOrNull;
     final prefs = user?.chatPreferences ?? ChatPreferences.defaults;
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final appIsDark = theme.brightness == Brightness.dark;
+    final previewDark = _previewIsDark ?? appIsDark;
 
-    final scaffoldBg = isDark
+    final scaffoldBg = appIsDark
         ? const Color(0xFF0F141A)
         : const Color(0xFFF6F8FA);
-    final cardBg = isDark ? const Color(0xFF1B222C) : Colors.white;
-    final borderColor = isDark
+    final cardBg = appIsDark ? const Color(0xFF1B222C) : Colors.white;
+    final borderColor = appIsDark
         ? Colors.white.withValues(alpha: 0.08)
         : Colors.black.withValues(alpha: 0.08);
 
@@ -114,7 +116,10 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
           // 1. Live Interactive Chat Preview Card
           _LiveChatPreview(
             preferences: prefs,
-            isDark: isDark,
+            isDark: previewDark,
+            onTogglePreviewDark: () => setState(
+              () => _previewIsDark = !previewDark,
+            ),
           ),
 
           const SizedBox(height: 16),
@@ -137,7 +142,7 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
               0 => _WallpapersView(
                   key: const ValueKey('wallpapers_view'),
                   preferences: prefs,
-                  isDark: isDark,
+                  isDark: previewDark,
                   cardBg: cardBg,
                   borderColor: borderColor,
                   onSave: _save,
@@ -145,7 +150,7 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
               1 => _ThemesView(
                   key: const ValueKey('themes_view'),
                   preferences: prefs,
-                  isDark: isDark,
+                  isDark: previewDark,
                   cardBg: cardBg,
                   borderColor: borderColor,
                   onSave: _save,
@@ -153,7 +158,7 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
               _ => _CustomizerView(
                   key: const ValueKey('customizer_view'),
                   preferences: prefs,
-                  isDark: isDark,
+                  isDark: previewDark,
                   cardBg: cardBg,
                   onSaveCustom: (custom, {wallpaperId}) => _saveCustomTheme(
                     prefs,
@@ -177,10 +182,12 @@ class _LiveChatPreview extends StatelessWidget {
   const _LiveChatPreview({
     required this.preferences,
     required this.isDark,
+    this.onTogglePreviewDark,
   });
 
   final ChatPreferences preferences;
   final bool isDark;
+  final VoidCallback? onTogglePreviewDark;
 
   @override
   Widget build(BuildContext context) {
@@ -309,6 +316,21 @@ class _LiveChatPreview extends StatelessWidget {
                       ),
                     ),
                     // Translucent action icons
+                    if (onTogglePreviewDark != null)
+                      IconButton(
+                        icon: Icon(
+                          isDark
+                              ? Icons.light_mode_rounded
+                              : Icons.dark_mode_rounded,
+                          size: 19,
+                          color: isDark ? Colors.amber : const Color(0xFF64748B),
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: isDark ? 'معاينة النهاري' : 'معاينة الليلي',
+                        onPressed: onTogglePreviewDark,
+                      ),
+                    const SizedBox(width: 10),
                     Icon(
                       Icons.videocam_outlined,
                       size: 20,
