@@ -734,7 +734,15 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
             final ungroupedConversations = conversations
                 .where(
                   (conversation) =>
+                      !conversation.isArchived &&
                       !folderConversationIds.contains(conversation.id),
+                )
+                .toList();
+            final directConversations = conversations
+                .where(
+                  (conversation) =>
+                      conversation.type == 'direct' &&
+                      !conversation.isArchived,
                 )
                 .toList();
             final favoriteConversations = conversations
@@ -942,7 +950,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
             // ── Tab 0: Chats ──
             return DefaultTabController(
               key: const ValueKey('chat_home_chats_tab_controller'),
-              length: 4,
+              length: 5,
               child: Column(
                 children: [
                   Padding(
@@ -1089,7 +1097,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                           )
                         : const SizedBox.shrink(),
                   ),
-                  _buildPillTabBar(['المحادثات', 'المجموعات', 'المفضلة', 'المؤرشفة'], appearance, isDark),
+                  _buildPillTabBar(['الكل', 'مباشر', 'المجموعات', 'المفضلة', 'المؤرشفة'], appearance, isDark),
                   Expanded(
                     child: TabBarView(
                       children: [
@@ -1183,15 +1191,14 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                               const ChatFolderDropZone(),
                               if (ungroupedConversations.isNotEmpty) ...[
                                 _HomeSectionHeader(
-                                  title: 'أحدث المحادثات',
+                                  title: 'كل المحادثات',
                                   subtitle:
-                                      'آخر المحادثات المباشرة والنشطة الخاصة بك.',
+                                      'جميع المحادثات المباشرة ومجموعات العمل النشطة.',
                                   appearance: appearance,
                                   isDark: isDark,
                                 ),
                                 const SizedBox(height: 8),
                                 ...ungroupedConversations
-                                    .take(8)
                                     .map(
                                       (conversation) => Padding(
                                         padding: EdgeInsets.zero,
@@ -1229,24 +1236,46 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                     ),
                                 const SizedBox(height: 14),
                               ],
+                              if (ungroupedConversations.isEmpty && folders.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 24),
+                                  child: Center(
+                                    child: Text('لا توجد محادثات نشطة بعد.'),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        // ── Tab 1: Direct Chats ──
+                        RefreshIndicator(
+                          onRefresh: () async {
+                            await ref
+                                .read(chatOverviewControllerProvider.notifier)
+                                .refresh();
+                            await ref
+                                .read(chatFoldersProvider.notifier)
+                                .refresh();
+                          },
+                          child: ListView(
+                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            children: [
                               _HomeSectionHeader(
-                                title: 'مجموعاتي وغرف العمل',
-                                subtitle: groupedSpaces.isEmpty
-                                    ? 'لا توجد مجموعات أو غرف مطابقة حاليًا.'
-                                    : '${groupedSpaces.length} مجموعة وغرفة وإعلان تظهر لك مباشرة.',
+                                title: 'المحادثات المباشرة',
+                                subtitle:
+                                    'جميع المحادثات الفردية المباشرة مع الموظفين.',
                                 appearance: appearance,
                                 isDark: isDark,
                               ),
                               const SizedBox(height: 8),
-                              if (groupedSpaces.isEmpty)
+                              if (directConversations.isEmpty)
                                 _InlineEmptyState(
                                   label:
-                                      'لا توجد مجموعات أو غرف ضمن نتائج البحث الحالية.',
+                                      'لا توجد محادثات مباشرة حاليًا. يمكنك بدء محادثة جديدة من الدليل.',
                                   appearance: appearance,
                                   isDark: isDark,
                                 )
                               else
-                                ...groupedSpaces.map(
+                                ...directConversations.map(
                                   (conversation) => Padding(
                                     padding: EdgeInsets.zero,
                                     child: _ConversationCard(
@@ -1262,7 +1291,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                       onTogglePin: () =>
                                           _updateConversationPreferences(
                                             conversation,
-                                            isPinned: !conversation.isPinned,
+                                            isPinned:
+                                                !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
                                           _updateConversationPreferences(
@@ -1278,13 +1308,6 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                       onDeleteConversation: () =>
                                           _deleteConversation(conversation),
                                     ),
-                                  ),
-                                ),
-                              if (conversations.isEmpty && groupedSpaces.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 24),
-                                  child: Center(
-                                    child: Text('لا توجد محادثات نشطة بعد.'),
                                   ),
                                 ),
                             ],
@@ -1443,7 +1466,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           borderRadius: BorderRadius.circular(19),
         ),
         child: TabBar(
-          isScrollable: false,
+          isScrollable: tabTitles.length > 4,
+          tabAlignment: tabTitles.length > 4 ? TabAlignment.start : null,
+          labelPadding: tabTitles.length > 4
+              ? const EdgeInsets.symmetric(horizontal: 14)
+              : null,
           indicatorAnimation: TabIndicatorAnimation.linear,
           indicatorSize: TabBarIndicatorSize.tab,
           splashFactory: NoSplash.splashFactory,

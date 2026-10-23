@@ -205,13 +205,11 @@ class ChatSidebar extends ConsumerWidget {
                             ? conversations
                                 .where((c) => c.type == 'direct' && !c.isArchived)
                                 .toList()
-                            : conversations.take(6).toList())
+                            : conversations.where((c) => !c.isArchived).toList())
         .where((c) => !folderConversationIds.contains(c.id))
         .toList();
     final groupedSpaces = switch (currentFilter) {
-      ChatSidebarFilter.all => conversations.where(
-        (conversation) => conversation.type != 'direct',
-      ),
+      ChatSidebarFilter.all => const <ChatConversation>[],
       ChatSidebarFilter.direct => const <ChatConversation>[],
       ChatSidebarFilter.departments => conversations.where(
         (conversation) => conversation.type == 'department',
@@ -575,7 +573,9 @@ class ChatSidebar extends ConsumerWidget {
                           _SidebarSectionHeader(
                             title: currentFilter == ChatSidebarFilter.direct
                                 ? 'المحادثات المباشرة'
-                                : 'أحدث المحادثات',
+                                : currentFilter == ChatSidebarFilter.all
+                                    ? 'كل المحادثات'
+                                    : 'أحدث المحادثات',
                             subtitle: currentFilter == ChatSidebarFilter.direct
                                 ? 'كل الشاتات المباشرة المتاحة لك.'
                                 : 'أسرع طريق للمحادثات المفتوحة مؤخرًا.',
@@ -609,7 +609,8 @@ class ChatSidebar extends ConsumerWidget {
                           ),
                           const SizedBox(height: 14),
                         ],
-                        if (currentFilter != ChatSidebarFilter.direct) ...[
+                        if (currentFilter != ChatSidebarFilter.direct &&
+                            currentFilter != ChatSidebarFilter.all) ...[
                           _SidebarSectionHeader(
                             title:
                                 currentFilter == ChatSidebarFilter.departments
