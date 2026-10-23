@@ -28,12 +28,14 @@ class WorkspaceBlock {
     this.isExpanded = true,
     List<List<String>>? tableData,
   })  : id = id ?? const Uuid().v4(),
-        tableData = tableData ??
-            [
-              ['البند', 'الحالة', 'ملاحظات'],
-              ['', '', ''],
-              ['', '', ''],
-            ];
+        tableData = (tableData ??
+                [
+                  ['البند', 'الحالة', 'ملاحظات'],
+                  ['', '', ''],
+                  ['', '', ''],
+                ])
+            .map((row) => List<String>.from(row, growable: true))
+            .toList(growable: true);
 
   final String id;
   WorkspaceBlockType type;

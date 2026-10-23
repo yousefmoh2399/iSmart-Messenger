@@ -1202,7 +1202,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                   label: const Text('إضافة صف جديد', style: TextStyle(fontSize: 12, color: Color(0xFF007AFF), fontWeight: FontWeight.w600)),
                   onPressed: () {
                     setState(() {
-                      rows.add(List.filled(colCount, ''));
+                      rows.add(List<String>.filled(colCount, '', growable: true));
                     });
                     widget.onChanged();
                   },
@@ -1214,10 +1214,10 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     label: const Text('إضافة عمود', style: TextStyle(fontSize: 12, color: Color(0xFF5856D6), fontWeight: FontWeight.w600)),
                     onPressed: () {
                       setState(() {
-                        for (final r in rows) {
-                          r.add('');
+                        for (var i = 0; i < rows.length; i++) {
+                          rows[i] = List<String>.from(rows[i], growable: true)
+                            ..add(i == 0 ? 'عمود ${rows[i].length + 1}' : '');
                         }
-                        rows.first[rows.first.length - 1] = 'عمود ${rows.first.length}';
                       });
                       widget.onChanged();
                     },

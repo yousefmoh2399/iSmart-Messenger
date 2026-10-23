@@ -233,119 +233,129 @@ class _ChatAudioAttachmentPlayerState
           : const Color(0xFF64748B);
     }
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 240, maxWidth: 330),
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-      child: StreamBuilder<PlayerState>(
-        stream: _player.playerStateStream,
-        builder: (context, playerSnapshot) {
-          final playerState = playerSnapshot.data;
-          final isPlaying = playerState?.playing == true;
-          final isBuffering = playerState?.processingState == ProcessingState.buffering ||
-              _loading;
+    return SizedBox(
+      width: 272,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: StreamBuilder<PlayerState>(
+          stream: _player.playerStateStream,
+          builder: (context, playerSnapshot) {
+            final playerState = playerSnapshot.data;
+            final isPlaying = playerState?.playing == true;
+            final isBuffering = playerState?.processingState == ProcessingState.buffering ||
+                _loading;
 
-          return StreamBuilder<Duration>(
-            stream: _player.positionStream,
-            builder: (context, posSnapshot) {
-              final position = posSnapshot.data ?? Duration.zero;
-              final total = _knownTotalDuration ?? Duration.zero;
-              final safeMaxMs = total.inMilliseconds <= 0
-                  ? 1.0
-                  : total.inMilliseconds.toDouble();
+            return StreamBuilder<Duration>(
+              stream: _player.positionStream,
+              builder: (context, posSnapshot) {
+                final position = posSnapshot.data ?? Duration.zero;
+                final total = _knownTotalDuration ?? Duration.zero;
+                final safeMaxMs = total.inMilliseconds <= 0
+                    ? 1.0
+                    : total.inMilliseconds.toDouble();
 
-              final currentProgress = (position.inMilliseconds / safeMaxMs).clamp(0.0, 1.0);
-              final effectiveProgress = _isScrubbing ? _scrubPercent : currentProgress;
+                final currentProgress = (position.inMilliseconds / safeMaxMs).clamp(0.0, 1.0);
+                final effectiveProgress = _isScrubbing ? _scrubPercent : currentProgress;
 
-              // Display duration: while playing/scrubbing show current elapsed, otherwise show total duration
-              final displayDuration = _isScrubbing
-                  ? Duration(milliseconds: (_scrubPercent * safeMaxMs).round())
-                  : (isPlaying || position > Duration.zero
-                      ? position
-                      : total);
+                // Display duration: while playing/scrubbing show current elapsed, otherwise show total duration
+                final displayDuration = _isScrubbing
+                    ? Duration(milliseconds: (_scrubPercent * safeMaxMs).round())
+                    : (isPlaying || position > Duration.zero
+                        ? position
+                        : total);
 
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // 1. Play / Pause circular button
-                  _buildPlayButton(
-                    token: token,
-                    isPlaying: isPlaying,
-                    isBuffering: isBuffering,
-                    actionBgColor: actionBgColor,
-                    actionIconColor: actionIconColor,
-                  ),
-                  const SizedBox(width: 8),
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // 1. Play / Pause circular button
+                    _buildPlayButton(
+                      token: token,
+                      isPlaying: isPlaying,
+                      isBuffering: isBuffering,
+                      actionBgColor: actionBgColor,
+                      actionIconColor: actionIconColor,
+                    ),
+                    const SizedBox(width: 8),
 
-                  // 2. Center: Waveform + Duration / Speed
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Waveform with Draggable Thumb
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final waveWidth = constraints.maxWidth;
-                            return GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTapDown: (d) => _onWaveformTap(d, waveWidth, total),
-                              onHorizontalDragStart: (d) =>
-                                  _onWaveformDragStart(d, waveWidth),
-                              onHorizontalDragUpdate: (d) =>
-                                  _onWaveformDragUpdate(d, waveWidth),
-                              onHorizontalDragEnd: (d) =>
-                                  _onWaveformDragEnd(d, total),
-                              child: Container(
-                                height: 32,
-                                width: double.infinity,
-                                color: Colors.transparent,
-                                child: CustomPaint(
-                                  painter: _WhatsAppWaveformPainter(
-                                    amplitudes: _waveformAmplitudes,
-                                    progress: effectiveProgress,
-                                    playedColor: playedWaveColor,
-                                    unplayedColor: unplayedWaveColor,
-                                    thumbColor: thumbColor,
+                    // 2. Center: Waveform + Duration / Speed
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Waveform with Draggable Thumb (using Builder instead of LayoutBuilder to support IntrinsicWidth)
+                          Builder(
+                            builder: (waveContext) {
+                              double resolveWaveWidth() {
+                                final box = waveContext.findRenderObject();
+                                if (box is RenderBox && box.hasSize) {
+                                  return box.size.width;
+                                }
+                                return 160.0;
+                              }
+
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTapDown: (d) =>
+                                    _onWaveformTap(d, resolveWaveWidth(), total),
+                                onHorizontalDragStart: (d) =>
+                                    _onWaveformDragStart(d, resolveWaveWidth()),
+                                onHorizontalDragUpdate: (d) =>
+                                    _onWaveformDragUpdate(d, resolveWaveWidth()),
+                                onHorizontalDragEnd: (d) =>
+                                    _onWaveformDragEnd(d, total),
+                                child: Container(
+                                  height: 32,
+                                  width: double.infinity,
+                                  color: Colors.transparent,
+                                  child: CustomPaint(
+                                    painter: _WhatsAppWaveformPainter(
+                                      amplitudes: _waveformAmplitudes,
+                                      progress: effectiveProgress,
+                                      playedColor: playedWaveColor,
+                                      unplayedColor: unplayedWaveColor,
+                                      thumbColor: thumbColor,
+                                    ),
                                   ),
                                 ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 2),
+                          // Duration & Speed Indicator
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                _formatDuration(displayDuration),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: durationTextColor,
+                                  letterSpacing: 0.2,
+                                ),
                               ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 2),
-                        // Duration & Speed Indicator
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              _formatDuration(displayDuration),
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: durationTextColor,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
-                            _buildSpeedPill(isDark: isDark),
-                          ],
-                        ),
-                      ],
+                              _buildSpeedPill(isDark: isDark),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
+                    const SizedBox(width: 10),
 
-                  // 3. Sender Avatar with Mic Status Badge
-                  _buildAvatarWithMicBadge(
-                    isPlayed: _hasBeenPlayed ||
-                        position > Duration.zero ||
-                        widget.message.seenBy.isNotEmpty,
-                    isDark: isDark,
-                  ),
-                ],
-              );
-            },
-          );
-        },
+                    // 3. Sender Avatar with Mic Status Badge
+                    _buildAvatarWithMicBadge(
+                      isPlayed: _hasBeenPlayed ||
+                          position > Duration.zero ||
+                          widget.message.seenBy.isNotEmpty,
+                      isDark: isDark,
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
