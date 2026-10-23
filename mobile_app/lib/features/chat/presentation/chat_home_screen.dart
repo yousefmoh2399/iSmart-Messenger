@@ -1775,7 +1775,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               ),
               const SizedBox(height: 2),
               Text(
-                'الإصدار 2.0.0 (Apple Minimalist Edition)',
+                'الإصدار 1.2.1',
                 style: TextStyle(
                   fontSize: 10,
                   color: isDark ? Colors.white24 : const Color(0xFFA1A1A6),
