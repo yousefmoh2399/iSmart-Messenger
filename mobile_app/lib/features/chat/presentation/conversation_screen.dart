@@ -1760,15 +1760,22 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (!_isRecordingVoice) {
       return;
     }
-    final rtl = Directionality.of(context) == TextDirection.rtl;
     final o = details.offsetFromOrigin;
-    final cancel = rtl ? o.dx > 76 : o.dx < -76;
-    final lock = o.dy < -72;
+    // Natural horizontal swipe in either direction (left or right) to cancel
+    final cancel = o.dx.abs() > 36;
+    // Sliding up by 50px locks hands-free recording
+    final lock = o.dy < -50;
+
+    if (cancel && !_voiceSlideCancelArmed) {
+      HapticFeedback.selectionClick();
+    }
+
     setState(() {
       _voiceGestureOffset = o;
       _voiceSlideCancelArmed = cancel;
       if (lock && !_isVoiceRecordingLocked) {
         _isVoiceRecordingLocked = true;
+        _isVoiceHoldActive = false;
         HapticFeedback.heavyImpact();
       }
     });
@@ -1804,6 +1811,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         _voiceSlideCancelArmed = false;
         _voiceGestureOffset = Offset.zero;
       });
+      return;
+    }
+
+    // Accidental tap protection (< 550ms)
+    final started = _recordingStartedAt;
+    final dur = started == null
+        ? _recordingDuration
+        : DateTime.now().difference(started);
+    if (dur.inMilliseconds < 550) {
+      await _cancelVoiceRecording();
       return;
     }
 
@@ -7171,6 +7188,7 @@ class _VoiceHoldRecordingBar extends StatefulWidget {
     required this.slideCancelArmed,
     required this.gestureOffset,
     required this.isDark,
+    required this.onCancel,
   });
 
   final ColorScheme colorScheme;
@@ -7178,6 +7196,7 @@ class _VoiceHoldRecordingBar extends StatefulWidget {
   final bool slideCancelArmed;
   final Offset gestureOffset;
   final bool isDark;
+  final VoidCallback onCancel;
 
   @override
   State<_VoiceHoldRecordingBar> createState() => _VoiceHoldRecordingBarState();
@@ -7204,10 +7223,7 @@ class _VoiceHoldRecordingBarState extends State<_VoiceHoldRecordingBar>
 
   @override
   Widget build(BuildContext context) {
-    final isRtl = Directionality.of(context) == TextDirection.rtl;
-    final dragX = isRtl
-        ? (widget.gestureOffset.dx * 0.35).clamp(-100.0, 0.0)
-        : (widget.gestureOffset.dx * 0.35).clamp(0.0, 100.0);
+    final dragX = (widget.gestureOffset.dx * 0.35).clamp(-60.0, 60.0);
 
     final cancelColor = widget.slideCancelArmed
         ? const Color(0xFFEF4444)
@@ -7215,21 +7231,57 @@ class _VoiceHoldRecordingBarState extends State<_VoiceHoldRecordingBar>
 
     return Container(
       height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: widget.isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(24),
       ),
       child: Row(
         children: [
+          // Explicit Clickable Cancel Button (Trash Icon + Text) - Guarantees the user can always tap to cancel!
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: widget.onCancel,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.delete_outline_rounded,
+                      size: 17,
+                      color: Color(0xFFEF4444),
+                    ),
+                    SizedBox(width: 4),
+                    Text(
+                      'إلغاء',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFEF4444),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
           // 1. Red Pulsing Recording Indicator Dot
           AnimatedBuilder(
             animation: _pulseController,
             builder: (context, _) {
               final opacity = 0.35 + (_pulseController.value * 0.65);
               return Container(
-                width: 10,
-                height: 10,
+                width: 9,
+                height: 9,
                 decoration: BoxDecoration(
                   color: const Color(0xFFEF4444).withValues(alpha: opacity),
                   shape: BoxShape.circle,
@@ -7243,19 +7295,19 @@ class _VoiceHoldRecordingBarState extends State<_VoiceHoldRecordingBar>
               );
             },
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
 
           // 2. Live Duration Counter
           Text(
             widget.durationLabel,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3,
               color: widget.isDark ? Colors.white : const Color(0xFF0F172A),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
 
           // 3. Slide to Cancel Animated Indicator
           Expanded(
@@ -7266,19 +7318,19 @@ class _VoiceHoldRecordingBarState extends State<_VoiceHoldRecordingBar>
                 children: [
                   Icon(
                     widget.slideCancelArmed
-                        ? Icons.delete_outline_rounded
-                        : (isRtl ? Icons.chevron_right_rounded : Icons.chevron_left_rounded),
+                        ? Icons.delete_forever_rounded
+                        : Icons.chevron_right_rounded,
                     size: 18,
                     color: cancelColor,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 3),
                   Flexible(
                     child: Text(
                       widget.slideCancelArmed ? 'اترك للإلغاء' : 'اسحب للإلغاء',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                         color: cancelColor,
                       ),
@@ -7562,7 +7614,8 @@ class _MessageComposerState extends State<_MessageComposer> {
     final enterSendsMessage = widget.enterSendsMessage;
     final onChanged = widget.onChanged;
 
-    final showVoiceActionButtons = isVoiceRecordingActive;
+    final showVoiceActionButtons =
+        (isVoiceRecordingActive && isVoiceLocked) || hasVoiceDraft;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
@@ -7613,6 +7666,7 @@ class _MessageComposerState extends State<_MessageComposer> {
                           slideCancelArmed: voiceSlideCancelArmed,
                           gestureOffset: voiceGestureOffset,
                           isDark: isDark,
+                          onCancel: onCancelVoiceNote,
                         )
                       : lockedOrDraftBar
                           ? Row(
@@ -7955,7 +8009,7 @@ class _MessageComposerState extends State<_MessageComposer> {
                   key: const ValueKey('mic_btn'),
                   message: 'اضغط مطوّلاً للتسجيل',
                   child: IgnorePointer(
-                    ignoring: !enabled || isUploading || isVoiceRecordingActive,
+                    ignoring: !enabled || isUploading,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () {
