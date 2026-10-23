@@ -637,6 +637,9 @@ class ChatMessage {
   final List<ChatReceipt> seenBy;
   final List<ChatReceipt> deliveredTo;
 
+  bool get isFailed => id.startsWith('temp_') && metadata?['status'] == 'failed';
+  bool get isPending => id.startsWith('temp_') && metadata?['status'] == 'pending';
+
   bool get isAudioMessage =>
       messageType == 'audio' ||
       (mimeType?.toLowerCase().startsWith('audio/') ?? false);
@@ -918,6 +921,13 @@ class ChatMessage {
             : (raw is Map
                 ? Map<String, dynamic>.from(raw)
                 : <String, dynamic>{});
+        final msgId = (json['_id'] ?? json['id'])?.toString() ?? '';
+        // If message has an official server ID (not temp_), it was confirmed by the server.
+        // It can NEVER be in failed status. Strip any historical/stale failed status.
+        if (!msgId.startsWith('temp_')) {
+          meta.remove('status');
+          meta.remove('error');
+        }
         final topLevelClientMsgId = json['clientMessageId']?.toString();
         if (topLevelClientMsgId != null &&
             topLevelClientMsgId.isNotEmpty &&

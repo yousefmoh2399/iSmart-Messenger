@@ -2991,7 +2991,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _retryMessage(ChatMessage message) async {
-    final clientMessageId = message.metadata?['clientMessageId']?.toString();
     try {
       await ref
           .read(
@@ -2999,14 +2998,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               _conversationId,
             ).notifier,
           )
-          .sendMessage(
-            content: message.content,
-            replyToMessageId: message.replyToMessageId,
-            messageType: message.messageType,
-            fileUrl: message.fileUrl,
-            metadata: message.metadata,
-            clientMessageId: clientMessageId,
-          );
+          .retryMessage(message);
     } catch (_) {
       // Handled and marked as failed by ConversationMessagesController
     }
@@ -4211,9 +4203,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                                   message.content;
                                             })
                                           : null,
-                                      onDelete: (canDelete ||
-                                              message.metadata?['status'] ==
-                                                  'failed') &&
+                                      onDelete: (canDelete || message.isFailed) &&
                                           !message.isDeleted
                                           ? () => ref
                                                 .read(
@@ -4288,8 +4278,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               emoji: emoji,
                                             );
                                       },
-                                      onRetry: message.metadata?['status'] ==
-                                              'failed'
+                                      onRetry: message.isFailed
                                           ? () => _retryMessage(message)
                                           : null,
                                       ),

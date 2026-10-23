@@ -1319,7 +1319,13 @@ class ConversationMessagesController
     _listenToSocket(arg);
     ref.onDispose(() {
       _disposed = true;
-      _messagesCacheDebounceTimer?.cancel();
+      if (_messagesCacheDebounceTimer?.isActive ?? false) {
+        _messagesCacheDebounceTimer?.cancel();
+        final current = state.valueOrNull;
+        if (current != null) {
+          _saveStateToCache(current);
+        }
+      }
       _eventsSubscription?.cancel();
       _socketService?.leaveConversation(arg);
     });
@@ -1509,6 +1515,17 @@ class ConversationMessagesController
   /// acknowledged it — it will never auto-confirm, so treat it as failed.
   ChatMessagesPage _markPendingAsFailed(ChatMessagesPage page) {
     final fixed = page.messages.map((m) {
+      if (!m.id.startsWith('temp_')) {
+        if (m.metadata != null &&
+            (m.metadata!.containsKey('status') ||
+                m.metadata!.containsKey('error'))) {
+          final updated = Map<String, dynamic>.from(m.metadata!);
+          updated.remove('status');
+          updated.remove('error');
+          return m.copyWith(metadata: updated.isEmpty ? null : updated);
+        }
+        return m;
+      }
       final msgStatus = m.metadata?['status']?.toString();
       if (msgStatus == 'pending') {
         final updated = Map<String, dynamic>.from(m.metadata ?? {});
@@ -1718,8 +1735,12 @@ class ConversationMessagesController
     _socketService?.markActivity();
     final stableClientMessageId = clientMessageId ?? const Uuid().v4();
 
+    final cleanMetadata = Map<String, dynamic>.from(metadata ?? {});
+    cleanMetadata.remove('status');
+    cleanMetadata.remove('error');
+
     final effectiveMetadata = <String, dynamic>{
-      ...?metadata,
+      ...cleanMetadata,
       'clientMessageId': stableClientMessageId,
     };
 
@@ -1821,9 +1842,10 @@ class ConversationMessagesController
       );
       confirmedMetadata['clientMessageId'] = stableClientMessageId;
       confirmedMetadata.remove('status');
+      confirmedMetadata.remove('error');
 
       final confirmedMessage = result.message.copyWith(
-        metadata: confirmedMetadata,
+        metadata: confirmedMetadata.isEmpty ? null : confirmedMetadata,
       );
 
       final latest = state.valueOrNull ?? current;
@@ -1831,6 +1853,7 @@ class ConversationMessagesController
         latest.copyWith(
           messages: _upsertMessage(latest.messages, confirmedMessage),
         ),
+        immediate: true,
       );
     } catch (error) {
       final failedMessage = tempMessage.copyWith(
@@ -1848,6 +1871,35 @@ class ConversationMessagesController
       );
       rethrow;
     }
+  }
+
+  Future<void> retryMessage(ChatMessage message) async {
+    final current = state.valueOrNull;
+    if (current != null) {
+      // Instantly remove failed message from state and cache so it doesn't linger
+      _setStateAndCache(
+        current.copyWith(
+          messages: current.messages.where((m) => m.id != message.id).toList(),
+        ),
+        immediate: true,
+      );
+    }
+
+    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
+        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
+
+    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
+    cleanMetadata.remove('status');
+    cleanMetadata.remove('error');
+
+    await sendMessage(
+      content: message.content,
+      replyToMessageId: message.replyToMessageId,
+      messageType: message.messageType,
+      fileUrl: message.fileUrl,
+      metadata: cleanMetadata,
+      clientMessageId: clientMessageId,
+    );
   }
 
   Future<void> sendFile(

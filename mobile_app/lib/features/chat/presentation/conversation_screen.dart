@@ -3005,7 +3005,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
 
   Future<void> _retryMessage(ChatMessage message) async {
-    final clientMessageId = message.metadata?['clientMessageId']?.toString();
     try {
       await ref
           .read(
@@ -3013,14 +3012,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               widget.conversation.id,
             ).notifier,
           )
-          .sendMessage(
-            content: message.content,
-            replyToMessageId: message.replyToMessageId,
-            messageType: message.messageType,
-            fileUrl: message.fileUrl,
-            metadata: message.metadata,
-            clientMessageId: clientMessageId,
-          );
+          .retryMessage(message);
     } catch (_) {
       // Handled and marked as failed by ConversationMessagesController
     }
@@ -3043,7 +3035,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final canDelete = isMine || authUser?.can('canDeleteMessages') == true;
     final canEdit = isMine && !message.hasAttachment && !message.isDeleted;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isFailed = message.metadata?['status'] == 'failed';
+    final isFailed = message.isFailed;
     final previewText = message.content.isNotEmpty
         ? message.content
         : (message.fileName ?? 'مرفق');
@@ -5886,7 +5878,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       const SizedBox(
                                                                         width: 4,
                                                                       ),
-                                                                      if (message.metadata?['status'] == 'failed')
+                                                                      if (message.isFailed)
                                                                         GestureDetector(
                                                                           onTap: () => _showActions(message),
                                                                           child: Icon(
@@ -8267,11 +8259,10 @@ Color _presenceColor(String status) => switch (status) {
 };
 
 _MessageStatus _status(ChatMessage message, String currentUserId) {
-  final msgStatus = message.metadata?['status']?.toString();
-  if (msgStatus == 'failed') {
+  if (message.isFailed) {
     return const _MessageStatus(Icons.error_outline_rounded, Color(0xFFEF4444));
   }
-  if (msgStatus == 'pending' || message.id.startsWith('temp_')) {
+  if (message.isPending || message.id.startsWith('temp_')) {
     return const _MessageStatus(Icons.access_time_rounded, Color(0xFF94A3B8));
   }
 

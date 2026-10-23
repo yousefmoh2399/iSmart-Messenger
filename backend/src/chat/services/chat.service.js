@@ -499,6 +499,8 @@ async function serializeConversation(conversation, currentUserId) {
 
 function serializeMessage(message, sender = null) {
   const metadata = message.metadata ? { ...message.metadata } : {};
+  delete metadata.status;
+  delete metadata.error;
   const clientMessageId =
     message.clientMessageId || metadata.clientMessageId || null;
   if (clientMessageId && !metadata.clientMessageId) {
@@ -1916,6 +1918,9 @@ async function createMessage(currentUser, payload, file) {
   if (payload.isSilent) {
     normalizedMetadata.silent = true;
   }
+
+  delete normalizedMetadata.status;
+  delete normalizedMetadata.error;
 
   const targetRecipientIds = recipientIds.filter(
     (userId) => userId !== currentUser.id,
