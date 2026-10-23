@@ -458,6 +458,7 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
+app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>,127.0.0.1,localhost");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("renderer-process-limit", "3");

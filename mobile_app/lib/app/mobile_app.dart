@@ -345,37 +345,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final currentBaseUrl =
         ref.read(apiBaseUrlControllerProvider).valueOrNull ??
         AppConfig.defaultApiBaseUrl;
-    final controller = TextEditingController(text: currentBaseUrl);
     final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('تغيير رابط الخادم'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'API Base URL',
-            hintText: 'http://192.168.1.10:5000',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('__reset__'),
-            child: const Text('الافتراضي'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('حفظ ومحاولة الاتصال'),
-          ),
-        ],
+      builder: (dialogContext) => _ChangeServerBaseUrlDialog(
+        initialUrl: currentBaseUrl,
       ),
     );
-    controller.dispose();
     if (!mounted || result == null) {
       return;
     }
@@ -1993,6 +1968,64 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+
+class _ChangeServerBaseUrlDialog extends StatefulWidget {
+  const _ChangeServerBaseUrlDialog({required this.initialUrl});
+
+  final String initialUrl;
+
+  @override
+  State<_ChangeServerBaseUrlDialog> createState() =>
+      _ChangeServerBaseUrlDialogState();
+}
+
+class _ChangeServerBaseUrlDialogState
+    extends State<_ChangeServerBaseUrlDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('تغيير رابط الخادم'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'API Base URL',
+          hintText: 'http://192.168.1.10:5000',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('__reset__'),
+          child: const Text('الافتراضي'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('حفظ ومحاولة الاتصال'),
+        ),
+      ],
     );
   }
 }

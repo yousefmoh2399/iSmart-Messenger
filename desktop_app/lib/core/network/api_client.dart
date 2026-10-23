@@ -97,7 +97,16 @@ class ApiClient {
               requestPath.contains('/download') ||
               requestPath.contains('/releases') ||
               requestPath.contains('/updates');
-          if (!isTransferEndpoint) {
+          final isFastEndpoint = requestPath.contains('/auth/login') ||
+              requestPath.contains('/auth/register') ||
+              requestPath.contains('/health');
+          if (isFastEndpoint) {
+            options.connectTimeout = const Duration(seconds: 10);
+            options.receiveTimeout = const Duration(seconds: 15);
+            if (!kIsWeb) {
+              options.sendTimeout = const Duration(seconds: 15);
+            }
+          } else if (!isTransferEndpoint) {
             options.receiveTimeout = const Duration(seconds: 90);
             if (!kIsWeb) {
               options.sendTimeout = const Duration(seconds: 90);
