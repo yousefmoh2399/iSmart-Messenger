@@ -1112,10 +1112,16 @@ class ChatRepository {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/admin/departments',
-      data: {'name': name, 'code': code, 'description': description},
+      data: {
+        'name': name,
+        'code': code,
+        'description': description,
+        'managers': managers,
+      },
     );
     return DepartmentSummary.fromJson(
       response.data?['department'] as Map<String, dynamic>,

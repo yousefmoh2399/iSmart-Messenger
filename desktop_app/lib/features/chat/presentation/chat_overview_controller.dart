@@ -133,8 +133,17 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final departments = await safeList(repository.fetchDepartments);
     final branches = await safeList(repository.fetchBranches);
 
-    final manageableConversations = await safeList(
+    final rawManageableConversations = await safeList(
       repository.fetchManageableConversations,
+    );
+    final manageableMap = <String, ChatConversation>{
+      for (final conv in conversations)
+        if (conv.type != 'direct') conv.id: conv,
+      for (final conv in rawManageableConversations)
+        if (conv.type != 'direct') conv.id: conv,
+    };
+    final manageableConversations = _sortConversations(
+      manageableMap.values.toList(),
     );
     final roles = await safeList(repository.fetchRoles);
 
@@ -741,13 +750,17 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
 
     final manageable = [...current.manageableConversations];
-    final manageableIndex = manageable.indexWhere(
-      (entry) => entry.id == conversation.id,
-    );
-    if (manageableIndex != -1) {
-      manageable[manageableIndex] = conversation.copyWith(
-        unreadCount: manageable[manageableIndex].unreadCount,
+    if (conversation.type != 'direct') {
+      final manageableIndex = manageable.indexWhere(
+        (entry) => entry.id == conversation.id,
       );
+      if (manageableIndex == -1) {
+        manageable.insert(0, conversation);
+      } else {
+        manageable[manageableIndex] = conversation.copyWith(
+          unreadCount: manageable[manageableIndex].unreadCount,
+        );
+      }
     }
 
     _setStateAndCache(
@@ -995,12 +1008,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final repository = _repository();
     await repository.createDepartment(
       name: name,
       code: code,
       description: description,
+      managers: managers,
     );
     await refresh();
   }

@@ -827,6 +827,21 @@ async function assertConversationManagementAccess(currentUser, conversation) {
     return;
   }
 
+  const canCreateRooms = await userHasPermission(currentUser, "canCreateRooms");
+  if (canCreateRooms && conversation.type !== "direct") {
+    return;
+  }
+
+  if (conversation.type === "broadcast") {
+    const canSendBroadcast = await userHasPermission(
+      currentUser,
+      "canSendBroadcast",
+    );
+    if (canSendBroadcast) {
+      return;
+    }
+  }
+
   if (conversation.type === "direct") {
     const memberIds = (conversation.members || []).map((entry) =>
       entry._id ? entry._id.toString() : entry.toString(),
@@ -951,18 +966,33 @@ async function listConversationsForUser(currentUser) {
 
 async function listManageableConversations(currentUser) {
   const isAdmin = currentUser.role === "admin";
-  const query = isAdmin
-    ? { deletedAt: null, type: { $ne: "direct" } }
-    : {
-        deletedAt: null,
-        $or: [
-          { admins: currentUser.id },
-          { createdBy: currentUser.id },
-          ...(currentUser.departmentId
-            ? [{ type: "department", departmentId: currentUser.departmentId }]
-            : []),
-        ],
-      };
+  const [canCreateRooms, canSendBroadcast] = await Promise.all([
+    isAdmin ? true : userHasPermission(currentUser, "canCreateRooms"),
+    isAdmin ? true : userHasPermission(currentUser, "canSendBroadcast"),
+  ]);
+  const hasGlobalRoomAccess = isAdmin || canCreateRooms;
+
+  let query;
+  if (hasGlobalRoomAccess) {
+    query = {
+      deletedAt: null,
+      type: { $in: ["group", "department", "broadcast"] },
+    };
+  } else {
+    const orClauses = [
+      { admins: currentUser.id },
+      { createdBy: currentUser.id },
+      ...(currentUser.departmentId
+        ? [{ type: "department", departmentId: currentUser.departmentId }]
+        : []),
+      ...(canSendBroadcast ? [{ type: "broadcast" }] : []),
+    ];
+    query = {
+      deletedAt: null,
+      type: { $in: ["group", "department", "broadcast"] },
+      $or: orClauses,
+    };
+  }
 
   const conversations = await Conversation.find(query)
     .sort({ updatedAt: -1 })
@@ -979,7 +1009,7 @@ async function listManageableConversations(currentUser) {
 
   const visible = [];
   for (const conversation of conversations) {
-    if (isDepartmentDefaultConversation(conversation)) {
+    if (conversation.type === "direct") {
       continue;
     }
     visible.push(await serializeConversation(conversation, currentUser.id));
