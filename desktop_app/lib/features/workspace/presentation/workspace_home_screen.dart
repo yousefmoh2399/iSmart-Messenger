@@ -227,15 +227,15 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'مساحة العمل',
+                        'مساحة العمل والملاحظات',
                         style: TextStyle(
-                          fontSize: 14.5,
+                          fontSize: 14,
                           fontWeight: FontWeight.w900,
                           color: isDark ? Colors.white : const Color(0xFF0F172A),
                         ),
                       ),
                       Text(
-                        'Notion Workspace',
+                        'الملاحظات والمهام الذكية',
                         style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w600,
@@ -516,7 +516,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                       ),
                     ),
                     Text(
-                      'نظم مهامك اليومية، الجداول، ومحاضر تسليم الشفت بتصميم أبل ونوشن',
+                      'نظم مهامك اليومية، الجداول، ومحاضر تسليم الشفت في مساحة عمل ذكية ومتكاملة',
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark ? Colors.white54 : const Color(0xFF64748B),

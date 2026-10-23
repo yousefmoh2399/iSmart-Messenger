@@ -136,7 +136,7 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
         onPressed: onOpenFiles,
       ),
       _DesktopWorkspaceIconButton(
-        tooltip: 'مساحة العمل والملاحظات (Notion)',
+        tooltip: 'مساحة العمل والملاحظات',
         icon: Iconsax.note_21,
         selected: activeSection == DesktopWorkspaceSection.workspace,
         isDark: isDark,

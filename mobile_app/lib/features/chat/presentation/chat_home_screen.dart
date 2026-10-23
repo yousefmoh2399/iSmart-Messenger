@@ -610,7 +610,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                   Padding(
                     padding: const EdgeInsetsDirectional.only(end: 4),
                     child: _HeaderIconButton(
-                      tooltip: 'مساحة العمل (Notion)',
+                      tooltip: 'مساحة العمل والملاحظات',
                       icon: Icons.edit_note_rounded,
                       appearance: appearance,
                       isDark: isDark,
@@ -3352,7 +3352,7 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                       ),
                       _MenuItem(
                         icon: Icons.edit_note_rounded,
-                        label: 'مساحة العمل (Notion)',
+                        label: 'مساحة العمل والملاحظات',
                         onTap: () => onSelected('workspace'),
                         iconColor: const Color(0xFF5856D6),
                       ),

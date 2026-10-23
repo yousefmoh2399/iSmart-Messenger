@@ -187,30 +187,30 @@ class _WorkspaceDocEditorScreenState
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
           title: const Text('اختر أيقونة الصفحة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           content: SizedBox(
-            width: 340,
+            width: 350,
             child: Wrap(
               spacing: 10,
               runSpacing: 10,
               children: _popularIcons.map((emoji) {
                 final isSelected = _doc.icon == emoji;
                 return InkWell(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                   onTap: () {
                     setState(() => _doc.icon = emoji);
                     _saveDoc();
                     Navigator.of(ctx).pop();
                   },
                   child: Container(
-                    width: 46,
-                    height: 46,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: isSelected
                           ? const Color(0xFF007AFF).withValues(alpha: 0.15)
                           : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       border: isSelected
                           ? Border.all(color: const Color(0xFF007AFF), width: 2)
                           : null,
@@ -232,10 +232,10 @@ class _WorkspaceDocEditorScreenState
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('اختر مظهر غلاف الصفحة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          title: const Text('اختر مظهر ترويسة الصفحة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           content: SizedBox(
-            width: 350,
+            width: 360,
             child: Wrap(
               spacing: 12,
               runSpacing: 12,
@@ -246,18 +246,18 @@ class _WorkspaceDocEditorScreenState
                 final isSelected = _doc.coverColor == hexStr;
 
                 return InkWell(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                   onTap: () {
                     setState(() => _doc.coverColor = hexStr);
                     _saveDoc();
                     Navigator.of(ctx).pop();
                   },
                   child: Container(
-                    width: 102,
-                    height: 56,
+                    width: 104,
+                    height: 58,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(colors: [c1, c2]),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: isSelected ? Colors.white : Colors.transparent,
                         width: 2.5,
@@ -269,7 +269,7 @@ class _WorkspaceDocEditorScreenState
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
@@ -287,18 +287,24 @@ class _WorkspaceDocEditorScreenState
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
           title: const Text('تصنيف الصفحة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           content: SizedBox(
-            width: 280,
+            width: 290,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: _categories.map((cat) {
                 final isSelected = _doc.category == cat;
                 return ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  title: Text(cat, style: TextStyle(fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500)),
-                  trailing: isSelected ? const Icon(CupertinoIcons.checkmark_alt, color: Color(0xFF007AFF)) : null,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  title: Text(
+                    cat,
+                    style: TextStyle(
+                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                      color: isSelected ? const Color(0xFF007AFF) : null,
+                    ),
+                  ),
+                  trailing: isSelected ? const Icon(CupertinoIcons.checkmark_circle_fill, color: Color(0xFF007AFF)) : null,
                   onTap: () {
                     setState(() => _doc.category = cat);
                     _saveDoc();
@@ -317,7 +323,7 @@ class _WorkspaceDocEditorScreenState
     Clipboard.setData(ClipboardData(text: _doc.toMarkdown()));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('تم نسخ الصفحة بالكامل إلى الحافظة ✓'),
+        content: Text('تم نسخ الصفحة بالكامل إلى الحافظة لمشاركتها ✓'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -332,10 +338,10 @@ class _WorkspaceDocEditorScreenState
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
           title: Row(
             children: [
-              Text(_doc.icon, style: const TextStyle(fontSize: 24)),
+              Text(_doc.icon, style: const TextStyle(fontSize: 26)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -347,7 +353,7 @@ class _WorkspaceDocEditorScreenState
             ],
           ),
           content: SizedBox(
-            width: 380,
+            width: 400,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -357,7 +363,7 @@ class _WorkspaceDocEditorScreenState
                     const SizedBox(width: 8),
                     _buildStatCard('الحروف', '${_doc.characterCount}', isDark),
                     const SizedBox(width: 8),
-                    _buildStatCard('الكتل', '${_doc.blocks.length}', isDark),
+                    _buildStatCard('العناصر', '${_doc.blocks.length}', isDark),
                     if (totalTodos > 0) ...[
                       const SizedBox(width: 8),
                       _buildStatCard('المهام', '$doneTodos/$totalTodos', isDark),
@@ -388,17 +394,25 @@ class _WorkspaceDocEditorScreenState
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           children: [
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            Text(
+              value,
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
+                color: Color(0xFF007AFF),
+              ),
+            ),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                fontSize: 10.5,
-                color: isDark ? Colors.white38 : const Color(0xFF64748B),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white54 : const Color(0xFF64748B),
               ),
             ),
           ],
@@ -409,397 +423,609 @@ class _WorkspaceDocEditorScreenState
 
   Widget _buildInfoRow(String title, String val, IconData icon) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
           Icon(icon, size: 15, color: const Color(0xFF007AFF)),
           const SizedBox(width: 8),
           Text(title, style: const TextStyle(fontSize: 12.5, color: Colors.grey)),
           const Spacer(),
-          Text(val, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+          Text(val, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
         ],
       ),
     );
   }
 
+  int _calculateNumberedIndex(int currentIndex) {
+    int count = 1;
+    for (int i = currentIndex - 1; i >= 0; i--) {
+      if (_doc.blocks[i].type == WorkspaceBlockType.numbered) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final canvasBg = isDark ? const Color(0xFF0B1120) : const Color(0xFFF2F2F7);
+    final paperColor = isDark ? const Color(0xFF151F32) : Colors.white;
     final gradColors = _resolveCoverGradient(_doc.coverColor);
+    final primaryAccent = gradColors.first;
     final totalTodos = _doc.todoCount;
     final completedTodos = _doc.completedTodoCount;
-
-    int numberedCounter = 1;
+    final progressRatio = totalTodos > 0 ? (completedTodos / totalTodos).clamp(0.0, 1.0) : 0.0;
 
     return Container(
-      color: isDark ? const Color(0xFF0F172A) : Colors.white,
+      color: canvasBg,
       child: Column(
         children: [
-          // Top Editor Action Header
+          // 1. Sleek Top Breadcrumb & Action Bar
           Container(
-            height: 52,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: paperColor,
               border: Border(
                 bottom: BorderSide(
-                  color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+                  color: isDark ? Colors.white.withValues(alpha: 0.07) : const Color(0xFFE2E8F0),
                   width: 0.8,
                 ),
               ),
             ),
             child: Row(
               children: [
-                if (widget.onBack != null)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: TextButton.icon(
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                if (widget.onBack != null) ...[
+                  InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: widget.onBack,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      icon: const Icon(CupertinoIcons.square_grid_2x2, size: 15),
-                      label: const Text('كل الصفحات', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                      onPressed: widget.onBack,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            CupertinoIcons.right_chevron,
+                            size: 14,
+                            color: isDark ? Colors.white70 : const Color(0xFF334155),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'مساحة العمل والملاحظات',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? Colors.white70 : const Color(0xFF334155),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                Text(_doc.icon, style: const TextStyle(fontSize: 17)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      '/',
+                      style: TextStyle(
+                        color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+                Text(_doc.icon, style: const TextStyle(fontSize: 18)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _doc.title.trim().isNotEmpty ? _doc.title : 'بدون عنوان',
+                    _doc.title.trim().isNotEmpty ? _doc.title : 'صفحة بدون عنوان',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
                       color: isDark ? Colors.white : const Color(0xFF0F172A),
                     ),
                   ),
                 ),
+                // Auto-save pill
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text(
-                    'محفوظ تلقائياً ✓',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF10B981)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'محفوظ تلقائياً',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF10B981),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
+                const SizedBox(width: 10),
+                _buildTopIconPill(
+                  icon: _doc.isPinned ? CupertinoIcons.pin_fill : CupertinoIcons.pin,
+                  color: _doc.isPinned ? const Color(0xFFFF9500) : null,
                   tooltip: _doc.isPinned ? 'إلغاء التثبيت' : 'تثبيت الصفحة',
-                  icon: Icon(
-                    _doc.isPinned ? CupertinoIcons.pin_fill : CupertinoIcons.pin,
-                    size: 18,
-                    color: _doc.isPinned
-                        ? const Color(0xFFF59E0B)
-                        : (isDark ? Colors.white54 : Colors.black54),
-                  ),
-                  onPressed: () {
+                  isDark: isDark,
+                  onTap: () {
                     setState(() => _doc.isPinned = !_doc.isPinned);
                     _saveDoc();
                   },
                 ),
-                IconButton(
-                  tooltip: _doc.isFavorite ? 'إزالة من المفضلة' : 'إضافة للمفضلة',
-                  icon: Icon(
-                    _doc.isFavorite ? CupertinoIcons.star_fill : CupertinoIcons.star,
-                    size: 18,
-                    color: _doc.isFavorite
-                        ? const Color(0xFFF59E0B)
-                        : (isDark ? Colors.white54 : Colors.black54),
-                  ),
-                  onPressed: () {
+                const SizedBox(width: 6),
+                _buildTopIconPill(
+                  icon: _doc.isFavorite ? CupertinoIcons.star_fill : CupertinoIcons.star,
+                  color: _doc.isFavorite ? const Color(0xFFFFCC00) : null,
+                  tooltip: 'إضافة للمفضلة',
+                  isDark: isDark,
+                  onTap: () {
                     setState(() => _doc.isFavorite = !_doc.isFavorite);
                     _saveDoc();
                   },
                 ),
-                IconButton(
-                  tooltip: 'نسخ المحتوى (Markdown)',
-                  icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 18),
-                  onPressed: _shareAsMarkdown,
+                const SizedBox(width: 6),
+                _buildTopIconPill(
+                  icon: CupertinoIcons.doc_on_clipboard,
+                  tooltip: 'نسخ المحتوى لمشاركته في المحادثات',
+                  isDark: isDark,
+                  onTap: _shareAsMarkdown,
                 ),
-                IconButton(
+                const SizedBox(width: 6),
+                _buildTopIconPill(
+                  icon: CupertinoIcons.chart_bar_square,
                   tooltip: 'إحصائيات وتفاصيل الصفحة',
-                  icon: const Icon(CupertinoIcons.info_circle, size: 18),
-                  onPressed: _showStatsDialog,
+                  isDark: isDark,
+                  onTap: _showStatsDialog,
                 ),
-                if (widget.onDeleteDoc != null)
-                  IconButton(
+                if (widget.onDeleteDoc != null) ...[
+                  const SizedBox(width: 6),
+                  _buildTopIconPill(
+                    icon: CupertinoIcons.trash,
+                    color: Colors.redAccent,
                     tooltip: 'حذف الصفحة',
-                    icon: const Icon(CupertinoIcons.trash, size: 18, color: Colors.redAccent),
-                    onPressed: widget.onDeleteDoc,
+                    isDark: isDark,
+                    onTap: widget.onDeleteDoc!,
                   ),
+                ],
               ],
             ),
           ),
 
-          // Main Scrollable Notion Canvas
+          // 2. Centered Apple Bento Document Canvas
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.only(bottom: 100),
+              padding: const EdgeInsets.fromLTRB(28, 22, 28, 40),
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 880),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 1. Notion Cover + Overlapping Floating Emoji Icon
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          GestureDetector(
-                            onTap: _pickCoverColor,
-                            child: Container(
-                              height: 135,
-                              margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                      // Hero Header Card
+                      Container(
+                        decoration: BoxDecoration(
+                          color: paperColor,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : const Color(0xFFE2E8F0),
+                            width: 0.9,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Soft Gradient Top Banner inside Hero Card
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: gradColors,
+                                  colors: [
+                                    gradColors[0].withValues(alpha: isDark ? 0.32 : 0.14),
+                                    gradColors[1].withValues(alpha: isDark ? 0.12 : 0.04),
+                                  ],
                                   begin: Alignment.topRight,
                                   end: Alignment.bottomLeft,
                                 ),
-                                borderRadius: BorderRadius.circular(20),
                               ),
-                              alignment: Alignment.topLeft,
-                              padding: const EdgeInsets.all(14),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.28),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(CupertinoIcons.paintbrush_fill, color: Colors.white, size: 12),
-                                    SizedBox(width: 5),
-                                    Text(
-                                      'تغيير الغلاف',
-                                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                              child: Row(
+                                children: [
+                                  // Squircle Icon Picker
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(20),
+                                    onTap: _pickIcon,
+                                    child: Tooltip(
+                                      message: 'تغيير أيقونة الصفحة',
+                                      child: Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Container(
+                                            width: 68,
+                                            height: 68,
+                                            decoration: BoxDecoration(
+                                              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color: primaryAccent.withValues(alpha: 0.35),
+                                                width: 1.5,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: primaryAccent.withValues(alpha: 0.16),
+                                                  blurRadius: 14,
+                                                  offset: const Offset(0, 4),
+                                                ),
+                                              ],
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(_doc.icon, style: const TextStyle(fontSize: 36)),
+                                          ),
+                                          Positioned(
+                                            bottom: -3,
+                                            left: -3,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(5),
+                                              decoration: BoxDecoration(
+                                                color: primaryAccent,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: paperColor,
+                                                  width: 2,
+                                                ),
+                                              ),
+                                              child: const Icon(
+                                                CupertinoIcons.sparkles,
+                                                size: 11,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(width: 18),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
+                                            InkWell(
+                                              borderRadius: BorderRadius.circular(20),
+                                              onTap: _pickCategory,
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                decoration: BoxDecoration(
+                                                  color: isDark ? Colors.black38 : Colors.white.withValues(alpha: 0.9),
+                                                  borderRadius: BorderRadius.circular(20),
+                                                  border: Border.all(
+                                                    color: primaryAccent.withValues(alpha: 0.3),
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(CupertinoIcons.folder_fill, size: 13, color: primaryAccent),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      _doc.category,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.w800,
+                                                        color: primaryAccent,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Icon(CupertinoIcons.chevron_down, size: 11, color: primaryAccent),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                            InkWell(
+                                              borderRadius: BorderRadius.circular(20),
+                                              onTap: _pickCoverColor,
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                                decoration: BoxDecoration(
+                                                  color: isDark ? Colors.black38 : Colors.white.withValues(alpha: 0.9),
+                                                  borderRadius: BorderRadius.circular(20),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Container(
+                                                      width: 11,
+                                                      height: 11,
+                                                      decoration: BoxDecoration(
+                                                        gradient: LinearGradient(colors: gradColors),
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      'تخصيص المظهر',
+                                                      style: TextStyle(
+                                                        fontSize: 11.5,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: isDark ? Colors.white70 : const Color(0xFF475569),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              CupertinoIcons.clock,
+                                              size: 12,
+                                              color: isDark ? Colors.white38 : const Color(0xFF64748B),
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              'آخر تعديل: ${DateFormat('d MMM yyyy - hh:mm a', 'ar').format(_doc.updatedAt)}',
+                                              style: TextStyle(
+                                                fontSize: 11.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: isDark ? Colors.white38 : const Color(0xFF64748B),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                          Positioned(
-                            bottom: -30,
-                            right: 44,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: _pickIcon,
-                              child: Tooltip(
-                                message: 'اضغط لتغيير الأيقونة',
-                                child: Container(
-                                  width: 68,
-                                  height: 68,
-                                  decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                                      width: 3.5,
+
+                            // Document Title & Progress Strip
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(26, 18, 26, 20),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  TextField(
+                                    controller: _titleController,
+                                    onChanged: (val) {
+                                      _doc.title = val;
+                                      _saveDoc();
+                                    },
+                                    maxLines: null,
+                                    style: TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.5,
+                                      height: 1.25,
+                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
                                     ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.12),
-                                        blurRadius: 14,
-                                        offset: const Offset(0, 4),
+                                    decoration: InputDecoration(
+                                      hintText: 'عنوان الصفحة أو الملاحظة...',
+                                      hintStyle: TextStyle(
+                                        color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.w900,
                                       ),
+                                      border: InputBorder.none,
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Row(
+                                    children: [
+                                      _buildMiniMetricPill(
+                                        icon: CupertinoIcons.square_stack_3d_up,
+                                        label: '${_doc.blocks.length} عنصر',
+                                        isDark: isDark,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _buildMiniMetricPill(
+                                        icon: CupertinoIcons.text_alignright,
+                                        label: '${_doc.wordCount} كلمة',
+                                        isDark: isDark,
+                                      ),
+                                      if (totalTodos > 0) ...[
+                                        const Spacer(),
+                                        Text(
+                                          'إنجاز المهام ${(progressRatio * 100).round()}% ($completedTodos من $totalTodos مكتملة)',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            color: completedTodos == totalTodos
+                                                ? const Color(0xFF10B981)
+                                                : primaryAccent,
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
-                                  alignment: Alignment.center,
-                                  child: Text(_doc.icon, style: const TextStyle(fontSize: 36)),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 38),
-
-                      // 2. Metadata Pills (Category + Task Progress + Word Count)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 32),
-                        child: Wrap(
-                          spacing: 10,
-                          runSpacing: 6,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            InkWell(
-                              borderRadius: BorderRadius.circular(8),
-                              onTap: _pickCategory,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: gradColors.first.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(CupertinoIcons.tag_fill, size: 12, color: gradColors.first),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      _doc.category,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                        color: gradColors.first,
+                                  if (totalTodos > 0) ...[
+                                    const SizedBox(height: 10),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: LinearProgressIndicator(
+                                        value: progressRatio,
+                                        minHeight: 7,
+                                        backgroundColor: isDark
+                                            ? Colors.white.withValues(alpha: 0.08)
+                                            : const Color(0xFFF1F5F9),
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          completedTodos == totalTodos
+                                              ? const Color(0xFF10B981)
+                                              : primaryAccent,
+                                        ),
                                       ),
                                     ),
-                                    const SizedBox(width: 4),
-                                    Icon(Icons.arrow_drop_down, size: 15, color: gradColors.first),
                                   ],
-                                ),
-                              ),
-                            ),
-                            if (totalTodos > 0)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  '☑️ $completedTodos من $totalTodos مهام مكتملة',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFF10B981),
-                                  ),
-                                ),
-                              ),
-                            Text(
-                              '${_doc.wordCount} كلمة • ${_doc.blocks.length} عنصر',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                                ],
                               ),
                             ),
                           ],
                         ),
                       ),
 
-                      // 3. Page Title
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(32, 14, 32, 8),
-                        child: TextField(
-                          controller: _titleController,
-                          maxLines: null,
-                          textInputAction: TextInputAction.next,
-                          onSubmitted: (_) {
-                            if (_doc.blocks.isEmpty) {
-                              _addBlock(WorkspaceBlockType.text);
-                            } else {
-                              _focusBlock(_doc.blocks.first.id);
-                            }
-                          },
-                          onChanged: (val) {
-                            _doc.title = val;
-                            _saveDoc();
-                          },
-                          style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
-                            height: 1.25,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      const SizedBox(height: 16),
+
+                      // Elevated Paper Sheet for Blocks
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(22, 20, 22, 24),
+                        decoration: BoxDecoration(
+                          color: paperColor,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : const Color(0xFFE2E8F0),
+                            width: 0.9,
                           ),
-                          decoration: InputDecoration(
-                            hintText: 'عنوان الصفحة...',
-                            hintStyle: TextStyle(
-                              color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
-                              fontSize: 30,
-                              fontWeight: FontWeight.w900,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.03),
+                              blurRadius: 18,
+                              offset: const Offset(0, 6),
                             ),
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.zero,
-                          ),
+                          ],
                         ),
-                      ),
-
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 6),
-                        child: Divider(
-                          height: 1,
-                          thickness: 0.6,
-                          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-                        ),
-                      ),
-
-                      // 4. Interactive Blocks
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: List.generate(_doc.blocks.length, (index) {
-                            final block = _doc.blocks[index];
-                            final currentNumber = block.type == WorkspaceBlockType.numbered
-                                ? numberedCounter++
-                                : 1;
-                            if (block.type != WorkspaceBlockType.numbered) {
-                              numberedCounter = 1;
-                            }
-
-                            return WorkspaceBlockWidget(
-                              key: ValueKey(block.id),
-                              block: block,
-                              focusNode: _getFocusNode(block.id),
-                              numberIndex: currentNumber,
-                              isEditable: true,
-                              isDark: isDark,
-                              onChanged: _saveDoc,
-                              onToggleTodo: () {
-                                ref
-                                    .read(workspaceDocsProvider.notifier)
-                                    .toggleTodoItem(_doc.id, block.id);
-                                setState(() {});
-                              },
-                              onInsertBelow: (type) =>
-                                  _addBlock(type, insertAtIndex: index + 1),
-                              onEnterPressed: (rem) => _handleEnterOnBlock(index, rem),
-                              onDelete: () => _deleteBlock(index),
-                              onMoveUp: index > 0 ? () => _moveBlock(index, -1) : null,
-                              onMoveDown: index < _doc.blocks.length - 1
-                                  ? () => _moveBlock(index, 1)
-                                  : null,
-                              onDuplicate: () => _duplicateBlock(index),
-                              onTransformType: (type) => _transformBlockType(index, type),
-                            );
-                          }),
-                        ),
-                      ),
-
-                      // 5. Click-to-append Empty Canvas Space
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _addBlock(WorkspaceBlockType.text),
-                        child: Container(
-                          height: 160,
-                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
-                          alignment: Alignment.topRight,
-                          child: Row(
-                            children: [
-                              Icon(
-                                CupertinoIcons.plus_circle,
-                                size: 16,
-                                color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                "اضغط هنا لإضافة سطر جديد، أو اكتب '/' لإدراج جدول أو قائمة...",
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                          children: [
+                            if (_doc.blocks.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 40),
+                                child: Column(
+                                  children: [
+                                    Icon(
+                                      CupertinoIcons.doc_text,
+                                      size: 42,
+                                      color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'الصفحة فارغة حالياً — ابدأ بالكتابة أو اختر عنصراً من الشريط السفلي',
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
+                            ...List.generate(_doc.blocks.length, (idx) {
+                              final block = _doc.blocks[idx];
+                              final numIdx = block.type == WorkspaceBlockType.numbered
+                                  ? _calculateNumberedIndex(idx)
+                                  : 1;
+
+                              return WorkspaceBlockWidget(
+                                key: ValueKey(block.id),
+                                block: block,
+                                focusNode: _getFocusNode(block.id),
+                                numberIndex: numIdx,
+                                isEditable: true,
+                                isDark: isDark,
+                                onChanged: _saveDoc,
+                                onToggleTodo: () {
+                                  setState(() {
+                                    block.isChecked = !block.isChecked;
+                                  });
+                                  _saveDoc();
+                                },
+                                onInsertBelow: (newType) =>
+                                    _addBlock(newType, insertAtIndex: idx + 1),
+                                onEnterPressed: (remainder) =>
+                                    _handleEnterOnBlock(idx, remainder),
+                                onMoveUp: idx > 0 ? () => _moveBlock(idx, -1) : null,
+                                onMoveDown: idx < _doc.blocks.length - 1
+                                    ? () => _moveBlock(idx, 1)
+                                    : null,
+                                onDuplicate: () => _duplicateBlock(idx),
+                                onTransformType: (newType) =>
+                                    _transformBlockType(idx, newType),
+                                onDelete: () => _deleteBlock(idx),
+                              );
+                            }),
+
+                            const SizedBox(height: 14),
+
+                            // Quick "+ إضافة سطر جديد" area at the bottom of the paper card
+                            InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => _addBlock(WorkspaceBlockType.text),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.025)
+                                      : const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      CupertinoIcons.add_circled_solid,
+                                      size: 18,
+                                      color: primaryAccent,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'اضغط هنا لإضافة سطر جديد أو اكتب / لإدراج الجداول والمهام والعناوين',
+                                      style: TextStyle(
+                                        color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -809,40 +1035,43 @@ class _WorkspaceDocEditorScreenState
             ),
           ),
 
-          // 6. Floating Quick-Insert Bar
+          // 3. Bottom Apple Dock Toolbar for Instant Block Insertion
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+              color: paperColor,
               border: Border(
                 top: BorderSide(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : const Color(0xFFE2E8F0),
+                  color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
                   width: 0.8,
                 ),
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, -3),
+                ),
+              ],
             ),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 880),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _buildToolbarChip('مهمة ☑️', CupertinoIcons.checkmark_square, const Color(0xFF10B981), () => _addBlock(WorkspaceBlockType.todo), isDark),
-                      _buildToolbarChip('جدول 📊', CupertinoIcons.table, const Color(0xFF059669), () => _addBlock(WorkspaceBlockType.table), isDark),
-                      _buildToolbarChip('عنوان H1', CupertinoIcons.textformat, const Color(0xFF007AFF), () => _addBlock(WorkspaceBlockType.heading1), isDark),
-                      _buildToolbarChip('عنوان H2', CupertinoIcons.textformat_size, const Color(0xFF5856D6), () => _addBlock(WorkspaceBlockType.heading2), isDark),
-                      _buildToolbarChip('نقطة •', CupertinoIcons.list_bullet, const Color(0xFFF59E0B), () => _addBlock(WorkspaceBlockType.bullet), isDark),
-                      _buildToolbarChip('ترقيم 1.', CupertinoIcons.list_number, const Color(0xFF0EA5E9), () => _addBlock(WorkspaceBlockType.numbered), isDark),
-                      _buildToolbarChip('قائمة طي ▶', CupertinoIcons.chevron_down_square, const Color(0xFF6366F1), () => _addBlock(WorkspaceBlockType.toggle), isDark),
-                      _buildToolbarChip('صندوق 💡', CupertinoIcons.lightbulb, const Color(0xFFD97706), () => _addBlock(WorkspaceBlockType.callout), isDark),
-                      _buildToolbarChip('كود 💻', CupertinoIcons.chevron_left_slash_chevron_right, const Color(0xFF334155), () => _addBlock(WorkspaceBlockType.code), isDark),
-                      _buildToolbarChip('اقتباس ❝', CupertinoIcons.quote_bubble, const Color(0xFFEC4899), () => _addBlock(WorkspaceBlockType.quote), isDark),
-                      _buildToolbarChip('فاصل ──', CupertinoIcons.minus, const Color(0xFF94A3B8), () => _addBlock(WorkspaceBlockType.divider), isDark),
-                    ],
-                  ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildQuickInsertChip('مهمة', CupertinoIcons.checkmark_circle_fill, const Color(0xFF10B981), WorkspaceBlockType.todo, isDark),
+                    _buildQuickInsertChip('جدول تفاعلي', CupertinoIcons.table, const Color(0xFF059669), WorkspaceBlockType.table, isDark),
+                    _buildQuickInsertChip('عنوان H1', CupertinoIcons.textformat, const Color(0xFF007AFF), WorkspaceBlockType.heading1, isDark),
+                    _buildQuickInsertChip('عنوان H2', CupertinoIcons.textformat_size, const Color(0xFF5856D6), WorkspaceBlockType.heading2, isDark),
+                    _buildQuickInsertChip('قائمة نقطية', CupertinoIcons.list_bullet, const Color(0xFFF59E0B), WorkspaceBlockType.bullet, isDark),
+                    _buildQuickInsertChip('قائمة مرقمة', CupertinoIcons.list_number, const Color(0xFF0EA5E9), WorkspaceBlockType.numbered, isDark),
+                    _buildQuickInsertChip('قائمة مطوية', CupertinoIcons.chevron_down_square_fill, const Color(0xFF6366F1), WorkspaceBlockType.toggle, isDark),
+                    _buildQuickInsertChip('ملاحظة بارزة', CupertinoIcons.lightbulb_fill, const Color(0xFFD97706), WorkspaceBlockType.callout, isDark),
+                    _buildQuickInsertChip('صندوق كود', CupertinoIcons.chevron_left_slash_chevron_right, const Color(0xFF334155), WorkspaceBlockType.code, isDark),
+                    _buildQuickInsertChip('اقتباس', CupertinoIcons.quote_bubble_fill, const Color(0xFFEC4899), WorkspaceBlockType.quote, isDark),
+                    _buildQuickInsertChip('فاصل', CupertinoIcons.minus, const Color(0xFF94A3B8), WorkspaceBlockType.divider, isDark),
+                  ],
                 ),
               ),
             ),
@@ -852,45 +1081,117 @@ class _WorkspaceDocEditorScreenState
     );
   }
 
-  Widget _buildToolbarChip(
+  Widget _buildTopIconPill({
+    required IconData icon,
+    Color? color,
+    required String tooltip,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            icon,
+            size: 16,
+            color: color ?? (isDark ? Colors.white70 : const Color(0xFF334155)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMiniMetricPill({
+    required IconData icon,
+    required String label,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 13,
+            color: isDark ? Colors.white54 : const Color(0xFF64748B),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white70 : const Color(0xFF475569),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickInsertChip(
     String label,
     IconData icon,
     Color color,
-    VoidCallback onTap,
+    WorkspaceBlockType type,
     bool isDark,
   ) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 3),
-      child: Material(
-        color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-                width: 0.7,
-              ),
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _addBlock(type),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.05)
+                : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+              width: 0.8,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 14, color: color),
-                const SizedBox(width: 5),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : const Color(0xFF1E293B),
-                  ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-              ],
-            ),
+                child: Icon(icon, size: 13, color: color),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                ),
+              ),
+            ],
           ),
         ),
       ),

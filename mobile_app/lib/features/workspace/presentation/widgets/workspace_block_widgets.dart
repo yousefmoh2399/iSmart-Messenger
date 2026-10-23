@@ -44,17 +44,31 @@ class WorkspaceBlockWidget extends StatefulWidget {
 class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   late TextEditingController _controller;
   late TextEditingController _subController;
+  bool _isFocused = false;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.block.content);
     _subController = TextEditingController(text: widget.block.subContent);
+    widget.focusNode?.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (!mounted) return;
+    final focused = widget.focusNode?.hasFocus ?? false;
+    if (_isFocused != focused) {
+      setState(() => _isFocused = focused);
+    }
   }
 
   @override
   void didUpdateWidget(covariant WorkspaceBlockWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode?.removeListener(_onFocusChange);
+      widget.focusNode?.addListener(_onFocusChange);
+    }
     if (oldWidget.block.id != widget.block.id ||
         (oldWidget.block.content != widget.block.content &&
             _controller.text != widget.block.content)) {
@@ -72,6 +86,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
 
   @override
   void dispose() {
+    widget.focusNode?.removeListener(_onFocusChange);
     _controller.dispose();
     _subController.dispose();
     super.dispose();
@@ -96,7 +111,6 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         return;
       } else if (val.startsWith('## ')) {
         _applyShortcut(WorkspaceBlockType.heading2, val.substring(3));
-        return;
       } else if (val.startsWith('### ')) {
         _applyShortcut(WorkspaceBlockType.heading3, val.substring(4));
         return;
@@ -122,7 +136,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       }
     }
 
-    // 3. Detect Enter key in single-flow blocks (Text, Headings, Todo, Bullet, Numbered, Quote)
+    // 3. Detect Enter key in single-flow blocks
     if (block.type != WorkspaceBlockType.code &&
         val.contains('\n') &&
         widget.onEnterPressed != null) {
@@ -130,7 +144,6 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       final firstLine = parts.first;
       final remainder = parts.sublist(1).join('\n');
 
-      // If pressing Enter on an empty list/todo item -> turn into normal paragraph
       if (firstLine.trim().isEmpty &&
           remainder.trim().isEmpty &&
           (block.type == WorkspaceBlockType.todo ||
@@ -173,7 +186,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   }
 
   void _showSlashCommandSheet(BuildContext context, {bool replaceCurrent = false}) {
-    HapticFeedback.lightImpact();
+    HapticFeedback.mediumImpact();
     final isDark = widget.isDark;
 
     showModalBottomSheet(
@@ -181,13 +194,13 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       isScrollControlled: true,
       backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.65,
+          initialChildSize: 0.68,
           minChildSize: 0.45,
-          maxChildSize: 0.88,
+          maxChildSize: 0.9,
           expand: false,
           builder: (_, scrollController) {
             return Column(
@@ -195,10 +208,10 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                 const SizedBox(height: 10),
                 Container(
                   width: 38,
-                  height: 4,
+                  height: 4.5,
                   decoration: BoxDecoration(
                     color: isDark ? Colors.white24 : Colors.black12,
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(3),
                   ),
                 ),
                 Padding(
@@ -206,7 +219,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(7),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: const Color(0xFF007AFF).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(10),
@@ -219,7 +232,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        replaceCurrent ? 'اختر نوع العنصر (/)' : 'إدراج عنصر جديد',
+                        replaceCurrent ? 'تحويل نوع العنصر' : 'إدراج عنصر في الصفحة',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
@@ -236,139 +249,139 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     children: [
                       _buildSectionHeader('النصوص والعناوين', isDark),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.text,
-                        'نص عادي',
-                        'كتابة فقرة نصية بسيطة',
-                        CupertinoIcons.text_alignright,
-                        const Color(0xFF64748B),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.text,
+                        title: 'نص عادي',
+                        subtitle: 'كتابة فقرة نصية بسيطة',
+                        icon: CupertinoIcons.text_alignright,
+                        color: const Color(0xFF64748B),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.heading1,
-                        'عنوان رئيسي كبير (H1)',
-                        'لتقسيم الأقسام الرئيسية في الصفحة',
-                        CupertinoIcons.textformat,
-                        const Color(0xFF007AFF),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.heading1,
+                        title: 'عنوان رئيسي كبير (H1)',
+                        subtitle: 'اختصار: اكتب # ثم مسافة',
+                        icon: CupertinoIcons.textformat,
+                        color: const Color(0xFF007AFF),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.heading2,
-                        'عنوان متوسط (H2)',
-                        'عنوان قسم فرعي متوسط الحجم',
-                        CupertinoIcons.textformat_size,
-                        const Color(0xFF5856D6),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.heading2,
+                        title: 'عنوان متوسط (H2)',
+                        subtitle: 'اختصار: اكتب ## ثم مسافة',
+                        icon: CupertinoIcons.textformat_size,
+                        color: const Color(0xFF5856D6),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.heading3,
-                        'عنوان صغير (H3)',
-                        'عنوان تفصيلي للعناصر الفرعية',
-                        CupertinoIcons.textformat_alt,
-                        const Color(0xFF8B5CF6),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.heading3,
+                        title: 'عنوان فرعي (H3)',
+                        subtitle: 'اختصار: اكتب ### ثم مسافة',
+                        icon: CupertinoIcons.textformat_alt,
+                        color: const Color(0xFF8B5CF6),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       _buildSectionHeader('القوائم والمهام التفاعلية', isDark),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.todo,
-                        'قائمة مهام (To-do List)',
-                        'مربعات اختيار تفاعلية لتتبع الإنجاز',
-                        CupertinoIcons.checkmark_square_fill,
-                        const Color(0xFF10B981),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.todo,
+                        title: 'مهمة تفاعلية (To-do)',
+                        subtitle: 'اختصار: اكتب [] ثم مسافة',
+                        icon: CupertinoIcons.checkmark_circle_fill,
+                        color: const Color(0xFF10B981),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.bullet,
-                        'قائمة نقطية (Bullet List)',
-                        'نقاط مرتبة لتدوين الملاحظات السريعة',
-                        CupertinoIcons.list_bullet,
-                        const Color(0xFFF59E0B),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.bullet,
+                        title: 'قائمة نقطية',
+                        subtitle: 'اختصار: اكتب - ثم مسافة',
+                        icon: CupertinoIcons.list_bullet,
+                        color: const Color(0xFFF59E0B),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.numbered,
-                        'قائمة مرقمة (1, 2, 3)',
-                        'خطوات متسلسلة مرقمة تلقائياً',
-                        CupertinoIcons.list_number,
-                        const Color(0xFF0EA5E9),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.numbered,
+                        title: 'قائمة مرقمة (1, 2, 3)',
+                        subtitle: 'اختصار: اكتب 1. ثم مسافة',
+                        icon: CupertinoIcons.list_number,
+                        color: const Color(0xFF0EA5E9),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.toggle,
-                        'قائمة قابلة للطي (Toggle)',
-                        'عنوان يفتح ويغلق بداخله تفاصيل كاملة',
-                        CupertinoIcons.chevron_down_square_fill,
-                        const Color(0xFF6366F1),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.toggle,
+                        title: 'قائمة قابلة للطي (Toggle)',
+                        subtitle: 'عنوان يفتح ويغلق بداخله تفاصيل فرعية',
+                        icon: CupertinoIcons.chevron_down_square_fill,
+                        color: const Color(0xFF6366F1),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      const SizedBox(height: 12),
-                      _buildSectionHeader('الجداول والعناصر المتقدمة', isDark),
-                      _buildSlashTile(
+                      const SizedBox(height: 14),
+                      _buildSectionHeader('الجداول والبطاقات المتقدمة', isDark),
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.table,
-                        'جدول بيانات تفاعلي (Table)',
-                        'صفوف وأعمدة قابلة للتعديل والإضافة',
-                        CupertinoIcons.table,
-                        const Color(0xFF059669),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.table,
+                        title: 'جدول بيانات تفاعلي',
+                        subtitle: 'صفوف وأعمدة قابلة للتعديل والإضافة',
+                        icon: CupertinoIcons.table,
+                        color: const Color(0xFF059669),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.callout,
-                        'صندوق ملاحظة ملون (Callout)',
-                        'إبراز تنبيه أو معلومة هامة بألوان وأيقونة',
-                        CupertinoIcons.lightbulb_fill,
-                        const Color(0xFFD97706),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.callout,
+                        title: 'بطاقة ملاحظة بارزة (Callout)',
+                        subtitle: 'إبراز تنبيه أو معلومة هامة بألوان وأيقونة',
+                        icon: CupertinoIcons.lightbulb_fill,
+                        color: const Color(0xFFD97706),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.quote,
-                        'اقتباس (Quote)',
-                        'نص بارز بخط جانبي أنيق',
-                        CupertinoIcons.quote_bubble_fill,
-                        const Color(0xFFEC4899),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.quote,
+                        title: 'اقتباس مرجعي',
+                        subtitle: 'اختصار: اكتب > ثم مسافة',
+                        icon: CupertinoIcons.quote_bubble_fill,
+                        color: const Color(0xFFEC4899),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.code,
-                        'صندوق كود / بيانات تقنية (Code)',
-                        'لحفظ الأكواد، عناوين IP، والأوامر مع زر نسخ',
-                        CupertinoIcons.chevron_left_slash_chevron_right,
-                        const Color(0xFF334155),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.code,
+                        title: 'صندوق كود / أوامر تقنية',
+                        subtitle: 'لحفظ الأكواد وعناوين IP مع زر نسخ فوري',
+                        icon: CupertinoIcons.chevron_left_slash_chevron_right,
+                        color: const Color(0xFF334155),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
-                      _buildSlashTile(
+                      _buildSlashOption(
                         ctx,
-                        WorkspaceBlockType.divider,
-                        'فاصل أفقي (Divider)',
-                        'خط فاصل أنيق بين الأقسام',
-                        CupertinoIcons.minus,
-                        const Color(0xFF94A3B8),
-                        replaceCurrent,
-                        isDark,
+                        type: WorkspaceBlockType.divider,
+                        title: 'فاصل أفقي أنيق',
+                        subtitle: 'اختصار: اكتب --- للفصل بين الأقسام',
+                        icon: CupertinoIcons.minus,
+                        color: const Color(0xFF94A3B8),
+                        replaceCurrent: replaceCurrent,
+                        isDark: isDark,
                       ),
                     ],
                   ),
@@ -387,46 +400,50 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       child: Text(
         title,
         style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          color: isDark ? Colors.white38 : const Color(0xFF64748B),
         ),
       ),
     );
   }
 
-  Widget _buildSlashTile(
-    BuildContext ctx,
-    WorkspaceBlockType type,
-    String title,
-    String subtitle,
-    IconData icon,
-    Color color,
-    bool replaceCurrent,
-    bool isDark,
-  ) {
+  Widget _buildSlashOption(
+    BuildContext ctx, {
+    required WorkspaceBlockType type,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required bool replaceCurrent,
+    required bool isDark,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
         color: isDark ? Colors.white.withValues(alpha: 0.04) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.06) : const Color(0xFFE2E8F0),
+          width: 0.8,
+        ),
       ),
       child: ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         leading: Container(
-          width: 38,
-          height: 38,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(11),
           ),
           child: Icon(icon, color: color, size: 20),
         ),
         title: Text(
           title,
           style: TextStyle(
-            fontSize: 13.5,
+            fontSize: 14,
             fontWeight: FontWeight.w700,
             color: isDark ? Colors.white : const Color(0xFF0F172A),
           ),
@@ -463,12 +480,12 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       context: context,
       backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -480,14 +497,14 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 16),
                 Row(
                   children: [
                     if (widget.onMoveUp != null)
                       Expanded(
                         child: _buildQuickActionBox(
                           ctx,
-                          'لأعلى',
+                          'تحريك لأعلى',
                           CupertinoIcons.arrow_up,
                           const Color(0xFF007AFF),
                           isDark,
@@ -499,7 +516,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                       Expanded(
                         child: _buildQuickActionBox(
                           ctx,
-                          'لأسفل',
+                          'تحريك لأسفل',
                           CupertinoIcons.arrow_down,
                           const Color(0xFF007AFF),
                           isDark,
@@ -511,7 +528,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                       Expanded(
                         child: _buildQuickActionBox(
                           ctx,
-                          'تكرار',
+                          'تكرار العنصر',
                           CupertinoIcons.plus_square_on_square,
                           const Color(0xFF8B5CF6),
                           isDark,
@@ -533,11 +550,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                 ),
                 const SizedBox(height: 12),
                 ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   tileColor: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF8FAFC),
                   leading: const Icon(CupertinoIcons.arrow_2_squarepath, color: Color(0xFF007AFF), size: 20),
                   title: const Text(
-                    'تحويل نوع العنصر (Turn into...)',
+                    'تغيير نوع العنصر (عنوان، مهمة، جدول...)',
                     style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
                   ),
                   trailing: const Icon(CupertinoIcons.chevron_left, size: 16),
@@ -546,13 +563,13 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     _showSlashCommandSheet(context, replaceCurrent: true);
                   },
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   tileColor: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF8FAFC),
                   leading: const Icon(CupertinoIcons.add_circled, color: Color(0xFF10B981), size: 20),
                   title: const Text(
-                    'إدراج عنصر جديد بالأسفل (+)',
+                    'إدراج عنصر جديد بالأسفل',
                     style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
                   ),
                   trailing: const Icon(CupertinoIcons.chevron_left, size: 16),
@@ -582,21 +599,22 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         Navigator.pop(ctx);
         onTap();
       },
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.2), width: 0.8),
         ),
         child: Column(
           children: [
             Icon(icon, color: color, size: 20),
-            const SizedBox(height: 4),
+            const SizedBox(height: 5),
             Text(
               label,
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: color,
               ),
@@ -610,9 +628,27 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   @override
   Widget build(BuildContext context) {
     final block = widget.block;
+    final isCardBlock = block.type == WorkspaceBlockType.callout ||
+        block.type == WorkspaceBlockType.toggle ||
+        block.type == WorkspaceBlockType.code ||
+        block.type == WorkspaceBlockType.table ||
+        block.type == WorkspaceBlockType.quote;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCardBlock ? 0 : 8,
+        vertical: isCardBlock ? 2 : 3,
+      ),
+      decoration: BoxDecoration(
+        color: (!isCardBlock && _isFocused)
+            ? (widget.isDark
+                ? Colors.white.withValues(alpha: 0.03)
+                : const Color(0xFF007AFF).withValues(alpha: 0.035))
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -620,14 +656,25 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
           if (widget.isEditable)
             GestureDetector(
               onTap: () => _showBlockActionsSheet(context),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 6, right: 4),
-                child: Icon(
-                  Icons.drag_indicator_rounded,
-                  size: 18,
-                  color: widget.isDark
-                      ? Colors.white.withValues(alpha: 0.25)
-                      : Colors.black.withValues(alpha: 0.22),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 150),
+                opacity: _isFocused || isCardBlock ? 0.85 : 0.32,
+                child: Container(
+                  margin: const EdgeInsets.only(top: 5, right: 6),
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: _isFocused
+                        ? const Color(0xFF007AFF).withValues(alpha: 0.1)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    CupertinoIcons.ellipsis,
+                    size: 16,
+                    color: _isFocused
+                        ? const Color(0xFF007AFF)
+                        : (widget.isDark ? Colors.white54 : const Color(0xFF64748B)),
+                  ),
                 ),
               ),
             ),
@@ -641,26 +688,30 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       case WorkspaceBlockType.heading1:
         return _buildHeading(
           context,
-          fontSize: 23,
-          fontWeight: FontWeight.w800,
-          hint: 'عنوان رئيسي H1...',
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
+          hint: 'عنوان رئيسي للقسم...',
           topPad: 14,
+          accentColor: const Color(0xFF007AFF),
+          showBottomLine: true,
         );
       case WorkspaceBlockType.heading2:
         return _buildHeading(
           context,
-          fontSize: 19,
-          fontWeight: FontWeight.w700,
-          hint: 'عنوان متوسط H2...',
+          fontSize: 18.5,
+          fontWeight: FontWeight.w800,
+          hint: 'عنوان فرعي متوسط...',
           topPad: 10,
+          accentColor: const Color(0xFF5856D6),
         );
       case WorkspaceBlockType.heading3:
         return _buildHeading(
           context,
-          fontSize: 16.5,
+          fontSize: 16,
           fontWeight: FontWeight.w700,
-          hint: 'عنوان فرعي H3...',
-          topPad: 8,
+          hint: 'عنوان فرعي صغير...',
+          topPad: 6,
+          accentColor: const Color(0xFF8B5CF6),
         );
       case WorkspaceBlockType.todo:
         return _buildTodo(context);
@@ -691,33 +742,67 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     required FontWeight fontWeight,
     required String hint,
     required double topPad,
+    required Color accentColor,
+    bool showBottomLine = false,
   }) {
     final isDark = widget.isDark;
     return Padding(
       padding: EdgeInsets.only(top: topPad, bottom: 4),
-      child: TextField(
-        controller: _controller,
-        focusNode: widget.focusNode,
-        onChanged: _handleTextChanged,
-        maxLines: null,
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: fontWeight,
-          letterSpacing: -0.3,
-          height: 1.3,
-          color: isDark ? Colors.white : const Color(0xFF0F172A),
-        ),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(
-            color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
-            fontSize: fontSize,
-            fontWeight: fontWeight,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 4,
+                height: fontSize * 0.95,
+                margin: const EdgeInsets.only(left: 10),
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: widget.focusNode,
+                  onChanged: _handleTextChanged,
+                  maxLines: null,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: fontWeight,
+                    letterSpacing: -0.3,
+                    height: 1.3,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                  decoration: InputDecoration(
+                    hintText: hint,
+                    hintStyle: TextStyle(
+                      color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                      fontSize: fontSize,
+                      fontWeight: fontWeight,
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+            ],
           ),
-          border: InputBorder.none,
-          isDense: true,
-          contentPadding: EdgeInsets.zero,
-        ),
+          if (showBottomLine)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Divider(
+                height: 1,
+                thickness: 0.8,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : const Color(0xFFE2E8F0),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -733,11 +818,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         maxLines: null,
         style: TextStyle(
           fontSize: 15.5,
-          height: 1.55,
+          height: 1.6,
           color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
         ),
         decoration: InputDecoration(
-          hintText: "اكتب شيئاً، أو اكتب '/' لإدراج عنصر أو جدول...",
+          hintText: "اكتب ملاحظتك هنا، أو اكتب '/' لإدراج مهمة أو جدول...",
           hintStyle: TextStyle(
             color: isDark ? Colors.white24 : const Color(0xFF94A3B8),
             fontSize: 14.5,
@@ -754,8 +839,28 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     final isDark = widget.isDark;
     final block = widget.block;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      margin: const EdgeInsets.symmetric(vertical: 2.5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: block.isChecked
+            ? (isDark
+                ? const Color(0xFF10B981).withValues(alpha: 0.08)
+                : const Color(0xFFECFDF5).withValues(alpha: 0.7))
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.03)
+                : const Color(0xFFF8FAFC)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: block.isChecked
+              ? const Color(0xFF10B981).withValues(alpha: 0.25)
+              : (isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : const Color(0xFFE2E8F0)),
+          width: 0.8,
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -765,26 +870,35 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               widget.onToggleTodo();
             },
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              margin: const EdgeInsets.only(top: 3, left: 10),
-              width: 21,
-              height: 21,
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.only(top: 1, left: 10),
+              width: 22,
+              height: 22,
               decoration: BoxDecoration(
                 color: block.isChecked
-                    ? const Color(0xFF007AFF)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
+                    ? const Color(0xFF10B981)
+                    : (isDark ? const Color(0xFF2C2C2E) : Colors.white),
+                shape: BoxShape.circle,
                 border: Border.all(
                   color: block.isChecked
-                      ? const Color(0xFF007AFF)
+                      ? const Color(0xFF10B981)
                       : (isDark ? Colors.white38 : const Color(0xFF94A3B8)),
-                  width: 1.7,
+                  width: 1.8,
                 ),
+                boxShadow: block.isChecked
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        )
+                      ]
+                    : null,
               ),
               child: block.isChecked
                   ? const Icon(
                       Icons.check_rounded,
-                      size: 15,
+                      size: 14,
                       color: Colors.white,
                     )
                   : null,
@@ -797,15 +911,16 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               onChanged: _handleTextChanged,
               maxLines: null,
               style: TextStyle(
-                fontSize: 15.5,
+                fontSize: 15,
                 height: 1.45,
+                fontWeight: block.isChecked ? FontWeight.w500 : FontWeight.w600,
                 decoration: block.isChecked ? TextDecoration.lineThrough : null,
                 color: block.isChecked
                     ? (isDark ? Colors.white38 : const Color(0xFF94A3B8))
-                    : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B)),
+                    : (isDark ? Colors.white : const Color(0xFF0F172A)),
               ),
               decoration: InputDecoration(
-                hintText: 'مهمة جديدة (اضغط Enter لإضافة مهمة تالية)...',
+                hintText: 'اكتب المهمة هنا...',
                 hintStyle: TextStyle(
                   color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
                   fontSize: 14.5,
@@ -828,15 +943,13 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 8, left: 10, right: 4),
-            child: Container(
-              width: 6.5,
-              height: 6.5,
-              decoration: BoxDecoration(
-                color: const Color(0xFF007AFF),
-                shape: BoxShape.circle,
-              ),
+          Container(
+            margin: const EdgeInsets.only(top: 8, left: 10, right: 4),
+            width: 7,
+            height: 7,
+            decoration: const BoxDecoration(
+              color: Color(0xFF007AFF),
+              shape: BoxShape.circle,
             ),
           ),
           Expanded(
@@ -851,7 +964,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                 color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
               ),
               decoration: InputDecoration(
-                hintText: 'عنصر قائمة (اضغط Enter للبند التالي)...',
+                hintText: 'عنصر قائمة نقطية...',
                 hintStyle: TextStyle(
                   color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
                   fontSize: 14.5,
@@ -875,11 +988,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            margin: const EdgeInsets.only(top: 2, left: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            margin: const EdgeInsets.only(top: 2, left: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 7.5, vertical: 2),
             decoration: BoxDecoration(
               color: const Color(0xFF007AFF).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(7),
             ),
             child: Text(
               '${widget.numberIndex}',
@@ -902,7 +1015,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                 color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
               ),
               decoration: InputDecoration(
-                hintText: 'خطوة مرقمة (اضغط Enter للخطوة التالية)...',
+                hintText: 'خطوة مرقمة...',
                 hintStyle: TextStyle(
                   color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
                   fontSize: 14.5,
@@ -922,32 +1035,32 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     switch (colorKey) {
       case 'green':
         return {
-          'bg': isDark ? const Color(0xFF064E3B).withValues(alpha: 0.4) : const Color(0xFFECFDF5),
+          'bg': isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5),
           'border': isDark ? const Color(0xFF10B981).withValues(alpha: 0.3) : const Color(0xFFA7F3D0),
           'dot': const Color(0xFF10B981),
         };
       case 'amber':
         return {
-          'bg': isDark ? const Color(0xFF78350F).withValues(alpha: 0.4) : const Color(0xFFFFFBEB),
+          'bg': isDark ? const Color(0xFF78350F).withValues(alpha: 0.35) : const Color(0xFFFFFBEB),
           'border': isDark ? const Color(0xFFF59E0B).withValues(alpha: 0.3) : const Color(0xFFFDE68A),
           'dot': const Color(0xFFF59E0B),
         };
       case 'purple':
         return {
-          'bg': isDark ? const Color(0xFF4C1D95).withValues(alpha: 0.4) : const Color(0xFFF5F3FF),
+          'bg': isDark ? const Color(0xFF4C1D95).withValues(alpha: 0.35) : const Color(0xFFF5F3FF),
           'border': isDark ? const Color(0xFF8B5CF6).withValues(alpha: 0.3) : const Color(0xFFDDD6FE),
           'dot': const Color(0xFF8B5CF6),
         };
       case 'rose':
         return {
-          'bg': isDark ? const Color(0xFF881337).withValues(alpha: 0.4) : const Color(0xFFFFF1F2),
+          'bg': isDark ? const Color(0xFF881337).withValues(alpha: 0.35) : const Color(0xFFFFF1F2),
           'border': isDark ? const Color(0xFFF43F5E).withValues(alpha: 0.3) : const Color(0xFFFECDD3),
           'dot': const Color(0xFFF43F5E),
         };
       case 'blue':
       default:
         return {
-          'bg': isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.35) : const Color(0xFFEFF6FF),
+          'bg': isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.32) : const Color(0xFFEFF6FF),
           'border': isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.3) : const Color(0xFFBFDBFE),
           'dot': const Color(0xFF007AFF),
         };
@@ -961,10 +1074,10 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: palette['bg'],
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: palette['border']!, width: 1),
       ),
       child: Row(
@@ -981,17 +1094,24 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               widget.onChanged();
             },
             child: Container(
-              width: 36,
-              height: 36,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
-                color: isDark ? Colors.black26 : Colors.white.withValues(alpha: 0.8),
-                borderRadius: BorderRadius.circular(10),
+                color: isDark ? Colors.black26 : Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(11),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               alignment: Alignment.center,
               child: Text(block.calloutIcon, style: const TextStyle(fontSize: 20)),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: TextField(
               controller: _controller,
@@ -1003,7 +1123,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               maxLines: null,
               style: TextStyle(
                 fontSize: 14.5,
-                height: 1.5,
+                height: 1.55,
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
@@ -1019,7 +1139,6 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               ),
             ),
           ),
-          // Color switcher dot
           GestureDetector(
             onTap: () {
               HapticFeedback.selectionClick();
@@ -1031,9 +1150,9 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               widget.onChanged();
             },
             child: Container(
-              margin: const EdgeInsets.only(top: 8, right: 4),
-              width: 16,
-              height: 16,
+              margin: const EdgeInsets.only(top: 9, right: 4),
+              width: 18,
+              height: 18,
               decoration: BoxDecoration(
                 color: palette['dot'],
                 shape: BoxShape.circle,
@@ -1050,12 +1169,12 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     final isDark = widget.isDark;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.fromLTRB(12, 6, 14, 6),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: BoxDecoration(
         color: isDark
             ? Colors.white.withValues(alpha: 0.03)
             : const Color(0xFFF8FAFC),
-        borderRadius: const BorderRadius.horizontal(left: Radius.circular(10)),
+        borderRadius: const BorderRadius.horizontal(left: Radius.circular(14), right: Radius.circular(4)),
         border: const Border(
           right: BorderSide(
             color: Color(0xFF007AFF),
@@ -1063,28 +1182,41 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
           ),
         ),
       ),
-      child: TextField(
-        controller: _controller,
-        focusNode: widget.focusNode,
-        onChanged: _handleTextChanged,
-        maxLines: null,
-        style: TextStyle(
-          fontSize: 15,
-          height: 1.55,
-          fontStyle: FontStyle.italic,
-          fontWeight: FontWeight.w500,
-          color: isDark ? Colors.white70 : const Color(0xFF334155),
-        ),
-        decoration: InputDecoration(
-          hintText: 'اكتب اقتباساً أو ملاحظة مرجعية...',
-          hintStyle: TextStyle(
-            color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
-            fontSize: 14.5,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            CupertinoIcons.quote_bubble_fill,
+            size: 16,
+            color: const Color(0xFF007AFF).withValues(alpha: 0.45),
           ),
-          border: InputBorder.none,
-          isDense: true,
-          contentPadding: EdgeInsets.zero,
-        ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              focusNode: widget.focusNode,
+              onChanged: _handleTextChanged,
+              maxLines: null,
+              style: TextStyle(
+                fontSize: 15,
+                height: 1.55,
+                fontStyle: FontStyle.italic,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white70 : const Color(0xFF334155),
+              ),
+              decoration: InputDecoration(
+                hintText: 'اكتب اقتباساً أو ملاحظة مرجعية...',
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                  fontSize: 14.5,
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1092,10 +1224,10 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   Widget _buildCode(BuildContext context) {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white12, width: 0.8),
       ),
       child: Column(
@@ -1103,10 +1235,15 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         children: [
           Row(
             children: [
-              const Icon(CupertinoIcons.chevron_left_slash_chevron_right, color: Color(0xFF38BDF8), size: 14),
-              const SizedBox(width: 6),
+              // macOS Terminal window dots
+              Container(width: 9, height: 9, decoration: const BoxDecoration(color: Color(0xFFFF5F56), shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Container(width: 9, height: 9, decoration: const BoxDecoration(color: Color(0xFFFFBD2E), shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Container(width: 9, height: 9, decoration: const BoxDecoration(color: Color(0xFF27C93F), shape: BoxShape.circle)),
+              const SizedBox(width: 10),
               const Text(
-                'CODE / TERMINAL',
+                'CODE / SNIPPET',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 10.5,
@@ -1128,24 +1265,24 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                   );
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(CupertinoIcons.doc_on_doc, size: 12, color: Colors.white70),
                       SizedBox(width: 4),
-                      Text('نسخ', style: TextStyle(color: Colors.white, fontSize: 11)),
+                      Text('نسخ', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Directionality(
             textDirection: TextDirection.ltr,
             child: TextField(
@@ -1183,8 +1320,8 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 5),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        color: isDark ? Colors.white.withValues(alpha: 0.03) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
         ),
@@ -1193,7 +1330,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
             child: Row(
               children: [
                 GestureDetector(
@@ -1205,11 +1342,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     widget.onChanged();
                   },
                   child: Container(
-                    width: 26,
-                    height: 26,
+                    width: 28,
+                    height: 28,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF007AFF).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(7),
+                      color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
                       block.isExpanded
@@ -1220,7 +1357,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _controller,
@@ -1235,7 +1372,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                       color: isDark ? Colors.white : const Color(0xFF0F172A),
                     ),
                     decoration: InputDecoration(
-                      hintText: 'عنوان القائمة القابلة للطي...',
+                      hintText: 'عنوان القسم القابل للطي...',
                       hintStyle: TextStyle(
                         color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
                         fontSize: 14.5,
@@ -1251,12 +1388,10 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
           ),
           if (block.isExpanded)
             Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 16, 12),
+              padding: const EdgeInsets.fromLTRB(12, 10, 16, 12),
               decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.black.withValues(alpha: 0.2)
-                    : const Color(0xFFF8FAFC),
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
                 border: Border(
                   top: BorderSide(
                     color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
@@ -1273,11 +1408,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                 maxLines: null,
                 style: TextStyle(
                   fontSize: 14,
-                  height: 1.5,
+                  height: 1.55,
                   color: isDark ? Colors.white70 : const Color(0xFF334155),
                 ),
                 decoration: InputDecoration(
-                  hintText: 'اكتب التفاصيل والبنود المخفية داخل هذا القسم هنا...',
+                  hintText: 'اكتب التفاصيل والبنود الفرعية داخل هذا القسم...',
                   hintStyle: TextStyle(
                     color: isDark ? Colors.white24 : const Color(0xFF94A3B8),
                     fontSize: 13.5,
@@ -1309,21 +1444,28 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
           width: 0.9,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Table rows
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                minWidth: MediaQuery.of(context).size.width - 64,
+                minWidth: MediaQuery.of(context).size.width - 72,
               ),
               child: Column(
                 children: List.generate(rows.length, (rIdx) {
@@ -1332,7 +1474,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     decoration: BoxDecoration(
                       color: isHeader
                           ? (isDark
-                              ? Colors.white.withValues(alpha: 0.06)
+                              ? const Color(0xFF007AFF).withValues(alpha: 0.14)
                               : const Color(0xFFF1F5F9))
                           : Colors.transparent,
                       border: rIdx < rows.length - 1
@@ -1346,39 +1488,46 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     child: Row(
                       children: [
                         ...List.generate(colCount, (cIdx) {
-                          return SizedBox(
-                            width: 135,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                              child: TextFormField(
-                                key: ValueKey('${block.id}_r${rIdx}_c$cIdx'),
-                                initialValue: rows[rIdx][cIdx],
-                                onChanged: (val) {
-                                  rows[rIdx][cIdx] = val;
-                                  widget.onChanged();
-                                },
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isHeader ? FontWeight.w700 : FontWeight.w500,
-                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          return Container(
+                            width: 138,
+                            decoration: cIdx < colCount - 1
+                                ? BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                            child: TextFormField(
+                              key: ValueKey('${block.id}_r${rIdx}_c$cIdx'),
+                              initialValue: rows[rIdx][cIdx],
+                              onChanged: (val) {
+                                rows[rIdx][cIdx] = val;
+                                widget.onChanged();
+                              },
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isHeader ? FontWeight.w800 : FontWeight.w500,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                              decoration: InputDecoration(
+                                hintText: isHeader ? 'عنوان العمود...' : '...',
+                                hintStyle: TextStyle(
+                                  color: isDark ? Colors.white24 : Colors.black26,
+                                  fontSize: 12.5,
                                 ),
-                                decoration: InputDecoration(
-                                  hintText: isHeader ? 'عنوان...' : '...',
-                                  hintStyle: TextStyle(
-                                    color: isDark ? Colors.white24 : Colors.black26,
-                                    fontSize: 12.5,
-                                  ),
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                ),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
                               ),
                             ),
                           );
                         }),
                         if (!isHeader && rows.length > 2)
                           IconButton(
-                            icon: const Icon(CupertinoIcons.minus_circle, size: 15, color: Colors.redAccent),
+                            icon: const Icon(CupertinoIcons.minus_circle, size: 16, color: Colors.redAccent),
                             onPressed: () {
                               setState(() {
                                 rows.removeAt(rIdx);
@@ -1393,23 +1542,28 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
               ),
             ),
           ),
-          // Table Footer Controls (+ Row / + Column)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: isDark ? Colors.white.withValues(alpha: 0.03) : const Color(0xFFF8FAFC),
-              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+              border: Border(
+                top: BorderSide(
+                  color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                ),
+              ),
             ),
             child: Row(
               children: [
                 TextButton.icon(
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    backgroundColor: const Color(0xFF007AFF).withValues(alpha: 0.08),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   icon: const Icon(CupertinoIcons.add, size: 13, color: Color(0xFF007AFF)),
-                  label: const Text('إضافة صف', style: TextStyle(fontSize: 11.5, color: Color(0xFF007AFF), fontWeight: FontWeight.w600)),
+                  label: const Text('صف جديد', style: TextStyle(fontSize: 11.5, color: Color(0xFF007AFF), fontWeight: FontWeight.w700)),
                   onPressed: () {
                     setState(() {
                       rows.add(List<String>.filled(colCount, '', growable: true));
@@ -1417,15 +1571,17 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     widget.onChanged();
                   },
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 TextButton.icon(
                   style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    backgroundColor: const Color(0xFF5856D6).withValues(alpha: 0.08),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   icon: const Icon(CupertinoIcons.add_circled, size: 13, color: Color(0xFF5856D6)),
-                  label: const Text('إضافة عمود', style: TextStyle(fontSize: 11.5, color: Color(0xFF5856D6), fontWeight: FontWeight.w600)),
+                  label: const Text('عمود جديد', style: TextStyle(fontSize: 11.5, color: Color(0xFF5856D6), fontWeight: FontWeight.w700)),
                   onPressed: () {
                     setState(() {
                       for (var i = 0; i < rows.length; i++) {
@@ -1447,11 +1603,32 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   Widget _buildDivider(BuildContext context) {
     final isDark = widget.isDark;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Divider(
-        height: 1,
-        thickness: 1,
-        color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        children: [
+          Expanded(
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Icon(
+              CupertinoIcons.sparkles,
+              size: 12,
+              color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+            ),
+          ),
+          Expanded(
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+            ),
+          ),
+        ],
       ),
     );
   }

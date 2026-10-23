@@ -61,7 +61,7 @@ class WorkspaceRepository {
           ),
           WorkspaceBlock(
             type: WorkspaceBlockType.todo,
-            content: 'إنشاء صفحات وملاحظات غير محدودة بنمط Notion',
+            content: 'إنشاء صفحات وملاحظات وجداول غير محدودة في مساحة العمل والملاحظات',
             isChecked: true,
           ),
           WorkspaceBlock(

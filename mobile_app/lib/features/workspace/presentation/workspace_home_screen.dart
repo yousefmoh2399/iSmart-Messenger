@@ -143,7 +143,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
             ),
             const SizedBox(width: 10),
             const Text(
-              'مساحة العمل (Notion)',
+              'مساحة العمل والملاحظات',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17.5, letterSpacing: -0.3),
             ),
           ],
@@ -291,7 +291,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                             const Icon(CupertinoIcons.sparkles, size: 15, color: Color(0xFF007AFF)),
                             const SizedBox(width: 6),
                             Text(
-                              'قوالب Notion الذكية',
+                              'القوالب الجاهزة السريعة',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
