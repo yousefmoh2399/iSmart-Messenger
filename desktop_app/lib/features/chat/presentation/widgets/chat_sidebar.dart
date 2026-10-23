@@ -1,299 +1,3 @@
-// import 'package:flutter/material.dart';
-
-// import '../../../../shared/models/app_user.dart';
-// import '../../models/chat_models.dart';
-// import 'chat_list_item.dart';
-// import 'chat_ui_helpers.dart';
-
-// class ChatSidebar extends StatelessWidget {
-//   const ChatSidebar({
-//     super.key,
-//     required this.currentUser,
-//     required this.currentThemeMode,
-//     required this.searchController,
-//     required this.currentFilter,
-//     required this.conversations,
-//     required this.selectedConversationId,
-//     required this.onFilterChanged,
-//     required this.onConversationSelected,
-//     required this.onCreateConversation,
-//     required this.onRefresh,
-//     required this.onOpenAdmin,
-//     required this.onToggleTheme,
-//     required this.onTogglePin,
-//     required this.onToggleMute,
-//     required this.onToggleArchive,
-//     required this.onDeleteConversation,
-//   });
-
-//   final AppUser? currentUser;
-//   final ThemeMode currentThemeMode;
-//   final TextEditingController searchController;
-//   final ChatSidebarFilter currentFilter;
-//   final List<ChatConversation> conversations;
-//   final String? selectedConversationId;
-//   final ValueChanged<ChatSidebarFilter> onFilterChanged;
-//   final ValueChanged<ChatConversation> onConversationSelected;
-//   final VoidCallback onCreateConversation;
-//   final VoidCallback onRefresh;
-//   final VoidCallback onOpenAdmin;
-//   final VoidCallback onToggleTheme;
-//   final ValueChanged<ChatConversation> onTogglePin;
-//   final ValueChanged<ChatConversation> onToggleMute;
-//   final ValueChanged<ChatConversation> onToggleArchive;
-//   final ValueChanged<ChatConversation> onDeleteConversation;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final surface = Theme.of(context).colorScheme.surface;
-//     final userLabel = (currentUser?.fullName.trim().isNotEmpty ?? false)
-//         ? currentUser!.fullName
-//         : (currentUser?.username ?? 'User');
-//     final unreadTotal = conversations.fold<int>(
-//       0,
-//       (sum, conversation) => sum + conversation.unreadCount,
-//     );
-
-//     return Container(
-//       color: surface,
-//       child: Column(
-//         children: [
-//           _SidebarHeader(
-//             userLabel: userLabel,
-//             unreadTotal: unreadTotal,
-//             canOpenAdmin:
-//                 currentUser?.can('canCreateUsers') == true ||
-//                 currentUser?.can('canCreateDepartments') == true,
-//             currentThemeMode: currentThemeMode,
-//             onCreateConversation: onCreateConversation,
-//             onRefresh: onRefresh,
-//             onOpenAdmin: onOpenAdmin,
-//             onToggleTheme: onToggleTheme,
-//           ),
-//           Padding(
-//             padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-//             child: TextField(
-//               controller: searchController,
-//               decoration: const InputDecoration(
-//                 hintText: 'Search',
-//                 prefixIcon: Icon(Icons.search_rounded),
-//               ),
-//             ),
-//           ),
-//           Padding(
-//             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-//             child: Wrap(
-//               spacing: 6,
-//               runSpacing: 6,
-//               children: [
-//                 _FilterButton(
-//                   label: 'All',
-//                   selected: currentFilter == ChatSidebarFilter.all,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.all),
-//                 ),
-//                 _FilterButton(
-//                   label: 'Direct',
-//                   selected: currentFilter == ChatSidebarFilter.direct,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.direct),
-//                 ),
-//                 _FilterButton(
-//                   label: 'Departments',
-//                   selected: currentFilter == ChatSidebarFilter.departments,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.departments),
-//                 ),
-//                 _FilterButton(
-//                   label: 'Rooms',
-//                   selected: currentFilter == ChatSidebarFilter.rooms,
-//                   onTap: () => onFilterChanged(ChatSidebarFilter.rooms),
-//                 ),
-//               ],
-//             ),
-//           ),
-//           const Divider(height: 1),
-//           Expanded(
-//             child: conversations.isEmpty
-//                 ? const Center(child: Text('No conversations'))
-//                 : Scrollbar(
-//                     child: ListView.builder(
-//                       padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
-//                       itemCount: conversations.length,
-//                       itemBuilder: (context, index) {
-//                         final conversation = conversations[index];
-//                         return Padding(
-//                           padding: const EdgeInsets.only(bottom: 2),
-//                           child: ChatListItem(
-//                             conversation: conversation,
-//                             currentUserId: currentUser?.id ?? '',
-//                             selected: selectedConversationId == conversation.id,
-//                             onTap: () => onConversationSelected(conversation),
-//                             onTogglePin: () => onTogglePin(conversation),
-//                             onToggleMute: () => onToggleMute(conversation),
-//                             onToggleArchive: () =>
-//                                 onToggleArchive(conversation),
-//                             onDeleteConversation: () =>
-//                                 onDeleteConversation(conversation),
-//                           ),
-//                         );
-//                       },
-//                     ),
-//                   ),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// class _SidebarHeader extends ConsumerWidget {
-//   const _SidebarHeader({
-//     required this.userLabel,
-//     required this.unreadTotal,
-//     required this.canOpenAdmin,
-//     required this.currentThemeMode,
-//     required this.onCreateConversation,
-//     required this.onRefresh,
-//     required this.onOpenAdmin,
-//     required this.onToggleTheme,
-//   });
-
-//   final String userLabel;
-//   final int unreadTotal;
-//   final bool canOpenAdmin;
-//   final ThemeMode currentThemeMode;
-//   final VoidCallback onCreateConversation;
-//   final VoidCallback onRefresh;
-//   final VoidCallback onOpenAdmin;
-//   final VoidCallback onToggleTheme;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Padding(
-//       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-//       child: Column(
-//         children: [
-//           Row(
-//             children: [
-//               CircleAvatar(
-//                 radius: 22,
-//                 backgroundColor: const Color(
-//                   0xFF3390EC,
-//                 ).withValues(alpha: 0.18),
-//                 child: Text(
-//                   _firstCharacter(userLabel).toUpperCase(),
-//                   style: const TextStyle(
-//                     fontWeight: FontWeight.w700,
-//                     color: Color(0xFF1D4E89),
-//                   ),
-//                 ),
-//               ),
-//               const SizedBox(width: 10),
-//               Expanded(
-//                 child: Column(
-//                   crossAxisAlignment: CrossAxisAlignment.start,
-//                   children: [
-//                     Text(
-//                       userLabel,
-//                       maxLines: 1,
-//                       overflow: TextOverflow.ellipsis,
-//                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-//                         fontWeight: FontWeight.w700,
-//                       ),
-//                     ),
-//                     const SizedBox(height: 2),
-//                     Text(
-//                       '$unreadTotal unread',
-//                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-//                         color: Theme.of(context).colorScheme.onSurfaceVariant,
-//                       ),
-//                     ),
-//                   ],
-//                 ),
-//               ),
-//               IconButton(
-//                 tooltip: 'Theme',
-//                 onPressed: onToggleTheme,
-//                 icon: Icon(switch (currentThemeMode) {
-//                   ThemeMode.dark => Icons.dark_mode_outlined,
-//                   ThemeMode.system => Icons.brightness_auto_outlined,
-//                   ThemeMode.light => Icons.light_mode_outlined,
-//                 }),
-//               ),
-//               IconButton(
-//                 tooltip: 'Refresh',
-//                 onPressed: onRefresh,
-//                 icon: const Icon(Icons.refresh_rounded),
-//               ),
-//             ],
-//           ),
-//           const SizedBox(height: 8),
-//           Row(
-//             children: [
-//               Expanded(
-//                 child: FilledButton.icon(
-//                   onPressed: onCreateConversation,
-//                   icon: const Icon(Icons.edit_square),
-//                   label: const Text('New'),
-//                 ),
-//               ),
-//               if (canOpenAdmin) ...[
-//                 const SizedBox(width: 8),
-//                 IconButton(
-//                   tooltip: 'Admin',
-//                   onPressed: onOpenAdmin,
-//                   icon: const Icon(Icons.admin_panel_settings_outlined),
-//                 ),
-//               ],
-//             ],
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// String _firstCharacter(String value) {
-//   final trimmed = value.trim();
-//   if (trimmed.isEmpty) {
-//     return 'U';
-//   }
-//   return trimmed.substring(0, 1);
-// }
-
-// class _FilterButton extends StatelessWidget {
-//   const _FilterButton({
-//     required this.label,
-//     required this.selected,
-//     required this.onTap,
-//   });
-
-//   final String label;
-//   final bool selected;
-//   final VoidCallback onTap;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Material(
-//       color: selected ? const Color(0xFFE8F2FF) : const Color(0xFFF3F6FA),
-//       borderRadius: BorderRadius.circular(10),
-//       child: InkWell(
-//         borderRadius: BorderRadius.circular(10),
-//         onTap: onTap,
-//         child: Padding(
-//           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-//           child: Text(
-//             label,
-//             style: Theme.of(context).textTheme.labelMedium?.copyWith(
-//               color: selected
-//                   ? const Color(0xFF2D78C6)
-//                   : const Color(0xFF5A6A78),
-//               fontWeight: FontWeight.w700,
-//             ),
-//           ),
-//         ),
-//       ),
-//     );
-//   }
-// }
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
@@ -306,8 +10,72 @@ import '../../models/chat_models.dart';
 import '../../providers/chat_folders_provider.dart';
 import '../chat_appearance.dart';
 import 'chat_folder_inline_item.dart';
+import 'create_chat_folder_dialog.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
+
+class _SidebarGroupingCache {
+  static Object? _lastUsers;
+  static Object? _lastDepartments;
+  static Object? _lastBranches;
+  static String? _lastQuery;
+  static ChatSidebarFilter? _lastFilter;
+  static String? _lastUserId;
+
+  static List<MapEntry<DepartmentSummary?, List<ChatDirectoryUser>>> _cachedDepartmentEntries = [];
+  static List<MapEntry<BranchSummary?, List<ChatDirectoryUser>>> _cachedBranchEntries = [];
+
+  static ({
+    List<MapEntry<DepartmentSummary?, List<ChatDirectoryUser>>> departmentEntries,
+    List<MapEntry<BranchSummary?, List<ChatDirectoryUser>>> branchEntries,
+  }) getEntries({
+    required ChatOverviewData overview,
+    required String currentUserId,
+    required ChatSidebarFilter currentFilter,
+    required String query,
+    required Map<String, DepartmentSummary> departmentById,
+    required Map<String, BranchSummary> branchById,
+  }) {
+    final same = identical(_lastUsers, overview.users) &&
+        identical(_lastDepartments, overview.departments) &&
+        identical(_lastBranches, overview.branches) &&
+        _lastQuery == query &&
+        _lastFilter == currentFilter &&
+        _lastUserId == currentUserId;
+
+    if (same) {
+      return (
+        departmentEntries: _cachedDepartmentEntries,
+        branchEntries: _cachedBranchEntries,
+      );
+    }
+
+    final groupedEntries = _SidebarGroupingCache.getEntries(
+      overview: overview,
+      currentUserId: currentUserId,
+      currentFilter: currentFilter,
+      query: query,
+      departmentById: departmentById,
+      branchById: branchById,
+    );
+    final orderedDepartmentEntries = groupedEntries.departmentEntries;
+    final orderedBranchEntries = groupedEntries.branchEntries;
+
+    _lastUsers = overview.users;
+    _lastDepartments = overview.departments;
+    _lastBranches = overview.branches;
+    _lastQuery = query;
+    _lastFilter = currentFilter;
+    _lastUserId = currentUserId;
+    _cachedDepartmentEntries = orderedDepartmentEntries;
+    _cachedBranchEntries = orderedBranchEntries;
+
+    return (
+      departmentEntries: orderedDepartmentEntries,
+      branchEntries: orderedBranchEntries,
+    );
+  }
+}
 
 class ChatSidebar extends ConsumerWidget {
   const ChatSidebar({
@@ -437,13 +205,11 @@ class ChatSidebar extends ConsumerWidget {
                             ? conversations
                                 .where((c) => c.type == 'direct' && !c.isArchived)
                                 .toList()
-                            : conversations.take(6).toList())
+                            : conversations.where((c) => !c.isArchived).toList())
         .where((c) => !folderConversationIds.contains(c.id))
         .toList();
     final groupedSpaces = switch (currentFilter) {
-      ChatSidebarFilter.all => conversations.where(
-        (conversation) => conversation.type != 'direct',
-      ),
+      ChatSidebarFilter.all => const <ChatConversation>[],
       ChatSidebarFilter.direct => const <ChatConversation>[],
       ChatSidebarFilter.departments => conversations.where(
         (conversation) => conversation.type == 'department',
@@ -600,6 +366,8 @@ class ChatSidebar extends ConsumerWidget {
                   onOpenProfile: onOpenProfile,
                   onOpenFavoriteMessages: onOpenFavoriteMessages,
                   onToggleTheme: onToggleTheme,
+                  conversations: conversations,
+                  currentUserId: currentUserId,
                 ),
 
                 // ── Search field ────────────────────────────────────────────────
@@ -805,7 +573,9 @@ class ChatSidebar extends ConsumerWidget {
                           _SidebarSectionHeader(
                             title: currentFilter == ChatSidebarFilter.direct
                                 ? 'المحادثات المباشرة'
-                                : 'أحدث المحادثات',
+                                : currentFilter == ChatSidebarFilter.all
+                                    ? 'كل المحادثات'
+                                    : 'أحدث المحادثات',
                             subtitle: currentFilter == ChatSidebarFilter.direct
                                 ? 'كل الشاتات المباشرة المتاحة لك.'
                                 : 'أسرع طريق للمحادثات المفتوحة مؤخرًا.',
@@ -839,7 +609,8 @@ class ChatSidebar extends ConsumerWidget {
                           ),
                           const SizedBox(height: 14),
                         ],
-                        if (currentFilter != ChatSidebarFilter.direct) ...[
+                        if (currentFilter != ChatSidebarFilter.direct &&
+                            currentFilter != ChatSidebarFilter.all) ...[
                           _SidebarSectionHeader(
                             title:
                                 currentFilter == ChatSidebarFilter.departments
@@ -1386,8 +1157,12 @@ class _SidebarHeader extends ConsumerWidget {
     required this.onOpenProfile,
     required this.onOpenFavoriteMessages,
     required this.onToggleTheme,
+    this.conversations = const [],
+    this.currentUserId,
   });
 
+  final List<ChatConversation> conversations;
+  final String? currentUserId;
   final String userLabel;
   final int unreadTotal;
   final bool canOpenAdmin;
@@ -1513,41 +1288,15 @@ class _SidebarHeader extends ConsumerWidget {
               ),
               const SizedBox(width: 6),
               _TgIconButton(
-                tooltip: 'إنشاء مجلد',
+                tooltip: 'إنشاء مجلد محادثات',
                 icon: Icons.create_new_folder_rounded,
                 isDark: isDark,
                 accentColor: appearance.accent,
                 onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) {
-                      final controller = TextEditingController();
-                      return AlertDialog(
-                        title: const Text('مجلد جديد'),
-                        content: TextField(
-                          controller: controller,
-                          decoration:
-                              const InputDecoration(hintText: 'اسم المجلد'),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('إلغاء'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              if (controller.text.isNotEmpty) {
-                                ref
-                                    .read(chatFoldersProvider.notifier)
-                                    .createFolder(controller.text.trim());
-                              }
-                              Navigator.pop(context);
-                            },
-                            child: const Text('إنشاء'),
-                          ),
-                        ],
-                      );
-                    },
+                  showCreateOrEditChatFolderDialog(
+                    context,
+                    availableConversations: conversations,
+                    currentUserId: currentUserId,
                   );
                 },
                 dense: true,
@@ -2033,19 +1782,28 @@ class _SidebarUserTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      user.displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF1C2B3A),
+                    Tooltip(
+                      message: user.jobTitle.trim().isNotEmpty
+                          ? '${user.displayName}\n💼 ${user.jobTitle.trim()}'
+                          : (user.branchCode.isNotEmpty
+                              ? '${user.displayName} • فرع ${user.branchCode}'
+                              : user.displayName),
+                      child: Text(
+                        user.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white : const Color(0xFF1C2B3A),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '@${user.username} • ${formatPresenceLabel(user)}',
+                      user.jobTitle.trim().isNotEmpty
+                          ? '${user.jobTitle.trim()} • ${formatPresenceLabel(user)}'
+                          : '@${user.username} • ${formatPresenceLabel(user)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

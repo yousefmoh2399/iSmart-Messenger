@@ -107,8 +107,9 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               message.metadata?['mentions'] is List &&
               (message.metadata!['mentions'] as List).contains(authUser?.id);
 
+          final senderId = message.sender?.id ?? message.senderId;
           if (authUser == null ||
-              message.sender?.id == authUser.id ||
+              senderId == authUser.id ||
               (message.conversationId == activeConversationId &&
                   isAppVisible)) {
             break;

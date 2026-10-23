@@ -58,12 +58,18 @@ async function sendUploadFile(
       return;
     }
 
-    console.warn(`[${logLabel}] sendFile failed`, {
-      storedPath,
-      resolvedPath,
-      code: error.code,
-      message: error.message,
-    });
+    const isClientAbort =
+      ["ECONNABORTED", "EPIPE", "ECONNRESET", "ECANCELED", "ETIMEDOUT"].includes(error.code) ||
+      error.message === "Request aborted";
+
+    if (!isClientAbort) {
+      console.warn(`[${logLabel}] sendFile failed`, {
+        storedPath,
+        resolvedPath,
+        code: error.code,
+        message: error.message,
+      });
+    }
 
     if (res.headersSent) {
       return;

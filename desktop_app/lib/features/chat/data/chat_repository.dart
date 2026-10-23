@@ -55,15 +55,31 @@ class ChatRepository {
     return Duration(seconds: seconds);
   }
 
+  List<ChatConversation> _parseConversationsSafely(
+    List<Map<String, dynamic>> rawItems,
+  ) {
+    final parsed = <ChatConversation>[];
+    for (final item in rawItems) {
+      try {
+        final conv = ChatConversation.fromJson(item);
+        if (conv.id.isNotEmpty) {
+          parsed.add(conv);
+        }
+      } catch (_) {
+        // Ignore single malformed conversation so others still load
+      }
+    }
+    return parsed;
+  }
+
   Future<List<ChatConversation>> fetchConversations() async {
     try {
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
         '/api/chat/conversations',
       );
-      final list = _extractList(
-        response.data,
-        'conversations',
-      ).map(ChatConversation.fromJson).toList();
+      final list = _parseConversationsSafely(
+        _extractList(response.data, 'conversations'),
+      );
       if (response.data != null) {
         await _cache.saveRawJson('conversations', response.data!);
       }
@@ -72,7 +88,9 @@ class ChatRepository {
       if (e is DioException) {
         final cached = await _cache.loadRawJson('conversations');
         if (cached != null) {
-          return _extractList(cached, 'conversations').map(ChatConversation.fromJson).toList();
+          return _parseConversationsSafely(
+            _extractList(cached, 'conversations'),
+          );
         }
       }
       rethrow;
@@ -83,10 +101,9 @@ class ChatRepository {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/admin/conversations',
     );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    return _parseConversationsSafely(
+      _extractList(response.data, 'conversations'),
+    );
   }
 
   Future<ChatConversation> fetchConversation(String conversationId) async {
@@ -240,6 +257,7 @@ class ChatRepository {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -250,6 +268,7 @@ class ChatRepository {
         'type': type,
         'name': name,
         'description': description,
+        if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
         'memberIds': memberIds,
         'adminIds': adminIds,
         if (departmentId != null && departmentId.isNotEmpty)
@@ -413,6 +432,7 @@ class ChatRepository {
     required String filePath,
     Uint8List? fileBytes,
     String? sourceFileName,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -436,6 +456,8 @@ class ChatRepository {
         : await MultipartFile.fromFile(filePath, filename: resolvedFileName);
     final formData = FormData.fromMap({
       'conversationId': conversationId,
+      if (content != null && content.trim().isNotEmpty)
+        'content': content.trim(),
       if (replyToMessageId != null && replyToMessageId.isNotEmpty)
         'replyToMessageId': replyToMessageId,
       if (safeCustomName != null && safeCustomName.isNotEmpty)
@@ -536,6 +558,15 @@ class ChatRepository {
     return ChatMessage.fromJson(
       response.data?['message'] as Map<String, dynamic>,
     );
+  }
+
+  Future<ChatMessage> sendScheduledMessageNow(String messageId) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/send-now',
+    );
+    final data = response.data?['data'] ?? response.data;
+    final msgJson = (data is Map<String, dynamic> ? data['message'] : null) ?? data;
+    return ChatMessage.fromJson(msgJson as Map<String, dynamic>);
   }
 
   Future<void> removeMessage(String messageId) async {
@@ -696,10 +727,18 @@ class ChatRepository {
     }
     final load = _fetchAttachmentPreviewBytes(message);
     _attachmentPreviewLoads[cacheKey] = load;
-    load.whenComplete(() {
+    
+    // Prevent infinite growth: max 100 items
+    if (_attachmentPreviewLoads.length > 100) {
+      final firstKey = _attachmentPreviewLoads.keys.first;
+      _attachmentPreviewLoads.remove(firstKey);
+    }
+    
+    load.catchError((e, st) {
       if (identical(_attachmentPreviewLoads[cacheKey], load)) {
         _attachmentPreviewLoads.remove(cacheKey);
       }
+      Error.throwWithStackTrace(e, st);
     });
     return load;
   }
@@ -1016,10 +1055,16 @@ class ChatRepository {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/admin/departments',
-      data: {'name': name, 'code': code, 'description': description},
+      data: {
+        'name': name,
+        'code': code,
+        'description': description,
+        'managers': managers,
+      },
     );
     return DepartmentSummary.fromJson(
       response.data?['department'] as Map<String, dynamic>,
@@ -1122,6 +1167,58 @@ class ChatRepository {
 
   Future<void> deleteManagedConversation(String conversationId) async {
     await deleteConversation(conversationId, deleteForEveryone: true);
+  }
+
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final token = _authRepository.currentToken ?? await _authRepository.getToken();
+    final resolvedFileName = fileName?.trim().isNotEmpty == true
+        ? fileName!.trim()
+        : (filePath != null ? p.basename(filePath) : 'avatar.jpg');
+
+    final MultipartFile multipartFile;
+    if (fileBytes != null) {
+      multipartFile = MultipartFile.fromBytes(fileBytes, filename: resolvedFileName);
+    } else if (filePath != null && filePath.isNotEmpty) {
+      multipartFile = await MultipartFile.fromFile(filePath, filename: resolvedFileName);
+    } else {
+      throw ArgumentError('Either filePath or fileBytes must be provided');
+    }
+
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      data: FormData.fromMap({
+        'avatar': multipartFile,
+      }),
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        contentType: 'multipart/form-data',
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
+  }
+
+  Future<ChatConversation> removeConversationAvatar(String conversationId) async {
+    final token = _authRepository.currentToken ?? await _authRepository.getToken();
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
   }
 
   Future<ChatConversation> addGroupMembers({

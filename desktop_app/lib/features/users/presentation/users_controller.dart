@@ -8,6 +8,56 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
   int _page = 1;
   bool _hasMore = false;
   bool _loadingMore = false;
+  String? _search;
+  String? _departmentId;
+  String? _branchId;
+  String? _role;
+  String? _status;
+  final int _limit = 100;
+
+  bool get hasMore => _hasMore;
+  bool get isLoadingMore => _loadingMore;
+
+  Future<void> setFilters({
+    String? search,
+    String? departmentId,
+    String? branchId,
+    String? role,
+    String? status,
+  }) async {
+    _search = search?.trim();
+    _departmentId = departmentId;
+    _branchId = branchId;
+    _role = role;
+    _status = status;
+    _page = 1;
+
+    final current = state;
+    state = const AsyncLoading<List<ManagedUser>>().copyWithPrevious(current);
+    state = await AsyncValue.guard(() async {
+      final hasSession = await _waitForAuthenticatedSession();
+      if (!hasSession) {
+        return const <ManagedUser>[];
+      }
+      if (!_canReadManagedUsers()) {
+        return const <ManagedUser>[];
+      }
+      final page = await _guardAuth(
+        () => ref.read(userManagementRepositoryProvider).fetchUsersPage(
+          search: _search,
+          departmentId: _departmentId,
+          branchId: _branchId,
+          role: _role,
+          status: _status,
+          page: 1,
+          limit: _limit,
+        ),
+      );
+      _page = page.page;
+      _hasMore = page.hasMore;
+      return page.users;
+    });
+  }
 
   bool _isUnauthorized(Object error) {
     return error is ApiException && error.isUnauthorized;
@@ -34,10 +84,7 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
     }
     final token = await ref.watch(authTokenProvider.future);
     if (token == null || token.trim().isEmpty) {
-      throw const ApiException(
-        'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
-        statusCode: 401,
-      );
+      return false;
     }
     return true;
   }
@@ -61,7 +108,15 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
       return const [];
     }
     final page = await _guardAuth(
-      () => ref.read(userManagementRepositoryProvider).fetchUsersPage(),
+      () => ref.read(userManagementRepositoryProvider).fetchUsersPage(
+        search: _search,
+        departmentId: _departmentId,
+        branchId: _branchId,
+        role: _role,
+        status: _status,
+        page: 1,
+        limit: _limit,
+      ),
     );
     _page = page.page;
     _hasMore = page.hasMore;
@@ -84,7 +139,15 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
           return const <ManagedUser>[];
         }
         final page = await _guardAuth(
-          () => ref.read(userManagementRepositoryProvider).fetchUsersPage(),
+          () => ref.read(userManagementRepositoryProvider).fetchUsersPage(
+            search: _search,
+            departmentId: _departmentId,
+            branchId: _branchId,
+            role: _role,
+            status: _status,
+            page: 1,
+            limit: _limit,
+          ),
         );
         _page = page.page;
         _hasMore = page.hasMore;
@@ -107,7 +170,15 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
       final page = await _guardAuth(
         () => ref
             .read(userManagementRepositoryProvider)
-            .fetchUsersPage(page: _page + 1),
+            .fetchUsersPage(
+          search: _search,
+          departmentId: _departmentId,
+          branchId: _branchId,
+          role: _role,
+          status: _status,
+          page: _page + 1,
+          limit: _limit,
+        ),
       );
       _page = page.page;
       _hasMore = page.hasMore;

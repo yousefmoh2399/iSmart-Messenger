@@ -27,6 +27,8 @@ function buildToken(user) {
   );
 }
 
+const defaultRefreshExpiresIn = process.env.JWT_REFRESH_EXPIRES_IN || "3650d";
+
 function buildRefreshToken(user, refreshNonce) {
   return jwt.sign(
     {
@@ -36,7 +38,7 @@ function buildRefreshToken(user, refreshNonce) {
     },
     jwtSecret,
     {
-      expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
+      expiresIn: defaultRefreshExpiresIn,
     },
   );
 }
@@ -113,7 +115,7 @@ async function loginUser({ username, password, deviceUid }) {
         did: normalizedDeviceUid,
       },
       jwtSecret,
-      { expiresIn: "30d" },
+      { expiresIn: defaultRefreshExpiresIn },
     ),
     user: await buildUserResponse(user),
   };
@@ -148,15 +150,30 @@ async function refreshAccessToken(refreshToken, { deviceUid } = {}) {
       : [];
     const currentSession = sessions.find((s) => s?.deviceUid === effectiveDeviceUid);
     const storedSessionRn = currentSession?.nonce ? String(currentSession.nonce) : null;
+    const storedPreviousRn = currentSession?.previousNonce ? String(currentSession.previousNonce) : null;
+    const previousExpiresAt = currentSession?.previousNonceExpiresAt ? new Date(currentSession.previousNonceExpiresAt) : null;
 
     if (!incomingRn) {
       throw new ApiError(401, "Invalid refresh token");
     }
 
+    const now = new Date();
+    let isGracePeriodMatch = false;
+
     // Prefer multi-device session nonce when available.
     if (storedSessionRn) {
       if (incomingRn !== storedSessionRn) {
-        throw new ApiError(401, "Invalid refresh token");
+        // Allow a 60-second grace period for retried requests on mobile network drops
+        if (
+          storedPreviousRn &&
+          incomingRn === storedPreviousRn &&
+          previousExpiresAt &&
+          previousExpiresAt > now
+        ) {
+          isGracePeriodMatch = true;
+        } else {
+          throw new ApiError(401, "Invalid refresh token");
+        }
       }
     } else if (storedLegacyRn) {
       // Migration path: accept legacy nonce once, then move to device session.
@@ -167,8 +184,25 @@ async function refreshAccessToken(refreshToken, { deviceUid } = {}) {
       throw new ApiError(401, "Invalid refresh token");
     }
 
+    if (isGracePeriodMatch) {
+      // Return fresh access token and existing active refresh token without re-rotating
+      return {
+        token: buildToken(user),
+        refreshToken: jwt.sign(
+          {
+            sub: user._id.toString(),
+            type: "refresh",
+            rn: storedSessionRn,
+            did: effectiveDeviceUid,
+          },
+          jwtSecret,
+          { expiresIn: defaultRefreshExpiresIn },
+        ),
+      };
+    }
+
     const newNonce = crypto.randomBytes(16).toString("hex");
-    const now = new Date();
+    const graceExpiresAt = new Date(now.getTime() + 60000); // 60s grace period for previous nonce
     const createdAt = currentSession?.createdAt || now;
     await User.updateOne(
       { _id: user._id },
@@ -189,6 +223,8 @@ async function refreshAccessToken(refreshToken, { deviceUid } = {}) {
                   {
                     deviceUid: effectiveDeviceUid,
                     nonce: newNonce,
+                    previousNonce: storedSessionRn,
+                    previousNonceExpiresAt: graceExpiresAt,
                     createdAt,
                     lastUsedAt: now,
                   },
@@ -210,7 +246,7 @@ async function refreshAccessToken(refreshToken, { deviceUid } = {}) {
           did: effectiveDeviceUid,
         },
         jwtSecret,
-        { expiresIn: "30d" },
+        { expiresIn: defaultRefreshExpiresIn },
       ),
     };
   } catch (error) {

@@ -195,6 +195,7 @@ class TicketRepository {
     String? priority,
     String? q,
     String format = 'xlsx',
+    String? templateId,
   }) async {
     final response = await _apiClient.dio.get<Object>(
       '/api/tickets/reports/export',
@@ -205,6 +206,8 @@ class TicketRepository {
         'ticketType': ticketType,
         if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
         'format': format,
+        if (templateId != null && templateId.trim().isNotEmpty)
+          'templateId': templateId.trim(),
       },
       options: Options(responseType: ResponseType.bytes),
     );

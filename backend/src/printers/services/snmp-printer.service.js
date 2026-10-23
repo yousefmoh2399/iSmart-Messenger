@@ -33,6 +33,14 @@ const SCALAR_OIDS = {
   hpDuplexPages: "1.3.6.1.4.1.11.2.3.9.4.2.1.4.1.2.22.0",
   hpAdfScan: "1.3.6.1.4.1.11.2.3.9.4.2.1.2.2.1.20.0",
   hpFlatbedScan: "1.3.6.1.4.1.11.2.3.9.4.2.1.2.2.1.21.0",
+
+  // Generic & Other Vendors (Canon, Xerox, Brother, Ricoh, PWG)
+  pwgTotalPages: "1.3.6.1.4.1.2699.1.2.1.2.1.1.3.1",
+  prtMarkerLifeCountAlt: "1.3.6.1.2.1.43.10.2.1.4.1.1",
+  canonTotalPages: "1.3.6.1.4.1.1602.1.11.1.3.1.4.101",
+  brotherTotalPages: "1.3.6.1.4.1.2435.2.3.9.4.2.1.5.5.8.0",
+  xeroxTotalPages: "1.3.6.1.4.1.253.8.53.13.2.1.6.1.20.1",
+  ricohTotalPages: "1.3.6.1.4.1.367.3.2.1.2.19.1.0",
 };
 
 const STANDARD_SCALAR_KEYS = [
@@ -42,6 +50,12 @@ const STANDARD_SCALAR_KEYS = [
   "serialNumber",
   "hrPrinterStatus",
   "hrPrinterDetectedErrorState",
+  "pwgTotalPages",
+  "prtMarkerLifeCountAlt",
+  "canonTotalPages",
+  "brotherTotalPages",
+  "xeroxTotalPages",
+  "ricohTotalPages",
 ];
 
 const KYOCERA_SCALAR_KEYS = [
@@ -735,7 +749,23 @@ function mapPrinter(host, data) {
     if (Number.isFinite(hpDuplex)) duplexPages = hpDuplex;
     if (adfScan > 0 || flatbedScan > 0) scanPages = adfScan + flatbedScan;
   } else {
-    // Generic B&W fallback
+    // Check extra multi-vendor OIDs if standard totalPages is still 0
+    if (totalPages === 0) {
+      const candidates = [
+        Number(data.scalars[SCALAR_OIDS.prtMarkerLifeCountAlt]),
+        Number(data.scalars[SCALAR_OIDS.pwgTotalPages]),
+        Number(data.scalars[SCALAR_OIDS.canonTotalPages]),
+        Number(data.scalars[SCALAR_OIDS.brotherTotalPages]),
+        Number(data.scalars[SCALAR_OIDS.xeroxTotalPages]),
+        Number(data.scalars[SCALAR_OIDS.ricohTotalPages]),
+      ];
+      for (const num of candidates) {
+        if (Number.isFinite(num) && num > 0) {
+          totalPages = num;
+          break;
+        }
+      }
+    }
     monoPages = totalPages;
   }
 
@@ -782,7 +812,40 @@ async function probePrinter(host, options = {}) {
     null,
     () => logPrinterSync("printer.probe.host_timeout", { host, hostTimeoutMs }),
   );
-  const printer = mapPrinter(host, data);
+  let printer = mapPrinter(host, data);
+  if (!printer && !options.skipWebDetails) {
+    try {
+      const webDetails = await collectPrinterWebDetails(host);
+      if (webDetails && (webDetails.serialNumber || webDetails.model || (Number(webDetails.totalPages) > 0))) {
+        printer = {
+          ipAddress: host,
+          hostname: webDetails.hostname || host,
+          model: webDetails.model || "Network Printer",
+          serialNumber: webDetails.serialNumber || "",
+          printerName: webDetails.printerName || webDetails.model || host,
+          macAddress: webDetails.macAddress || "",
+          vendor: resolveVendor(`${webDetails.model || ""} ${webDetails.vendor || ""}`),
+          status: "online",
+          counters: {
+            totalPages: Number(webDetails.totalPages) || 0,
+            monoPages: Number(webDetails.monoPages) || Number(webDetails.totalPages) || 0,
+            colorPages: Number(webDetails.colorPages) || 0,
+            duplexPages: Number(webDetails.duplexPages) || 0,
+            copyPages: 0,
+            scanPages: Number(webDetails.scanPages) || 0,
+          },
+          tonerLevels: webDetails.tonerLevels || {},
+          maintenance: {
+            paperJams: 0,
+            errorMessages: [],
+            warnings: [],
+          },
+          extendedDetails: webDetails,
+        };
+        logPrinterSync("printer.probe.web_fallback_success", { host, model: printer.model });
+      }
+    } catch (_) {}
+  }
   if (!printer) {
     logPrinterSync("printer.probe.no_printer", {
       host,

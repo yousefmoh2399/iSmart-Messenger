@@ -102,6 +102,8 @@ const getConsumptionHandler = asyncHandler(async (req, res) => {
     fromYear: req.query.fromYear || null,
     toMonth: req.query.toMonth || null,
     toYear: req.query.toYear || null,
+    templateId: req.query.templateId || null,
+    sheetsPerClient: Number(req.query.sheetsPerClient || req.query.pagesPerClient) || 16,
   });
   sendChatResponse(res, { data: result, legacy: result });
 });
@@ -116,6 +118,8 @@ const exportReportHandler = asyncHandler(async (req, res) => {
     fromYear: req.query.fromYear || null,
     toMonth: req.query.toMonth || null,
     toYear: req.query.toYear || null,
+    templateId: req.query.templateId || null,
+    sheetsPerClient: Number(req.query.sheetsPerClient || req.query.pagesPerClient) || 16,
   });
   const isExcel = fileName.endsWith(".xlsx");
   res.setHeader(

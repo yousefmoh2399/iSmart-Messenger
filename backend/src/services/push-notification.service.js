@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const logger = require("../utils/logger");
 const ConversationMemberState = require("../chat/models/conversation-member-state.model");
 
@@ -40,6 +41,36 @@ function loadServiceAccountFromEnv() {
   const rawPath = String(process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "").trim();
   if (rawPath && fs.existsSync(rawPath)) {
     return JSON.parse(fs.readFileSync(rawPath, "utf8"));
+  }
+
+  // Check fallback locations: DATA_DIR, exe directory, working directory
+  const candidateDirs = [
+    process.env.DATA_DIR,
+    path.dirname(process.execPath || ""),
+    process.cwd(),
+    path.resolve(__dirname, "../..")
+  ].filter(Boolean);
+
+  const candidateFilenames = [
+    "ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json",
+    "firebase-service-account.json"
+  ];
+
+  for (const dir of candidateDirs) {
+    for (const filename of candidateFilenames) {
+      const fullCandidate = path.join(dir, filename);
+      if (fs.existsSync(fullCandidate)) {
+        try {
+          return JSON.parse(fs.readFileSync(fullCandidate, "utf8"));
+        } catch (_) {}
+      }
+    }
+  }
+
+  try {
+    return require("../../ismart-messenger-firebase-adminsdk-fbsvc-4ab072fea4.json");
+  } catch (err) {
+    // ignore
   }
 
   return null;

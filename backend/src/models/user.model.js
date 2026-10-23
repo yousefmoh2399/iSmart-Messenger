@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 120,
     },
+    jobTitle: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 150,
+    },
     role: {
       type: String,
       required: true,
@@ -106,6 +112,8 @@ const userSchema = new mongoose.Schema(
           {
             deviceUid: { type: String, required: true },
             nonce: { type: String, required: true },
+            previousNonce: { type: String, default: null },
+            previousNonceExpiresAt: { type: Date, default: null },
             createdAt: { type: Date, default: Date.now },
             lastUsedAt: { type: Date, default: Date.now },
           },
@@ -125,6 +133,7 @@ const userSchema = new mongoose.Schema(
         {
           themeId: { type: String, default: "system" },
           wallpaperId: { type: String, default: "default" },
+          doodles: { type: Boolean, default: true },
           customTheme: {
             type: new mongoose.Schema(
               {

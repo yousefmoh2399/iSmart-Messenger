@@ -71,6 +71,7 @@ function serializeUser(user, permissions = null) {
     id: user._id.toString(),
     username: user.username,
     fullName: user.fullName,
+    jobTitle: user.jobTitle || "",
     role: user.role,
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     departmentIds: Array.isArray(user.departmentIds)
@@ -94,6 +95,7 @@ function serializeUser(user, permissions = null) {
     chatPreferences: {
       themeId: user.chatPreferences?.themeId || "system",
       wallpaperId: user.chatPreferences?.wallpaperId || "default",
+      doodles: user.chatPreferences?.doodles !== false,
       customTheme,
     },
     createdAt: user.createdAt,
@@ -220,7 +222,7 @@ async function resolveNamedIds(Model, value) {
 
 async function listUsers(actor = null, filters = {}) {
   const page = Math.max(1, Math.min(Number(filters.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(filters.limit || 50), 100));
+  const limit = Math.max(1, Math.min(Number(filters.limit || 50), 500));
   const skip = (page - 1) * limit;
   const query = {};
   if (actor?.role === "manager" && actor.departmentId) {
@@ -248,6 +250,19 @@ async function listUsers(actor = null, filters = {}) {
       { fullName: searchRegex },
       { branchCode: searchRegex },
     );
+    const [matchingDeptIds, matchingBranchIds] = await Promise.all([
+      resolveNamedIds(Department, filters.search || filters.q),
+      resolveNamedIds(Branch, filters.search || filters.q),
+    ]);
+    if (matchingDeptIds.length) {
+      or.push(
+        { departmentId: { $in: matchingDeptIds } },
+        { departmentIds: { $in: matchingDeptIds } },
+      );
+    }
+    if (matchingBranchIds.length) {
+      or.push({ branchId: { $in: matchingBranchIds } });
+    }
   }
 
   const departmentIds = await resolveNamedIds(Department, filters.department);
@@ -333,6 +348,7 @@ async function createUser(
       username: normalizedUsername,
       passwordHash,
       fullName: String(fullName).trim(),
+      jobTitle: payload.jobTitle ? String(payload.jobTitle).trim().slice(0, 150) : "",
       role: role || "user",
       permissionOverrides: normalizePermissionOverrides(permissions),
       maxAttachmentSizeMB: maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
@@ -429,6 +445,10 @@ async function updateUser(actor, userId, payload) {
 
   if (payload.fullName != null) {
     user.fullName = String(payload.fullName).trim();
+  }
+
+  if (payload.jobTitle !== undefined) {
+    user.jobTitle = String(payload.jobTitle || "").trim().slice(0, 150);
   }
 
   if (payload.role != null && (actorIsAdmin || actorCanManageUsers)) {
@@ -600,6 +620,10 @@ async function updateProfile(actor, payload) {
     user.fullName = String(payload.fullName).trim().slice(0, 120);
   }
 
+  if (payload.jobTitle !== undefined) {
+    user.jobTitle = String(payload.jobTitle || "").trim().slice(0, 150);
+  }
+
   if (payload.chatPreferences && typeof payload.chatPreferences === "object") {
     const rawThemeId = payload.chatPreferences.themeId;
     const rawWallpaperId = payload.chatPreferences.wallpaperId;
@@ -619,6 +643,10 @@ async function updateProfile(actor, payload) {
         rawWallpaperId != null
           ? String(rawWallpaperId).trim().slice(0, 60)
           : user.chatPreferences?.wallpaperId || "default",
+      doodles:
+        typeof payload.chatPreferences.doodles === "boolean"
+          ? payload.chatPreferences.doodles
+          : user.chatPreferences?.doodles !== false,
       customTheme: {
         accentColorHex: normalizeColorHex(
           incomingCustomTheme?.accentColorHex,

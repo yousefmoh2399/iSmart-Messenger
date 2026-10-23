@@ -274,30 +274,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (result == null || !mounted) return;
 
+    final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
+    final publicSettingsService = ref.read(publicAppSettingsServiceProvider);
+    final authRepository = ref.read(authRepositoryProvider);
+    final serverConnCtrl = ref.read(
+      serverConnectionControllerProvider.notifier,
+    );
+
     if (result == '__reset__') {
-      await ref.read(apiBaseUrlControllerProvider.notifier).reset();
+      await apiBaseUrlCtrl.reset();
       try {
-        final defaults = await ref
-            .read(publicAppSettingsServiceProvider)
-            .fetchDefaults();
+        final defaults = await publicSettingsService.fetchDefaults();
         final desktopBaseUrl = defaults.desktopBaseUrl?.trim();
         if (desktopBaseUrl != null && desktopBaseUrl.isNotEmpty) {
-          await ref
-              .read(apiBaseUrlControllerProvider.notifier)
-              .applyAdminDefault(desktopBaseUrl);
+          await apiBaseUrlCtrl.applyAdminDefault(desktopBaseUrl);
         }
       } catch (_) {}
     } else if (result.isNotEmpty) {
-      await ref.read(apiBaseUrlControllerProvider.notifier).save(result);
+      await apiBaseUrlCtrl.save(result);
     }
 
-    await ref.read(authRepositoryProvider).clearLocalSessionForServerChange();
+    await authRepository.clearLocalSessionForServerChange();
+    if (!mounted) return;
     ref.read(serverRecoveryRevisionProvider.notifier).state++;
     ref.invalidate(authControllerProvider);
     ref.invalidate(documentsControllerProvider);
     ref.invalidate(adminDocumentsControllerProvider);
     ref.invalidate(usersControllerProvider);
-    await ref.read(serverConnectionControllerProvider.notifier).refresh();
+    await serverConnCtrl.refresh();
 
     if (!mounted) return;
     setState(() => _errorMessage = null);
@@ -381,8 +385,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           color: isDark
-              ? const Color(0xFF1F2C38).withValues(alpha: 0.65)
-              : Colors.white.withValues(alpha: 0.8),
+              ? const Color(0xFF1E2834)
+              : Colors.white,
           border: Border.all(
             color: isDark
                 ? const Color(0xFF314555).withValues(alpha: 0.45)
@@ -398,11 +402,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Padding(
-              padding: EdgeInsets.all(compact ? 22 : 28),
-              child: Form(
+          child: Padding(
+            padding: EdgeInsets.all(compact ? 22 : 28),
+            child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -545,8 +547,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   @override

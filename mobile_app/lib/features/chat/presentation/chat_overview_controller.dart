@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
@@ -31,11 +32,20 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
+  bool _isUnauthorized(Object error) {
+    if (error is ApiException && error.isUnauthorized) return true;
+    if (error is DioException) {
+      if (error.response?.statusCode == 401) return true;
+      if (error.error is ApiException && (error.error as ApiException).isUnauthorized) return true;
+    }
+    return false;
+  }
+
   Future<T> _guardAuth<T>(Future<T> Function() action) async {
     try {
       return await action();
     } catch (error, stackTrace) {
-      if (error is ApiException && error.isUnauthorized) {
+      if (_isUnauthorized(error)) {
         Future<void>.microtask(
           () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
@@ -44,10 +54,36 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
   }
 
+  Future<bool> _waitForAuthenticatedSession() async {
+    ref.watch(authCredentialsRevisionProvider);
+    final authUser = ref.watch(currentUserProvider);
+    if (authUser == null) {
+      return false;
+    }
+    final token = await ref.watch(authTokenProvider.future);
+    if (token == null || token.trim().isEmpty) {
+      return false;
+    }
+    return true;
+  }
+
   @override
   Future<ChatOverviewData> build() async {
     ref.watch(serverRecoveryRevisionProvider);
-    await ref.watch(chatSocketConnectionProvider.future);
+    final hasSession = await _waitForAuthenticatedSession();
+    if (!hasSession) {
+      return const ChatOverviewData(
+        conversations: [],
+        manageableConversations: [],
+        users: [],
+        departments: [],
+        branches: [],
+        roles: [],
+      );
+    }
+    try {
+      await ref.watch(chatSocketConnectionProvider.future);
+    } catch (_) {}
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatSocketService = ref.read(chatSocketServiceProvider);
     _currentUserId = ref.read(authControllerProvider).valueOrNull?.id ?? '';
@@ -57,7 +93,30 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       _disposed = true;
       _eventsSubscription?.cancel();
     });
-    return _loadOverview();
+    try {
+      return await _loadOverview();
+    } catch (_) {
+      try {
+        final cached = await _repository().fetchConversations();
+        return ChatOverviewData(
+          conversations: cached,
+          manageableConversations: const [],
+          users: const [],
+          departments: const [],
+          branches: const [],
+          roles: const [],
+        );
+      } catch (_) {
+        return const ChatOverviewData(
+          conversations: [],
+          manageableConversations: [],
+          users: [],
+          departments: [],
+          branches: [],
+          roles: [],
+        );
+      }
+    }
   }
 
   Future<ChatOverviewData> _loadOverview() async {
@@ -80,8 +139,17 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }
 
-    final manageableConversations = await safeList(
+    final rawManageableConversations = await safeList(
       repository.fetchManageableConversations,
+    );
+    final manageableMap = <String, ChatConversation>{
+      for (final conv in conversations)
+        if (conv.type != 'direct') conv.id: conv,
+      for (final conv in rawManageableConversations)
+        if (conv.type != 'direct') conv.id: conv,
+    };
+    final manageableConversations = _sortConversations(
+      manageableMap.values.toList(),
     );
     final roles = await safeList(repository.fetchRoles);
 
@@ -116,6 +184,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       );
     } finally {
       _loadingMoreUsers = false;
+    }
+  }
+
+  Future<void> ensureAllUsersLoaded() async {
+    final current = state.valueOrNull;
+    if (current == null || !_hasMoreUsers) return;
+    while (_hasMoreUsers) {
+      final beforePage = _usersPage;
+      await loadMoreUsers();
+      if (_usersPage == beforePage) break;
     }
   }
 
@@ -435,6 +513,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         ? DateTime.tryParse(event.payload['lastActiveAt'] as String)
         : null;
 
+    final matchingUser = current.users.cast<ChatDirectoryUser?>().firstWhere(
+      (u) => u?.id == userId,
+      orElse: () => null,
+    );
+    if (matchingUser != null &&
+        matchingUser.isOnline == isOnline &&
+        matchingUser.presenceStatus == presenceStatus) {
+      return;
+    }
+
     state = AsyncData(
       ChatOverviewData(
         conversations: current.conversations
@@ -495,11 +583,35 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
+  Future<void> _upsertIncomingMessageInCache(ChatMessage message) async {
+    try {
+      final cached = await _repository().getCachedMessages(message.conversationId);
+      if (cached != null) {
+        final updated = sortAndDedupeChatMessages([...cached.messages, message]);
+        final jsonList = updated.map((m) => m.toJson()).toList();
+        await _repository().cache.saveRawJson('messages_${message.conversationId}', {
+          'messages': jsonList,
+          'meta': {
+            'nextCursor': cached.nextCursor,
+            'hasMore': cached.hasMore,
+            'limit': cached.limit,
+          },
+        });
+      }
+    } catch (_) {}
+  }
+
   void _applyIncomingMessage(ChatMessage message) {
+    unawaited(_upsertIncomingMessageInCache(message));
+
     final current = state.valueOrNull;
     if (current == null) {
       return;
     }
+
+    final effectiveSenderId = message.sender?.id ?? message.senderId;
+    final isFromCurrentUser =
+        effectiveSenderId.isNotEmpty && effectiveSenderId == _currentUserId;
 
     final index = current.conversations.indexWhere(
       (conversation) => conversation.id == message.conversationId,
@@ -522,7 +634,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
           final inserted = conversation.copyWith(
             lastMessage: _buildLastMessage(message),
-            unreadCount: message.sender?.id == _currentUserId ? 0 : 1,
+            unreadCount: isFromCurrentUser ? 0 : 1,
             updatedAt: message.createdAt,
           );
 
@@ -548,7 +660,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final existing = updated[index];
     updated[index] = existing.copyWith(
       lastMessage: _buildLastMessage(message),
-      unreadCount: message.sender?.id == _currentUserId || isActiveConversation
+      unreadCount: isFromCurrentUser || isActiveConversation
           ? 0
           : existing.unreadCount + 1,
       updatedAt: message.createdAt,
@@ -561,7 +673,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       ),
     );
 
-    if (isActiveConversation && message.sender?.id != _currentUserId) {
+    if (isActiveConversation && !isFromCurrentUser) {
       Future<void>.microtask(() async {
         if (_disposed) {
           return;
@@ -673,13 +785,17 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
 
     final manageable = [...current.manageableConversations];
-    final manageableIndex = manageable.indexWhere(
-      (entry) => entry.id == conversation.id,
-    );
-    if (manageableIndex != -1) {
-      manageable[manageableIndex] = conversation.copyWith(
-        unreadCount: manageable[manageableIndex].unreadCount,
+    if (conversation.type != 'direct') {
+      final manageableIndex = manageable.indexWhere(
+        (entry) => entry.id == conversation.id,
       );
+      if (manageableIndex == -1) {
+        manageable.insert(0, conversation);
+      } else {
+        manageable[manageableIndex] = conversation.copyWith(
+          unreadCount: manageable[manageableIndex].unreadCount,
+        );
+      }
     }
 
     state = AsyncData(
@@ -809,6 +925,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -818,6 +935,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       type: type,
       name: name,
       description: description,
+      avatarUrl: avatarUrl,
       memberIds: memberIds,
       adminIds: adminIds,
       departmentId: departmentId,
@@ -923,12 +1041,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final repository = _repository();
     await repository.createDepartment(
       name: name,
       code: code,
       description: description,
+      managers: managers,
     );
     await refresh();
   }
@@ -1033,6 +1153,46 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     await refresh();
   }
 
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final conversation = await _repository().uploadConversationAvatar(
+      conversationId: conversationId,
+      filePath: filePath,
+      fileBytes: fileBytes,
+      fileName: fileName,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
+  Future<ChatConversation> removeConversationAvatar({
+    required String conversationId,
+  }) async {
+    final conversation = await _repository().removeConversationAvatar(
+      conversationId,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
+  Future<ChatConversation> updateGroupInfo({
+    required String conversationId,
+    String? name,
+    String? description,
+  }) async {
+    final conversation = await _repository().updateManagedConversation(
+      conversationId: conversationId,
+      name: name,
+      description: description,
+    );
+    _applyConversationUpdate(conversation);
+    return conversation;
+  }
+
   Future<ChatConversation> addGroupMembers({
     required String conversationId,
     required List<String> userIds,
@@ -1113,14 +1273,24 @@ class ConversationMessagesController
   ChatRepository? _chatRepository;
   bool _isRefreshing = false;
   bool _disposed = false;
+  bool _isInitialBuildFetchingNetwork = false;
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
+
+  bool _isUnauthorized(Object error) {
+    if (error is ApiException && error.isUnauthorized) return true;
+    if (error is DioException) {
+      if (error.response?.statusCode == 401) return true;
+      if (error.error is ApiException && (error.error as ApiException).isUnauthorized) return true;
+    }
+    return false;
+  }
 
   Future<T> _guardAuth<T>(Future<T> Function() action) async {
     try {
       return await action();
     } catch (error, stackTrace) {
-      if (error is ApiException && error.isUnauthorized) {
+      if (_isUnauthorized(error)) {
         Future<void>.microtask(
           () => ref.read(authControllerProvider.notifier).logoutIfSessionGone(),
         );
@@ -1132,7 +1302,16 @@ class ConversationMessagesController
   @override
   Future<ConversationMessagesState> build(String arg) async {
     ref.watch(serverRecoveryRevisionProvider);
-    await ref.watch(chatSocketConnectionProvider.future);
+    final authUser = ref.watch(currentUserProvider);
+    if (authUser == null) {
+      return const ConversationMessagesState(
+        messages: [],
+        nextCursor: null,
+        hasMore: false,
+        isLoadingMore: false,
+      );
+    }
+    unawaited(ref.read(chatSocketConnectionProvider.future));
     _socketService = ref.read(chatSocketServiceProvider);
     _chatRepository = ref.read(chatRepositoryProvider);
     _disposed = false;
@@ -1140,12 +1319,32 @@ class ConversationMessagesController
     _listenToSocket(arg);
     ref.onDispose(() {
       _disposed = true;
+      if (_messagesCacheDebounceTimer?.isActive ?? false) {
+        _messagesCacheDebounceTimer?.cancel();
+        final current = state.valueOrNull;
+        if (current != null) {
+          _saveStateToCache(current);
+        }
+      }
       _eventsSubscription?.cancel();
       _socketService?.leaveConversation(arg);
     });
 
-    final page = await _repository().fetchMessages(arg);
-    return ConversationMessagesState.initial(page);
+    final cached = await _repository().getCachedMessages(arg);
+    if (cached != null) {
+      Future.microtask(() => refresh());
+      return ConversationMessagesState.initial(
+        _dedupePage(_markPendingAsFailed(cached)),
+      );
+    }
+
+    _isInitialBuildFetchingNetwork = true;
+    try {
+      final page = await _guardAuth(() => _repository().fetchMessages(arg));
+      return ConversationMessagesState.initial(_dedupePage(page));
+    } finally {
+      _isInitialBuildFetchingNetwork = false;
+    }
   }
 
   void _listenToSocket(String conversationId) {
@@ -1162,21 +1361,28 @@ class ConversationMessagesController
       }
 
       if (event.type == 'receive_message') {
-        final message = ChatMessage.fromJson(event.payload);
-        if (message.conversationId == conversationId) {
-          state = AsyncData(
-            current.copyWith(
-              messages: _upsertMessage(current.messages, message),
-            ),
-          );
-        }
+        try {
+          final message = ChatMessage.fromJson(event.payload);
+          if (message.conversationId == conversationId) {
+            final current = state.valueOrNull;
+            if (current != null) {
+              _setStateAndCache(
+                current.copyWith(
+                  messages: _upsertMessage(current.messages, message),
+                ),
+              );
+            } else {
+              unawaited(refresh());
+            }
+          }
+        } catch (_) {}
         return;
       }
 
       if (event.type == 'message_updated') {
         final message = ChatMessage.fromJson(event.payload);
         if (message.conversationId == conversationId) {
-          state = AsyncData(
+          _setStateAndCache(
             current.copyWith(
               messages: _upsertMessage(current.messages, message),
             ),
@@ -1189,7 +1395,7 @@ class ConversationMessagesController
           event.payload['conversationId']?.toString() == conversationId) {
         final messageId = event.payload['messageId']?.toString();
         if (messageId != null) {
-          state = AsyncData(
+          _setStateAndCache(
             current.copyWith(
               messages: _markMessageDeleted(current.messages, messageId),
             ),
@@ -1242,7 +1448,7 @@ class ConversationMessagesController
           );
         }).toList();
 
-        state = AsyncData(current.copyWith(messages: updatedMessages));
+        _setStateAndCache(current.copyWith(messages: updatedMessages));
 
         if (!matchedAny) {
           Future<void>.microtask(() async {
@@ -1269,7 +1475,7 @@ class ConversationMessagesController
           return;
         }
 
-        state = AsyncData(
+        _setStateAndCache(
           current.copyWith(
             messages: current.messages
                 .map(
@@ -1297,15 +1503,52 @@ class ConversationMessagesController
     List<ChatMessage> source,
     ChatMessage message,
   ) {
-    final index = source.indexWhere((entry) => entry.id == message.id);
-    final items = [...source];
-    if (index == -1) {
-      items.add(message);
-    } else {
-      items[index] = message;
-    }
-    items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    return items;
+    return _sortAndDedupeMessages([...source, message]);
+  }
+
+  List<ChatMessage> _sortAndDedupeMessages(Iterable<ChatMessage> source) {
+    return sortAndDedupeChatMessages(source);
+  }
+
+  /// Converts cached messages whose status is `pending` to `failed`.
+  /// A pending message in cache means the app was killed before the server
+  /// acknowledged it — it will never auto-confirm, so treat it as failed.
+  ChatMessagesPage _markPendingAsFailed(ChatMessagesPage page) {
+    final fixed = page.messages.map((m) {
+      if (!m.id.startsWith('temp_')) {
+        if (m.metadata != null &&
+            (m.metadata!.containsKey('status') ||
+                m.metadata!.containsKey('error'))) {
+          final updated = Map<String, dynamic>.from(m.metadata!);
+          updated.remove('status');
+          updated.remove('error');
+          return m.copyWith(metadata: updated.isEmpty ? null : updated);
+        }
+        return m;
+      }
+      final msgStatus = m.metadata?['status']?.toString();
+      if (msgStatus == 'pending') {
+        final updated = Map<String, dynamic>.from(m.metadata ?? {});
+        updated['status'] = 'failed';
+        return m.copyWith(metadata: updated);
+      }
+      return m;
+    }).toList();
+    return ChatMessagesPage(
+      messages: fixed,
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      limit: page.limit,
+    );
+  }
+
+  ChatMessagesPage _dedupePage(ChatMessagesPage page) {
+    return ChatMessagesPage(
+      messages: _sortAndDedupeMessages(page.messages),
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      limit: page.limit,
+    );
   }
 
   List<ChatMessage> _markMessageDeleted(
@@ -1376,10 +1619,7 @@ class ConversationMessagesController
   }
 
   Future<void> refresh() async {
-    if (_isRefreshing || _disposed) {
-      return;
-    }
-    if (state.isLoading && state.valueOrNull == null) {
+    if (_isRefreshing || _disposed || _isInitialBuildFetchingNetwork) {
       return;
     }
     _isRefreshing = true;
@@ -1388,7 +1628,23 @@ class ConversationMessagesController
       if (_disposed) {
         return;
       }
-      state = AsyncData(ConversationMessagesState.initial(page));
+      final current = state.valueOrNull;
+      if (current != null && current.messages.isNotEmpty) {
+        final pageMap = {for (final m in page.messages) m.id: m};
+        final olderMessages = current.messages
+            .where((m) => !pageMap.containsKey(m.id))
+            .toList();
+        final mergedMessages = <ChatMessage>[...olderMessages, ...page.messages];
+        _setStateAndCache(
+          current.copyWith(
+            messages: _sortAndDedupeMessages(mergedMessages),
+            hasMore: current.hasMore || page.hasMore,
+            nextCursor: current.nextCursor ?? page.nextCursor,
+          ),
+        );
+      } else {
+        _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
+      }
     } catch (error, stackTrace) {
       if (_disposed) {
         return;
@@ -1410,9 +1666,11 @@ class ConversationMessagesController
       final page = await _guardAuth(
         () => _repository().fetchMessages(arg, cursor: current.nextCursor),
       );
-      final merged = [...page.messages, ...current.messages];
-      merged.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      state = AsyncData(
+      final merged = _sortAndDedupeMessages([
+        ...page.messages,
+        ...current.messages,
+      ]);
+      _setStateAndCache(
         current.copyWith(
           messages: merged,
           nextCursor: page.nextCursor,
@@ -1444,7 +1702,7 @@ class ConversationMessagesController
       merged = _upsertMessage(merged, message);
     }
 
-    state = AsyncData(current.copyWith(messages: merged));
+    _setStateAndCache(current.copyWith(messages: merged));
   }
 
   Future<void> sendText(
@@ -1476,23 +1734,31 @@ class ConversationMessagesController
   }) async {
     _socketService?.markActivity();
     final stableClientMessageId = clientMessageId ?? const Uuid().v4();
-    final result = await _guardAuth(
-      () => _repository().sendTextMessage(
-        conversationId: arg,
-        content: content,
-        clientMessageId: stableClientMessageId,
-        replyToMessageId: replyToMessageId,
-        metadata: metadata,
-        messageType: messageType,
-        fileUrl: fileUrl,
-        isSilent: isSilent,
-        isScheduled: scheduledFor != null,
-        scheduledFor: scheduledFor,
-      ),
-    );
+
+    final cleanMetadata = Map<String, dynamic>.from(metadata ?? {});
+    cleanMetadata.remove('status');
+    cleanMetadata.remove('error');
+
+    final effectiveMetadata = <String, dynamic>{
+      ...cleanMetadata,
+      'clientMessageId': stableClientMessageId,
+    };
 
     if (scheduledFor != null) {
-      // Do not add scheduled messages to the main chat list
+      await _guardAuth(
+        () => _repository().sendTextMessage(
+          conversationId: arg,
+          content: content,
+          clientMessageId: stableClientMessageId,
+          replyToMessageId: replyToMessageId,
+          metadata: effectiveMetadata,
+          messageType: messageType,
+          fileUrl: fileUrl,
+          isSilent: isSilent,
+          isScheduled: true,
+          scheduledFor: scheduledFor,
+        ),
+      );
       return;
     }
 
@@ -1504,15 +1770,141 @@ class ConversationMessagesController
           hasMore: false,
           isLoadingMore: false,
         );
-    state = AsyncData(
+
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    final currentUserId = authUser?.id ?? '';
+    final tempCreatedAt = DateTime.now();
+
+    final tempMessage = ChatMessage(
+      id: 'temp_$stableClientMessageId',
+      conversationId: arg,
+      senderId: currentUserId,
+      sender: authUser != null
+          ? ChatDirectoryUser(
+              id: authUser.id,
+              username: authUser.username,
+              fullName: authUser.fullName,
+              role: authUser.role,
+              departmentId: authUser.departmentId,
+              branchId: authUser.branchId,
+              branchCode: authUser.branchCode,
+              isOnline: authUser.isOnline,
+              presenceStatus: authUser.presenceStatus,
+              isActive: authUser.isActive,
+              avatarUrl: authUser.avatarUrl,
+              lastSeen: authUser.lastSeen,
+              lastActiveAt: authUser.lastActiveAt,
+            )
+          : null,
+      content: content,
+      messageType: messageType ?? 'text',
+      fileUrl: fileUrl,
+      fileName: null,
+      fileSize: null,
+      mimeType: null,
+      replyToMessageId: replyToMessageId,
+      isDeleted: false,
+      metadata: {
+        ...effectiveMetadata,
+        'status': 'pending',
+      },
+      createdAt: tempCreatedAt,
+      updatedAt: tempCreatedAt,
+      seenBy: const [],
+      deliveredTo: const [],
+    );
+
+    // Optimistic insert: appears immediately at index 0 in descending order
+    _setStateAndCache(
       current.copyWith(
-        messages: _upsertMessage(current.messages, result.message),
+        messages: _upsertMessage(current.messages, tempMessage),
       ),
+    );
+
+    try {
+      final result = await _guardAuth(
+        () => _repository().sendTextMessage(
+          conversationId: arg,
+          content: content,
+          clientMessageId: stableClientMessageId,
+          replyToMessageId: replyToMessageId,
+          metadata: effectiveMetadata,
+          messageType: messageType,
+          fileUrl: fileUrl,
+          isSilent: isSilent,
+          isScheduled: false,
+          scheduledFor: null,
+        ),
+      );
+
+      final confirmedMetadata = Map<String, dynamic>.from(
+        result.message.metadata ?? const {},
+      );
+      confirmedMetadata['clientMessageId'] = stableClientMessageId;
+      confirmedMetadata.remove('status');
+      confirmedMetadata.remove('error');
+
+      final confirmedMessage = result.message.copyWith(
+        metadata: confirmedMetadata.isEmpty ? null : confirmedMetadata,
+      );
+
+      final latest = state.valueOrNull ?? current;
+      _setStateAndCache(
+        latest.copyWith(
+          messages: _upsertMessage(latest.messages, confirmedMessage),
+        ),
+        immediate: true,
+      );
+    } catch (error) {
+      final failedMessage = tempMessage.copyWith(
+        metadata: {
+          ...effectiveMetadata,
+          'status': 'failed',
+          'error': error.toString(),
+        },
+      );
+      final latest = state.valueOrNull ?? current;
+      _setStateAndCache(
+        latest.copyWith(
+          messages: _upsertMessage(latest.messages, failedMessage),
+        ),
+      );
+      rethrow;
+    }
+  }
+
+  Future<void> retryMessage(ChatMessage message) async {
+    final current = state.valueOrNull;
+    if (current != null) {
+      // Instantly remove failed message from state and cache so it doesn't linger
+      _setStateAndCache(
+        current.copyWith(
+          messages: current.messages.where((m) => m.id != message.id).toList(),
+        ),
+        immediate: true,
+      );
+    }
+
+    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
+        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
+
+    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
+    cleanMetadata.remove('status');
+    cleanMetadata.remove('error');
+
+    await sendMessage(
+      content: message.content,
+      replyToMessageId: message.replyToMessageId,
+      messageType: message.messageType,
+      fileUrl: message.fileUrl,
+      metadata: cleanMetadata,
+      clientMessageId: clientMessageId,
     );
   }
 
   Future<void> sendFile(
     String filePath, {
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -1523,6 +1915,7 @@ class ConversationMessagesController
       () => _repository().sendFileMessage(
         conversationId: arg,
         filePath: filePath,
+        content: content,
         replyToMessageId: replyToMessageId,
         customFileName: customFileName,
         metadata: metadata,
@@ -1537,7 +1930,7 @@ class ConversationMessagesController
           hasMore: false,
           isLoadingMore: false,
         );
-    state = AsyncData(
+    _setStateAndCache(
       current.copyWith(
         messages: _upsertMessage(current.messages, result.message),
       ),
@@ -1555,20 +1948,46 @@ class ConversationMessagesController
     if (current == null) {
       return;
     }
-    state = AsyncData(
+    _setStateAndCache(
       current.copyWith(messages: _upsertMessage(current.messages, updated)),
     );
   }
 
   Future<void> deleteMessage(String messageId) async {
-    await _guardAuth(() => _repository().removeMessage(messageId));
     final current = state.valueOrNull;
     if (current == null) {
       return;
     }
-    state = AsyncData(
+    final targetIndex = current.messages.indexWhere((m) => m.id == messageId);
+    final target = targetIndex != -1 ? current.messages[targetIndex] : null;
+    final isFailedOrTemp = messageId.startsWith('temp_') ||
+        target?.metadata?['status'] == 'failed';
+
+    if (isFailedOrTemp) {
+      _setStateAndCache(
+        current.copyWith(
+          messages: current.messages.where((m) => m.id != messageId).toList(),
+        ),
+      );
+      return;
+    }
+    await _guardAuth(() => _repository().removeMessage(messageId));
+    final latest = state.valueOrNull ?? current;
+    _setStateAndCache(
+      latest.copyWith(
+        messages: _markMessageDeleted(latest.messages, messageId),
+      ),
+    );
+  }
+
+  Future<void> deleteFailedMessage(String messageId) async {
+    final current = state.valueOrNull;
+    if (current == null) {
+      return;
+    }
+    _setStateAndCache(
       current.copyWith(
-        messages: _markMessageDeleted(current.messages, messageId),
+        messages: current.messages.where((m) => m.id != messageId).toList(),
       ),
     );
   }
@@ -1589,7 +2008,7 @@ class ConversationMessagesController
         }
       }
       if (previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           current.copyWith(
             messages: _upsertMessage(
               current.messages,
@@ -1610,7 +2029,7 @@ class ConversationMessagesController
       );
       final latest = state.valueOrNull;
       if (latest != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
         );
       }
@@ -1622,7 +2041,7 @@ class ConversationMessagesController
     } catch (error) {
       final latest = state.valueOrNull;
       if (latest != null && previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(
             messages: _upsertMessage(latest.messages, previousMessage),
           ),
@@ -1645,7 +2064,7 @@ class ConversationMessagesController
         }
       }
       if (previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           current.copyWith(
             messages: _upsertMessage(
               current.messages,
@@ -1662,14 +2081,14 @@ class ConversationMessagesController
       );
       final latest = state.valueOrNull;
       if (latest != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
         );
       }
     } catch (error) {
       final latest = state.valueOrNull;
       if (latest != null && previousMessage != null) {
-        state = AsyncData(
+        _setStateAndCache(
           latest.copyWith(
             messages: _upsertMessage(latest.messages, previousMessage),
           ),
@@ -1686,7 +2105,7 @@ class ConversationMessagesController
           .votePoll(messageId, optionIds);
       final st = state.valueOrNull;
       if (st != null) {
-        state = AsyncData(
+        _setStateAndCache(
           st.copyWith(messages: _upsertMessage(st.messages, updatedMessage)),
         );
       }
@@ -1762,4 +2181,62 @@ class ConversationMessagesController
   void sendTyping() => _socketService?.sendTyping(arg);
 
   void stopTyping() => _socketService?.stopTyping(arg);
+
+  Timer? _messagesCacheDebounceTimer;
+
+  Future<void> _saveStateToCache(ConversationMessagesState data) async {
+    try {
+      final jsonList = data.messages.map((m) => m.toJson()).toList();
+      await _repository().cache.saveRawJson('messages_$arg', {
+        'messages': jsonList,
+        'meta': {'nextCursor': data.nextCursor, 'hasMore': data.hasMore},
+      });
+    } catch (_) {}
+  }
+
+  void _setStateAndCache(ConversationMessagesState data, {bool immediate = false}) {
+    state = AsyncData(data);
+    _messagesCacheDebounceTimer?.cancel();
+    if (immediate) {
+      _saveStateToCache(data);
+    } else {
+      _messagesCacheDebounceTimer = Timer(const Duration(seconds: 4), () {
+        _saveStateToCache(data);
+      });
+    }
+  }
+}
+
+List<ChatMessage> sortAndDedupeChatMessages(Iterable<ChatMessage> source) {
+  final byKey = <String, ChatMessage>{};
+  for (final message in source) {
+    final clientMsgId = message.metadata?['clientMessageId']?.toString();
+    final key = (clientMsgId != null && clientMsgId.isNotEmpty)
+        ? 'client_$clientMsgId'
+        : 'id_${message.id}';
+
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = message;
+    } else {
+      final existingIsTemp = existing.id.startsWith('temp_');
+      final messageIsTemp = message.id.startsWith('temp_');
+      if (existingIsTemp && !messageIsTemp) {
+        byKey[key] = message;
+      } else if (!existingIsTemp && messageIsTemp) {
+        // Keep confirmed server message
+      } else {
+        byKey[key] = message;
+      }
+    }
+  }
+  final items = byKey.values.toList();
+  items.sort((a, b) {
+    final byCreatedAt = b.createdAt.compareTo(a.createdAt);
+    if (byCreatedAt != 0) {
+      return byCreatedAt;
+    }
+    return b.id.compareTo(a.id);
+  });
+  return items;
 }

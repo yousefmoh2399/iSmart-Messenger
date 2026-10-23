@@ -105,11 +105,17 @@ class _AuthenticatedAttachmentImageState
             ),
           );
         }
+        final dpr = MediaQuery.devicePixelRatioOf(context).clamp(1.0, 2.0);
+        final targetW = widget.width != null ? (widget.width! * dpr).round() : 800;
+        final targetH = widget.height != null ? (widget.height! * dpr).round() : null;
         return Image.memory(
           bytes,
           width: widget.width,
           height: widget.height,
+          cacheWidth: targetW,
+          cacheHeight: targetH,
           fit: widget.fit,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => SizedBox(
             width: widget.width,
             height: widget.height,

@@ -12,6 +12,7 @@ const exceljs = require("exceljs");
 const {
   ensureDirectory,
   fileExists,
+  getConversationAvatarUploadsDir,
   resolveStoredUploadPath,
   toRelativeUploadPath,
 } = require("../../utils/storage-paths");
@@ -32,9 +33,25 @@ const { classifyAttachment } = require("./chat-attachment.service");
 
 function getObjectIdString(value) {
   if (!value) return null;
-  if (typeof value === "string") return value;
-  if (value._id) return value._id.toString();
-  if (value.toString) return value.toString();
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^[a-fA-F0-9]{24}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/['"]?_?id['"]?\s*[:=]\s*(?:new\s+ObjectId\(['"])?([a-fA-F0-9]{24})['"]?\)?/i);
+    if (match && match[1]) return match[1];
+    return null;
+  }
+  if (value._id) {
+    const str = value._id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (value.id) {
+    const str = value.id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (typeof value.toString === "function") {
+    const str = value.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
   return null;
 }
 
@@ -123,6 +140,9 @@ function normalizeMessageMetadata(metadata) {
       allowDownload: rawPolicy.allowDownload !== false,
       allowForward: rawPolicy.allowForward !== false,
     };
+  }
+  if (nextMetadata.allowForward === false || rawPolicy?.allowForward === false) {
+    nextMetadata.allowForward = false;
   }
   return nextMetadata;
 }
@@ -320,14 +340,35 @@ function isAdminRole(role) {
 }
 
 function serializeUserLite(user) {
+  if (!user) {
+    return {
+      id: "",
+      username: "",
+      fullName: "",
+      jobTitle: "",
+      role: "user",
+      departmentId: null,
+      departmentIds: [],
+      branchId: null,
+      branchCode: "MAIN",
+      isOnline: false,
+      presenceStatus: "offline",
+      isActive: false,
+      avatarUrl: null,
+      lastSeen: null,
+      lastActiveAt: null,
+    };
+  }
+  const id = (user._id || user.id || "").toString();
   return {
-    id: user._id.toString(),
-    username: user.username,
-    fullName: user.fullName,
-    role: user.role,
+    id,
+    username: user.username || "",
+    fullName: user.fullName || "",
+    jobTitle: user.jobTitle || "",
+    role: user.role || "user",
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     departmentIds: Array.isArray(user.departmentIds)
-      ? user.departmentIds.map((entry) => entry.toString())
+      ? user.departmentIds.filter(Boolean).map((entry) => entry.toString())
       : user.departmentId
         ? [user.departmentId.toString()]
         : [],
@@ -358,19 +399,26 @@ function normalizeMediaUrl(value) {
 }
 
 function serializeReceipt(entry) {
+  const userId = entry.userId?._id
+    ? entry.userId._id.toString()
+    : (entry.userId?.toString?.() || "");
   return {
-    userId: entry.userId.toString(),
+    userId,
     at: entry.at,
   };
 }
 
 async function serializeConversation(conversation, currentUserId) {
-  const members = (conversation.members || []).map((member) =>
-    member._id ? serializeUserLite(member) : { id: member.toString() },
-  );
-  const admins = (conversation.admins || []).map((admin) =>
-    admin._id ? serializeUserLite(admin) : { id: admin.toString() },
-  );
+  const members = (conversation.members || [])
+    .filter(Boolean)
+    .map((member) =>
+      member._id ? serializeUserLite(member) : { id: member.toString() },
+    );
+  const admins = (conversation.admins || [])
+    .filter(Boolean)
+    .map((admin) =>
+      admin._id ? serializeUserLite(admin) : { id: admin.toString() },
+    );
 
   const memberState = await ConversationMemberState.findOne({
     conversationId: conversation._id,
@@ -405,23 +453,28 @@ async function serializeConversation(conversation, currentUserId) {
     type: conversation.type,
     name: conversation.name,
     description: conversation.description || "",
+    avatarUrl: conversation.avatarUrl ? normalizeMediaUrl(conversation.avatarUrl) : null,
     departmentId: conversation.departmentId
       ? conversation.departmentId._id
         ? conversation.departmentId._id.toString()
         : conversation.departmentId.toString()
       : null,
-    createdBy: conversation.createdBy?.toString?.() || conversation.createdBy,
+    createdBy: conversation.createdBy?._id
+      ? conversation.createdBy._id.toString()
+      : conversation.createdBy?.toString?.() || conversation.createdBy,
     members,
     admins,
-    broadcastPublisherIds: (conversation.broadcastPublisherIds || []).map(
-      (entry) => (entry._id ? entry._id.toString() : entry.toString()),
-    ),
-    blockedMemberIds: (conversation.blockedMembers || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString(),
-    ),
-    blockedMembers: (conversation.blockedMembers || []).map((entry) =>
-      entry._id ? serializeUserLite(entry) : { id: entry.toString() },
-    ),
+    broadcastPublisherIds: (conversation.broadcastPublisherIds || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+    blockedMemberIds: (conversation.blockedMembers || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+    blockedMembers: (conversation.blockedMembers || [])
+      .filter(Boolean)
+      .map((entry) =>
+        entry._id ? serializeUserLite(entry) : { id: entry.toString() },
+      ),
     pinnedMessage: conversation.pinnedMessage
       ? {
           content: conversation.pinnedMessage.content || "",
@@ -445,12 +498,24 @@ async function serializeConversation(conversation, currentUserId) {
 }
 
 function serializeMessage(message, sender = null) {
+  const metadata = message.metadata ? { ...message.metadata } : {};
+  delete metadata.status;
+  delete metadata.error;
+  const clientMessageId =
+    message.clientMessageId || metadata.clientMessageId || null;
+  if (clientMessageId && !metadata.clientMessageId) {
+    metadata.clientMessageId = clientMessageId;
+  }
+  const senderId = message.senderId?._id
+    ? message.senderId._id.toString()
+    : (message.senderId?.toString?.() || "");
   return {
     id: message._id.toString(),
     conversationId: message.conversationId.toString(),
-    senderId: message.senderId.toString(),
+    senderId,
     sender: sender ? serializeUserLite(sender) : null,
     content: message.content,
+    clientMessageId,
     messageType: message.messageType,
     fileUrl: message.fileUrl,
     fileName: message.fileName,
@@ -458,7 +523,9 @@ function serializeMessage(message, sender = null) {
     mimeType: message.mimeType || null,
     replyToMessageId: message.replyToMessageId?.toString?.() || null,
     isDeleted: message.isDeleted === true,
-    metadata: message.metadata || null,
+    isScheduled: message.isScheduled === true,
+    scheduledFor: message.scheduledFor || null,
+    metadata: Object.keys(metadata).length > 0 ? metadata : null,
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,
     seenBy: (message.seenBy || []).map(serializeReceipt),
@@ -493,6 +560,7 @@ async function buildDeliveryReceipts(userIds) {
 
 async function createSystemConversationMessage(conversation, actor, payload) {
   const recipientIds = (conversation.members || [])
+    .filter(Boolean)
     .map((entry) => (entry._id ? entry._id.toString() : entry.toString()))
     .filter((userId) => userId !== actor.id);
 
@@ -522,7 +590,7 @@ async function createSystemConversationMessage(conversation, actor, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -537,7 +605,7 @@ async function refreshConversationLastMessage(conversationId) {
     .sort({ createdAt: -1, _id: -1 })
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -643,15 +711,15 @@ async function getConversationById(conversationId) {
   })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "blockedMembers",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .exec();
@@ -662,38 +730,45 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
   const shouldPaginate =
     options.page !== undefined || options.limit !== undefined;
   const page = Math.max(1, Math.min(Number(options.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(options.limit || 50), 100));
+  const limit = Math.max(1, Math.min(Number(options.limit || 50), 5000));
   const skip = (page - 1) * limit;
   const query = {
     isActive: true,
     _id: { $ne: currentUser.id },
   };
-  if (currentUser.role === "user") {
-    query.role = { $ne: "admin" };
-  }
+
+  const andConditions = [];
 
   if (search) {
     const regex = new RegExp(escapeRegExp(search), "i");
-    query.$or = [
-      { username: regex },
-      { fullName: regex },
-      { branchCode: regex },
-    ];
+    andConditions.push({
+      $or: [
+        { username: regex },
+        { fullName: regex },
+        { branchCode: regex },
+        { jobTitle: regex },
+      ],
+    });
   }
   if (options.departmentId) {
-    const departmentMatch = [
-      { departmentId: options.departmentId },
-      { departmentIds: options.departmentId },
-    ];
-    if (query.$or) {
-      query.$and = [{ $or: query.$or }, { $or: departmentMatch }];
-      delete query.$or;
-    } else {
-      query.$or = departmentMatch;
-    }
+    andConditions.push({
+      $or: [
+        { departmentId: options.departmentId },
+        { departmentIds: options.departmentId },
+      ],
+    });
   }
   if (options.branchId) {
-    query.branchId = options.branchId;
+    andConditions.push({
+      $or: [
+        { branchId: options.branchId },
+        { branchCode: options.branchId },
+      ],
+    });
+  }
+
+  if (andConditions.length > 0) {
+    query.$and = andConditions;
   }
 
   const usersQuery = User.find(query).sort({
@@ -727,9 +802,9 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
-  const memberIds = (conversation.members || []).map((entry) =>
-    entry._id ? entry._id.toString() : entry.toString(),
-  );
+  const memberIds = (conversation.members || [])
+    .filter(Boolean)
+    .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
 
   if (conversation.type === "department") {
     const conversationDepartmentId =
@@ -760,10 +835,12 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   if (conversation.type === "direct" && currentUser.role === "user") {
-    const target = (conversation.members || []).find((entry) => {
-      const entryId = entry._id ? entry._id.toString() : entry.toString();
-      return entryId !== currentUserId;
-    });
+    const target = (conversation.members || [])
+      .filter(Boolean)
+      .find((entry) => {
+        const entryId = entry._id ? entry._id.toString() : entry.toString();
+        return entryId !== currentUserId;
+      });
     if (isRestrictedDirectTarget(currentUser, target)) {
       throw new ApiError(403, "Conversation access denied.");
     }
@@ -783,21 +860,37 @@ async function assertConversationManagementAccess(currentUser, conversation) {
     return;
   }
 
-  if (conversation.type === "direct") {
-    const memberIds = (conversation.members || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString(),
+  const canCreateRooms = await userHasPermission(currentUser, "canCreateRooms");
+  if (canCreateRooms && conversation.type !== "direct") {
+    return;
+  }
+
+  if (conversation.type === "broadcast") {
+    const canSendBroadcast = await userHasPermission(
+      currentUser,
+      "canSendBroadcast",
     );
+    if (canSendBroadcast) {
+      return;
+    }
+  }
+
+  if (conversation.type === "direct") {
+    const memberIds = (conversation.members || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
     const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
     if (currentUserId && memberIds.includes(currentUserId)) {
       return;
     }
   }
 
-  const adminIds = (conversation.admins || []).map((entry) =>
-    entry._id ? entry._id.toString() : entry.toString(),
-  );
+  const adminIds = (conversation.admins || [])
+    .filter(Boolean)
+    .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
-  if (currentUserId && adminIds.includes(currentUserId)) {
+  const createdById = getObjectIdString(conversation.createdBy);
+  if (currentUserId && (adminIds.includes(currentUserId) || createdById === currentUserId)) {
     return;
   }
 
@@ -854,11 +947,11 @@ async function listConversationsForUser(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -906,38 +999,57 @@ async function listConversationsForUser(currentUser) {
 
 async function listManageableConversations(currentUser) {
   const isAdmin = currentUser.role === "admin";
-  const query = isAdmin
-    ? { deletedAt: null, type: { $ne: "direct" } }
-    : {
-        deletedAt: null,
-        $or: [
-          { admins: currentUser.id },
-          { createdBy: currentUser.id },
-          ...(currentUser.departmentId
-            ? [{ type: "department", departmentId: currentUser.departmentId }]
-            : []),
-        ],
-      };
+  const [canCreateRooms, canSendBroadcast] = await Promise.all([
+    isAdmin ? true : userHasPermission(currentUser, "canCreateRooms"),
+    isAdmin ? true : userHasPermission(currentUser, "canSendBroadcast"),
+  ]);
+  const hasGlobalRoomAccess = isAdmin || canCreateRooms;
+
+  let query;
+  if (hasGlobalRoomAccess) {
+    query = {
+      deletedAt: null,
+      type: { $in: ["group", "department", "broadcast"] },
+    };
+  } else {
+    const orClauses = [
+      { admins: currentUser.id },
+      { createdBy: currentUser.id },
+      ...(currentUser.departmentId
+        ? [{ type: "department", departmentId: currentUser.departmentId }]
+        : []),
+      ...(canSendBroadcast ? [{ type: "broadcast" }] : []),
+    ];
+    query = {
+      deletedAt: null,
+      type: { $in: ["group", "department", "broadcast"] },
+      $or: orClauses,
+    };
+  }
 
   const conversations = await Conversation.find(query)
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
 
   const visible = [];
   for (const conversation of conversations) {
-    if (isDepartmentDefaultConversation(conversation)) {
+    if (!conversation || conversation.type === "direct") {
       continue;
     }
-    visible.push(await serializeConversation(conversation, currentUser.id));
+    try {
+      visible.push(await serializeConversation(conversation, currentUser.id));
+    } catch (_) {
+      // Skip malformed conversation without failing the entire manageable list
+    }
   }
   return visible;
 }
@@ -1024,6 +1136,7 @@ async function createConversation(currentUser, payload) {
       type,
       name,
       description,
+      avatarUrl: payload.avatarUrl || null,
       createdBy: currentUser.id,
       members,
       admins: [currentUser.id],
@@ -1058,6 +1171,7 @@ async function createConversation(currentUser, payload) {
       type,
       name: name || `${department.name} room`,
       description,
+      avatarUrl: payload.avatarUrl || null,
       departmentId: department._id,
       createdBy: currentUser.id,
       members: memberIds,
@@ -1105,6 +1219,7 @@ async function createConversation(currentUser, payload) {
     type,
     name: name || "Broadcast",
     description,
+    avatarUrl: payload.avatarUrl || null,
     createdBy: currentUser.id,
     members,
     admins: adminIds,
@@ -1130,6 +1245,9 @@ async function updateConversation(currentUser, conversationId, payload) {
   }
   if (payload.description != null) {
     conversation.description = sanitizeText(payload.description, 500);
+  }
+  if (payload.avatarUrl !== undefined) {
+    conversation.avatarUrl = payload.avatarUrl;
   }
   if (payload.isArchived != null) {
     conversation.isArchived = Boolean(payload.isArchived);
@@ -1389,7 +1507,7 @@ async function listMessagesForConversation(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1423,7 +1541,7 @@ async function createMessage(currentUser, payload, file) {
     })
       .populate(
         "senderId",
-        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
     if (existing) {
@@ -1494,13 +1612,12 @@ async function createMessage(currentUser, payload, file) {
         : null;
 
     if (
-      forwardedMessage.storedFilePath &&
-      sourcePolicy &&
-      sourcePolicy.allowForward === false
+      (sourcePolicy && sourcePolicy.allowForward === false) ||
+      (forwardedMessage.metadata && forwardedMessage.metadata.allowForward === false)
     ) {
       throw new ApiError(
         403,
-        "This attachment cannot be forwarded by sender policy.",
+        "This message cannot be forwarded by sender policy.",
       );
     }
   }
@@ -1569,24 +1686,69 @@ async function createMessage(currentUser, payload, file) {
         normalizedMetadata.departmentNames ||
         payload.departmentNames ||
         [],
+      userIds:
+        rawTargets.userIds ||
+        normalizedMetadata.userIds ||
+        payload.userIds ||
+        [],
+      userNames:
+        rawTargets.userNames ||
+        normalizedMetadata.userNames ||
+        payload.userNames ||
+        [],
     };
+    const targetDepartmentIds =
+      await resolveBroadcastTargetDepartmentIds(mergedRawTargets);
+    const targetUserIds = Array.from(
+      new Set(
+        (mergedRawTargets.userIds || [])
+          .map((entry) => getObjectIdString(entry))
+          .filter(Boolean),
+      ),
+    );
     const requestedTargetCount =
       (mergedRawTargets.departmentIds || []).length +
       (mergedRawTargets.departmentCodes || []).length +
-      (mergedRawTargets.departmentNames || []).length;
-    const targetDepartmentIds =
-      await resolveBroadcastTargetDepartmentIds(mergedRawTargets);
-    if (requestedTargetCount > 0 && targetDepartmentIds.length === 0) {
-      throw new ApiError(400, "No valid target departments selected.");
+      (mergedRawTargets.departmentNames || []).length +
+      targetUserIds.length;
+    if (requestedTargetCount > 0 && targetDepartmentIds.length === 0 && targetUserIds.length === 0) {
+      throw new ApiError(400, "No valid target departments or users selected.");
     }
-    const userQuery = {
-      isActive: true,
-      ...(targetDepartmentIds.length > 0
-        ? { departmentId: { $in: targetDepartmentIds } }
-        : {}),
-    };
-    const targetUsers = await User.find(userQuery, "_id").lean();
-    recipientIds = targetUsers.map((entry) => entry._id.toString());
+
+    if (targetDepartmentIds.length > 0 && targetUserIds.length > 0) {
+      const targetDeptUsers = await User.find(
+        {
+          isActive: true,
+          $or: [
+            { departmentId: { $in: targetDepartmentIds } },
+            { departmentIds: { $in: targetDepartmentIds } },
+          ],
+        },
+        "_id",
+      ).lean();
+      const combined = new Set([
+        ...targetDeptUsers.map((entry) => entry._id.toString()),
+        ...targetUserIds,
+      ]);
+      recipientIds = Array.from(combined);
+    } else if (targetDepartmentIds.length > 0) {
+      const targetDeptUsers = await User.find(
+        {
+          isActive: true,
+          $or: [
+            { departmentId: { $in: targetDepartmentIds } },
+            { departmentIds: { $in: targetDepartmentIds } },
+          ],
+        },
+        "_id",
+      ).lean();
+      recipientIds = targetDeptUsers.map((entry) => entry._id.toString());
+    } else if (targetUserIds.length > 0) {
+      recipientIds = targetUserIds;
+    } else {
+      const allActiveUsers = await User.find({ isActive: true }, "_id").lean();
+      recipientIds = allActiveUsers.map((entry) => entry._id.toString());
+    }
 
     const conversationMemberIds = new Set(
       (conversation.members || []).map((entry) => getObjectIdString(entry)),
@@ -1630,11 +1792,21 @@ async function createMessage(currentUser, payload, file) {
         .map((id) => departmentCodeById.get(id))
         .filter(Boolean);
     }
+    let targetUserNames = mergedRawTargets.userNames || [];
+    if (targetUserIds.length > 0 && targetUserNames.length === 0) {
+      const users = await User.find(
+        { _id: { $in: targetUserIds } },
+        "fullName username",
+      ).lean();
+      targetUserNames = users.map((u) => u.fullName || u.username);
+    }
     normalizedMetadata.broadcastTargets = {
       departmentIds: targetDepartmentIds,
       departmentNames: targetDepartmentNames,
       departmentCodes: targetDepartmentCodes,
-      sentToAllDepartments: targetDepartmentIds.length === 0,
+      userIds: targetUserIds,
+      userNames: targetUserNames,
+      sentToAllDepartments: targetDepartmentIds.length === 0 && targetUserIds.length === 0,
     };
   } else if (conversation.type === "department" && currentUser.departmentId) {
     const departmentUsers = await User.find(
@@ -1747,6 +1919,9 @@ async function createMessage(currentUser, payload, file) {
     normalizedMetadata.silent = true;
   }
 
+  delete normalizedMetadata.status;
+  delete normalizedMetadata.error;
+
   const targetRecipientIds = recipientIds.filter(
     (userId) => userId !== currentUser.id,
   );
@@ -1808,7 +1983,7 @@ async function createMessage(currentUser, payload, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1871,8 +2046,16 @@ async function markConversationDelivered(currentUser, conversationId) {
       const targets = message.metadata.broadcastTargets;
       if (targets && targets.sentToAllDepartments === false) {
         const targetDeptIds = (targets.departmentIds || []).map(String);
+        const targetUserIds = (targets.userIds || []).map(String);
+        const currentUserId = String(currentUser.id || currentUser._id);
         const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
-        if (!userDeptId || !targetDeptIds.includes(userDeptId)) {
+        const userDeptIds = (currentUser.departmentIds || []).map(String);
+        const isUserMatch = targetUserIds.includes(currentUserId);
+        const isDeptMatch = targetDeptIds.length > 0 && (
+          (userDeptId && targetDeptIds.includes(userDeptId)) ||
+          userDeptIds.some((id) => targetDeptIds.includes(id))
+        );
+        if (!isUserMatch && !isDeptMatch) {
           continue;
         }
       }
@@ -1934,8 +2117,16 @@ async function markPendingDeliveriesForUser(currentUser) {
       const targets = message.metadata.broadcastTargets;
       if (targets && targets.sentToAllDepartments === false) {
         const targetDeptIds = (targets.departmentIds || []).map(String);
+        const targetUserIds = (targets.userIds || []).map(String);
+        const currentUserId = String(currentUser.id || currentUser._id);
         const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
-        if (!userDeptId || !targetDeptIds.includes(userDeptId)) {
+        const userDeptIds = (currentUser.departmentIds || []).map(String);
+        const isUserMatch = targetUserIds.includes(currentUserId);
+        const isDeptMatch = targetDeptIds.length > 0 && (
+          (userDeptId && targetDeptIds.includes(userDeptId)) ||
+          userDeptIds.some((id) => targetDeptIds.includes(id))
+        );
+        if (!isUserMatch && !isDeptMatch) {
           continue;
         }
       }
@@ -2069,7 +2260,7 @@ async function updateMessage(currentUser, messageId, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2134,7 +2325,7 @@ async function toggleMessageReaction(currentUser, messageId, emoji) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2174,7 +2365,7 @@ async function toggleMessageFavorite(currentUser, messageId) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2694,7 +2885,7 @@ async function searchMessages(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2772,7 +2963,7 @@ async function listFavoriteMessages(
       .limit(batchSize)
       .populate(
         "senderId",
-        "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
 
@@ -2977,7 +3168,7 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
   return serializeMessage(populated, populated.senderId);
@@ -3033,7 +3224,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role departmentId isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -3139,7 +3330,110 @@ async function exportPollToExcel(currentUser, messageId) {
   };
 }
 
+
+async function updateConversationAvatar(currentUser, conversationId, file) {
+  if (!file) {
+    throw new ApiError(400, "صورة المحادثة مطلوبة.");
+  }
+  const conversation = await Conversation.findOne({
+    _id: conversationId,
+    deletedAt: null,
+  });
+  if (!conversation) {
+    throw new ApiError(404, "المحادثة غير موجودة.");
+  }
+  await assertConversationManagementAccess(currentUser, conversation);
+
+  conversation.avatarUrl = `/api/chat/conversations/${conversationId}/avatar?v=${Date.now()}`;
+  await conversation.save();
+
+  const avatarDirectory = getConversationAvatarUploadsDir(conversationId);
+  try {
+    const entries = await fs.promises.readdir(avatarDirectory);
+    for (const entry of entries) {
+      const candidatePath = path.join(avatarDirectory, entry);
+      if (candidatePath !== resolveStoredUploadPath(file.path)) {
+        await deleteFileIfExists(candidatePath);
+      }
+    }
+  } catch (_) {}
+
+  await logAuditEvent({
+    actorId: currentUser.id,
+    action: "conversation.avatar.updated",
+    entityType: "Conversation",
+    entityId: conversation._id,
+    payload: { avatarUrl: conversation.avatarUrl },
+  });
+
+  return serializeConversation(conversation, currentUser.id);
+}
+
+async function removeConversationAvatar(currentUser, conversationId) {
+  const conversation = await Conversation.findOne({
+    _id: conversationId,
+    deletedAt: null,
+  });
+  if (!conversation) {
+    throw new ApiError(404, "المحادثة غير موجودة.");
+  }
+  await assertConversationManagementAccess(currentUser, conversation);
+
+  conversation.avatarUrl = null;
+  await conversation.save();
+
+  const avatarDirectory = getConversationAvatarUploadsDir(conversationId);
+  try {
+    const entries = await fs.promises.readdir(avatarDirectory);
+    for (const entry of entries) {
+      const candidatePath = path.join(avatarDirectory, entry);
+      await deleteFileIfExists(candidatePath);
+    }
+  } catch (_) {}
+
+  await logAuditEvent({
+    actorId: currentUser.id,
+    action: "conversation.avatar.removed",
+    entityType: "Conversation",
+    entityId: conversation._id,
+    payload: {},
+  });
+
+  return serializeConversation(conversation, currentUser.id);
+}
+
+async function getConversationAvatarFilePath(conversationId) {
+  const conversation = await Conversation.findOne({
+    _id: conversationId,
+    deletedAt: null,
+  }).lean();
+  if (!conversation) {
+    throw new ApiError(404, "Avatar not found.");
+  }
+
+  const avatarDirectory = getConversationAvatarUploadsDir(conversationId);
+  let entries = [];
+  try {
+    entries = await fs.promises.readdir(avatarDirectory);
+  } catch (_) {
+    throw new ApiError(404, "Avatar not found.");
+  }
+  if (!entries.length) {
+    throw new ApiError(404, "Avatar not found.");
+  }
+  const latestEntry = entries
+    .map((fileName) => ({
+      fileName,
+      filePath: path.join(avatarDirectory, fileName),
+    }))
+    .sort((a, b) => (a.fileName < b.fileName ? 1 : -1))[0];
+  return latestEntry.filePath;
+}
+
 module.exports = {
+  updateConversationAvatar,
+  removeConversationAvatar,
+  getConversationAvatarFilePath,
   votePollMessage,
   exportPollToExcel,
   serializeUserLite,

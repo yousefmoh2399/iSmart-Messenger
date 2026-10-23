@@ -29,7 +29,7 @@ class UserManagementRepository {
     String? role,
     String? status,
     int page = 1,
-    int limit = 50,
+    int limit = 100,
   }) async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/admin/users',
@@ -80,7 +80,7 @@ class UserManagementRepository {
     String? role,
     String? status,
     int page = 1,
-    int limit = 50,
+    int limit = 100,
   }) async {
     final result = await fetchUsersPage(
       search: search,

@@ -1,11 +1,38 @@
 const ConversationMemberState = require("../models/conversation-member-state.model");
 
+function extractObjectId(entry) {
+  if (!entry) return null;
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    if (/^[a-fA-F0-9]{24}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/['"]?_?id['"]?\s*[:=]\s*(?:new\s+ObjectId\(['"])?([a-fA-F0-9]{24})['"]?\)?/i);
+    if (match && match[1]) return match[1];
+    return null;
+  }
+  if (entry._id) {
+    const str = entry._id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (entry.id) {
+    const str = entry.id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (typeof entry.toString === "function") {
+    const str = entry.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  return null;
+}
+
 async function ensureConversationMemberStates(conversationId, memberIds) {
-  if (!conversationId || !Array.isArray(memberIds) || memberIds.length === 0) {
+  const cleanMemberIds = Array.isArray(memberIds)
+    ? [...new Set(memberIds.map(extractObjectId).filter(Boolean))]
+    : [];
+  if (!conversationId || cleanMemberIds.length === 0) {
     return;
   }
 
-  const operations = memberIds.map((userId) => ({
+  const operations = cleanMemberIds.map((userId) => ({
     updateOne: {
       filter: { conversationId, userId },
       update: {
@@ -26,16 +53,13 @@ async function ensureConversationMemberStates(conversationId, memberIds) {
 }
 
 async function removeConversationMemberState(conversationId, userId) {
-  await ConversationMemberState.deleteOne({ conversationId, userId });
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId) return;
+  await ConversationMemberState.deleteOne({ conversationId, userId: cleanUserId });
 }
 
 async function syncConversationMemberStates(conversationId, memberIds) {
-  const normalized = [...new Set((memberIds || []).map(entry => {
-    if (!entry) return "";
-    if (typeof entry === "string") return entry;
-    if (entry._id) return entry._id.toString();
-    return entry.toString();
-  }).filter(Boolean))];
+  const normalized = [...new Set((memberIds || []).map(extractObjectId).filter(Boolean))];
 
   await ensureConversationMemberStates(conversationId, normalized);
   await ConversationMemberState.deleteMany({
@@ -45,9 +69,10 @@ async function syncConversationMemberStates(conversationId, memberIds) {
 }
 
 async function incrementUnreadCounts(conversationId, recipientIds, exceptUserId = null) {
-  const filtered = (recipientIds || []).filter(
-    (userId) => String(userId) !== String(exceptUserId || "")
-  );
+  const exceptId = exceptUserId ? extractObjectId(exceptUserId) : null;
+  const filtered = (recipientIds || [])
+    .map(extractObjectId)
+    .filter((userId) => Boolean(userId) && userId !== exceptId);
   if (filtered.length === 0) {
     return;
   }

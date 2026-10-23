@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/document_folder_service.dart';
+import '../../chat/providers/chat_folders_provider.dart';
 import '../data/auth_repository.dart';
 
 enum AuthStatus { initializing, unauthenticated, authenticated }
@@ -150,18 +152,51 @@ class AuthController extends Notifier<AuthState> {
     _isLoggingOut = true;
     try {
       debugPrint('[AuthController] Logging out...');
-      ref.read(chatSocketServiceProvider).setPresenceOffline();
-      ref.read(chatSocketServiceProvider).disconnect();
+      try {
+        ref.read(chatSocketServiceProvider).setPresenceOffline();
+        ref.read(chatSocketServiceProvider).disconnect();
+      } catch (_) {}
 
-      await ref.read(pushNotificationServiceProvider).unregisterCurrentDevice();
-      await ref.read(authRepositoryProvider).logout();
+      try {
+        await ref.read(pushNotificationServiceProvider).unregisterCurrentDevice();
+      } catch (e) {
+        debugPrint('[AuthController] Unregister push device error: $e');
+      }
+
+      try {
+        await ref.read(authRepositoryProvider).logout();
+      } catch (e) {
+        debugPrint('[AuthController] Logout repository error: $e');
+      }
+
+      // Wipe cached chat data so the next user doesn't see stale messages
+      try {
+        await ref.read(chatLocalCacheProvider).clearAll();
+      } catch (_) {}
+
+      // Reset active conversation
+      ref.read(activeConversationIdProvider.notifier).state = null;
+
+      // Invalidate all dependent providers to ensure a clean state
+      ref.invalidate(chatOverviewControllerProvider);
+      ref.invalidate(chatRealtimeControllerProvider);
+      ref.invalidate(usersControllerProvider);
+      ref.invalidate(remoteDocumentsControllerProvider);
+      ref.invalidate(adminDocumentsControllerProvider);
+      ref.invalidate(announcementsControllerProvider);
+      ref.invalidate(adminAnnouncementsControllerProvider);
+      ref.invalidate(ticketsControllerProvider);
+      ref.invalidate(mobilePrinterControllerProvider);
+      ref.invalidate(pendingUploadsControllerProvider);
+      ref.invalidate(scanSessionControllerProvider);
+      ref.invalidate(documentFoldersProvider);
+      ref.invalidate(chatFoldersProvider);
 
       state = const AuthState(status: AuthStatus.unauthenticated);
       debugPrint('[AuthController] Logged out successfully');
     } catch (e) {
       debugPrint('[AuthController] Logout error: $e');
       state = const AuthState(status: AuthStatus.unauthenticated);
-      rethrow;
     } finally {
       _isLoggingOut = false;
     }
@@ -194,11 +229,13 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> updateProfile({
     required String fullName,
+    String? jobTitle,
     String? password,
   }) async {
     final repository = ref.read(authRepositoryProvider);
     final user = await repository.updateProfile(
       fullName: fullName,
+      jobTitle: jobTitle,
       password: password,
     );
     final session = await repository.getSession();

@@ -33,6 +33,7 @@ const {
 
 const typingState = new Map();
 const typingTimeouts = new Map();
+let activeIOInstance = null;
 const userSockets = new Map();
 const socketPresence = new Map();
 const socketClientType = new Map();
@@ -95,7 +96,7 @@ function unregisterUserSocket(userId, socketId) {
 function hasLiveSocketId(io, socketId) {
   const registry = io?.sockets?.sockets;
   if (!registry) {
-    return true;
+    return false;
   }
   if (typeof registry.has === "function") {
     return registry.has(socketId);
@@ -106,7 +107,7 @@ function hasLiveSocketId(io, socketId) {
   if (typeof registry === "object") {
     return Boolean(registry[socketId]);
   }
-  return true;
+  return false;
 }
 
 function pruneUserSockets(io, userId) {
@@ -246,9 +247,8 @@ function getAggregatedPresence(io, userId) {
 async function publishAggregatedPresence(io, userId, extra = {}) {
   const aggregated = getAggregatedPresence(io, userId);
   const nextSignature = `${aggregated.isOnline ? "1" : "0"}:${aggregated.status}`;
-  const hasExtra = extra && Object.keys(extra).length > 0;
   const currentSignature = publishedPresenceState.get(userId);
-  if (!hasExtra && currentSignature === nextSignature) {
+  if (currentSignature === nextSignature) {
     return;
   }
   await setUserPresence(userId, {
@@ -338,17 +338,31 @@ async function resolveSocketUser(socket) {
   };
 }
 
-function emitMessageToRecipients(io, message) {
+function emitMessageToRecipients(io, message, recipientUserIds = []) {
   const recipients = new Set(
-    (message.deliveredTo || [])
-      .map((entry) => entry.userId?.toString?.() || entry.userId)
+    (recipientUserIds || [])
+      .concat(
+        (message.deliveredTo || []).map(
+          (entry) => entry.userId?.toString?.() || entry.userId,
+        ),
+      )
       .filter(Boolean),
   );
 
+  // 1. Emit to the conversation room so whoever is actively viewing the conversation gets it immediately
+  if (message.conversationId) {
+    io.to(`conversation:${message.conversationId}`).emit(
+      "receive_message",
+      message,
+    );
+  }
+
+  // 2. Emit to sender's personal room
   if (message.senderId) {
     io.to(`user:${message.senderId}`).emit("receive_message", message);
   }
 
+  // 3. Emit to all recipients' personal rooms
   for (const userId of recipients) {
     io.to(`user:${userId}`).emit("receive_message", message);
     io.to(`user:${userId}`).emit("message_delivered", {
@@ -462,6 +476,7 @@ function initializeChatSocketServer(httpServer) {
       credentials: true,
     },
   });
+  activeIOInstance = io;
 
   // On server restart, clear stale online flags from previous process lifetime.
   User.updateMany(
@@ -1524,7 +1539,46 @@ function initializeChatSocketServer(httpServer) {
   return io;
 }
 
+function getLiveSocketMetrics() {
+  const io = activeIOInstance;
+  let liveSocketCount = 0;
+  if (io?.sockets?.sockets) {
+    if (typeof io.sockets.sockets.size === "number") {
+      liveSocketCount = io.sockets.sockets.size;
+    } else if (typeof io.sockets.sockets === "object") {
+      liveSocketCount = Object.keys(io.sockets.sockets).length;
+    }
+  } else {
+    for (const sockets of userSockets.values()) {
+      liveSocketCount += sockets.size;
+    }
+  }
+
+  const liveUserCount = userSockets.size;
+
+  return {
+    liveSocketCount,
+    liveUserCount,
+    isSocketConnected(socketId) {
+      if (!socketId) return false;
+      return hasLiveSocketId(io, String(socketId));
+    },
+    isUserOnline(userId) {
+      if (!userId) return false;
+      const uid = String(userId._id || userId);
+      const sockets = userSockets.get(uid);
+      if (!sockets || !sockets.size) return false;
+      if (!io) return sockets.size > 0;
+      for (const sId of sockets) {
+        if (hasLiveSocketId(io, sId)) return true;
+      }
+      return false;
+    },
+  };
+}
+
 module.exports = {
   initializeChatSocketServer,
   getUserDeliveryContext,
+  getLiveSocketMetrics,
 };

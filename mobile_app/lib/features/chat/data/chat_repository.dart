@@ -13,6 +13,7 @@ import '../../../core/settings/user_preferences.dart';
 import '../../../features/auth/data/auth_repository.dart';
 import '../../../shared/services/local_media_storage_service.dart';
 import '../models/chat_models.dart';
+import 'chat_local_cache.dart';
 
 class ChatRepository {
   ChatRepository(
@@ -20,7 +21,9 @@ class ChatRepository {
     this._localStorage,
     this._preferences, {
     AuthRepository? authRepository,
-  }) : _authRepository = authRepository;
+    ChatLocalCache? cache,
+  })  : _authRepository = authRepository,
+        _cache = cache ?? ChatLocalCache();
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   static const int _maxConcurrentPreviewDownloads = 3;
@@ -35,6 +38,9 @@ class ChatRepository {
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
   final AuthRepository? _authRepository;
+  final ChatLocalCache _cache;
+
+  ChatLocalCache get cache => _cache;
 
   /// Dedicated Dio instance for file downloads — no timeouts so large files
   /// never get aborted mid-transfer. The auth token is copied per-request.
@@ -72,24 +78,39 @@ class ChatRepository {
     return Duration(seconds: seconds);
   }
 
+  List<ChatConversation> _parseConversationsSafely(
+    List<Map<String, dynamic>> rawItems,
+  ) {
+    final parsed = <ChatConversation>[];
+    for (final item in rawItems) {
+      try {
+        final conv = ChatConversation.fromJson(item);
+        if (conv.id.isNotEmpty) {
+          parsed.add(conv);
+        }
+      } catch (_) {
+        // Ignore single malformed conversation so others still load
+      }
+    }
+    return parsed;
+  }
+
   Future<List<ChatConversation>> fetchConversations() async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/conversations',
     );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    return _parseConversationsSafely(
+      _extractList(response.data, 'conversations'),
+    );
   }
 
   Future<List<ChatConversation>> fetchManageableConversations() async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/admin/conversations',
     );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    return _parseConversationsSafely(
+      _extractList(response.data, 'conversations'),
+    );
   }
 
   Future<ChatConversation> fetchConversation(String conversationId) async {
@@ -235,6 +256,7 @@ class ChatRepository {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -245,6 +267,7 @@ class ChatRepository {
         'type': type,
         'name': name,
         'description': description,
+        if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
         'memberIds': memberIds,
         'adminIds': adminIds,
         if (departmentId != null && departmentId.isNotEmpty)
@@ -262,24 +285,57 @@ class ChatRepository {
     int limit = 40,
     bool isScheduled = false,
   }) async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations/$conversationId/messages',
-      queryParameters: {
-        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
-        'limit': limit,
-        if (isScheduled) 'isScheduled': 'true',
-      },
-    );
-    final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
-    return ChatMessagesPage(
-      messages: _extractList(
-        response.data,
-        'messages',
-      ).map(ChatMessage.fromJson).toList(),
-      nextCursor: meta['nextCursor'] as String?,
-      hasMore: meta['hasMore'] == true,
-      limit: meta['limit'] as int? ?? limit,
-    );
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations/$conversationId/messages',
+        queryParameters: {
+          if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+          'limit': limit,
+          if (isScheduled) 'isScheduled': 'true',
+        },
+      );
+      final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
+      if (cursor == null && !isScheduled && response.data != null) {
+        await _cache.saveRawJson('messages_$conversationId', response.data!);
+      }
+      return ChatMessagesPage(
+        messages: _extractList(
+          response.data,
+          'messages',
+        ).map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: meta['limit'] as int? ?? limit,
+      );
+    } catch (e) {
+      if (e is DioException && cursor == null && !isScheduled) {
+        final cached = await _cache.loadRawJson('messages_$conversationId');
+        if (cached != null) {
+          final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+          return ChatMessagesPage(
+            messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+            nextCursor: meta['nextCursor'] as String?,
+            hasMore: meta['hasMore'] == true,
+            limit: meta['limit'] as int? ?? limit,
+          );
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<ChatMessagesPage?> getCachedMessages(String conversationId) async {
+    final cached = await _cache.loadRawJson('messages_$conversationId');
+    if (cached != null) {
+      final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+      return ChatMessagesPage(
+        messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: (meta['limit'] as num?)?.toInt() ?? 40,
+      );
+    }
+    return null;
   }
 
   Future<ChatSearchResult> searchMessages({
@@ -374,6 +430,7 @@ class ChatRepository {
   Future<ChatPostResult> sendFileMessage({
     required String conversationId,
     required String filePath,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -390,6 +447,8 @@ class ChatRepository {
     final uploadTimeout = _uploadTimeoutForBytes(fileLength);
     final formData = FormData.fromMap({
       'conversationId': conversationId,
+      if (content != null && content.trim().isNotEmpty)
+        'content': content.trim(),
       if (replyToMessageId != null && replyToMessageId.isNotEmpty)
         'replyToMessageId': replyToMessageId,
       if (safeCustomName != null && safeCustomName.isNotEmpty)
@@ -502,6 +561,15 @@ class ChatRepository {
     return ChatMessage.fromJson(
       response.data?['message'] as Map<String, dynamic>,
     );
+  }
+
+  Future<ChatMessage> sendScheduledMessageNow(String messageId) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/send-now',
+    );
+    final data = response.data?['data'] ?? response.data;
+    final msgJson = (data is Map<String, dynamic> ? data['message'] : null) ?? data;
+    return ChatMessage.fromJson(msgJson as Map<String, dynamic>);
   }
 
   Future<void> removeMessage(String messageId) async {
@@ -1059,10 +1127,16 @@ class ChatRepository {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/admin/departments',
-      data: {'name': name, 'code': code, 'description': description},
+      data: {
+        'name': name,
+        'code': code,
+        'description': description,
+        'managers': managers,
+      },
     );
     return DepartmentSummary.fromJson(
       response.data?['department'] as Map<String, dynamic>,
@@ -1166,6 +1240,58 @@ class ChatRepository {
 
   Future<void> deleteManagedConversation(String conversationId) async {
     await deleteConversation(conversationId, deleteForEveryone: true);
+  }
+
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final token = await _authRepository?.getToken();
+    final resolvedFileName = fileName?.trim().isNotEmpty == true
+        ? fileName!.trim()
+        : (filePath != null ? p.basename(filePath) : 'avatar.jpg');
+
+    final MultipartFile multipartFile;
+    if (fileBytes != null) {
+      multipartFile = MultipartFile.fromBytes(fileBytes, filename: resolvedFileName);
+    } else if (filePath != null && filePath.isNotEmpty) {
+      multipartFile = await MultipartFile.fromFile(filePath, filename: resolvedFileName);
+    } else {
+      throw ArgumentError('Either filePath or fileBytes must be provided');
+    }
+
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      data: FormData.fromMap({
+        'avatar': multipartFile,
+      }),
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        contentType: 'multipart/form-data',
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
+  }
+
+  Future<ChatConversation> removeConversationAvatar(String conversationId) async {
+    final token = await _authRepository?.getToken();
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
   }
 
   Future<ChatConversation> addGroupMembers({

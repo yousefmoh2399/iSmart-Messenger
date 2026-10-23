@@ -1090,17 +1090,23 @@ Future<Map<String, dynamic>> startElectronUpdate({
   required String downloadUrl,
   String? token,
   String? checksumSha256,
+  String? fileName,
+  String? silentInstallArgs,
+  String? installerKind,
 }) async {
   final result = await _callElectron('startUpdate', {
     'downloadUrl': downloadUrl,
     if (token != null) 'token': token,
     if (checksumSha256 != null) 'checksumSha256': checksumSha256,
+    if (fileName != null) 'fileName': fileName,
+    if (silentInstallArgs != null) 'silentInstallArgs': silentInstallArgs,
+    if (installerKind != null) 'installerKind': installerKind,
   });
   return _asStringMap(result);
 }
 
-Future<Map<String, dynamic>> applyElectronUpdate() async {
-  final result = await _callElectron('applyUpdate');
+Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]) async {
+  final result = await _callElectron('applyUpdate', options ?? {});
   return _asStringMap(result);
 }
 
@@ -1148,5 +1154,34 @@ Future<String?> electronCaptureScreen() async {
 /// Opens Remote Desktop Connection (mstsc.exe) via the main process.
 Future<bool> electronOpenRdp(String ip) async {
   final result = _asStringMap(await _callElectron('openRdp', {'ip': ip}));
+  return result['success'] == true;
+}
+
+Future<bool> electronOpenPing(String ip) async {
+  final result = _asStringMap(await _callElectron('openPing', {'ip': ip}));
+  return result['success'] == true;
+}
+
+Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async {
+  if (!isElectron()) {
+    return const <String, dynamic>{
+      'success': false,
+      'message': 'فحص الاتصال عبر Electron غير متاح.',
+    };
+  }
+  return _asStringMap(await _callElectron('probePeerStatus', {'ip': ip}));
+}
+
+Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}) async {
+  if (!isElectron()) return const <String, dynamic>{'success': false};
+  return _asStringMap(await _callElectron('getStorageBreakdown', {'directoryPath': directoryPath}));
+}
+
+Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(await _callElectron('clearStorageCache', {
+    'category': category,
+    'directoryPath': directoryPath,
+  }));
   return result['success'] == true;
 }

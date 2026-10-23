@@ -417,7 +417,7 @@ async function buildExcelReport({
         value: `${totalPaper.exactReams.toFixed(2)} رزمة (${totalPaper.fullReams} رزمة و ${totalPaper.remainingSheets} ورقة)`,
       },
       {
-        metric: "عدد العملاء التقديري (16 ورقة/عميل)",
+        metric: "عدد العملاء التقديري",
         value: `${totalPaper.estimatedClients} عميل`,
       },
       {
@@ -534,7 +534,7 @@ async function buildExcelReport({
       { header: "إجمالي الصفحات", key: "totalPages", width: 20 },
       { header: "استهلاك الرزم (500 ورقة/رزمة)", key: "reams", width: 28 },
       { header: "الرزم المطلوبة محاسبيًا", key: "requiredReams", width: 22 },
-      { header: "العملاء المفترضين (16 ورقة/عميل)", key: "estimatedClients", width: 28 },
+      { header: "العملاء المفترضين", key: "estimatedClients", width: 20 },
       { header: "متوسط صفحات/طابعة", key: "avgPagesPerPrinter", width: 18 },
       { header: "طابعات بقراءات جزئية", key: "partialPrintersCount", width: 22 },
       { header: "طابعات باستهلاك مرتفع جدًا", key: "suspiciousPrintersCount", width: 26 },
@@ -727,7 +727,7 @@ async function buildPdfReport({
       { label: isAllMonths ? `إجمالي الاستهلاك للفترة` : `إجمالي استهلاك شهر ${monthName}`, value: `${mTotal} صفحة` },
       { label: "إجمالي استهلاك الرزم (500 ورقة/رزمة)", value: `${mPaper.exactReams.toFixed(2)} رزمة (${mPaper.fullReams} رزمة و ${mPaper.remainingSheets} ورقة)` },
       { label: "الرزم المطلوبة محاسبيًا", value: mPaper.requiredReams },
-      { label: "عدد العملاء التقديري (16 ورقة/عميل)", value: `${mPaper.estimatedClients} عميل` },
+      { label: "عدد العملاء التقديري", value: `${mPaper.estimatedClients} عميل` },
       { label: "فروع تحتاج مراجعة القراءات", value: mPartialBranches },
       { label: isAllMonths ? "استهلاك أبيض وأسود للفترة" : "استهلاك أبيض وأسود للشهر", value: `${mMono} صفحة` },
       { label: isAllMonths ? "استهلاك ملون للفترة" : "استهلاك ملون للشهر", value: `${mColor} صفحة` }

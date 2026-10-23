@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart' hide RefreshCallback;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -36,17 +37,21 @@ import '../utils/chat_attachment_policy.dart';
 import 'attachment_send_dialogs.dart';
 import 'chat_appearance.dart';
 import 'chat_appearance_screen.dart';
+import 'conversation_details_screen.dart';
 import 'group_management_screen.dart';
+import 'widgets/broadcast_target_picker_sheet.dart';
 import 'widgets/attachment_bottom_sheet.dart';
-import 'widgets/chat_animated_reaction_picker.dart';
 import 'widgets/chat_audio_attachment_player.dart';
 import 'widgets/chat_avatar.dart';
+import 'widgets/chat_forward_sheet.dart';
 import 'widgets/chat_link_text.dart';
 import 'widgets/chat_poll_bubble.dart';
 import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/gif_picker_panel.dart';
 import 'widgets/poll_creator_dialog.dart';
 import 'widgets/scheduled_messages_list.dart';
+import 'widgets/whatsapp_reaction_picker.dart';
+import 'widgets/chat_remote_search_sheet.dart';
 
 /// خطوط احتياطية لعرض الإيموجي ملوّنًا (مهم على سطح المكتب/لينكس).
 const List<String> _kChatReactionEmojiFontFallbacks = <String>[
@@ -57,9 +62,16 @@ const List<String> _kChatReactionEmojiFontFallbacks = <String>[
 ];
 
 class ConversationScreen extends ConsumerStatefulWidget {
-  const ConversationScreen({super.key, required this.conversation});
+  const ConversationScreen({
+    super.key,
+    required this.conversation,
+    this.initialTargetMessage,
+    this.initialMessageId,
+  });
 
   final ChatConversation conversation;
+  final ChatMessage? initialTargetMessage;
+  final String? initialMessageId;
 
   @override
   ConsumerState<ConversationScreen> createState() => _ConversationScreenState();
@@ -95,17 +107,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   ChatConversation? _conversation;
   ChatMessage? _replyingTo;
+  bool _isSendingText = false;
   ChatMessage? _editingMessage;
 
   late final ProviderContainer _container;
 
   int _lastMessageCount = 0;
   bool _isLoadingMore = false;
-  bool _didAutoScrollOnEnter = false;
   bool _showScrollToLatestButton = false;
+  int _unreadBelowCount = 0;
   DateTime? _lastLoadMoreAt;
   bool _didSendTyping = false;
   String? _focusedMessageId;
+  String? _pulsingHeartMessageId;
   bool _isUploadingAttachment = false;
   double _uploadProgress = 0;
   String? _uploadingFileName;
@@ -120,6 +134,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       _downloadStates.isEmpty ? null : _downloadStates.values.first.fileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
+  Set<String> _broadcastTargetUserIds = <String>{};
   bool _isRecordingVoice = false;
   bool _isVoiceRecordingPaused = false;
   Duration _recordingDuration = Duration.zero;
@@ -272,18 +287,51 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _container = ProviderScope.containerOf(context, listen: false);
     _conversation = widget.conversation;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (widget.initialTargetMessage != null) {
+      _focusedMessageId = widget.initialTargetMessage!.id;
+    } else if (widget.initialMessageId != null) {
+      _focusedMessageId = widget.initialMessageId;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       _container.read(activeConversationIdProvider.notifier).state =
           widget.conversation.id;
       _container.read(chatSocketServiceProvider).markActivity();
-      ref
-          .read(
-            conversationMessagesControllerProvider(
-              widget.conversation.id,
-            ).notifier,
-          )
-          .markSeen();
+      final controller = ref.read(
+        conversationMessagesControllerProvider(
+          widget.conversation.id,
+        ).notifier,
+      );
+      controller.markSeen();
+      controller.refresh();
+
+      final target = widget.initialTargetMessage;
+      final targetId = target?.id ?? widget.initialMessageId;
+      if (targetId != null) {
+        if (target != null) {
+          await ref
+              .read(
+                conversationMessagesControllerProvider(
+                  widget.conversation.id,
+                ).notifier,
+              )
+              .hydrateMessages([target]);
+        }
+        if (!mounted) return;
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+        if (!mounted) return;
+        await _scrollToMessageById(targetId);
+
+        Future<void>.delayed(const Duration(milliseconds: 2800), () {
+          if (!mounted) return;
+          if (_focusedMessageId == targetId) {
+            setState(() {
+              _focusedMessageId = null;
+            });
+          }
+        });
+      }
     });
 
     _scrollController.addListener(_onScroll);
@@ -344,7 +392,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         return;
       }
 
-      if (event.payload['conversationId'] != widget.conversation.id) {
+      if (event.payload['conversationId']?.toString() != widget.conversation.id) {
         return;
       }
 
@@ -424,7 +472,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   void _onScroll() {
     if (!_scrollController.hasClients) return;
 
-    final shouldShowScrollToLatest = !_isNearBottom();
+    final isNear = _isNearBottom();
+    final shouldShowScrollToLatest = !isNear;
+    if (isNear && _unreadBelowCount > 0 && mounted) {
+      setState(() {
+        _unreadBelowCount = 0;
+      });
+    }
     if (shouldShowScrollToLatest != _showScrollToLatestButton) {
       setState(() {
         _showScrollToLatestButton = shouldShowScrollToLatest;
@@ -443,7 +497,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    if (_scrollController.position.pixels <= 120) {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 300) {
       final now = DateTime.now();
       if (_lastLoadMoreAt != null &&
           now.difference(_lastLoadMoreAt!) <
@@ -459,8 +514,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (_isLoadingMore || !_scrollController.hasClients) return;
 
     _isLoadingMore = true;
-    final previousMaxExtent = _scrollController.position.maxScrollExtent;
-
     try {
       await ref
           .read(
@@ -469,26 +522,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ).notifier,
           )
           .loadMore();
-
-      if (!mounted || !_scrollController.hasClients) return;
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
-
-        final newMaxExtent = _scrollController.position.maxScrollExtent;
-        final delta = newMaxExtent - previousMaxExtent;
-        if (delta <= 0) {
-          return;
-        }
-        final targetOffset = _scrollController.offset + delta;
-
-        _scrollController.jumpTo(
-          targetOffset.clamp(
-            _scrollController.position.minScrollExtent,
-            _scrollController.position.maxScrollExtent,
-          ),
-        );
-      });
     } finally {
       _isLoadingMore = false;
     }
@@ -612,31 +645,129 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       sendPath: sendDraft.filePath,
       displayName: sendDraft.displayName,
       restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+      caption: sendDraft.caption,
     );
   }
 
   void _showSendOptions() {
+    final hasContent = _messageController.text.trim().isNotEmpty;
+    if (!hasContent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى كتابة نص الرسالة أولاً قبل جدولتها.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final today6PM = DateTime(now.year, now.month, now.day, 18, 0);
+    final tomorrow9AM = DateTime(now.year, now.month, now.day + 1, 9, 0);
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 8, bottom: 6),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black26,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
               ListTile(
-                leading: const Icon(Icons.notifications_off_rounded),
-                title: const Text('إرسال بدون صوت'),
+                leading: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.notifications_off_rounded, color: Colors.orange, size: 18),
+                ),
+                title: const Text('إرسال بدون صوت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('يصل إشعار صامت للمستلم دون إصدار نغمة', style: TextStyle(fontSize: 12)),
                 onTap: () {
                   Navigator.pop(sheetContext);
                   _sendText(isSilent: true);
                 },
               ),
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    'جدولة الرسالة',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ),
+              ),
               ListTile(
-                leading: const Icon(Icons.schedule_rounded),
-                title: const Text('جدولة الرسالة'),
+                dense: true,
+                leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('بعد 30 دقيقة', style: TextStyle(fontSize: 14)),
+                trailing: Text(
+                  DateFormat('hh:mm a', 'ar').format(now.add(const Duration(minutes: 30))),
+                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _sendText(scheduledFor: now.add(const Duration(minutes: 30)));
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('بعد ساعة واحدة', style: TextStyle(fontSize: 14)),
+                trailing: Text(
+                  DateFormat('hh:mm a', 'ar').format(now.add(const Duration(hours: 1))),
+                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _sendText(scheduledFor: now.add(const Duration(hours: 1)));
+                },
+              ),
+              if (now.isBefore(today6PM.subtract(const Duration(minutes: 30))))
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.nightlight_round, size: 20, color: Color(0xFF007AFF)),
+                  title: const Text('مساء اليوم (06:00 م)', style: TextStyle(fontSize: 14)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _sendText(scheduledFor: today6PM);
+                  },
+                ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.wb_sunny_rounded, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('صباح الغد (09:00 ص)', style: TextStyle(fontSize: 14)),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _sendText(scheduledFor: tomorrow9AM);
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.edit_calendar_rounded, size: 20, color: Color(0xFF007AFF)),
+                title: const Text('تحديد موعد مخصص...', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 onTap: () async {
                   Navigator.pop(sheetContext);
                   final selectedDate = await showDatePicker(
@@ -658,7 +789,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         selectedTime.hour,
                         selectedTime.minute,
                       );
-                      // check if it's in the future
                       if (scheduledFor.isAfter(DateTime.now())) {
                         _sendText(scheduledFor: scheduledFor);
                       } else {
@@ -672,6 +802,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   }
                 },
               ),
+              const SizedBox(height: 8),
             ],
           ),
         );
@@ -761,6 +892,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     bool isSilent = false,
     DateTime? scheduledFor,
   }) async {
+    if (_isSendingText) return;
+
     if (_isUploadingAttachment) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -798,33 +931,52 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       conversationMessagesControllerProvider(widget.conversation.id).notifier,
     );
 
-    if (_editingMessage != null) {
-      await notifier.editMessage(messageId: _editingMessage!.id, content: text);
-    } else {
-      await notifier.sendText(
-        text,
-        replyToMessageId: _replyingTo?.id,
-        metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
-        isSilent: isSilent,
-        scheduledFor: scheduledFor,
-      );
-    }
+    _isSendingText = true;
+    final wasEditing = _editingMessage != null;
+    final targetEditingMessage = _editingMessage;
+    final targetReplyingTo = _replyingTo;
 
+    // Immediately clear text field and draft for instant UI response and prevent double sends
     _messageController.clear();
     unawaited(_draftStore.clear(widget.conversation.id));
 
-    setState(() {
-      _replyingTo = null;
-      _editingMessage = null;
-      if (authUserId != null && authUserId.isNotEmpty) {
-        _typingUsers.remove(authUserId);
-      }
-    });
+    if (mounted) {
+      setState(() {
+        _replyingTo = null;
+        _editingMessage = null;
+        if (authUserId != null && authUserId.isNotEmpty) {
+          _typingUsers.remove(authUserId);
+        }
+      });
+      _scrollToBottom(animated: true);
+    }
 
     notifier.stopTyping();
     _didSendTyping = false;
 
-    _scrollToBottom(animated: true);
+    try {
+      if (wasEditing && targetEditingMessage != null) {
+        await notifier.editMessage(messageId: targetEditingMessage.id, content: text);
+      } else {
+        await notifier.sendText(
+          text,
+          replyToMessageId: targetReplyingTo?.id,
+          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+          isSilent: isSilent,
+          scheduledFor: scheduledFor,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('فشل الإرسال: لا يوجد اتصال بالسيرفر حالياً.'),
+          ),
+        );
+      }
+    } finally {
+      _isSendingText = false;
+    }
   }
 
   Future<void> _sendFile() async {
@@ -873,6 +1025,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -964,6 +1117,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -1037,11 +1191,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (mounted) _showChatAttachmentSizeExceededSnackbar();
       return;
     }
+    if (!mounted) return;
+
+    final sendDraft = await showAttachmentSendDialog(context, photo.path);
+    if (sendDraft == null) return;
 
     await _sendPreparedFile(
-      sendPath: photo.path,
-      displayName: p.basename(photo.path),
-      restrictForwardAndDownload: false,
+      sendPath: sendDraft.filePath,
+      displayName: sendDraft.displayName,
+      restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+      caption: sendDraft.caption,
     );
   }
 
@@ -1049,10 +1208,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) return;
 
-    final pollData = await showDialog<Map<String, dynamic>>(
+    final pollData = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      builder: (_) =>
-          const PollCreatorDialog(), // Will fix the import using prefix or direct
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const PollCreatorDialog(),
     );
 
     if (pollData == null || !mounted) return;
@@ -1094,8 +1254,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) return;
 
-    final pollData = await showDialog<Map<String, dynamic>>(
+    final pollData = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (_) => const PollCreatorDialog(isChecklistMode: true),
     );
 
@@ -1261,6 +1423,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     required String sendPath,
     required String displayName,
     required bool restrictForwardAndDownload,
+    String? caption,
     Map<String, dynamic>? extraMetadata,
     Map<String, dynamic>? fixedBroadcastMetadata,
   }) async {
@@ -1300,6 +1463,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         'allowDownload': !restrictForwardAndDownload,
         'allowForward': !restrictForwardAndDownload,
       },
+      if (restrictForwardAndDownload)
+        'allowForward': false,
     };
 
     setState(() {
@@ -1317,6 +1482,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           )
           .sendFile(
             sendPath,
+            content: caption,
             replyToMessageId: _replyingTo?.id,
             customFileName: displayName,
             metadata: metadata,
@@ -1444,7 +1610,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       CheckboxListTile(
                         value: restrictForwardAndDownload,
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('منع إعادة التوجيه والتحميل'),
+                        title: const Text('🔒 محتوى محمي (لهذه الملفات فقط)'),
+                        subtitle: const Text('منع إعادة التوجيه والتحميل للملفات المحددة فقط دون التأثير على المحادثة'),
                         onChanged: (value) => setDialogState(() {
                           restrictForwardAndDownload = value == true;
                         }),
@@ -1593,15 +1760,22 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (!_isRecordingVoice) {
       return;
     }
-    final rtl = Directionality.of(context) == TextDirection.rtl;
     final o = details.offsetFromOrigin;
-    final cancel = rtl ? o.dx > 76 : o.dx < -76;
-    final lock = o.dy < -72;
+    // Natural horizontal swipe in either direction (left or right) to cancel
+    final cancel = o.dx.abs() > 36;
+    // Sliding up by 50px locks hands-free recording
+    final lock = o.dy < -50;
+
+    if (cancel && !_voiceSlideCancelArmed) {
+      HapticFeedback.selectionClick();
+    }
+
     setState(() {
       _voiceGestureOffset = o;
       _voiceSlideCancelArmed = cancel;
       if (lock && !_isVoiceRecordingLocked) {
         _isVoiceRecordingLocked = true;
+        _isVoiceHoldActive = false;
         HapticFeedback.heavyImpact();
       }
     });
@@ -1637,6 +1811,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         _voiceSlideCancelArmed = false;
         _voiceGestureOffset = Offset.zero;
       });
+      return;
+    }
+
+    // Accidental tap protection (< 550ms)
+    final started = _recordingStartedAt;
+    final dur = started == null
+        ? _recordingDuration
+        : DateTime.now().difference(started);
+    if (dur.inMilliseconds < 550) {
+      await _cancelVoiceRecording();
       return;
     }
 
@@ -2128,18 +2312,44 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _saveReceivedSticker(ChatMessage message) async {
-    if (!message.attachmentDownloadAllowed) return;
+    if (!message.attachmentDownloadAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('غير مسموح بحفظ هذا المرفق.')),
+        );
+      }
+      return;
+    }
     try {
-      final path = await ref
+      Uint8List? bytes;
+      try {
+        final path = await ref
+            .read(chatRepositoryProvider)
+            .downloadAttachment(message);
+        final file = File(path);
+        if (await file.exists()) {
+          bytes = await file.readAsBytes();
+        }
+      } catch (_) {}
+
+      bytes ??= await ref
           .read(chatRepositoryProvider)
-          .downloadAttachment(message);
+          .fetchAttachmentBytes(message);
+
+      if (bytes.isEmpty) {
+        throw Exception('ملف الملصق فارغ');
+      }
+
       await saveLocalSticker(
-        name: message.fileName ?? 'sticker.png',
-        bytes: await File(path).readAsBytes(),
+        name: message.fileName ?? 'sticker_${message.id.substring(0, 6)}.png',
+        bytes: bytes,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الملصق في مكتبتك.')),
+          const SnackBar(
+            content: Text('تمت إضافة الملصق إلى مكتبة ملصقاتك بنجاح! ⭐'),
+            duration: Duration(seconds: 2),
+          ),
         );
       }
     } catch (_) {
@@ -2189,43 +2399,27 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   void _scrollToBottom({bool animated = false}) {
-    unawaited(_settleScrollToBottom(animated: animated));
-  }
-
-  Future<void> _settleScrollToBottom({required bool animated}) async {
-    for (var i = 0; i < 2; i++) {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
+    if (!_scrollController.hasClients) return;
+    if (_showScrollToLatestButton || _unreadBelowCount > 0) {
+      setState(() {
+        _showScrollToLatestButton = false;
+        _unreadBelowCount = 0;
+      });
     }
-
-    final target = _scrollController.position.maxScrollExtent;
     if (animated) {
-      await _scrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 220),
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
       );
     } else {
-      _scrollController.jumpTo(target);
-    }
-
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || !_scrollController.hasClients) {
-      return;
-    }
-    final correctedTarget = _scrollController.position.maxScrollExtent;
-    if ((_scrollController.offset - correctedTarget).abs() > 1) {
-      _scrollController.jumpTo(correctedTarget);
+      _scrollController.jumpTo(0);
     }
   }
 
   bool _isNearBottom() {
     if (!_scrollController.hasClients) return true;
-    return (_scrollController.position.maxScrollExtent -
-            _scrollController.position.pixels) <=
-        120;
+    return _scrollController.position.pixels < 50;
   }
 
   List<ChatMessage> _deduplicateMessagesById(List<ChatMessage> input) {
@@ -2233,13 +2427,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return input;
     }
     final seen = <String>{};
-    final dedupedReversed = <ChatMessage>[];
-    for (final message in input.reversed) {
+    final deduped = <ChatMessage>[];
+    for (final message in input) {
       if (seen.add(message.id)) {
-        dedupedReversed.add(message);
+        deduped.add(message);
       }
     }
-    return dedupedReversed.reversed.toList();
+    return deduped;
   }
 
   List<ChatMessage> _collapseMediaAlbums(List<ChatMessage> messages) {
@@ -2262,13 +2456,29 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
       return <ChatMessage>[message];
     }
-    return messages
+    final album = messages
         .where(
           (item) =>
               item.isImageMessage &&
               item.metadata?['mediaGroupId']?.toString() == groupId,
         )
         .toList();
+    album.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return album;
+  }
+
+  String _formatDateDivider(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final difference = today.difference(target).inDays;
+    if (difference == 0) {
+      return 'اليوم';
+    } else if (difference == 1) {
+      return 'أمس';
+    } else {
+      return DateFormat('yyyy/MM/dd').format(date);
+    }
   }
 
   void _toggleMessageSelection(String messageId) {
@@ -2294,17 +2504,109 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   Future<void> _scrollToMessageById(String messageId) async {
-    final key = _messageKeys[messageId];
-    final targetContext = key?.currentContext;
-    if (targetContext == null) {
-      return;
+    for (int attempt = 0; attempt < 6; attempt++) {
+      var key = _messageKeys[messageId];
+      var targetContext = key?.currentContext;
+      if ((targetContext == null || !targetContext.mounted) &&
+          _scrollController.hasClients) {
+        final messages = ref
+            .read(conversationMessagesControllerProvider(widget.conversation.id))
+            .valueOrNull
+            ?.messages;
+        if (messages != null && messages.isNotEmpty) {
+          final targetIndex = messages.indexWhere((m) => m.id == messageId);
+          if (targetIndex >= 0) {
+            final maxExt = _scrollController.position.maxScrollExtent;
+            if (maxExt > 0) {
+              final ratio = (targetIndex / messages.length).clamp(0.0, 1.0);
+              _scrollController.jumpTo(ratio * maxExt);
+              await WidgetsBinding.instance.endOfFrame;
+              await Future<void>.delayed(const Duration(milliseconds: 40));
+              if (!mounted) return;
+              key = _messageKeys[messageId];
+              targetContext = key?.currentContext;
+            }
+          }
+        }
+      }
+      if (targetContext != null && targetContext.mounted) {
+        await Scrollable.ensureVisible(
+          targetContext,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          alignment: 0.25,
+        );
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 70));
+      if (!mounted) return;
     }
-    await Scrollable.ensureVisible(
-      targetContext,
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
-      alignment: 0.2,
-    );
+  }
+
+
+  Future<void> _jumpToRepliedMessage(String replyId) async {
+    await _scrollToMessageById(replyId);
+    if (!mounted) return;
+    setState(() => _focusedMessageId = replyId);
+    await Future<void>.delayed(const Duration(milliseconds: 240));
+    if (!mounted) return;
+    setState(() => _focusedMessageId = null);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    setState(() => _focusedMessageId = replyId);
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    if (!mounted) return;
+    if (_focusedMessageId == replyId) {
+      setState(() => _focusedMessageId = null);
+    }
+  }
+
+  void _handleDoubleTapReaction(ChatMessage message) {
+    HapticFeedback.mediumImpact();
+    ref
+        .read(
+          conversationMessagesControllerProvider(
+            widget.conversation.id,
+          ).notifier,
+        )
+        .toggleReaction(
+          messageId: message.id,
+          emoji: '❤️',
+        );
+
+    setState(() {
+      _pulsingHeartMessageId = message.id;
+    });
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted && _pulsingHeartMessageId == message.id) {
+        setState(() => _pulsingHeartMessageId = null);
+      }
+    });
+  }
+
+  String _formatReceiptDateTime(DateTime? dateTime) {
+    if (dateTime == null) return '—';
+    final local = dateTime.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(local.year, local.month, local.day);
+    final diff = today.difference(target).inDays;
+    final hour = local.hour > 12 ? local.hour - 12 : (local.hour == 0 ? 12 : local.hour);
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour >= 12 ? 'م' : 'ص';
+    final timeStr = '$hour:$minute $period';
+
+    if (diff == 0) {
+      return 'اليوم في $timeStr';
+    } else if (diff == 1) {
+      return 'أمس في $timeStr';
+    } else {
+      const months = [
+        'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+        'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+      ];
+      return '${local.day} ${months[local.month - 1]} ${local.year}، $timeStr';
+    }
   }
 
   Map<String, dynamic>? _replyMetadata(ChatMessage? replyTarget) {
@@ -2349,150 +2651,39 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     final departments = overview?.departments ?? const <DepartmentSummary>[];
-    if (departments.isEmpty) {
-      return {
-        'broadcastTargets': {
-          'departmentIds': const <String>[],
-          'departmentCodes': const <String>[],
-          'departmentNames': const <String>[],
-        },
-      };
-    }
+    final users = overview?.users ?? const <ChatDirectoryUser>[];
+    final currentUserId =
+        ref.read(authControllerProvider).valueOrNull?.id ?? '';
 
-    final selectedIds = <String>{..._broadcastTargetDepartmentIds};
-    var sendToAll = _broadcastSendToAllDepartments || selectedIds.isEmpty;
-
-    final selection = await showModalBottomSheet<bool>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
-
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setModalState) => SafeArea(
-          child: FractionallySizedBox(
-            heightFactor: 0.82,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'إرسال البث إلى',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: sendToAll,
-                    onChanged: (value) {
-                      setModalState(() {
-                        sendToAll = value;
-                      });
-                    },
-                    title: const Text('كل الأقسام'),
-                    subtitle: const Text(
-                      'لو أغلقتها، اختار أقسام محددة للبث الحالي فقط.',
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Expanded(
-                    child: ListView(
-                      children: departments
-                          .map(
-                            (department) => CheckboxListTile(
-                              value: sendToAll
-                                  ? true
-                                  : selectedIds.contains(department.id),
-                              onChanged: sendToAll
-                                  ? null
-                                  : (value) {
-                                      setModalState(() {
-                                        if (value == true) {
-                                          selectedIds.add(department.id);
-                                        } else {
-                                          selectedIds.remove(department.id);
-                                        }
-                                      });
-                                    },
-                              title: Text(department.name),
-                              subtitle: Text(
-                                department.description.isEmpty
-                                    ? 'قسم ${department.code}'
-                                    : department.description,
-                              ),
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () =>
-                              Navigator.of(sheetContext).pop(false),
-                          child: const Text('إلغاء'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: (!sendToAll && selectedIds.isEmpty)
-                              ? null
-                              : () => Navigator.of(sheetContext).pop(true),
-                          child: const Text('إرسال'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    final payload = await BroadcastTargetPickerSheet.show(
+      context,
+      departments: departments,
+      users: users,
+      currentUserId: currentUserId,
+      initialSendToAll: _broadcastSendToAllDepartments,
+      initialDepartmentIds: _broadcastTargetDepartmentIds,
+      initialUserIds: _broadcastTargetUserIds,
     );
 
-    if (selection != true) {
+    if (payload == null) {
       return null;
     }
 
-    _broadcastSendToAllDepartments = sendToAll;
-    _broadcastTargetDepartmentIds = sendToAll ? <String>{} : selectedIds;
-    final selectedDepartments = sendToAll
-        ? const <DepartmentSummary>[]
-        : departments.where((entry) => selectedIds.contains(entry.id)).toList();
-    final selectedDepartmentIds = selectedDepartments
-        .map((entry) => entry.id.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentCodes = selectedDepartments
-        .map((entry) => entry.code.trim().toUpperCase())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentNames = selectedDepartments
-        .map((entry) => entry.name.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
+    final rawTargets =
+        payload['broadcastTargets'] as Map<String, dynamic>? ?? {};
+    final bool isAll = rawTargets['sentToAllDepartments'] == true;
+    final deptIds = (rawTargets['departmentIds'] as List<dynamic>? ?? const [])
+        .map((e) => e.toString())
+        .toSet();
+    final userIds = (rawTargets['userIds'] as List<dynamic>? ?? const [])
+        .map((e) => e.toString())
+        .toSet();
 
-    return {
-      'broadcastTargets': {
-        'departmentIds': sendToAll ? const <String>[] : selectedDepartmentIds,
-        'departmentCodes': sendToAll
-            ? const <String>[]
-            : selectedDepartmentCodes,
-        'departmentNames': sendToAll
-            ? const <String>[]
-            : selectedDepartmentNames,
-      },
-    };
+    _broadcastSendToAllDepartments = isAll;
+    _broadcastTargetDepartmentIds = isAll ? <String>{} : deptIds;
+    _broadcastTargetUserIds = isAll ? <String>{} : userIds;
+
+    return payload;
   }
 
   Map<String, dynamic> _forwardMetadataFor(ChatMessage message) {
@@ -2593,127 +2784,206 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    final conversations = overview.conversations
-        .where((conversation) => conversation.id != widget.conversation.id)
-        .toList();
-    ChatConversation? target;
+    final currentUserId =
+        ref.read(authControllerProvider).valueOrNull?.id ?? '';
 
-    await showModalBottomSheet<void>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
-
-      builder: (sheetContext) => SafeArea(
-        child: FractionallySizedBox(
-          heightFactor: 0.82,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'إعادة توجيه ${selectedMessages.length} رسالة',
-                        style: Theme.of(sheetContext).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const Text('إلغاء'),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: conversations.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'لا توجد محادثات أخرى متاحة لإعادة التوجيه.',
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        itemCount: conversations.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final conversation = conversations[index];
-                          return ListTile(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            tileColor: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerLowest,
-                            title: Text(
-                              conversation.displayTitle(
-                                ref
-                                        .read(authControllerProvider)
-                                        .valueOrNull
-                                        ?.id ??
-                                    '',
-                              ),
-                            ),
-                            subtitle: Text(switch (conversation.type) {
-                              'direct' => 'محادثة مباشرة',
-                              'department' => 'غرفة قسم',
-                              'broadcast' => 'قناة إعلانية',
-                              _ => 'مجموعة',
-                            }),
-                            onTap: () {
-                              target = conversation;
-                              Navigator.of(sheetContext).pop();
-                            },
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final targets = await ChatForwardSheet.show(
+      context,
+      currentUserId: currentUserId,
+      currentConversationId: widget.conversation.id,
+      selectedMessageCount: selectedMessages.length,
     );
 
-    if (target == null) {
+    if (targets == null || targets.isEmpty) {
       return;
     }
 
-    final repository = ref.read(chatRepositoryProvider);
-
+    // Filter restricted attachments
     var skippedRestrictedCount = 0;
-    try {
-      for (final message in selectedMessages) {
-        if (message.hasAttachment && !message.attachmentForwardAllowed) {
-          skippedRestrictedCount++;
-          continue;
-        }
-        final metadata = _forwardMetadataFor(message);
-        await repository.forwardMessage(
-          conversationId: target!.id,
-          sourceMessageId: message.id,
-          metadata: metadata,
-        );
+    final validMessages = <ChatMessage>[];
+    for (final message in selectedMessages) {
+      if (!message.attachmentForwardAllowed || message.metadata?['allowForward'] == false) {
+        skippedRestrictedCount++;
+      } else {
+        validMessages.add(message);
       }
+    }
 
-      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
-      if (!mounted) {
-        return;
-      }
-      _clearSelection();
-      final forwardedCount = selectedMessages.length - skippedRestrictedCount;
-      final targetName = target!.displayTitle(
-        ref.read(authControllerProvider).valueOrNull?.id ?? '',
-      );
-      if (forwardedCount > 0) {
+    if (validMessages.isEmpty) {
+      if (mounted && skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تمت إعادة توجيه $forwardedCount رسالة إلى $targetName',
+              skippedRestrictedCount == 1
+                  ? 'المرسل منع إعادة توجيه هذه الرسالة.'
+                  : 'تم تخطي $skippedRestrictedCount رسائل لأن المرسل منع إعادة توجيهها.',
             ),
           ),
         );
       }
+      return;
+    }
+
+    final repository = ref.read(chatRepositoryProvider);
+    final targetConversationIds = <String>{};
+    final targetNames = <String>[];
+
+    // Show loading indicator
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            ),
+            SizedBox(width: 12),
+            Text('جاري إعادة توجيه الرسائل...'),
+          ],
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    for (final target in targets) {
+      try {
+        switch (target.kind) {
+          case ForwardTargetKind.conversation:
+            if (target.conversation != null) {
+              targetConversationIds.add(target.conversation!.id);
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.user:
+            if (target.user != null) {
+              ChatConversation? existingDirect;
+              for (final conv in overview.conversations) {
+                if (conv.type == 'direct') {
+                  final isWithTarget =
+                      conv.members.any((m) => m.id == target.user!.id);
+                  if (isWithTarget) {
+                    existingDirect = conv;
+                    break;
+                  }
+                }
+              }
+
+              if (existingDirect != null) {
+                targetConversationIds.add(existingDirect.id);
+              } else {
+                final created = await repository.createDirectConversation(
+                  target.user!.id,
+                );
+                targetConversationIds.add(created.id);
+              }
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.department:
+            if (target.department != null) {
+              final dept = target.department!;
+              ChatConversation? deptRoom;
+              for (final conv in overview.conversations) {
+                if (conv.departmentId == dept.id ||
+                    conv.id == dept.defaultConversationId) {
+                  deptRoom = conv;
+                  break;
+                }
+              }
+
+              if (deptRoom != null) {
+                targetConversationIds.add(deptRoom.id);
+                targetNames.add('غرفة ${dept.name}');
+              } else {
+                final deptUsers = overview.users
+                    .where(
+                      (u) =>
+                          u.departmentId == dept.id &&
+                          u.id != currentUserId,
+                    )
+                    .toList();
+
+                if (deptUsers.isEmpty) {
+                  targetNames.add(dept.name);
+                } else {
+                  targetNames.add('${dept.name} (${deptUsers.length} أعضاء)');
+                  for (final member in deptUsers) {
+                    ChatConversation? memberConv;
+                    for (final conv in overview.conversations) {
+                      if (conv.type == 'direct' &&
+                          conv.members.any((m) => m.id == member.id)) {
+                        memberConv = conv;
+                        break;
+                      }
+                    }
+                    if (memberConv != null) {
+                      targetConversationIds.add(memberConv.id);
+                    } else {
+                      try {
+                        final created =
+                            await repository.createDirectConversation(
+                              member.id,
+                            );
+                        targetConversationIds.add(created.id);
+                      } catch (_) {}
+                    }
+                  }
+                }
+              }
+            }
+            break;
+        }
+      } catch (err) {
+        debugPrint('Error resolving forward target: $err');
+      }
+    }
+
+    if (targetConversationIds.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر تحديد وجهة إعادة التوجيه')),
+        );
+      }
+      return;
+    }
+
+    try {
+      for (final convId in targetConversationIds) {
+        for (final message in validMessages) {
+          final metadata = _forwardMetadataFor(message);
+          await repository.forwardMessage(
+            conversationId: convId,
+            sourceMessageId: message.id,
+            metadata: metadata,
+          );
+        }
+      }
+
+      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
+
+      if (!mounted) return;
+      _clearSelection();
+
+      final destinationText = targetNames.length <= 2
+          ? targetNames.join(' و ')
+          : '${targetNames.first} و ${targetNames.length - 1} وجهات أخرى';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تمت إعادة توجيه ${validMessages.length} رسالة إلى $destinationText بنجاح',
+          ),
+          backgroundColor: const Color(0xFF34C759),
+        ),
+      );
+
       if (skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2733,7 +3003,22 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
   }
 
-  Future<void> _showActions(ChatMessage message) async {
+
+  Future<void> _retryMessage(ChatMessage message) async {
+    try {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
+          .retryMessage(message);
+    } catch (_) {
+      // Handled and marked as failed by ConversationMessagesController
+    }
+  }
+
+  Future<void> _showWhatsAppContextMenu(ChatMessage message) async {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) {
       if (!mounted) return;
@@ -2743,409 +3028,530 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
+    HapticFeedback.heavyImpact();
     final authUser = ref.read(authControllerProvider).valueOrNull;
-    // final canDelete =
-    //     authUser?.id == message.senderId ||
-    //     authUser?.can('canDeleteMessages') == true;
     final senderId = message.sender?.id ?? message.senderId;
-
     final isMine = authUser?.id.toString() == senderId.toString();
-
     final canDelete = isMine || authUser?.can('canDeleteMessages') == true;
-
     final canEdit = isMine && !message.hasAttachment && !message.isDeleted;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isFailed = message.isFailed;
     final previewText = message.content.isNotEmpty
         ? message.content
         : (message.fileName ?? 'مرفق');
 
-    final quickReactionRow = await buildQuickReactionUnicodeRow();
-    if (!mounted) {
-      return;
-    }
+    final quickEmojis = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
+    final statusObj = authUser == null || !isMine ? null : _status(message, authUser.id);
 
-    await showModalBottomSheet<void>(
-      isScrollControlled: true,
+    await showGeneralDialog<void>(
       context: context,
-      backgroundColor: Colors.transparent,
-      showDragHandle: true,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        final textTheme = Theme.of(context).textTheme;
+        return Material(
+          type: MaterialType.transparency,
+          child: DefaultTextStyle(
+            style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(
+              decoration: TextDecoration.none,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+            child: GestureDetector(
+              onTap: () => Navigator.of(dialogContext).pop(),
+              behavior: HitTestBehavior.opaque,
+              child: SafeArea(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  child: GestureDetector(
+                    onTap: () {}, // Prevent tap through
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment:
+                          isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                      children: [
+                        // 1. Floating Reactions Capsule (WhatsApp iOS Style)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                            borderRadius: BorderRadius.circular(32),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.18),
+                                blurRadius: 18,
+                                offset: const Offset(0, 6),
+                              ),
+                            ],
+                            border: Border.all(
+                              color: isDark ? Colors.white12 : const Color(0x0F000000),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ...quickEmojis.map((emoji) {
+                                final isReacted = _reactionEntries(message).any((entry) => entry.key == emoji && _reactionHasUser(entry.value, authUser?.id));
+                                return GestureDetector(
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    Navigator.of(dialogContext).pop();
+                                    ref
+                                        .read(
+                                          conversationMessagesControllerProvider(
+                                            widget.conversation.id,
+                                          ).notifier,
+                                        )
+                                        .toggleReaction(
+                                          messageId: message.id,
+                                          emoji: emoji,
+                                        );
+                                  },
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 150),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isReacted
+                                          ? (isDark
+                                              ? Colors.white24
+                                              : const Color(0xFFE5E5EA))
+                                          : Colors.transparent,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text(
+                                      emoji,
+                                      style: const TextStyle(fontSize: 26, decoration: TextDecoration.none),
+                                    ),
+                                  ),
+                                );
+                              }),
+                              // Add reaction (+) button
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.of(dialogContext).pop();
+                                  _showFullReactionPicker(message);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(7),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white12
+                                        : const Color(0xFFF2F2F7),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    CupertinoIcons.add,
+                                    size: 19,
+                                    color: isDark ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
 
-      builder: (context) => SafeArea(
-        child: Container(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.84,
-          ),
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 22,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 42,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerLowest,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+                        // 2. Elevated Bubble Preview (WhatsApp iOS Style)
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth:
+                                MediaQuery.of(dialogContext).size.width * 0.78,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isMine
+                                  ? (isDark
+                                      ? const Color(0xFF005D4B)
+                                      : const Color(0xFFE7FFDB))
+                                  : (isDark
+                                      ? const Color(0xFF262D31)
+                                      : Colors.white),
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(18),
+                                topRight: const Radius.circular(18),
+                                bottomLeft: Radius.circular(isMine ? 18 : 4),
+                                bottomRight: Radius.circular(isMine ? 4 : 18),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.22),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!isMine &&
+                                    message.sender?.displayName != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      message.sender!.displayName,
+                                      style: const TextStyle(
+                                        color: Color(0xFF3390EC),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        decoration: TextDecoration.none,
+                                      ),
+                                    ),
+                                  ),
+                                Text(
+                                  previewText,
+                                  maxLines: 5,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: isDark ? Colors.white : Colors.black87,
+                                    decoration: TextDecoration.none,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      DateFormat('hh:mm a').format(
+                                        message.createdAt.toLocal(),
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark
+                                            ? Colors.white54
+                                            : Colors.black45,
+                                      ),
+                                    ),
+                                    if (statusObj != null) ...[
+                                      const SizedBox(width: 4),
+                                      Icon(
+                                        statusObj.icon,
+                                        size: 14,
+                                        color: statusObj.color,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // 3. iOS Inset Context Menu Card
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            width: 250,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF2C2C2E)
+                                  : Colors.white.withValues(alpha: 0.96),
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isFailed) ...[
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'إعادة إرسال',
+                                    icon: CupertinoIcons.arrow_clockwise,
+                                    isDestructive: true,
+                                    onTap: () => _retryMessage(message),
+                                  ),
+                                  _buildWhatsAppMenuDivider(isDark),
+                                ],
+                                _buildWhatsAppContextMenuItem(
+                                  title: 'الرد',
+                                  icon: CupertinoIcons.arrowshape_turn_up_left,
+                                  onTap: () {
+                                    setState(() {
+                                      _replyingTo = message;
+                                      _editingMessage = null;
+                                    });
+                                  },
+                                ),
+                                if (message.content.trim().isNotEmpty) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'نسخ',
+                                    icon: CupertinoIcons.doc_on_doc,
+                                    onTap: () {
+                                      Clipboard.setData(
+                                        ClipboardData(text: message.content),
+                                      );
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('تم نسخ النص إلى الحافظة'),
+                                          duration: Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
+                                  title: message.isFavoritedBy(authUser?.id)
+                                      ? 'إلغاء التمييز بنجمة'
+                                      : 'تمييز بنجمة',
+                                  icon: message.isFavoritedBy(authUser?.id)
+                                      ? CupertinoIcons.star_slash
+                                      : CupertinoIcons.star,
+                                  onTap: () {
+                                    ref
+                                        .read(
+                                          conversationMessagesControllerProvider(
+                                            widget.conversation.id,
+                                          ).notifier,
+                                        )
+                                        .toggleFavoriteMessage(
+                                          messageId: message.id,
+                                        );
+                                  },
+                                ),
+                                if (isMine) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'معلومات الرسالة',
+                                    icon: CupertinoIcons.info,
+                                    onTap: () => _showMessageDetails(message),
+                                  ),
+                                ],
+                                if (!message.hasAttachment ||
+                                    message.attachmentForwardAllowed) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'إعادة توجيه',
+                                    icon: CupertinoIcons.arrowshape_turn_up_right,
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedMessageIds
+                                          ..clear()
+                                          ..add(message.id);
+                                      });
+                                      _forwardSelectedMessages(
+                                        ref
+                                                .read(
+                                                  conversationMessagesControllerProvider(
+                                                    widget.conversation.id,
+                                                  ),
+                                                )
+                                                .valueOrNull
+                                                ?.messages ??
+                                            const <ChatMessage>[],
+                                      );
+                                    },
+                                  ),
+                                ],
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
+                                  title: 'تحديد',
+                                  icon: CupertinoIcons.checkmark_circle,
+                                  onTap: () =>
+                                      _toggleMessageSelection(message.id),
+                                ),
+                                if (message.isPrintableAttachment) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'طباعة عبر الكمبيوتر',
+                                    icon: CupertinoIcons.printer,
+                                    onTap: () =>
+                                        _requestAttachmentPrint(message),
+                                  ),
+                                ],
+                                if (message.hasAttachment &&
+                                    message.attachmentDownloadAllowed) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'تنزيل من جديد',
+                                    icon: CupertinoIcons.arrow_down_to_line,
+                                    onTap: () =>
+                                        _downloadAttachment(message),
+                                  ),
+                                ],
+                                if ((message.isStickerMessage || message.isImageMessage) &&
+                                    message.attachmentDownloadAllowed) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'حفظ ضمن الملصقات',
+                                    icon: CupertinoIcons.sparkles,
+                                    onTap: () => _saveReceivedSticker(message),
+                                  ),
+                                ],
+                                if (_canManagePinnedMessage(authUser?.id)) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'تثبيت الرسالة',
+                                    icon: CupertinoIcons.pin,
+                                    onTap: () {
+                                      ref
+                                          .read(
+                                            chatOverviewControllerProvider.notifier,
+                                          )
+                                          .setGroupPinnedMessage(
+                                            conversationId: widget.conversation.id,
+                                            content: previewText,
+                                            messageId: message.id,
+                                          );
+                                    },
+                                  ),
+                                ],
+                                if (canEdit) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'تعديل',
+                                    icon: CupertinoIcons.pencil,
+                                    onTap: () {
+                                      setState(() {
+                                        _editingMessage = message;
+                                        _replyingTo = null;
+                                        _messageController.text = message.content;
+                                      });
+                                    },
+                                  ),
+                                ],
+                                if (canDelete && !message.isDeleted) ...[
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'حذف',
+                                    icon: CupertinoIcons.trash,
+                                    isDestructive: true,
+                                    onTap: () {
+                                      ref
+                                          .read(
+                                            conversationMessagesControllerProvider(
+                                              widget.conversation.id,
+                                            ).notifier,
+                                          )
+                                          .deleteMessage(message.id);
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        message.sender?.displayName ??
-                            (isMine ? 'أنت' : 'مستخدم'),
-                        style: const TextStyle(
-                          color: Color(0xFF3390EC),
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        previewText,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
                 ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 5,
-                  runSpacing: 5,
-                  children: quickReactionRow
-                      .map(
-                        (emoji) => ChatAnimatedReactionQuickChip(
-                          emoji: emoji,
-                          size: 30,
-                          onTap: () async {
-                            Navigator.pop(context);
-                            await ref
-                                .read(
-                                  conversationMessagesControllerProvider(
-                                    widget.conversation.id,
-                                  ).notifier,
-                                )
-                                .toggleReaction(
-                                  messageId: message.id,
-                                  emoji: emoji,
-                                );
-                          },
-                        ),
-                      )
-                      .toList(),
-                ),
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: TextButton.icon(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      await _showFullReactionPicker(message);
-                    },
-                    icon: const Icon(Icons.add_reaction_outlined),
-                    label: const Text('المزيد من التفاعلات'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _TelegramActionTile(
-                  icon: Icons.reply_rounded,
-                  label: 'رد',
-                  color: const Color(0xFF3390EC),
-                  onTap: () {
-                    Navigator.pop(context);
-                    setState(() {
-                      _replyingTo = message;
-                      _editingMessage = null;
-                    });
-                  },
-                ),
-                if (!message.hasAttachment || message.attachmentForwardAllowed)
-                  _TelegramActionTile(
-                    icon: Icons.forward_to_inbox_rounded,
-                    label: 'إعادة توجيه',
-                    color: const Color(0xFF19A974),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      setState(() {
-                        _selectedMessageIds
-                          ..clear()
-                          ..add(message.id);
-                      });
-                      await _forwardSelectedMessages(
-                        ref
-                                .read(
-                                  conversationMessagesControllerProvider(
-                                    widget.conversation.id,
-                                  ),
-                                )
-                                .valueOrNull
-                                ?.messages ??
-                            const <ChatMessage>[],
-                      );
-                    },
-                  ),
-                if (message.isPrintableAttachment)
-                  _TelegramActionTile(
-                    icon: Icons.print_rounded,
-                    label: 'طباعة عبر الكمبيوتر',
-                    color: const Color(0xFF0EA5A4),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      await _requestAttachmentPrint(message);
-                    },
-                  ),
-                if (message.hasAttachment && message.attachmentDownloadAllowed)
-                  _TelegramActionTile(
-                    icon: Icons.download_rounded,
-                    label: 'تنزيل من جديد',
-                    color: const Color(0xFF19A974),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      await _downloadAttachment(message);
-                    },
-                  ),
-                _TelegramActionTile(
-                  icon: message.isFavoritedBy(authUser?.id)
-                      ? Icons.star_rounded
-                      : Icons.star_outline_rounded,
-                  label: message.isFavoritedBy(authUser?.id)
-                      ? 'إزالة من المفضلة'
-                      : 'إضافة إلى المفضلة',
-                  color: const Color(0xFFF59E0B),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await ref
-                        .read(
-                          conversationMessagesControllerProvider(
-                            widget.conversation.id,
-                          ).notifier,
-                        )
-                        .toggleFavoriteMessage(messageId: message.id);
-                  },
-                ),
-                if (widget.conversation.type != 'direct' && isMine)
-                  _TelegramActionTile(
-                    icon: Icons.info_outline_rounded,
-                    label: 'تفاصيل الرسالة',
-                    color: const Color(0xFF3390EC),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showMessageDetails(message);
-                    },
-                  ),
-                if (canEdit)
-                  _TelegramActionTile(
-                    icon: Icons.edit_outlined,
-                    label: 'تعديل',
-                    color: const Color(0xFFF59E0B),
-                    onTap: () {
-                      Navigator.pop(context);
-                      setState(() {
-                        _editingMessage = message;
-                        _replyingTo = null;
-                        _messageController.text = message.content;
-                      });
-                    },
-                  ),
-                if (_canManagePinnedMessage(authUserId))
-                  _TelegramActionTile(
-                    icon: Icons.push_pin_outlined,
-                    label: 'تثبيت الرسالة',
-                    color: const Color(0xFF9A6400),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      await ref
-                          .read(chatOverviewControllerProvider.notifier)
-                          .setGroupPinnedMessage(
-                            conversationId: widget.conversation.id,
-                            content: previewText,
-                            messageId: message.id,
-                          );
-                    },
-                  ),
-                if (canDelete && !message.isDeleted)
-                  _TelegramActionTile(
-                    icon: Icons.delete_outline_rounded,
-                    label: 'حذف',
-                    color: const Color(0xFFE53935),
-                    onTap: () async {
-                      Navigator.pop(context);
-                      await ref
-                          .read(
-                            conversationMessagesControllerProvider(
-                              widget.conversation.id,
-                            ).notifier,
-                          )
-                          .deleteMessage(message.id);
-                    },
-                  ),
-              ],
+              ),
             ),
+          ),
+        ),
+      ),
+    );
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1.0).animate(
+              CurvedAnimation(parent: anim1, curve: Curves.easeOutBack),
+            ),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWhatsAppContextMenuItem({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Navigator.of(context).pop();
+          onTap();
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w400,
+                  decoration: TextDecoration.none,
+                  color: isDestructive
+                      ? CupertinoColors.systemRed
+                      : (isDark ? Colors.white : Colors.black87),
+                ),
+              ),
+              Icon(
+                icon,
+                size: 20,
+                color: isDestructive
+                    ? CupertinoColors.systemRed
+                    : (isDark ? Colors.white70 : Colors.black54),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Future<void> _showFullReactionPicker(ChatMessage message) async {
-    final sections = buildPickerSections(
-      chatPickerAnimatedEmojis(),
-      const <String, int>{},
+  Widget _buildWhatsAppMenuDivider(bool isDark) {
+    return Divider(
+      height: 0.5,
+      thickness: 0.5,
+      indent: 16,
+      color: isDark ? Colors.white12 : Colors.black12,
     );
-    await showModalBottomSheet<void>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
+  }
 
-      useSafeArea: true,
-      builder: (sheetContext) => DraggableScrollableSheet(
-        initialChildSize: 0.55,
-        minChildSize: 0.32,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) {
-          final theme = Theme.of(context);
-          final titleSmall = theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w800,
+  Future<void> _showActions(ChatMessage message) async {
+    return _showWhatsAppContextMenu(message);
+  }
+  Future<void> _showFullReactionPicker(ChatMessage message) async {
+    final selectedEmoji = await WhatsAppReactionPickerSheet.show(context);
+    if (selectedEmoji != null && selectedEmoji.isNotEmpty && mounted) {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              widget.conversation.id,
+            ).notifier,
+          )
+          .toggleReaction(
+            messageId: message.id,
+            emoji: selectedEmoji,
           );
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 4, 2),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'اختر تفاعلًا',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'إغلاق',
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                if (sections.frequentTop.isNotEmpty) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-                    child: Text('الأكثر استخدامًا', style: titleSmall),
-                  ),
-                  SizedBox(
-                    height: 72,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: sections.frequentTop.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 2),
-                      itemBuilder: (context, i) {
-                        final data = sections.frequentTop[i];
-                        return SizedBox(
-                          width: 60,
-                          child: ChatAnimatedReactionOption(
-                            data: data,
-                            size: 44,
-                            onTap: () async {
-                              Navigator.of(sheetContext).pop();
-                              await ref
-                                  .read(
-                                    conversationMessagesControllerProvider(
-                                      widget.conversation.id,
-                                    ).notifier,
-                                  )
-                                  .toggleReaction(
-                                    messageId: message.id,
-                                    emoji: data.toUnicodeEmoji(),
-                                  );
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
-                    child: Text('باقي التفاعلات', style: titleSmall),
-                  ),
-                ],
-                Expanded(
-                  child: GridView.builder(
-                    controller: scrollController,
-                    padding: EdgeInsets.fromLTRB(
-                      8,
-                      sections.frequentTop.isEmpty ? 4 : 0,
-                      8,
-                      12,
-                    ),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 6,
-                          mainAxisSpacing: 2,
-                          crossAxisSpacing: 2,
-                          childAspectRatio: 1,
-                        ),
-                    itemCount: sections.gridRest.length,
-                    itemBuilder: (context, index) {
-                      final data = sections.gridRest[index];
-                      return ChatAnimatedReactionOption(
-                        data: data,
-                        size: 38,
-                        onTap: () async {
-                          Navigator.of(sheetContext).pop();
-                          await ref
-                              .read(
-                                conversationMessagesControllerProvider(
-                                  widget.conversation.id,
-                                ).notifier,
-                              )
-                              .toggleReaction(
-                                messageId: message.id,
-                                emoji: data.toUnicodeEmoji(),
-                              );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+    }
   }
 
   Future<bool> _confirmAction({
@@ -3282,38 +3688,108 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   void _showMessageDetails(ChatMessage message) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final previewText = message.content.isNotEmpty
+        ? message.content
+        : (message.fileName ?? 'مرفق');
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
+        initialChildSize: 0.75,
+        maxChildSize: 0.95,
+        minChildSize: 0.45,
         builder: (context, scrollController) => Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
+            color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
+              // iOS drag handle
               Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 36,
+                height: 5,
+                margin: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
+                  color: isDark ? Colors.white24 : Colors.black26,
+                  borderRadius: BorderRadius.circular(2.5),
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text(
-                  'من شاهد الرسالة',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'معلومات الرسالة',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: Icon(
+                        CupertinoIcons.clear_circled_solid,
+                        color: isDark ? Colors.white38 : Colors.black26,
+                        size: 22,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Divider(),
+              // Message Preview Card
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        previewText,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: Text(
+                          DateFormat('hh:mm a').format(
+                            message.createdAt.toLocal(),
+                          ),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white38 : Colors.black38,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Receipts Sections (FutureBuilder)
               Expanded(
                 child: FutureBuilder<Map<String, dynamic>>(
                   future: ref
@@ -3321,48 +3797,107 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       .getReadReceipts(message.id),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
+                      return const Center(
+                        child: CircularProgressIndicator.adaptive(),
+                      );
                     }
-                    if (snapshot.hasError) {
-                      return Center(child: Text('خطأ: ${snapshot.error}'));
-                    }
+                    final data = snapshot.data ?? {};
                     final seenBy =
-                        snapshot.data?['seenBy'] as List<dynamic>? ?? [];
-                    if (seenBy.isEmpty) {
-                      return const Center(child: Text('لم يشاهدها أحد بعد.'));
+                        (data['seenBy'] as List<dynamic>? ?? []);
+                    final deliveredTo =
+                        (data['deliveredTo'] as List<dynamic>? ?? []);
+                    final isDirect = widget.conversation.type == 'direct';
+
+                    DateTime? directReadTime;
+                    if (seenBy.isNotEmpty && seenBy.first['seenAt'] != null) {
+                      directReadTime = DateTime.tryParse(
+                        seenBy.first['seenAt'].toString(),
+                      );
                     }
-                    return ListView.builder(
+                    DateTime? directDeliveredTime;
+                    if (deliveredTo.isNotEmpty &&
+                        deliveredTo.first['deliveredAt'] != null) {
+                      directDeliveredTime = DateTime.tryParse(
+                        deliveredTo.first['deliveredAt'].toString(),
+                      );
+                    }
+
+                    return ListView(
                       controller: scrollController,
-                      itemCount: seenBy.length,
-                      itemBuilder: (context, index) {
-                        final user = seenBy[index] as Map<String, dynamic>;
-                        return ListTile(
-                          leading: ChatAvatar(
-                            avatarUrl: user['avatarUrl']?.toString() ?? '',
-                            radius: 20,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer,
-                            fallback: Text(
-                              user['displayName']?.toString().isNotEmpty == true
-                                  ? user['displayName']
-                                        .toString()[0]
-                                        .toUpperCase()
-                                  : '?',
-                            ),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                      children: [
+                        // Section 1: قُرِئت (Read)
+                        _buildReceiptsGroupCard(
+                          isDark: isDark,
+                          icon: Icons.done_all_rounded,
+                          iconColor: const Color(0xFF34B7F1), // WhatsApp Blue Check
+                          title: 'قُرِئت',
+                          subtitle: isDirect
+                              ? (directReadTime != null
+                                  ? _formatReceiptDateTime(directReadTime)
+                                  : 'لم تُقرأ بعد')
+                              : (seenBy.isNotEmpty
+                                  ? '${seenBy.length} من الأعضاء'
+                                  : 'لم يشاهدها أحد بعد'),
+                          receipts: isDirect ? [] : seenBy,
+                          timeField: 'seenAt',
+                        ),
+                        const SizedBox(height: 16),
+                        // Section 2: سُلِّمت (Delivered)
+                        _buildReceiptsGroupCard(
+                          isDark: isDark,
+                          icon: Icons.done_all_rounded,
+                          iconColor: const Color(0xFF8E8E93), // WhatsApp Grey Double Check
+                          title: 'سُلِّمت',
+                          subtitle: isDirect
+                              ? (directDeliveredTime != null
+                                  ? _formatReceiptDateTime(directDeliveredTime)
+                                  : 'لم تُسلّم بعد')
+                              : (deliveredTo.isNotEmpty
+                                  ? '${deliveredTo.length} من الأعضاء'
+                                  : 'لم تُسلّم لأحد بعد'),
+                          receipts: isDirect ? [] : deliveredTo,
+                          timeField: 'deliveredAt',
+                        ),
+                        const SizedBox(height: 16),
+                        // Section 3: أُرسِلت (Sent)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
                           ),
-                          title: Text(
-                            user['displayName']?.toString() ?? 'مستخدم',
+                          decoration: BoxDecoration(
+                            color:
+                                isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                          subtitle: user['seenAt'] != null
-                              ? Text(
-                                  DateTime.parse(
-                                    user['seenAt'].toString(),
-                                  ).toLocal().toString(),
-                                )
-                              : null,
-                        );
-                      },
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.done_rounded,
+                                color: Color(0xFF8E8E93),
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              const Text(
+                                'أُرسِلت',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                _formatReceiptDateTime(message.createdAt),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark ? Colors.white60 : Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -3374,211 +3909,173 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
+  Widget _buildReceiptsGroupCard({
+    required bool isDark,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required List<dynamic> receipts,
+    required String timeField,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, color: iconColor, size: 20),
+                const SizedBox(width: 12),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (receipts.isNotEmpty) ...[
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 16,
+              color: isDark ? Colors.white12 : Colors.black12,
+            ),
+            ...receipts.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final user = entry.value as Map<String, dynamic>;
+              final rawTime =
+                  user[timeField] ?? user['seenAt'] ?? user['deliveredAt'];
+              DateTime? itemTime;
+              if (rawTime != null) {
+                itemTime = DateTime.tryParse(rawTime.toString());
+              }
+              final isLast = idx == receipts.length - 1;
+
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        ChatAvatar(
+                          avatarUrl: user['avatarUrl']?.toString() ?? '',
+                          radius: 18,
+                          backgroundColor: isDark
+                              ? Colors.white12
+                              : const Color(0xFFE5E5EA),
+                          fallback: Text(
+                            user['displayName']?.toString().isNotEmpty == true
+                                ? user['displayName'].toString()[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            user['displayName']?.toString() ??
+                                user['username']?.toString() ??
+                                'مستخدم',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        if (itemTime != null)
+                          Text(
+                            _formatReceiptDateTime(itemTime),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white38 : Colors.black38,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (!isLast)
+                    Divider(
+                      height: 0.5,
+                      thickness: 0.5,
+                      indent: 58,
+                      color: isDark ? Colors.white12 : Colors.black12,
+                    ),
+                ],
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
+
   void _showScheduledMessagesSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        maxChildSize: 0.9,
-        builder: (context, scrollController) => Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              AppBar(
-                title: const Text('الرسائل المجدولة'),
-                leading: const CloseButton(),
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-              ),
-              Expanded(
-                child: ScheduledMessagesList(
-                  conversationId: widget.conversation.id,
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (context) => ScheduledMessagesSheet(
+        conversationId: widget.conversation.id,
+        onMessageSent: () {
+          ref
+              .read(
+                conversationMessagesControllerProvider(
+                  widget.conversation.id,
+                ).notifier,
+              )
+              .refresh();
+        },
       ),
     );
   }
 
   Future<void> _showSearchSheet() async {
-    final notifier = ref.read(
-      conversationMessagesControllerProvider(widget.conversation.id).notifier,
-    );
-
-    final controller = TextEditingController();
-    List<ChatMessage> results = const <ChatMessage>[];
-    bool isLoading = false;
-    String? errorText;
-
-    Future<void> runSearch(StateSetter setSheetState) async {
-      final query = controller.text.trim();
-      if (query.isEmpty) {
-        setSheetState(() {
-          results = const <ChatMessage>[];
-          errorText = null;
-        });
-        return;
-      }
-
-      setSheetState(() {
-        isLoading = true;
-        errorText = null;
-      });
-
-      try {
-        final result = await notifier.searchMessages(query);
-        setSheetState(() {
-          results = result.messages;
-        });
-      } catch (error) {
-        setSheetState(() {
-          errorText = error.toString();
-        });
-      } finally {
-        setSheetState(() => isLoading = false);
-      }
-    }
-
     if (!mounted) {
       return;
     }
 
     await showModalBottomSheet<void>(
-      isScrollControlled: true,
       context: context,
-      showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              16 + MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: SizedBox(
-              height: MediaQuery.of(context).size.height * 0.8,
-              child: Column(
-                children: [
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => runSearch(setSheetState),
-                    decoration: InputDecoration(
-                      hintText: 'ابحث في كل رسائل المحادثة',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      suffixIcon: IconButton(
-                        onPressed: () => runSearch(setSheetState),
-                        icon: const Icon(Icons.arrow_forward_rounded),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: isLoading
-                        ? const Center(child: AppLoadingIndicator(size: 28))
-                        : errorText != null
-                        ? Center(child: Text(errorText!))
-                        : results.isEmpty
-                        ? Center(
-                            child: Text(
-                              controller.text.trim().isEmpty
-                                  ? 'اكتب كلمة أو جملة للبحث داخل كل الرسائل.'
-                                  : 'لا توجد نتائج مطابقة.',
-                            ),
-                          )
-                        : ListView.separated(
-                            itemCount: results.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 8),
-                            itemBuilder: (context, index) {
-                              final message = results[index];
-                              final title =
-                                  message.sender?.displayName.isNotEmpty == true
-                                  ? message.sender!.displayName
-                                  : 'رسالة';
-                              final preview = message.content.isNotEmpty
-                                  ? message.content
-                                  : (message.fileName ?? 'مرفق');
-
-                              return InkWell(
-                                borderRadius: BorderRadius.circular(18),
-                                onTap: () async {
-                                  Navigator.of(context).pop();
-                                  await _jumpToSearchMessage(
-                                    message,
-                                    query: controller.text,
-                                  );
-                                },
-                                child: Ink(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.surface,
-                                    borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outlineVariant
-                                          .withValues(alpha: 0.42),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              title,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleSmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w800,
-                                                  ),
-                                            ),
-                                          ),
-                                          Text(
-                                            formatEgyptDateTime(
-                                              message.createdAt,
-                                              datePattern: 'dd/MM',
-                                              separator: ' • ',
-                                            ),
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.labelSmall,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        preview,
-                                        maxLines: 3,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      builder: (sheetContext) => ChatRemoteSearchSheet(
+        conversationId: widget.conversation.id,
+        onSelectMessage: (message) async {
+          Navigator.of(sheetContext).pop();
+          await _jumpToSearchMessage(message);
+        },
       ),
     );
   }
@@ -3990,6 +4487,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ? 'يكتب الآن...'
               : '${_typingUsers.values.join('، ')} يكتب الآن...');
 
+    final peerJobAndBranch = [
+      if (peer != null && peer.jobTitle.trim().isNotEmpty) peer.jobTitle.trim(),
+      if (peer != null && peer.branchCode.trim().isNotEmpty) 'فرع ${peer.branchCode.trim()}',
+    ].join(' • ');
+
+    final chatSubtitleText = typingIndicatorText ??
+        (peerJobAndBranch.isNotEmpty
+            ? '$peerJobAndBranch | $effectiveStatusText'
+            : effectiveStatusText);
+
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
@@ -4012,56 +4519,87 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           ),
           title: _selectionMode
               ? Text('${_selectedMessageIds.length} محددة')
-              : Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundColor: colorScheme.surfaceContainerHighest,
-                      child: peer?.avatarUrl?.isNotEmpty == true
-                          ? ClipOval(
-                              child: CachedNetworkImage(
-                                imageUrl: peer!.avatarUrl!,
-                                width: 40,
-                                height: 40,
-                                fit: BoxFit.cover,
-                                httpHeaders: token == null || token.isEmpty
-                                    ? null
-                                    : {'Authorization': 'Bearer $token'},
-                                errorWidget: (_, __, ___) => Icon(
-                                  _data.type == 'group'
-                                      ? Icons.groups_outlined
-                                      : Icons.person_outline,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            )
-                          : Icon(
-                              _data.type == 'group'
-                                  ? Icons.groups_outlined
-                                  : Icons.person_outline,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _data.displayTitle(authUser?.id ?? ''),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            effectiveStatusText,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: statusColor,
-                            ),
-                          ),
-                        ],
+              : GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () async {
+                    final updated = await Navigator.of(context).push<ChatConversation>(
+                      CupertinoPageRoute(
+                        builder: (_) => ConversationDetailsScreen(
+                          conversation: _data,
+                          peer: peer,
+                          messages: loadedMessages,
+                          token: token,
+                        ),
                       ),
-                    ),
-                  ],
+                    );
+                    if (updated != null && mounted) {
+                      setState(() {
+                        _conversation = updated;
+                      });
+                    }
+                  },
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: colorScheme.surfaceContainerHighest,
+                        child: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)?.isNotEmpty == true
+                            ? ClipOval(
+                                child: CachedNetworkImage(
+                                  imageUrl: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)!,
+                                  width: 40,
+                                  height: 40,
+                                  fit: BoxFit.cover,
+                                  httpHeaders: token == null || token.isEmpty
+                                      ? null
+                                      : {'Authorization': 'Bearer $token'},
+                                  errorWidget: (_, __, ___) => Icon(
+                                    _data.type == 'group'
+                                        ? Icons.groups_outlined
+                                        : Icons.person_outline,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              )
+                            : Icon(
+                                _data.type == 'group'
+                                    ? Icons.groups_outlined
+                                    : Icons.person_outline,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _data.displayTitle(authUser?.id ?? ''),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              chatSubtitleText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: typingIndicatorText != null
+                                    ? const Color(0xFF34C759)
+                                    : statusColor,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
           actions: [
             if (_selectionMode) ...[
@@ -4076,21 +4614,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 tooltip: 'إلغاء التحديد',
               ),
             ] else ...[
-              IconButton(
-                onPressed: () => _showScheduledMessagesSheet(),
-                icon: const Icon(Icons.schedule_rounded),
-                tooltip: 'الرسائل المجدولة',
-              ),
-              IconButton(
-                onPressed: () => _showSearchSheet(),
-                icon: const Icon(Icons.search_rounded),
-                tooltip: 'بحث',
-              ),
-              IconButton(
-                onPressed: () => _showSharedMediaSheet(loadedMessages, token),
-                icon: const Icon(Icons.perm_media_outlined),
-                tooltip: 'الوسائط',
-              ),
               if (_data.type == 'group' && _data.createdBy == authUser?.id)
                 IconButton(
                   onPressed: () async {
@@ -4110,6 +4633,18 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 ),
               PopupMenuButton<String>(
                 onSelected: (value) async {
+                  if (value == 'search') {
+                    _showSearchSheet();
+                    return;
+                  }
+                  if (value == 'media') {
+                    _showSharedMediaSheet(loadedMessages, token);
+                    return;
+                  }
+                  if (value == 'scheduled') {
+                    _showScheduledMessagesSheet();
+                    return;
+                  }
                   if (value == 'clear') {
                     await _clearConversationForMe();
                     return;
@@ -4159,6 +4694,37 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   setState(() => _conversation = updated);
                 },
                 itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'search',
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded, size: 20),
+                        SizedBox(width: 10),
+                        Text('بحث في المحادثة'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'media',
+                    child: Row(
+                      children: [
+                        Icon(Icons.perm_media_outlined, size: 20),
+                        SizedBox(width: 10),
+                        Text('الوسائط والمستندات'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'scheduled',
+                    child: Row(
+                      children: [
+                        Icon(Icons.schedule_rounded, size: 20),
+                        SizedBox(width: 10),
+                        Text('الرسائل المجدولة'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'pin',
                     child: Text(
@@ -4223,6 +4789,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ),
             ],
           ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(0.5),
+            child: Divider(
+              height: 0.5,
+              thickness: 0.5,
+              color: colorScheme.outlineVariant.withValues(alpha: 0.25),
+            ),
+          ),
         ),
         body: Stack(
           children: [
@@ -4350,7 +4924,6 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       if (messages.isEmpty) {
                         _lastMessageCount = 0;
-                        _didAutoScrollOnEnter = false;
                         return Center(
                           child: Text(
                             'لا توجد رسائل بعد',
@@ -4363,30 +4936,24 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       if (_lastMessageCount == 0 && messages.isNotEmpty) {
                         _animatedMessageIds.addAll(messages.map((m) => m.id));
+                        _animatedMessageIds.addAll(
+                          messages
+                              .map((m) => m.metadata?['clientMessageId']?.toString())
+                              .whereType<String>(),
+                        );
                       }
 
                       final hasNewMessages =
                           messages.length > _lastMessageCount;
-                      if (!_didAutoScrollOnEnter) {
-                        _didAutoScrollOnEnter = true;
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted || !_scrollController.hasClients) {
-                            return;
-                          }
-                          _scrollController.jumpTo(
-                            _scrollController.position.maxScrollExtent,
-                          );
-                          _scrollToBottom();
-                        });
-                      }
                       final shouldAutoScroll =
-                          _lastMessageCount == 0 ||
-                          (_isNearBottom() && !_isLoadingMore);
+                          _isNearBottom() && !_isLoadingMore;
 
-                      if (hasNewMessages && shouldAutoScroll) {
+                      if (hasNewMessages && shouldAutoScroll && _lastMessageCount > 0) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
-                          _scrollToBottom();
+                          _scrollToBottom(animated: true);
                         });
+                      } else if (hasNewMessages && !shouldAutoScroll && _lastMessageCount > 0) {
+                        _unreadBelowCount += (messages.length - _lastMessageCount);
                       }
 
                       _lastMessageCount = messages.length;
@@ -4398,6 +4965,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       return ListView.builder(
                         controller: _scrollController,
+                        reverse: true,
                         padding: EdgeInsets.fromLTRB(
                           16,
                           hasTopBanner
@@ -4422,20 +4990,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           }
 
                           final message = renderedMessages[index];
-                          final previous = index > 0
+                          final older = index < renderedMessages.length - 1
+                              ? renderedMessages[index + 1]
+                              : null;
+                          final newer = index > 0
                               ? renderedMessages[index - 1]
                               : null;
 
                           final messageLocalDate = message.createdAt.toLocal();
-                          final previousLocalDate = previous?.createdAt
+                          final olderLocalDate = older?.createdAt
                               .toLocal();
 
                           final showDate =
-                              previousLocalDate == null ||
-                              previousLocalDate.day != messageLocalDate.day ||
-                              previousLocalDate.month !=
+                              olderLocalDate == null ||
+                              olderLocalDate.day != messageLocalDate.day ||
+                              olderLocalDate.month !=
                                   messageLocalDate.month ||
-                              previousLocalDate.year != messageLocalDate.year;
+                              olderLocalDate.year != messageLocalDate.year;
 
                           final senderId =
                               message.sender?.id ?? message.senderId;
@@ -4443,13 +5014,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           final isMine =
                               authUser?.id.toString() == senderId.toString();
 
-                          final next = index < renderedMessages.length - 1
-                              ? renderedMessages[index + 1]
-                              : null;
                           final isLastInGroup =
-                              next == null ||
-                              next.sender?.id != message.sender?.id ||
-                              next.createdAt
+                              newer == null ||
+                              newer.sender?.id != message.sender?.id ||
+                              newer.createdAt
                                       .difference(message.createdAt)
                                       .inMinutes >
                                   6;
@@ -4515,9 +5083,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             message.id,
                           );
                           final isFocused = _focusedMessageId == message.id;
+                          final isFavorited = message.isFavoritedBy(authUser?.id);
                           final albumMessages = _albumFor(message, messages);
+                          final stableItemKey =
+                              message.metadata?['clientMessageId']
+                                  ?.toString() ??
+                              message.id;
+                          final messageGlobalKey = _messageKeys.putIfAbsent(
+                            stableItemKey,
+                            GlobalKey.new,
+                          );
+                          _messageKeys[message.id] = messageGlobalKey;
 
                           Widget child = RepaintBoundary(
+                            key: ValueKey(stableItemKey),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -4539,9 +5118,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                         ),
                                       ),
                                       child: Text(
-                                        DateFormat(
-                                          'yyyy/MM/dd',
-                                        ).format(messageLocalDate),
+                                        _formatDateDivider(messageLocalDate),
                                         style: TextStyle(
                                           color: colorScheme.onSurfaceVariant,
                                         ),
@@ -4558,13 +5135,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   child: Align(
                                     alignment: bubbleAlignment,
                                     child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
                                       onTap: _selectionMode
                                           ? () => _toggleMessageSelection(
                                               message.id,
                                             )
-                                          : () => _showActions(message),
-                                      onLongPress: () =>
-                                          _toggleMessageSelection(message.id),
+                                          : () {
+                                              FocusScope.of(context).unfocus();
+                                            },
+                                      onDoubleTap: () =>
+                                          _handleDoubleTapReaction(message),
+                                      onLongPress: () {
+                                        if (_selectionMode) {
+                                          _toggleMessageSelection(message.id);
+                                        } else {
+                                          _showWhatsAppContextMenu(message);
+                                        }
+                                      },
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         mainAxisAlignment: isMine
@@ -4575,10 +5162,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                         children: [
                                           Flexible(
                                             child: ConstrainedBox(
-                                              key: _messageKeys.putIfAbsent(
-                                                message.id,
-                                                GlobalKey.new,
-                                              ),
+                                              key: messageGlobalKey,
                                               constraints: BoxConstraints(
                                                 maxWidth: maxBubbleWidth
                                                     .clamp(200.0, 480.0)
@@ -4596,89 +5180,97 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                         MainAxisSize.min,
                                                     children: [
                                                       AnimatedContainer(
-                                                        duration:
-                                                            const Duration(
-                                                              milliseconds: 180,
-                                                            ),
-                                                        margin: EdgeInsets.only(
-                                                          bottom: 10,
-                                                          left: isMine ? 34 : 0,
-                                                          right: isMine
-                                                              ? 0
-                                                              : 34,
-                                                        ),
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 14,
-                                                              vertical: 10,
-                                                            ),
-                                                        decoration: BoxDecoration(
-                                                          color: isSelected
-                                                              ? const Color(
-                                                                  0xFF3390EC,
-                                                                ).withValues(
-                                                                  alpha: 0.14,
-                                                                )
-                                                              : (isFocused
-                                                                    ? const Color(
-                                                                        0xFFFDF3C7,
-                                                                      )
-                                                                    : bubbleColor),
-                                                          gradient:
-                                                              !isSelected &&
-                                                                  !isFocused &&
-                                                                  isMine &&
-                                                                  resolved
-                                                                      .hasOutgoingGradient
-                                                              ? LinearGradient(
-                                                                  begin: Alignment
-                                                                      .topLeft,
-                                                                  end: Alignment
-                                                                      .bottomRight,
-                                                                  colors: resolved
-                                                                      .outgoingBubbleColors,
-                                                                )
-                                                              : null,
-                                                          borderRadius: BorderRadius.only(
-                                                            topLeft:
-                                                                const Radius.circular(
-                                                                  22,
-                                                                ),
-                                                            topRight:
-                                                                const Radius.circular(
-                                                                  22,
-                                                                ),
-                                                            bottomLeft:
-                                                                Radius.circular(
-                                                                  isMine
-                                                                      ? 22
-                                                                      : 6,
-                                                                ),
-                                                            bottomRight:
-                                                                Radius.circular(
-                                                                  isMine
-                                                                      ? 6
-                                                                      : 22,
-                                                                ),
+                                                          duration:
+                                                              const Duration(
+                                                                milliseconds: 180,
+                                                              ),
+                                                          margin: EdgeInsets.only(
+                                                            bottom: 6,
+                                                            left: isMine ? 34 : 0,
+                                                            right: isMine
+                                                                ? 0
+                                                                : 34,
                                                           ),
-                                                          border: Border.all(
+                                                          padding:
+                                                              const EdgeInsets.symmetric(
+                                                                horizontal: 14,
+                                                                vertical: 8,
+                                                              ),
+                                                          decoration: BoxDecoration(
                                                             color: isSelected
                                                                 ? const Color(
                                                                     0xFF3390EC,
+                                                                  ).withValues(
+                                                                    alpha: 0.14,
                                                                   )
                                                                 : (isFocused
-                                                                      ? const Color(
-                                                                          0xFFF59E0B,
+                                                                      ? (isDark
+                                                                          ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
+                                                                          : const Color(0xFFFEF3C7))
+                                                                      : bubbleColor),
+                                                            gradient:
+                                                                !isSelected &&
+                                                                    !isFocused &&
+                                                                    isMine &&
+                                                                    resolved
+                                                                        .hasOutgoingGradient
+                                                                ? LinearGradient(
+                                                                    begin: Alignment
+                                                                        .topLeft,
+                                                                    end: Alignment
+                                                                        .bottomRight,
+                                                                    colors: resolved
+                                                                        .outgoingBubbleColors,
+                                                                  )
+                                                                : null,
+                                                            borderRadius: BorderRadius.only(
+                                                              topLeft:
+                                                                  const Radius.circular(
+                                                                    18,
+                                                                  ),
+                                                              topRight:
+                                                                  const Radius.circular(
+                                                                    18,
+                                                                  ),
+                                                              bottomLeft:
+                                                                  Radius.circular(
+                                                                    isMine
+                                                                        ? 18
+                                                                        : 4,
+                                                                  ),
+                                                              bottomRight:
+                                                                  Radius.circular(
+                                                                    isMine
+                                                                        ? 4
+                                                                        : 18,
+                                                                  ),
+                                                            ),
+                                                            border: isSelected
+                                                                ? Border.all(
+                                                                    color: const Color(
+                                                                      0xFF3390EC,
+                                                                    ),
+                                                                    width: 1.5,
+                                                                  )
+                                                                : (isFocused
+                                                                      ? Border.all(
+                                                                          color: const Color(
+                                                                            0xFFF59E0B,
+                                                                          ),
+                                                                          width: 1.5,
                                                                         )
-                                                                      : bubbleBorderColor),
-                                                            width:
-                                                                isSelected ||
-                                                                    isFocused
-                                                                ? 1.4
-                                                                : 1,
+                                                                      : (isMine
+                                                                          ? null
+                                                                          : Border.all(
+                                                                              color: colorScheme
+                                                                                  .outlineVariant
+                                                                                  .withValues(
+                                                                                    alpha: 0.25,
+                                                                                  ),
+                                                                              width: 0.5,
+                                                                            ))),
                                                           ),
-                                                        ),
-                                                        child: IntrinsicWidth(
+                                                          child: IntrinsicWidth(
                                                           child: Column(
                                                             crossAxisAlignment:
                                                                 CrossAxisAlignment
@@ -4758,119 +5350,114 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                     ],
                                                                   ),
                                                                 ),
-                                                              if (_data.type ==
-                                                                      'broadcast' &&
+                                                              if (_data.type == 'broadcast' &&
                                                                   (message.sentToAllDepartments ||
-                                                                      message
-                                                                          .broadcastTargetDepartmentNames
-                                                                          .isNotEmpty))
-                                                                Container(
-                                                                  width: double
-                                                                      .infinity,
-                                                                  margin:
-                                                                      const EdgeInsets.only(
-                                                                        bottom:
-                                                                            8,
-                                                                      ),
-                                                                  padding:
-                                                                      const EdgeInsets.symmetric(
-                                                                        horizontal:
-                                                                            10,
-                                                                        vertical:
-                                                                            7,
-                                                                      ),
-                                                                  decoration: BoxDecoration(
-                                                                    color:
-                                                                        const Color(
-                                                                          0xFFE67E22,
-                                                                        ).withValues(
-                                                                          alpha:
-                                                                              0.1,
-                                                                        ),
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                          12,
-                                                                        ),
-                                                                  ),
-                                                                  child: Text(
-                                                                    message.sentToAllDepartments
+                                                                      message.broadcastTargetDepartmentNames.isNotEmpty ||
+                                                                      message.broadcastTargetUserNames.isNotEmpty))
+                                                                Builder(
+                                                                  builder: (context) {
+                                                                    final List<String> targets = [];
+                                                                    if (message.broadcastTargetDepartmentNames.isNotEmpty) {
+                                                                      targets.add(message.broadcastTargetDepartmentNames.join('، '));
+                                                                    }
+                                                                    if (message.broadcastTargetUserNames.isNotEmpty) {
+                                                                      targets.add(message.broadcastTargetUserNames.join('، '));
+                                                                    }
+                                                                    final String targetText = message.sentToAllDepartments
                                                                         ? 'إرسال إلى كل الأقسام'
-                                                                        : 'إرسال إلى: ${message.broadcastTargetDepartmentNames.join('، ')}',
-                                                                    maxLines: 2,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style: const TextStyle(
-                                                                      color: Color(
-                                                                        0xFFB85714,
+                                                                        : (targets.isNotEmpty
+                                                                            ? 'إرسال إلى: ${targets.join(' • ')}'
+                                                                            : 'إرسال إلى كل الأقسام');
+
+                                                                    return Container(
+                                                                      width: double.infinity,
+                                                                      margin: const EdgeInsets.only(bottom: 8),
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                                                      decoration: BoxDecoration(
+                                                                        color: const Color(0xFFE67E22).withValues(alpha: 0.1),
+                                                                        borderRadius: BorderRadius.circular(12),
                                                                       ),
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w700,
-                                                                      fontSize:
-                                                                          12,
-                                                                    ),
-                                                                  ),
+                                                                      child: Text(
+                                                                        targetText,
+                                                                        maxLines: 2,
+                                                                        overflow: TextOverflow.ellipsis,
+                                                                        style: const TextStyle(
+                                                                          color: Color(0xFFB85714),
+                                                                          fontWeight: FontWeight.w700,
+                                                                          fontSize: 12,
+                                                                        ),
+                                                                      ),
+                                                                    );
+                                                                  },
                                                                 ),
                                                               if (replyPreview !=
                                                                   null)
-                                                                Container(
-                                                                  width: double
-                                                                      .infinity,
-                                                                  margin:
-                                                                      const EdgeInsets.only(
-                                                                        bottom:
-                                                                            8,
-                                                                      ),
-                                                                  padding:
-                                                                      const EdgeInsets.all(
-                                                                        10,
-                                                                      ),
-                                                                  decoration: BoxDecoration(
-                                                                    color:
-                                                                        replyBgColor,
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                          14,
+                                                                GestureDetector(
+                                                                  behavior: HitTestBehavior.opaque,
+                                                                  onTap: () {
+                                                                    final replyId = message.replyToMessageId;
+                                                                    if (replyId != null && replyId.isNotEmpty) {
+                                                                      _jumpToRepliedMessage(replyId);
+                                                                    }
+                                                                  },
+                                                                  child: Container(
+                                                                    width: double
+                                                                        .infinity,
+                                                                    margin:
+                                                                        const EdgeInsets.only(
+                                                                          bottom:
+                                                                              8,
                                                                         ),
-                                                                  ),
-                                                                  child: Column(
-                                                                    crossAxisAlignment:
-                                                                        CrossAxisAlignment
-                                                                            .start,
-                                                                    children: [
-                                                                      if (replyPreviewSender !=
-                                                                          null)
-                                                                        Padding(
-                                                                          padding: const EdgeInsets.only(
-                                                                            bottom:
-                                                                                3,
+                                                                    padding:
+                                                                        const EdgeInsets.all(
+                                                                          10,
+                                                                        ),
+                                                                    decoration: BoxDecoration(
+                                                                      color:
+                                                                          replyBgColor,
+                                                                      borderRadius:
+                                                                          BorderRadius.circular(
+                                                                            14,
                                                                           ),
-                                                                          child: Text(
-                                                                            replyPreviewSender,
-                                                                            maxLines:
-                                                                                1,
-                                                                            overflow:
-                                                                                TextOverflow.ellipsis,
-                                                                            style: TextStyle(
-                                                                              color: resolved.accent,
-                                                                              fontSize: 12,
-                                                                              fontWeight: FontWeight.w700,
+                                                                    ),
+                                                                    child: Column(
+                                                                      crossAxisAlignment:
+                                                                          CrossAxisAlignment
+                                                                              .start,
+                                                                      children: [
+                                                                        if (replyPreviewSender !=
+                                                                            null)
+                                                                          Padding(
+                                                                            padding: const EdgeInsets.only(
+                                                                              bottom:
+                                                                                  3,
+                                                                            ),
+                                                                            child: Text(
+                                                                              replyPreviewSender,
+                                                                              maxLines:
+                                                                                  1,
+                                                                              overflow:
+                                                                                  TextOverflow.ellipsis,
+                                                                              style: TextStyle(
+                                                                                color: resolved.accent,
+                                                                                fontSize: 12,
+                                                                                fontWeight: FontWeight.w700,
+                                                                              ),
                                                                             ),
                                                                           ),
+                                                                        Text(
+                                                                          replyPreview,
+                                                                          maxLines:
+                                                                              2,
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
+                                                                          style: TextStyle(
+                                                                            color:
+                                                                                subTextColor,
+                                                                          ),
                                                                         ),
-                                                                      Text(
-                                                                        replyPreview,
-                                                                        maxLines:
-                                                                            2,
-                                                                        overflow:
-                                                                            TextOverflow.ellipsis,
-                                                                        style: TextStyle(
-                                                                          color:
-                                                                              subTextColor,
-                                                                        ),
-                                                                      ),
-                                                                    ],
+                                                                      ],
+                                                                    ),
                                                                   ),
                                                                 ),
                                                               AnimatedSwitcher(
@@ -4908,7 +5495,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                         .isDeleted
                                                                     ? Container(
                                                                         key: ValueKey(
-                                                                          'deleted_${message.id}',
+                                                                          'deleted_$stableItemKey',
                                                                         ),
                                                                         alignment:
                                                                             Alignment.centerLeft,
@@ -4924,7 +5511,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       )
                                                                     : Column(
                                                                         key: ValueKey(
-                                                                          'content_${message.id}',
+                                                                          'content_$stableItemKey',
                                                                         ),
                                                                         crossAxisAlignment:
                                                                             CrossAxisAlignment.stretch,
@@ -5005,12 +5592,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                           if (message
                                                                               .hasAttachment)
                                                                             Padding(
-                                                                              padding: const EdgeInsets.only(
-                                                                                top: 10,
+                                                                              padding: EdgeInsets.only(
+                                                                                top: message.content.isNotEmpty ? 8 : 0,
                                                                               ),
                                                                               child: message.isAudioMessage
                                                                                   ? ChatAudioAttachmentPlayer(
                                                                                       message: message,
+                                                                                      isMine: isMine,
                                                                                     )
                                                                                   : message.isImageMessage &&
                                                                                         albumMessages.length >
@@ -5020,16 +5608,94 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       width: maxBubbleWidth,
                                                                                       onOpen: _showImagePreview,
                                                                                     )
+                                                                                  : message.isStickerMessage
+                                                                                  ? InkWell(
+                                                                                      onTap: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _saveReceivedSticker(message),
+                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                      onLongPress: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _showWhatsAppContextMenu(message),
+                                                                                      borderRadius: BorderRadius.circular(14),
+                                                                                      child: Stack(
+                                                                                        children: [
+                                                                                          Container(
+                                                                                            padding: const EdgeInsets.all(4),
+                                                                                            constraints: const BoxConstraints(
+                                                                                              maxWidth: 170,
+                                                                                              maxHeight: 170,
+                                                                                            ),
+                                                                                            child: Hero(
+                                                                                              tag: 'image_$stableItemKey',
+                                                                                              child: _ChatAttachmentImage(
+                                                                                                message: message,
+                                                                                                fit: BoxFit.contain,
+                                                                                              ),
+                                                                                            ),
+                                                                                          ),
+                                                                                          Positioned(
+                                                                                            bottom: 2,
+                                                                                            left: 2,
+                                                                                            child: InkWell(
+                                                                                              onTap: () => _saveReceivedSticker(message),
+                                                                                              borderRadius: BorderRadius.circular(12),
+                                                                                              child: Container(
+                                                                                                padding: const EdgeInsets.symmetric(
+                                                                                                  horizontal: 6,
+                                                                                                  vertical: 3,
+                                                                                                ),
+                                                                                                decoration: BoxDecoration(
+                                                                                                  color: (isDark ? const Color(0xFF1C1C1E) : Colors.white).withValues(alpha: 0.92),
+                                                                                                  borderRadius: BorderRadius.circular(12),
+                                                                                                  border: Border.all(
+                                                                                                    color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                                                                                                    width: 0.8,
+                                                                                                  ),
+                                                                                                  boxShadow: [
+                                                                                                    BoxShadow(
+                                                                                                      color: Colors.black.withValues(alpha: 0.12),
+                                                                                                      blurRadius: 4,
+                                                                                                      offset: const Offset(0, 1),
+                                                                                                    ),
+                                                                                                  ],
+                                                                                                ),
+                                                                                                child: Row(
+                                                                                                  mainAxisSize: MainAxisSize.min,
+                                                                                                  children: [
+                                                                                                    const Icon(
+                                                                                                      Icons.auto_awesome_motion_rounded,
+                                                                                                      size: 11,
+                                                                                                      color: Color(0xFF007AFF),
+                                                                                                    ),
+                                                                                                    const SizedBox(width: 3),
+                                                                                                    Text(
+                                                                                                      'حفظ كملصق',
+                                                                                                      style: TextStyle(
+                                                                                                        fontSize: 9.5,
+                                                                                                        fontWeight: FontWeight.w700,
+                                                                                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                                                                                      ),
+                                                                                                    ),
+                                                                                                  ],
+                                                                                                ),
+                                                                                              ),
+                                                                                            ),
+                                                                                          ),
+                                                                                        ],
+                                                                                      ),
+                                                                                    )
                                                                                   : message.isImageMessage
                                                                                   ? InkWell(
-                                                                                      onTap: () => _openAttachment(
-                                                                                        message,
-                                                                                      ),
-                                                                                      onLongPress: message.isStickerMessage
-                                                                                          ? () => _saveReceivedSticker(
-                                                                                              message,
-                                                                                            )
-                                                                                          : null,
+                                                                                      onTap: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _openAttachment(message),
+                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                      onLongPress: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : (message.isStickerMessage
+                                                                                              ? () => _saveReceivedSticker(message)
+                                                                                              : () => _showWhatsAppContextMenu(message)),
                                                                                       borderRadius: BorderRadius.circular(
                                                                                         14,
                                                                                       ),
@@ -5041,7 +5707,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                           width: maxBubbleWidth,
                                                                                           height: 180,
                                                                                           child: Hero(
-                                                                                            tag: 'image_${message.id}',
+                                                                                            tag: 'image_$stableItemKey',
                                                                                             child: _ChatAttachmentImage(
                                                                                               message: message,
                                                                                               fit: BoxFit.cover,
@@ -5053,9 +5719,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       ),
                                                                                     )
                                                                                   : InkWell(
-                                                                                      onTap: () => _openAttachment(
-                                                                                        message,
-                                                                                      ),
+                                                                                      onTap: _selectionMode
+                                                                                          ? () => _toggleMessageSelection(message.id)
+                                                                                          : () => _openAttachment(message),
+                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                      onLongPress: () {
+                                                                                        if (_selectionMode) {
+                                                                                          _toggleMessageSelection(message.id);
+                                                                                        } else {
+                                                                                          _showWhatsAppContextMenu(message);
+                                                                                        }
+                                                                                      },
                                                                                       borderRadius: BorderRadius.circular(
                                                                                         14,
                                                                                       ),
@@ -5137,53 +5811,102 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                       ),
                                                               ),
                                                               const SizedBox(
-                                                                height: 8,
+                                                                height: 3,
                                                               ),
-                                                              Row(
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .min,
-                                                                children: [
-                                                                  Text(
-                                                                    formatEgyptTime(
-                                                                      messageLocalDate,
-                                                                    ),
-                                                                    style: TextStyle(
-                                                                      color:
-                                                                          subTextColor,
-                                                                      fontSize:
-                                                                          12,
-                                                                    ),
-                                                                  ),
-                                                                  if (message
-                                                                      .isEdited) ...[
-                                                                    const SizedBox(
-                                                                      width: 6,
-                                                                    ),
-                                                                    Text(
-                                                                      'معدلة',
+                                                              Align(
+                                                                alignment: AlignmentDirectional.bottomEnd,
+                                                                child: Row(
+                                                                  mainAxisSize:
+                                                                      MainAxisSize
+                                                                          .min,
+                                                                  children: [
+                                                                    if (message.isAttachmentViewOnly ||
+                                                                        !message.attachmentForwardAllowed ||
+                                                                        message.metadata?['allowForward'] == false) ...[
+                                                                      const Tooltip(
+                                                                        message: 'محتوى محمي: غير مسموح بإعادة التوجيه',
+                                                                        child: Icon(
+                                                                          Icons.lock_rounded,
+                                                                          size: 11.5,
+                                                                          color: Color(0xFF10B981),
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(width: 3),
+                                                                    ],
+                                                                    if (isFavorited) ...[
+                                                                        const Icon(
+                                                                          Icons.star_rounded,
+                                                                          size: 13,
+                                                                          color: Color(0xFFF59E0B),
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          width: 3,
+                                                                        ),
+                                                                      ],
+                                                                      Text(
+                                                                      formatEgyptTime(
+                                                                        messageLocalDate,
+                                                                      ),
                                                                       style: TextStyle(
                                                                         color:
                                                                             subTextColor,
                                                                         fontSize:
-                                                                            12,
+                                                                            11,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
                                                                       ),
                                                                     ),
+                                                                    if (message
+                                                                        .isEdited) ...[
+                                                                      const SizedBox(
+                                                                        width: 4,
+                                                                      ),
+                                                                      Text(
+                                                                        'معدلة',
+                                                                        style: TextStyle(
+                                                                          color:
+                                                                              subTextColor,
+                                                                          fontSize:
+                                                                              11,
+                                                                          fontWeight:
+                                                                              FontWeight.w500,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                    if (status !=
+                                                                        null) ...[
+                                                                      const SizedBox(
+                                                                        width: 4,
+                                                                      ),
+                                                                      if (message.isFailed)
+                                                                        GestureDetector(
+                                                                          onTap: () => _showActions(message),
+                                                                          child: Icon(
+                                                                            status.icon,
+                                                                            size: 15,
+                                                                            color: status.color,
+                                                                          ),
+                                                                        )
+                                                                      else
+                                                                        AnimatedSwitcher(
+                                                                          duration: const Duration(milliseconds: 220),
+                                                                          transitionBuilder: (child, animation) => ScaleTransition(
+                                                                            scale: CurvedAnimation(
+                                                                              parent: animation,
+                                                                              curve: Curves.easeOutBack,
+                                                                            ),
+                                                                            child: child,
+                                                                          ),
+                                                                          child: Icon(
+                                                                            status.icon,
+                                                                            key: ValueKey(status.icon),
+                                                                            size: 15,
+                                                                            color: status.color,
+                                                                          ),
+                                                                        ),
+                                                                    ],
                                                                   ],
-                                                                  if (status !=
-                                                                      null) ...[
-                                                                    const SizedBox(
-                                                                      width: 6,
-                                                                    ),
-                                                                    Icon(
-                                                                      status
-                                                                          .icon,
-                                                                      size: 16,
-                                                                      color: status
-                                                                          .color,
-                                                                    ),
-                                                                  ],
-                                                                ],
+                                                                ),
                                                               ),
                                                             ],
                                                           ),
@@ -5234,6 +5957,40 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                         ),
                                                     ],
                                                   ),
+                                                   if (_pulsingHeartMessageId == message.id)
+                                                     Positioned.fill(
+                                                       child: Center(
+                                                         child: TweenAnimationBuilder<double>(
+                                                           tween: Tween(begin: 0.0, end: 1.0),
+                                                           duration: const Duration(milliseconds: 650),
+                                                           curve: Curves.elasticOut,
+                                                           builder: (context, val, child) {
+                                                             final scale = val <= 0.6
+                                                                 ? (val / 0.6 * 1.35)
+                                                                 : (1.35 - ((val - 0.6) / 0.4 * 0.35));
+                                                             final opacity = (1.0 - (val > 0.7 ? (val - 0.7) / 0.3 : 0.0)).clamp(0.0, 1.0);
+                                                             return Opacity(
+                                                               opacity: opacity,
+                                                               child: Transform.scale(
+                                                                 scale: scale,
+                                                                 child: const Icon(
+                                                                   CupertinoIcons.heart_fill,
+                                                                   color: Color(0xFFE53935),
+                                                                   size: 52,
+                                                                   shadows: [
+                                                                     BoxShadow(
+                                                                       color: Colors.black26,
+                                                                       blurRadius: 10,
+                                                                       offset: Offset(0, 3),
+                                                                     ),
+                                                                   ],
+                                                                 ),
+                                                               ),
+                                                             );
+                                                           },
+                                                         ),
+                                                       ),
+                                                     ),
                                                   if (_selectionMode)
                                                     Positioned(
                                                       top: -2,
@@ -5377,7 +6134,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             ),
                           );
 
-                          if (!_animatedMessageIds.contains(message.id)) {
+                          final animationKey =
+                              message.metadata?['clientMessageId']?.toString() ??
+                              message.id;
+                          final alreadyAnimated =
+                              _animatedMessageIds.contains(animationKey) ||
+                              _animatedMessageIds.contains(message.id);
+
+                          if (!alreadyAnimated) {
+                            _animatedMessageIds.add(animationKey);
                             _animatedMessageIds.add(message.id);
                             child = child
                                 .animate()
@@ -5388,6 +6153,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   duration: 200.ms,
                                   curve: Curves.easeOut,
                                 );
+                          } else {
+                            _animatedMessageIds.add(animationKey);
+                            _animatedMessageIds.add(message.id);
                           }
                           return child;
                         },
@@ -5574,11 +6342,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   opacity: _showScrollToLatestButton ? 1 : 0,
                   child: IgnorePointer(
                     ignoring: !_showScrollToLatestButton,
-                    child: FloatingActionButton.small(
-                      heroTag: 'scroll_to_latest_btn',
-                      tooltip: 'آخر رسالة',
-                      onPressed: () => _scrollToBottom(animated: true),
-                      child: const Icon(Icons.keyboard_arrow_down_rounded),
+                    child: Badge(
+                      isLabelVisible: _unreadBelowCount > 0,
+                      label: Text('$_unreadBelowCount'),
+                      child: FloatingActionButton.small(
+                        heroTag: 'scroll_to_latest_btn',
+                        tooltip: 'آخر رسالة',
+                        onPressed: () => _scrollToBottom(animated: true),
+                        child: const Icon(Icons.keyboard_arrow_down_rounded),
+                      ),
                     ),
                   ),
                 ),
@@ -5785,58 +6557,6 @@ class _ChatMessagesLoadingSkeleton extends StatelessWidget {
   }
 }
 
-class _TelegramActionTile extends StatelessWidget {
-  const _TelegramActionTile({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: color.withValues(alpha: 0.14),
-                child: Icon(icon, size: 18, color: color),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  label,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 14,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _ChatMediaAlbum extends StatelessWidget {
   const _ChatMediaAlbum({
@@ -5863,7 +6583,7 @@ class _ChatMediaAlbum extends StatelessWidget {
               color: Colors.black54,
               child: Center(
                 child: Text(
-                  '+${overflowCount}',
+                  '+$overflowCount',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -6453,72 +7173,271 @@ class _TelegramComposerUploadStrip extends StatelessWidget {
   }
 }
 
-class _VoiceHoldRecordingBar extends StatelessWidget {
+class _VoiceHoldRecordingBar extends StatefulWidget {
   const _VoiceHoldRecordingBar({
     required this.colorScheme,
     required this.durationLabel,
     required this.slideCancelArmed,
     required this.gestureOffset,
+    required this.isDark,
+    required this.onCancel,
   });
 
   final ColorScheme colorScheme;
   final String durationLabel;
   final bool slideCancelArmed;
   final Offset gestureOffset;
+  final bool isDark;
+  final VoidCallback onCancel;
+
+  @override
+  State<_VoiceHoldRecordingBar> createState() => _VoiceHoldRecordingBarState();
+}
+
+class _VoiceHoldRecordingBarState extends State<_VoiceHoldRecordingBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final dx = rtl ? -gestureOffset.dx * 0.22 : gestureOffset.dx * 0.22;
-    final cancelColor = slideCancelArmed
-        ? const Color(0xFFDC2626)
-        : colorScheme.onSurfaceVariant;
-    return Transform.translate(
-      offset: Offset(dx, gestureOffset.dy * 0.08),
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: slideCancelArmed
-                ? const Color(0xFFFCA5A5)
-                : colorScheme.outlineVariant,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              rtl ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-              size: 20,
-              color: cancelColor,
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                slideCancelArmed ? 'اترك للإلغاء' : 'اسحب للإلغاء',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  color: cancelColor,
+    final dragX = (widget.gestureOffset.dx * 0.35).clamp(-60.0, 60.0);
+
+    final cancelColor = widget.slideCancelArmed
+        ? const Color(0xFFEF4444)
+        : (widget.isDark ? Colors.white70 : const Color(0xFF64748B));
+
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: widget.isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          // Explicit Clickable Cancel Button (Trash Icon + Text) - Guarantees the user can always tap to cancel!
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: widget.onCancel,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.delete_outline_rounded,
+                      size: 17,
+                      color: Color(0xFFEF4444),
+                    ),
+                    SizedBox(width: 4),
+                    Text(
+                      'إلغاء',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFEF4444),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(width: 6),
-            Text(
-              durationLabel,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+
+          // 1. Red Pulsing Recording Indicator Dot
+          AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, _) {
+              final opacity = 0.35 + (_pulseController.value * 0.65);
+              return Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: opacity),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withValues(alpha: opacity * 0.6),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 6),
+
+          // 2. Live Duration Counter
+          Text(
+            widget.durationLabel,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+              color: widget.isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // 3. Slide to Cancel Animated Indicator
+          Expanded(
+            child: Transform.translate(
+              offset: Offset(dragX, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    widget.slideCancelArmed
+                        ? Icons.delete_forever_rounded
+                        : Icons.chevron_right_rounded,
+                    size: 18,
+                    color: cancelColor,
+                  ),
+                  const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(
+                      widget.slideCancelArmed ? 'اترك للإلغاء' : 'اسحب للإلغاء',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: cancelColor,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            const SizedBox(width: 72, child: _RecordingWaveform()),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Floating lock capsule displayed vertically above the mic button during hold-recording.
+class _VoiceLockPill extends StatefulWidget {
+  const _VoiceLockPill({
+    required this.gestureDy,
+    required this.isDark,
+    required this.colorScheme,
+  });
+
+  final double gestureDy;
+  final bool isDark;
+  final ColorScheme colorScheme;
+
+  @override
+  State<_VoiceLockPill> createState() => _VoiceLockPillState();
+}
+
+class _VoiceLockPillState extends State<_VoiceLockPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isNearLock = widget.gestureDy < -45;
+    final dyOffset = (widget.gestureDy * 0.25).clamp(-20.0, 0.0);
+
+    return Transform.translate(
+      offset: Offset(0, dyOffset),
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder: (context, _) {
+          final bounce = math.sin(_anim.value * math.pi) * 3;
+          return Container(
+            width: 42,
+            height: 84,
+            decoration: BoxDecoration(
+              color: widget.isDark ? const Color(0xFF1E293B) : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isNearLock
+                    ? const Color(0xFF00A884)
+                    : (widget.isDark ? Colors.white12 : Colors.black12),
+                width: isNearLock ? 1.5 : 0.8,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: widget.isDark ? 0.35 : 0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: isNearLock
+                        ? const Color(0xFF00A884).withValues(alpha: 0.15)
+                        : Colors.transparent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isNearLock ? Icons.lock_open_rounded : Icons.lock_rounded,
+                    size: 20,
+                    color: isNearLock
+                        ? const Color(0xFF00A884)
+                        : (widget.isDark ? Colors.white70 : const Color(0xFF64748B)),
+                  ),
+                ),
+                Transform.translate(
+                  offset: Offset(0, -bounce),
+                  child: Icon(
+                    Icons.keyboard_arrow_up_rounded,
+                    size: 20,
+                    color: isNearLock
+                        ? const Color(0xFF00A884)
+                        : (widget.isDark ? Colors.white38 : const Color(0xFF94A3B8)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -6606,29 +7525,60 @@ class _MessageComposer extends StatefulWidget {
 }
 
 class _MessageComposerState extends State<_MessageComposer> {
-  double _sendScale = 1.0;
-
-  void _scaleSendButton(bool scaleDown) {
-    if (!mounted) return;
-    setState(() => _sendScale = scaleDown ? 0.9 : 1.0);
-  }
-
   String _formatDuration(Duration value) {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
   }
 
+  Future<void> _openActionsMenu() async {
+    if (!widget.enabled) return;
+
+    final selected = await showModalBottomSheet<dynamic>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const AttachmentBottomSheet(),
+    );
+
+    if (selected is String) {
+      widget.onSendSpecificFile?.call(selected);
+    }
+
+    if (selected is AttachmentBottomSheetResult) {
+      switch (selected) {
+        case AttachmentBottomSheetResult.image:
+          widget.onPickImage();
+          break;
+        case AttachmentBottomSheetResult.file:
+          widget.onAttach();
+          break;
+        case AttachmentBottomSheetResult.screenshot:
+          widget.onSendScreenshot();
+          break;
+        case AttachmentBottomSheetResult.reaction:
+          widget.onOpenReactionPicker();
+          break;
+        case AttachmentBottomSheetResult.poll:
+          widget.onSendPoll();
+          break;
+        case AttachmentBottomSheetResult.gif:
+          widget.onSendGif();
+          break;
+        case AttachmentBottomSheetResult.checklist:
+          widget.onSendChecklist();
+          break;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = widget.colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final enabled = widget.enabled;
     final isUploading = widget.isUploading;
     final isEditing = widget.isEditing;
-    final onAttach = widget.onAttach;
-    final onPickImage = widget.onPickImage;
-    final onSendScreenshot = widget.onSendScreenshot;
-    final onOpenReactionPicker = widget.onOpenReactionPicker;
     final onSend = widget.onSend;
     final controller = widget.controller;
     final uploadFileName = widget.uploadFileName;
@@ -6656,327 +7606,562 @@ class _MessageComposerState extends State<_MessageComposer> {
     final enterSendsMessage = widget.enterSendsMessage;
     final onChanged = widget.onChanged;
 
-    /// أزرار التحكم تظهر دائمًا أثناء التسجيل أو مع مسودة (لا نعتمد على وضع القفل فقط).
-    final showVoiceActionButtons = isVoiceRecordingActive;
+    final showVoiceActionButtons =
+        (isVoiceRecordingActive && isVoiceLocked) || hasVoiceDraft;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-        decoration: BoxDecoration(
-          color: colorScheme.surface.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: colorScheme.outlineVariant),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 18,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isUploading)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(6, 2, 6, 10),
-                child: _TelegramComposerUploadStrip(
-                  colorScheme: colorScheme,
-                  fileName: uploadFileName ?? 'مرفق',
-                  progress: uploadProgress,
-                ),
+      padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isUploading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 2, 6, 8),
+              child: _TelegramComposerUploadStrip(
+                colorScheme: colorScheme,
+                fileName: uploadFileName ?? 'مرفق',
+                progress: uploadProgress,
               ),
-            Row(
-              children: [
-                if (!isVoiceRecordingActive) ...[
-                  _ComposerActionsFab(
-                    enabled: enabled && !isUploading,
-                    colorScheme: colorScheme,
-                    onAttach: onAttach,
-                    onPickImage: onPickImage,
-                    onSendSpecificFile: widget.onSendSpecificFile,
-                    onSendScreenshot: onSendScreenshot,
-                    onOpenReactionPicker: onOpenReactionPicker,
-                    onSendPoll: widget.onSendPoll,
-                    onSendChecklist: widget.onSendChecklist,
-                    onSendGif: widget.onSendGif,
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton.filledTonal(
-                    tooltip: 'Ø§Ù„ÙƒØ§Ù…ÙŠØ±Ø§',
-                    onPressed: enabled && !isUploading
-                        ? widget.onTakePhoto
-                        : null,
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size(42, 42),
-                      padding: EdgeInsets.zero,
-                      backgroundColor: colorScheme.surfaceContainerHighest,
+            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // WhatsApp style Input Capsule
+              Expanded(
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? colorScheme.surfaceContainerHigh
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: colorScheme.outlineVariant
+                          .withValues(alpha: isDark ? 0.35 : 0.22),
+                      width: 0.5,
                     ),
-                    icon: const Icon(Icons.camera_alt_rounded, size: 20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: isDark ? 0.25 : 0.04,
+                        ),
+                        blurRadius: 6,
+                        offset: const Offset(0, 1.5),
+                      ),
+                    ],
                   ),
-                ],
-                Expanded(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                   child: holdPhase
                       ? _VoiceHoldRecordingBar(
                           colorScheme: colorScheme,
                           durationLabel: _formatDuration(recordingDuration),
                           slideCancelArmed: voiceSlideCancelArmed,
                           gestureOffset: voiceGestureOffset,
+                          isDark: isDark,
+                          onCancel: onCancelVoiceNote,
                         )
                       : lockedOrDraftBar
-                      ? _VoiceRecordingLockedBar(
-                          colorScheme: colorScheme,
-                          durationLabel: _formatDuration(recordingDuration),
-                          isLocked: isVoiceLocked || !isRecordingVoice,
-                        )
-                      : ChatTextFieldPasteMenu(
-                          controller: controller,
-                          enabled: enabled,
-                          child: TextField(
-                            controller: controller,
-                            enabled: enabled,
-                            minLines: 1,
-                            maxLines: 5,
-                            onChanged: onChanged,
-                            textInputAction: enterSendsMessage
-                                ? TextInputAction.send
-                                : TextInputAction.newline,
-                            onSubmitted: enterSendsMessage && enabled
-                                ? (_) => onSend()
-                                : null,
-                            decoration: InputDecoration(
-                              hintText: enabled
-                                  ? (isEditing
-                                        ? 'عدّل الرسالة...'
-                                        : 'اكتب رسالة...')
-                                  : 'الغرفة للقراءة فقط',
-                              border: InputBorder.none,
-                              filled: false,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 10,
-                              ),
-                            ),
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 4),
-                if (showVoiceActionButtons) ...[
-                  if (isRecordingVoice) ...[
-                    IconButton.filledTonal(
-                      onPressed: enabled
-                          ? (isVoicePaused
-                                ? onResumeVoiceNote
-                                : onPauseVoiceNote)
-                          : null,
-                      tooltip: isVoicePaused ? 'استئناف' : 'إيقاف مؤقت',
-                      style: IconButton.styleFrom(
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                      ),
-                      icon: Icon(
-                        isVoicePaused
-                            ? Icons.play_arrow_rounded
-                            : Icons.pause_rounded,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton.filledTonal(
-                      onPressed: enabled ? onStopVoiceNote : null,
-                      tooltip: 'إيقاف وحفظ مسودة',
-                      style: IconButton.styleFrom(
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                      ),
-                      icon: const Icon(Icons.stop_rounded),
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  IconButton.filledTonal(
-                    onPressed: enabled ? onCancelVoiceNote : null,
-                    tooltip: 'إلغاء التسجيل',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFE4E6),
-                    ),
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Color(0xFFB91C1C),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Tooltip(
-                    message: hasVoiceDraft ? 'إرسال' : 'إرسال الملاحظة الصوتية',
-                    child: FilledButton(
-                      onPressed: enabled ? onSendVoiceNote : null,
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                        padding: EdgeInsets.zero,
-                        shape: const CircleBorder(),
-                      ),
-                      child: const Icon(Icons.send_rounded, size: 20),
-                    ),
-                  ),
-                ] else
-                  ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: controller,
-                    builder: (context, value, _) {
-                      final hasText = value.text.trim().isNotEmpty || isEditing;
-                      return AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        transitionBuilder: (child, animation) =>
-                            ScaleTransition(scale: animation, child: child),
-                        child: hasText
-                            ? Stack(
-                                key: const ValueKey('send_btn'),
-                                alignment: Alignment.center,
-                                children: [
-                                  if (isUploading)
-                                    SizedBox(
-                                      width: 52,
-                                      height: 52,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.6,
-                                        value: uploadProgress <= 0
-                                            ? null
-                                            : uploadProgress,
-                                        color: const Color(0xFF3390EC),
-                                        backgroundColor:
-                                            colorScheme.surfaceContainerHighest,
-                                      ),
-                                    ),
-                                  GestureDetector(
-                                    onTapDown: (_) => _scaleSendButton(true),
-                                    onTapUp: (_) => _scaleSendButton(false),
-                                    onTapCancel: () => _scaleSendButton(false),
-                                    onLongPress:
-                                        enabled && !isUploading && !isEditing
-                                        ? widget.onSendOptions
+                          ? Row(
+                              children: [
+                                IconButton(
+                                  tooltip: 'إلغاء وحذف',
+                                  onPressed: enabled ? onCancelVoiceNote : null,
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                    color: Color(0xFFEF4444),
+                                    size: 24,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _VoiceRecordingLockedBar(
+                                    colorScheme: colorScheme,
+                                    durationLabel:
+                                        _formatDuration(recordingDuration),
+                                    isLocked: isVoiceLocked || !isRecordingVoice,
+                                    isPaused: isVoicePaused,
+                                    isDark: isDark,
+                                  ),
+                                ),
+                                if (isRecordingVoice)
+                                  IconButton(
+                                    tooltip: isVoicePaused
+                                        ? 'استئناف'
+                                        : 'إيقاف مؤقت',
+                                    onPressed: enabled
+                                        ? (isVoicePaused
+                                            ? onResumeVoiceNote
+                                            : onPauseVoiceNote)
                                         : null,
-                                    child: AnimatedScale(
-                                      scale: _sendScale,
-                                      duration: const Duration(
-                                        milliseconds: 100,
-                                      ),
-                                      child: FilledButton(
-                                        onPressed: enabled && !isUploading
-                                            ? onSend
-                                            : null,
-                                        style: FilledButton.styleFrom(
-                                          minimumSize: const Size(48, 48),
-                                          padding: EdgeInsets.zero,
-                                          shape: const CircleBorder(),
-                                        ),
-                                        child: Icon(
-                                          isEditing
-                                              ? Icons.check_rounded
-                                              : Icons.send_rounded,
-                                          size: 20,
-                                        ),
-                                      ),
+                                    icon: Icon(
+                                      isVoicePaused
+                                          ? Icons.mic_rounded
+                                          : Icons.pause_circle_outline_rounded,
+                                      size: 24,
+                                      color: isVoicePaused
+                                          ? const Color(0xFFEF4444)
+                                          : (isDark ? Colors.white70 : const Color(0xFF64748B)),
                                     ),
                                   ),
-                                ],
-                              )
-                            : Tooltip(
-                                key: const ValueKey('mic_btn'),
-                                message: 'اضغط مطوّلاً للتسجيل',
-                                child: IgnorePointer(
-                                  ignoring:
-                                      !enabled ||
-                                      isUploading ||
-                                      isVoiceRecordingActive,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onLongPressStart: (_) =>
-                                        unawaited(onVoiceLongPressStart()),
-                                    onLongPressMoveUpdate: onVoiceLongPressMove,
-                                    onLongPressEnd: (_) =>
-                                        unawaited(onVoiceLongPressEnd()),
-                                    child: Container(
-                                      width: 48,
-                                      height: 48,
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color:
-                                            colorScheme.surfaceContainerHighest,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        Icons.mic_rounded,
-                                        color: colorScheme.onSurfaceVariant,
+                              ],
+                            )
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                // Left: Emoji & Stickers button
+                                IconButton(
+                                  tooltip: 'الملصقات والتعبيرات',
+                                  onPressed: enabled && !isUploading
+                                      ? widget.onSendGif
+                                      : null,
+                                  splashRadius: 20,
+                                  padding: const EdgeInsets.all(8),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 44,
+                                  ),
+                                  icon: Icon(
+                                    Icons.sentiment_satisfied_rounded,
+                                    size: 24,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                                // Center: Text field expanding to fill all available space
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 2,
+                                    ),
+                                    child: ChatTextFieldPasteMenu(
+                                      controller: controller,
+                                      enabled: enabled,
+                                      child: TextField(
+                                        controller: controller,
+                                        enabled: enabled,
+                                        minLines: 1,
+                                        maxLines: 6,
+                                        onChanged: onChanged,
+                                        textInputAction: enterSendsMessage
+                                            ? TextInputAction.send
+                                            : TextInputAction.newline,
+                                        onSubmitted:
+                                            enterSendsMessage && enabled
+                                                ? (_) => onSend()
+                                                : null,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          height: 1.3,
+                                          color: isDark
+                                              ? const Color(0xFFF8FAFC)
+                                              : const Color(0xFF0F172A),
+                                        ),
+                                        decoration: InputDecoration(
+                                          hintText: enabled
+                                              ? (isEditing
+                                                  ? 'عدّل الرسالة...'
+                                                  : 'اكتب رسالة...')
+                                              : 'المحادثة للقراءة فقط',
+                                          hintStyle: TextStyle(
+                                            fontSize: 15.5,
+                                            color: isDark
+                                                ? Colors.white38
+                                                : const Color(0xFF94A3B8),
+                                          ),
+                                          border: InputBorder.none,
+                                          isDense: true,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 4,
+                                                vertical: 11,
+                                              ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                      );
-                    },
-                  ),
-              ],
-            ),
-            if (holdPhase && isVoiceHoldActive)
-              Padding(
-                padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
-                child: Text(
-                  'اسحب للأعلى للقفل ثم التعديل قبل الإرسال',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                                // Trailing attachment and camera inside bubble
+                                ValueListenableBuilder<TextEditingValue>(
+                                  valueListenable: controller,
+                                  builder: (context, value, _) {
+                                    final hasText =
+                                        value.text.trim().isNotEmpty ||
+                                        isEditing;
+                                    return Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        // Attachment (Paperclip) button
+                                        IconButton(
+                                          tooltip: 'إرفاق',
+                                          onPressed: enabled && !isUploading
+                                              ? _openActionsMenu
+                                              : null,
+                                          splashRadius: 20,
+                                          padding: const EdgeInsets.all(8),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 38,
+                                            minHeight: 44,
+                                          ),
+                                          icon: Icon(
+                                            Icons.attach_file_rounded,
+                                            size: 23,
+                                            color: isDark
+                                                ? Colors.white70
+                                                : const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                        // Camera button (disappears smoothly when user starts typing)
+                                        AnimatedSize(
+                                          duration: const Duration(
+                                            milliseconds: 200,
+                                          ),
+                                          curve: Curves.easeInOutCubic,
+                                          child: hasText
+                                              ? const SizedBox.shrink()
+                                              : IconButton(
+                                                  tooltip: 'الكاميرا',
+                                                  onPressed:
+                                                      enabled && !isUploading
+                                                          ? widget.onTakePhoto
+                                                          : null,
+                                                  splashRadius: 20,
+                                                  padding:
+                                                      const EdgeInsets.all(8),
+                                                  constraints:
+                                                      const BoxConstraints(
+                                                        minWidth: 38,
+                                                        minHeight: 44,
+                                                      ),
+                                                  icon: Icon(
+                                                    Icons.camera_alt_rounded,
+                                                    size: 22,
+                                                    color: isDark
+                                                        ? Colors.white70
+                                                        : const Color(
+                                                            0xFF64748B,
+                                                          ),
+                                                  ),
+                                                ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
                 ),
               ),
+              const SizedBox(width: 6),
+              // WhatsApp Circular Action Button (Mic / Send) with Floating Lock Capsule
+              Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.bottomCenter,
+                children: [
+                  if (holdPhase && isVoiceHoldActive)
+                    Positioned(
+                      bottom: 58,
+                      child: _VoiceLockPill(
+                        gestureDy: voiceGestureOffset.dy,
+                        isDark: isDark,
+                        colorScheme: colorScheme,
+                      ),
+                    ),
+                  _buildCircularActionButton(
+                    context: context,
+                    colorScheme: colorScheme,
+                    enabled: enabled,
+                    isUploading: isUploading,
+                    uploadProgress: uploadProgress,
+                    isEditing: isEditing,
+                    showVoiceActionButtons: showVoiceActionButtons,
+                    onSendVoiceNote: onSendVoiceNote,
+                    onSend: onSend,
+                    onSendOptions: widget.onSendOptions,
+                    onVoiceLongPressStart: onVoiceLongPressStart,
+                    onVoiceLongPressMove: onVoiceLongPressMove,
+                    onVoiceLongPressEnd: onVoiceLongPressEnd,
+                    isVoiceRecordingActive: isVoiceRecordingActive,
+                    isHoldingVoice: holdPhase && isVoiceHoldActive,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCircularActionButton({
+    required BuildContext context,
+    required ColorScheme colorScheme,
+    required bool enabled,
+    required bool isUploading,
+    required double uploadProgress,
+    required bool isEditing,
+    required bool showVoiceActionButtons,
+    required VoidCallback onSendVoiceNote,
+    required VoidCallback onSend,
+    required VoidCallback onSendOptions,
+    required Future<void> Function() onVoiceLongPressStart,
+    required void Function(LongPressMoveUpdateDetails) onVoiceLongPressMove,
+    required Future<void> Function() onVoiceLongPressEnd,
+    required bool isVoiceRecordingActive,
+    bool isHoldingVoice = false,
+  }) {
+    const whatsappGreen = Color(0xFF00A884);
+
+    if (showVoiceActionButtons) {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: whatsappGreen,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: whatsappGreen.withValues(alpha: 0.38),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
-      ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: enabled ? onSendVoiceNote : null,
+            child: const Center(
+              child: Icon(Icons.send_rounded, size: 22, color: Colors.white),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: widget.controller,
+      builder: (context, value, _) {
+        final hasText = value.text.trim().isNotEmpty || isEditing;
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          transitionBuilder: (child, animation) =>
+              ScaleTransition(scale: animation, child: child),
+          child: hasText
+              ? Container(
+                  key: const ValueKey('send_btn'),
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: colorScheme.primary.withValues(alpha: 0.35),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: enabled && !isUploading ? onSend : null,
+                      onLongPress: enabled && !isUploading && !isEditing
+                          ? onSendOptions
+                          : null,
+                      child: Center(
+                        child: isUploading
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  value: uploadProgress <= 0
+                                      ? null
+                                      : uploadProgress,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Icon(
+                                isEditing
+                                    ? Icons.check_rounded
+                                    : Icons.send_rounded,
+                                size: 21,
+                                color: Colors.white,
+                              ),
+                      ),
+                    ),
+                  ),
+                )
+              : Tooltip(
+                  key: const ValueKey('mic_btn'),
+                  message: 'اضغط مطوّلاً للتسجيل',
+                  child: IgnorePointer(
+                    ignoring: !enabled || isUploading,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'اضغط مطوّلاً على المايك لتسجيل رسالة صوتية',
+                              textAlign: TextAlign.center,
+                            ),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      onLongPressStart: (_) =>
+                          unawaited(onVoiceLongPressStart()),
+                      onLongPressMoveUpdate: onVoiceLongPressMove,
+                      onLongPressEnd: (_) =>
+                          unawaited(onVoiceLongPressEnd()),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: isHoldingVoice ? 54 : 48,
+                        height: isHoldingVoice ? 54 : 48,
+                        decoration: BoxDecoration(
+                          color: isHoldingVoice ? whatsappGreen : colorScheme.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: (isHoldingVoice ? whatsappGreen : colorScheme.primary)
+                                  .withValues(alpha: isHoldingVoice ? 0.45 : 0.32),
+                              blurRadius: isHoldingVoice ? 12 : 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Icon(
+                            Icons.mic_rounded,
+                            size: isHoldingVoice ? 26 : 23,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+        );
+      },
     );
   }
 }
 
-class _VoiceRecordingLockedBar extends StatelessWidget {
+class _VoiceRecordingLockedBar extends StatefulWidget {
   const _VoiceRecordingLockedBar({
     required this.colorScheme,
     required this.durationLabel,
     required this.isLocked,
+    this.isPaused = false,
+    required this.isDark,
   });
 
   final ColorScheme colorScheme;
   final String durationLabel;
   final bool isLocked;
+  final bool isPaused;
+  final bool isDark;
+
+  @override
+  State<_VoiceRecordingLockedBar> createState() => _VoiceRecordingLockedBarState();
+}
+
+class _VoiceRecordingLockedBarState extends State<_VoiceRecordingLockedBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    if (!widget.isPaused) {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _VoiceRecordingLockedBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isPaused && _pulseController.isAnimating) {
+      _pulseController.stop();
+    } else if (!widget.isPaused && !_pulseController.isAnimating) {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final fg = colorScheme.onSurfaceVariant;
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            isLocked ? Icons.lock_rounded : Icons.mic_rounded,
-            size: 18,
-            color: fg,
+    return Row(
+      children: [
+        // Pulsing red dot (or static gray dot when paused)
+        if (!widget.isPaused)
+          AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, _) {
+              final opacity = 0.35 + (_pulseController.value * 0.65);
+              return Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: opacity),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withValues(alpha: opacity * 0.6),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              );
+            },
+          )
+        else
+          Container(
+            width: 10,
+            height: 10,
+            decoration: const BoxDecoration(
+              color: Color(0xFF94A3B8),
+              shape: BoxShape.circle,
+            ),
           ),
-          const SizedBox(width: 8),
-          Text(
-            durationLabel,
-            style: TextStyle(fontWeight: FontWeight.w800, color: fg),
+        const SizedBox(width: 8),
+        Text(
+          widget.durationLabel,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+            color: widget.isDark ? Colors.white : const Color(0xFF0F172A),
           ),
-          const SizedBox(width: 10),
-          const Expanded(child: _RecordingWaveform()),
-        ],
-      ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _RecordingWaveform(isPaused: widget.isPaused),
+        ),
+      ],
     );
   }
 }
 
 class _RecordingWaveform extends StatefulWidget {
-  const _RecordingWaveform();
+  const _RecordingWaveform({this.isPaused = false});
+
+  final bool isPaused;
 
   @override
   State<_RecordingWaveform> createState() => _RecordingWaveformState();
@@ -6984,10 +8169,29 @@ class _RecordingWaveform extends StatefulWidget {
 
 class _RecordingWaveformState extends State<_RecordingWaveform>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (!widget.isPaused) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecordingWaveform oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isPaused && _controller.isAnimating) {
+      _controller.stop();
+    } else if (!widget.isPaused && !_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
 
   @override
   void dispose() {
@@ -6997,7 +8201,8 @@ class _RecordingWaveformState extends State<_RecordingWaveform>
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    const waveColor = Color(0xFF00A884);
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -7006,17 +8211,19 @@ class _RecordingWaveformState extends State<_RecordingWaveform>
           alignment: Alignment.centerLeft,
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            children: List.generate(10, (i) {
-              final phase = (t * 6.28318) + (i * 0.6);
-              final v = (0.5 + 0.5 * (math.sin(phase))).clamp(0.0, 1.0);
-              final h = 6 + (v * 14);
+            children: List.generate(14, (i) {
+              final phase = (t * 6.28318) + (i * 0.55);
+              final v = widget.isPaused
+                  ? 0.3
+                  : (0.35 + 0.65 * (math.sin(phase))).clamp(0.15, 1.0);
+              final h = 5 + (v * 18);
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 1.5),
                 child: Container(
-                  width: 3,
+                  width: 2.8,
                   height: h,
                   decoration: BoxDecoration(
-                    color: cs.primary.withValues(alpha: 0.65),
+                    color: waveColor.withValues(alpha: widget.isPaused ? 0.35 : 0.8),
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -7030,103 +8237,6 @@ class _RecordingWaveformState extends State<_RecordingWaveform>
 }
 
 // (Removed) Slide-to-lock/cancel voice recording UI.
-
-class _ComposerActionsFab extends StatefulWidget {
-  const _ComposerActionsFab({
-    required this.enabled,
-    required this.colorScheme,
-    required this.onAttach,
-    required this.onPickImage,
-    this.onSendSpecificFile,
-    required this.onSendScreenshot,
-    required this.onOpenReactionPicker,
-    this.onSendPoll,
-    this.onSendChecklist,
-    this.onSendGif,
-  });
-
-  final bool enabled;
-  final ColorScheme colorScheme;
-  final VoidCallback onAttach;
-  final VoidCallback onPickImage;
-  final ValueChanged<String>? onSendSpecificFile;
-  final VoidCallback onSendScreenshot;
-  final VoidCallback onOpenReactionPicker;
-  final VoidCallback? onSendPoll;
-  final VoidCallback? onSendChecklist;
-  final VoidCallback? onSendGif;
-
-  @override
-  State<_ComposerActionsFab> createState() => _ComposerActionsFabState();
-}
-
-class _ComposerActionsFabState extends State<_ComposerActionsFab> {
-  final GlobalKey _anchorKey = GlobalKey();
-
-  Future<void> _openActionsMenu() async {
-    if (!widget.enabled) {
-      return;
-    }
-
-    final anchorContext = _anchorKey.currentContext;
-    if (anchorContext == null) {
-      return;
-    }
-
-    final selected = await showModalBottomSheet<dynamic>(
-      context: anchorContext,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => const AttachmentBottomSheet(),
-    );
-
-    if (selected is String) {
-      widget.onSendSpecificFile?.call(selected);
-    }
-
-    if (selected is AttachmentBottomSheetResult) {
-      switch (selected) {
-        case AttachmentBottomSheetResult.image:
-          widget.onPickImage();
-          break;
-        case AttachmentBottomSheetResult.file:
-          widget.onAttach();
-          break;
-        case AttachmentBottomSheetResult.screenshot:
-          widget.onSendScreenshot();
-          break;
-        case AttachmentBottomSheetResult.reaction:
-          widget.onOpenReactionPicker();
-          break;
-        case AttachmentBottomSheetResult.poll:
-          widget.onSendPoll?.call();
-          break;
-        case AttachmentBottomSheetResult.gif:
-          widget.onSendGif?.call();
-          break;
-        case AttachmentBottomSheetResult.checklist:
-          widget.onSendChecklist?.call();
-          break;
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 42,
-      height: 42,
-      child: IconButton.filledTonal(
-        key: _anchorKey,
-        onPressed: widget.enabled ? _openActionsMenu : null,
-        style: IconButton.styleFrom(
-          backgroundColor: widget.colorScheme.surfaceContainerHighest,
-        ),
-        icon: const Icon(Icons.add_rounded),
-      ),
-    );
-  }
-}
 
 String _presenceLabel(ChatDirectoryUser user) {
   if (user.presenceStatus == 'online') return 'متصل الآن';
@@ -7149,6 +8259,13 @@ Color _presenceColor(String status) => switch (status) {
 };
 
 _MessageStatus _status(ChatMessage message, String currentUserId) {
+  if (message.isFailed) {
+    return const _MessageStatus(Icons.error_outline_rounded, Color(0xFFEF4444));
+  }
+  if (message.isPending || message.id.startsWith('temp_')) {
+    return const _MessageStatus(Icons.access_time_rounded, Color(0xFF94A3B8));
+  }
+
   if (message.seenBy.any((entry) => entry.userId != currentUserId)) {
     return const _MessageStatus(Icons.done_all_rounded, Color(0xFF16A34A));
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'chat_text_field_paste_menu.dart';
 import 'emoji_picker_panel.dart';
@@ -7,6 +8,7 @@ class ChatInput extends StatefulWidget {
   const ChatInput({
     super.key,
     required this.controller,
+    this.focusNode,
     required this.onChanged,
     required this.onSend,
     required this.onSendOptions,
@@ -26,6 +28,7 @@ class ChatInput extends StatefulWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final ValueChanged<String> onChanged;
   final VoidCallback onSend;
   final VoidCallback onSendOptions;
@@ -43,12 +46,63 @@ class ChatInput extends StatefulWidget {
   final bool enabled;
   final bool enterSendsMessage;
 
+  static TextEditingValue insertTextAtSelection(
+    TextEditingValue value,
+    String textToInsert,
+  ) {
+    final text = value.text;
+    final selection = value.selection;
+
+    int start = selection.isValid ? selection.baseOffset : -1;
+    int end = selection.isValid ? selection.extentOffset : -1;
+
+    if (start > end) {
+      final temp = start;
+      start = end;
+      end = temp;
+    }
+
+    if (start == -1 || end == -1) {
+      start = text.length;
+      end = text.length;
+    }
+
+    final newText = text.replaceRange(start, end, textToInsert);
+    return TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: start + textToInsert.length,
+      ),
+    );
+  }
+
   @override
   State<ChatInput> createState() => _ChatInputState();
 }
 
 class _ChatInputState extends State<ChatInput> {
+  FocusNode? _internalFocusNode;
+  final FocusNode _sendButtonFocusNode =
+      FocusNode(canRequestFocus: false, skipTraversal: true);
   bool _actionsExpanded = false;
+
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ?? (_internalFocusNode ??= FocusNode());
+
+  @override
+  void dispose() {
+    _internalFocusNode?.dispose();
+    _sendButtonFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _submitMessage() {
+    if (!widget.enabled || widget.isUploading) return;
+    final text = widget.controller.text.trim();
+    if (text.isEmpty) return;
+    widget.onSend();
+    _effectiveFocusNode.requestFocus();
+  }
 
   void _toggleActions() {
     if (!widget.enabled) {
@@ -267,40 +321,51 @@ class _ChatInputState extends State<ChatInput> {
                   tooltip: 'إيموجي',
                   onPressed: widget.enabled && !widget.isUploading
                       ? () {
-                          // Note: implement opening the emoji picker overlay/dialog here
                           showDialog(
                             context: context,
-                            builder: (context) => AlertDialog(
-                              contentPadding: EdgeInsets.zero,
-                              content: SizedBox(
-                                width: 350,
-                                height: 400,
-                                child: EmojiPickerPanel(
-                                  onEmojiSelected: (emoji) {
-                                    final text = widget.controller.text;
-                                    final selection =
-                                        widget.controller.selection;
-                                    final newText = text.replaceRange(
-                                      selection.start > -1
-                                          ? selection.start
-                                          : text.length,
-                                      selection.end > -1
-                                          ? selection.end
-                                          : text.length,
-                                      emoji.emoji,
-                                    );
-                                    widget.controller.value = TextEditingValue(
-                                      text: newText,
-                                      selection: TextSelection.collapsed(
-                                        offset:
-                                            (selection.start > -1
-                                                ? selection.start
-                                                : text.length) +
-                                            emoji.emoji.length,
+                            builder: (dialogContext) => Dialog(
+                              clipBehavior: Clip.antiAlias,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: SizedBox(
+                                width: 380,
+                                height: 440,
+                                child: Column(
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(14, 10, 4, 4),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              'اختر إيموجي',
+                                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'إغلاق',
+                                            onPressed: () => Navigator.of(dialogContext).pop(),
+                                            icon: const Icon(Icons.close_rounded),
+                                          ),
+                                        ],
                                       ),
-                                    );
-                                    Navigator.pop(context);
-                                  },
+                                    ),
+                                    const Divider(height: 1),
+                                    Expanded(
+                                      child: EmojiPickerPanel(
+                                        onEmojiSelected: (emoji) {
+                                          widget.controller.value = ChatInput.insertTextAtSelection(
+                                            widget.controller.value,
+                                            emoji.emoji,
+                                          );
+                                          widget.onChanged(widget.controller.text);
+                                        },
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -316,29 +381,53 @@ class _ChatInputState extends State<ChatInput> {
                     child: ChatTextFieldPasteMenu(
                       controller: widget.controller,
                       enabled: widget.enabled,
-                      child: TextField(
-                        controller: widget.controller,
-                        enabled: widget.enabled,
-                        onChanged: widget.onChanged,
-                        keyboardType: TextInputType.multiline,
-                        maxLines: null,
-                        textAlignVertical: TextAlignVertical.center,
-                        textInputAction: widget.enterSendsMessage
-                            ? TextInputAction.send
-                            : TextInputAction.newline,
-                        onSubmitted: widget.enterSendsMessage && widget.enabled
-                            ? (_) => widget.onSend()
-                            : null,
-                        decoration: InputDecoration(
-                          hintText: widget.enabled
-                              ? (widget.isEditing
-                                    ? 'عدّل الرسالة...'
-                                    : 'اكتب رسالة...')
-                              : 'هذه المحادثة للقراءة فقط',
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
+                      child: Focus(
+                        onKeyEvent: (node, event) {
+                          if (event is KeyDownEvent) {
+                            final isEnter =
+                                event.logicalKey == LogicalKeyboardKey.enter ||
+                                event.logicalKey == LogicalKeyboardKey.numpadEnter;
+                            if (isEnter) {
+                              final isShift = HardwareKeyboard.instance.isShiftPressed;
+                              if (isShift) {
+                                final val = widget.controller.value;
+                                widget.controller.value =
+                                    ChatInput.insertTextAtSelection(val, '\n');
+                                widget.onChanged(widget.controller.text);
+                                return KeyEventResult.handled;
+                              } else if (widget.enterSendsMessage && widget.enabled) {
+                                _submitMessage();
+                                return KeyEventResult.handled;
+                              }
+                            }
+                          }
+                          return KeyEventResult.ignored;
+                        },
+                        child: TextField(
+                          controller: widget.controller,
+                          focusNode: _effectiveFocusNode,
+                          enabled: widget.enabled,
+                          onChanged: widget.onChanged,
+                          keyboardType: TextInputType.multiline,
+                          maxLines: null,
+                          textAlignVertical: TextAlignVertical.center,
+                          textInputAction: widget.enterSendsMessage
+                              ? TextInputAction.send
+                              : TextInputAction.newline,
+                          onSubmitted: widget.enterSendsMessage && widget.enabled
+                              ? (_) => _submitMessage()
+                              : null,
+                          decoration: InputDecoration(
+                            hintText: widget.enabled
+                                ? (widget.isEditing
+                                      ? 'عدّل الرسالة...'
+                                      : 'اكتب رسالة...')
+                                : 'هذه المحادثة للقراءة فقط',
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                           ),
                         ),
                       ),
@@ -357,7 +446,8 @@ class _ChatInputState extends State<ChatInput> {
                           ? widget.onSendOptions
                           : null,
                       child: FilledButton(
-                        onPressed: canSend ? widget.onSend : null,
+                        focusNode: _sendButtonFocusNode,
+                        onPressed: canSend ? _submitMessage : null,
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(44, 44),
                           shape: const CircleBorder(),

@@ -105,6 +105,22 @@ class UpdateManagementRepository {
     final resolvedArtifactName = artifactFileName?.trim().isNotEmpty == true
         ? artifactFileName!.trim()
         : (artifactFilePath == null ? null : path.basename(artifactFilePath));
+    final isExeOrMsi = resolvedArtifactName != null &&
+        (resolvedArtifactName.toLowerCase().endsWith('.exe') ||
+            resolvedArtifactName.toLowerCase().endsWith('.msi'));
+    final effectivePackageLayout =
+        isExeOrMsi ? 'installer' : packageLayout.trim();
+    final effectiveInstallerKind = resolvedArtifactName != null &&
+            resolvedArtifactName.toLowerCase().endsWith('.exe')
+        ? 'exe'
+        : (resolvedArtifactName != null &&
+                resolvedArtifactName.toLowerCase().endsWith('.msi')
+            ? 'msi'
+            : (resolvedArtifactName != null &&
+                    resolvedArtifactName.toLowerCase().endsWith('.apk')
+                ? 'apk'
+                : 'zip'));
+
     final formData = FormData.fromMap({
       'version': version.trim(),
       if (buildNumber != null && buildNumber.trim().isNotEmpty)
@@ -114,8 +130,9 @@ class UpdateManagementRepository {
       'notes': notes.trim(),
       'mandatory': mandatory,
       'isEnabled': isEnabled,
+      'installerKind': effectiveInstallerKind,
       'packageType': packageType.trim(),
-      'packageLayout': packageLayout.trim(),
+      'packageLayout': effectivePackageLayout,
       'entryExecutable': entryExecutable.trim(),
       if (minSupportedVersion != null && minSupportedVersion.trim().isNotEmpty)
         'minSupportedVersion': minSupportedVersion.trim(),
@@ -255,6 +272,7 @@ class UpdateManagementRepository {
     required String connectionStatus,
     required bool autoUpdateEnabled,
     required bool silentInstallEnabled,
+    String platform = 'desktop_windows',
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/updates/devices/heartbeat',
@@ -266,6 +284,7 @@ class UpdateManagementRepository {
           'localIp': localIp.trim(),
         'branchCode': branchCode,
         'channel': channel,
+        'platform': platform,
         'appVersion': appVersion,
         'osName': osName,
         'osVersion': osVersion,

@@ -3,6 +3,7 @@ const rateLimit = require("express-rate-limit");
 const { body, param, query } = require("express-validator");
 const { chatUpload } = require("../utils/chat-upload");
 const { chatTransferUpload } = require("../utils/chat-transfer-upload");
+const { conversationAvatarUpload } = require("../utils/conversation-avatar-upload");
 const {
   getChatDirectoryUsers,
   getChatRoles,
@@ -10,6 +11,9 @@ const {
   getManageableConversations,
   createChatConversation,
   updateChatConversation,
+  uploadConversationAvatar,
+  deleteConversationAvatar,
+  downloadConversationAvatar,
   updateChatConversationPreferences,
   setGroupPinnedMessage,
   clearGroupPinnedMessage,
@@ -33,6 +37,7 @@ const {
   markSeen,
   markSingleMessageSeen,
   removeMessage,
+  sendScheduledMessage,
   searchChatMessages,
   getFavoriteChatMessages,
   getPresence,
@@ -61,6 +66,13 @@ const messageLimiter = rateLimit({
     message: "تم تجاوز عدد الرسائل المسموح في الدقيقة. حاول مرة أخرى بعد قليل.",
   },
 });
+
+router.get(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  downloadConversationAvatar,
+);
 
 router.use(requireAuth);
 
@@ -112,6 +124,21 @@ router.put(
   ],
   validateRequest,
   updateChatConversation,
+);
+
+router.post(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  conversationAvatarUpload.single("avatar"),
+  uploadConversationAvatar,
+);
+
+router.delete(
+  "/conversations/:id/avatar",
+  [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
+  validateRequest,
+  deleteConversationAvatar,
 );
 
 router.patch(
@@ -341,6 +368,13 @@ router.delete(
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
   removeMessage,
+);
+
+router.post(
+  "/messages/:id/send-now",
+  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
+  validateRequest,
+  sendScheduledMessage,
 );
 
 router.post(

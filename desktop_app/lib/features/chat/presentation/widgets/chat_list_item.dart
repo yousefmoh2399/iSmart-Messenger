@@ -54,14 +54,20 @@ class _ChatListItemState extends State<ChatListItem> {
     final preview =
         widget.typingPreviewText ?? _previewText(widget.conversation);
     final avatarLabel = (peer?.displayName ?? title).trim();
+    final String tooltipMessage = (peer?.jobTitle.trim().isNotEmpty == true)
+        ? '$title\n💼 ${peer!.jobTitle.trim()}'
+        : (peer != null && peer.branchCode.isNotEmpty
+            ? '$title • فرع ${peer.branchCode}'
+            : title);
     final onSurfaceVariant = colorScheme.onSurfaceVariant;
     final selectionColor = colorScheme.primary.withValues(alpha: 0.14);
     final hoverColor = colorScheme.onSurface.withValues(alpha: 0.04);
     final inactiveColor = colorScheme.surfaceContainerHighest;
     final isTypingPreview = widget.typingPreviewText != null;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 320;
         final avatarRadius = isNarrow ? 20.0 : 24.0;
         final horizontalPadding = isNarrow ? 8.0 : 12.0;
@@ -141,7 +147,7 @@ class _ChatListItemState extends State<ChatListItem> {
                           SafeNetworkAvatar(
                             radius: avatarRadius,
                             backgroundColor: accent.withValues(alpha: 0.16),
-                            imageUrl: peer?.avatarUrl,
+                            imageUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
                             fallbackText: avatarLabel.isEmpty
                                 ? '?'
                                 : avatarLabel.substring(0, 1).toUpperCase(),
@@ -177,19 +183,38 @@ class _ChatListItemState extends State<ChatListItem> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                          // color: selected
-                                          //     ? const Colors.black
-                                          //     : const Colors.white,
-                                        ),
+                                  child: Tooltip(
+                                    message: tooltipMessage,
+                                    waitDuration: const Duration(milliseconds: 250),
+                                    showDuration: const Duration(seconds: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1C1C1E).withValues(alpha: 0.94),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.15),
+                                        width: 0.8,
+                                      ),
+                                    ),
+                                    textStyle: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    child: Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
                                   ),
                                 ),
                                 if (widget.conversation.isPinned)
@@ -399,6 +424,7 @@ class _ChatListItemState extends State<ChatListItem> {
         
         ));
       },
+      ),
     );
   }
 }

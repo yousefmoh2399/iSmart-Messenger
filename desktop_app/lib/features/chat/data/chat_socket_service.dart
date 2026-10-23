@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io' as io_dart;
 
 import 'package:socket_io_client/socket_io_client.dart' as io;
@@ -259,6 +259,7 @@ class ChatSocketService implements PrintStatusEmitter {
     }
 
     bind('receive_message');
+    bind('scheduled_message_sent');
     bind('typing');
     bind('stop_typing');
     bind('message_seen');

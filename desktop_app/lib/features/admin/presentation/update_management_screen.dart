@@ -7,9 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/formatters.dart';
 import '../../../shared/providers/providers.dart';
-import '../../../shared/widgets/button_loading_indicator.dart';
-import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../models/update_management_models.dart';
+import '../../chat/models/chat_models.dart';
 
 class UpdateManagementScreen extends ConsumerStatefulWidget {
   const UpdateManagementScreen({super.key});
@@ -24,10 +23,10 @@ class _UpdateManagementScreenState
   bool _loading = true;
   bool _busy = false;
   String _selectedSection = 'releases';
-  String _deviceStatusFilter = 'all';
-  String _platformFilter = 'all';
+  final String _deviceStatusFilter = 'all';
+  final String _platformFilter = 'all';
   String _deviceSearch = '';
-  bool _excludeCurrentDevice = true;
+  bool _excludeCurrentDevice = false;
   String? _currentDeviceUid;
 
   int _uploadProgress = 0;
@@ -36,22 +35,23 @@ class _UpdateManagementScreenState
   List<ManagedUpdateDevice> _devices = const [];
   List<ManagedUpdateRelease> _releases = const [];
   List<ManagedUpdateJob> _jobs = const [];
+  List<BranchSummary> _availableBranches = const [];
 
   String? _selectedReleaseId;
   String _targetType = 'all';
   final Set<String> _selectedDeviceIds = <String>{};
+  final Set<String> _selectedBranchCodes = <String>{};
+  String _targetDeviceSearch = '';
 
   final _versionController = TextEditingController();
   final _notesController = TextEditingController();
   final _externalUrlController = TextEditingController();
-  final _silentArgsController = TextEditingController(
-    text: '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-',
-  );
+  final _silentArgsController = TextEditingController(text: '');
   final _targetBranchesController = TextEditingController();
   final _noteController = TextEditingController();
 
   String _releaseChannel = 'stable';
-  String _releasePlatform = 'desktop_windows';
+  final String _releasePlatform = 'desktop_windows';
   bool _releaseMandatory = false;
   bool _releaseEnabled = true;
   String? _artifactPath;
@@ -89,6 +89,10 @@ class _UpdateManagementScreenState
     setState(() => _loading = true);
     try {
       final repository = ref.read(updateManagementRepositoryProvider);
+      final branchFuture = ref
+          .read(chatRepositoryProvider)
+          .fetchBranches()
+          .catchError((_) => <BranchSummary>[]);
       final results = await Future.wait([
         repository.listDevices(
           status: _deviceStatusFilter,
@@ -98,12 +102,14 @@ class _UpdateManagementScreenState
         ),
         repository.listReleases(),
         repository.listUpdateJobs(limit: 150),
+        branchFuture,
       ]);
       if (!mounted) return;
       setState(() {
         _devices = results[0] as List<ManagedUpdateDevice>;
         _releases = results[1] as List<ManagedUpdateRelease>;
         _jobs = results[2] as List<ManagedUpdateJob>;
+        _availableBranches = results[3] as List<BranchSummary>;
         final selectedExists =
             _selectedReleaseId != null &&
             _releases.any((release) => release.id == _selectedReleaseId);
@@ -121,7 +127,7 @@ class _UpdateManagementScreenState
   Future<void> _pickArtifact() async {
     final extensions = _releasePlatform == 'mobile_android'
         ? const ['apk']
-        : const ['zip', 'msi', 'exe'];
+        : const ['exe', 'msi', 'zip'];
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: extensions,
@@ -149,7 +155,7 @@ class _UpdateManagementScreenState
     }
     if ((_artifactPath == null || _artifactPath!.isEmpty) &&
         externalUrl.isEmpty) {
-      _showSnack('اختر ملف التحديث أو أدخل رابط تحميل مباشر.', isError: true);
+      _showSnack('اختر ملف التحديث (.exe أو .msi) أو أدخل رابط مباشر.', isError: true);
       return;
     }
 
@@ -187,7 +193,7 @@ class _UpdateManagementScreenState
       await _reload();
       if (!mounted) return;
       setState(() => _selectedReleaseId = created.id);
-      _showSnack('تم إضافة الإصدار وتحديده للتوزيع.');
+      _showSnack('تم إضافة الإصدار الجديد بنجاح.');
     } catch (error) {
       _showSnack(error.toString(), isError: true);
     } finally {
@@ -252,9 +258,10 @@ class _UpdateManagementScreenState
       builder: (context) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('حذف الإصدار'),
           content: Text(
-            'سيتم حذف الإصدار v${release.version} وملف التحديث الخاص به. هل تريد المتابعة؟',
+            'سيتم حذف الإصدار v${release.version} وملف التحديث الخاص به نهائياً. هل أنت متأكد؟',
           ),
           actions: [
             TextButton(
@@ -263,10 +270,11 @@ class _UpdateManagementScreenState
             ),
             FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFDC2626),
+                backgroundColor: const Color(0xFFEF4444),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('حذف'),
+              child: const Text('حذف نهائي'),
             ),
           ],
         ),
@@ -293,15 +301,18 @@ class _UpdateManagementScreenState
 
   Future<void> _createUpdateJob() async {
     if (_selectedReleaseId == null || _selectedReleaseId!.isEmpty) {
-      _showSnack('اختر إصدارا قبل إرسال التحديث.', isError: true);
+      _showSnack('اختر إصداراً أولاً لإرسال التحديث.', isError: true);
       return;
     }
-    final branches = _targetBranchesController.text
+    final textBranches = _targetBranchesController.text
         .split(',')
         .map((entry) => entry.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toSet()
-        .toList();
+        .where((entry) => entry.isNotEmpty);
+    final branches = <String>{
+      ..._selectedBranchCodes,
+      ...textBranches,
+    }.toList();
+
     final targetDevices = _selectedDeviceIds.toList();
     final excludeUids =
         _excludeCurrentDevice && (_currentDeviceUid?.isNotEmpty ?? false)
@@ -309,11 +320,11 @@ class _UpdateManagementScreenState
         : const <String>[];
 
     if (_targetType == 'branch' && branches.isEmpty) {
-      _showSnack('أدخل فرعا واحدا على الأقل.', isError: true);
+      _showSnack('اختر فرعاً واحداً على الأقل من القائمة أدناه.', isError: true);
       return;
     }
     if (_targetType == 'devices' && targetDevices.isEmpty) {
-      _showSnack('اختر جهازا واحدا على الأقل.', isError: true);
+      _showSnack('اختر جهازاً واحداً على الأقل من قائمة الأجهزة أدناه.', isError: true);
       return;
     }
 
@@ -331,7 +342,7 @@ class _UpdateManagementScreenState
           );
       _noteController.clear();
       await _reload();
-      _showSnack('تم إنشاء مهمة التحديث للأجهزة المستهدفة.');
+      _showSnack('تم إطلاق مهمة التوزيع لأجهزة المنظومة بنجاح.');
     } catch (error) {
       _showSnack(error.toString(), isError: true);
     } finally {
@@ -359,7 +370,9 @@ class _UpdateManagementScreenState
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? const Color(0xFFB42318) : null,
+        backgroundColor: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -378,49 +391,44 @@ class _UpdateManagementScreenState
   }
 
   int get _onlineDevices => _devices.where((device) => device.isOnline).length;
-  int get _updatingDevices => _devices
-      .where((device) => !['idle', 'completed'].contains(device.updateStatus))
-      .length;
   int get _failedDevices =>
       _devices.where((device) => device.updateStatus == 'failed').length;
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return ListView(
-        padding: const EdgeInsets.all(18),
-        children: const [
-          ShimmerSkeleton(height: 84, borderRadius: 16),
-          SizedBox(height: 12),
-          ShimmerSkeleton(height: 260, borderRadius: 16),
-          SizedBox(height: 12),
-          ShimmerSkeleton(height: 360, borderRadius: 16),
-        ],
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (_loading && _releases.isEmpty && _devices.isEmpty) {
+      return Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+          child: const Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
       );
     }
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Container(
-        color: isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7),
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final wide = constraints.maxWidth >= 1180;
+            final wide = constraints.maxWidth >= 1060;
             return RefreshIndicator(
               onRefresh: _reload,
               child: ListView(
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                 children: [
-                  _HeaderBar(busy: _busy, onRefresh: _reload),
-                  const SizedBox(height: 16),
-                  _SectionTabs(
-                    value: _selectedSection,
-                    onChanged: (value) =>
-                        setState(() => _selectedSection = value),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSelectedSection(wide),
+                  _buildHeader(isDark),
+                  const SizedBox(height: 18),
+                  _buildMetricsStrip(isDark),
+                  const SizedBox(height: 18),
+                  _buildSectionTabs(isDark),
+                  const SizedBox(height: 18),
+                  _buildActiveSectionContent(wide, isDark),
                 ],
               ),
             );
@@ -430,1428 +438,1346 @@ class _UpdateManagementScreenState
     );
   }
 
-  Widget _buildSelectedSection(bool wide) {
-    return switch (_selectedSection) {
-      'send' => _buildSendSection(wide),
-      'devices' => _buildDevicesSection(wide),
-      'jobs' => _buildJobsSection(),
-      _ => _buildReleasesSection(wide),
-    };
-  }
-
-  Widget _buildReleasesSection(bool wide) {
-    if (!wide) {
-      return Column(
-        children: [
-          _buildReleaseComposer(),
-          const SizedBox(height: 16),
-          _buildReleaseListPanel(),
-        ],
-      );
-    }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 5, child: _buildReleaseComposer()),
-        const SizedBox(width: 16),
-        Expanded(flex: 6, child: _buildReleaseListPanel()),
-      ],
-    );
-  }
-
-  Widget _buildSendSection(bool wide) {
-    if (!wide) {
-      return Column(
-        children: [
-          _buildDistributionPanel(),
-          const SizedBox(height: 16),
-          _buildDevicesPanel(),
-        ],
-      );
-    }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 5, child: _buildDistributionPanel()),
-        const SizedBox(width: 16),
-        Expanded(flex: 6, child: _buildDevicesPanel()),
-      ],
-    );
-  }
-
-  Widget _buildDevicesSection(bool wide) {
-    if (!wide) {
-      return Column(
-        children: [
-          _buildControls(),
-          const SizedBox(height: 16),
-          _buildDevicesPanel(showAll: true),
-        ],
-      );
-    }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 360, child: _buildControls()),
-        const SizedBox(width: 16),
-        Expanded(child: _buildDevicesPanel(showAll: true)),
-      ],
-    );
-  }
-
-  Widget _buildJobsSection() {
-    return Column(
-      children: [
-        _SummaryStrip(
-          devices: _devices.length,
-          online: _onlineDevices,
-          releases: _filteredReleases.length,
-          updating: _updatingDevices,
-          failed: _failedDevices,
-        ),
-        const SizedBox(height: 16),
-        _buildJobsPanel(showAll: true),
-      ],
-    );
-  }
-
-  Widget _buildWorkflowColumn() {
-    return Column(
-      children: [
-        _buildReleaseComposer(),
-        const SizedBox(height: 16),
-        _buildDistributionPanel(),
-        const SizedBox(height: 16),
-        _buildJobsPanel(),
-      ],
-    );
-  }
-
-  Widget _buildStatusColumn() {
-    return Column(
-      children: [
-        _SummaryStrip(
-          devices: _devices.length,
-          online: _onlineDevices,
-          releases: _filteredReleases.length,
-          updating: _updatingDevices,
-          failed: _failedDevices,
-        ),
-        const SizedBox(height: 16),
-        _buildControls(),
-        const SizedBox(height: 16),
-        _buildDevicesPanel(),
-      ],
-    );
-  }
-
-  Widget _buildControls() {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _SectionTitle(
-            icon: Iconsax.filter_search,
-            title: 'فلترة الأجهزة',
-            subtitle: 'استخدمها عند الإرسال لأجهزة محددة.',
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            onChanged: (value) => _deviceSearch = value.trim(),
-            onSubmitted: (_) => _reload(),
-            decoration: const InputDecoration(
-              hintText: 'بحث باسم الجهاز أو المستخدم',
-              prefixIcon: Icon(Iconsax.search_normal),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _FilterMenu(
-                  value: _platformFilter,
-                  label: 'المنصة',
-                  items: const {
-                    'all': 'كل المنصات',
-                    'desktop_windows': 'Windows',
-                    'mobile_android': 'Android',
-                  },
-                  onChanged: (value) {
-                    setState(() => _platformFilter = value);
-                    _reload();
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _FilterMenu(
-                  value: _deviceStatusFilter,
-                  label: 'الحالة',
-                  items: const {
-                    'all': 'كل الحالات',
-                    'online': 'متصل',
-                    'offline': 'غير متصل',
-                  },
-                  onChanged: (value) {
-                    setState(() => _deviceStatusFilter = value);
-                    _reload();
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 44,
-            child: OutlinedButton.icon(
-              onPressed: _busy ? null : _reload,
-              icon: const Icon(Iconsax.refresh, size: 18),
-              label: const Text('تحديث القائمة'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReleaseComposer() {
-    final hasArtifact = _artifactPath != null && _artifactPath!.isNotEmpty;
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _StepHeader(
-            number: 1,
-            title: 'أضف ملف التحديث',
-            subtitle:
-                'اكتب رقم الإصدار وارفع الملف. بعد الحفظ سيظهر الإصدار في خطوة الإرسال.',
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _versionController,
-                  decoration: const InputDecoration(
-                    labelText: 'رقم الإصدار',
-                    hintText: 'مثال 1.2.0',
-                    prefixIcon: Icon(Iconsax.tag),
-                  ),
-                  textDirection: TextDirection.ltr,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _FilterMenu(
-                  value: _releaseChannel,
-                  label: 'القناة',
-                  items: const {
-                    'stable': 'Stable',
-                    'beta': 'Beta',
-                    'alpha': 'Alpha',
-                    'internal': 'Internal',
-                  },
-                  onChanged: (value) => setState(() => _releaseChannel = value),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _FilterMenu(
-                  value: _releasePlatform,
-                  label: 'المنصة',
-                  items: const {
-                    'desktop_windows': 'Windows',
-                    'mobile_android': 'Android',
-                  },
-                  onChanged: (value) {
-                    setState(() {
-                      _releasePlatform = value;
-                      _artifactPath = null;
-                      _artifactBytes = null;
-                      _artifactFileName = null;
-                    });
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _FileDropSurface(
-            fileName: _artifactFileName,
-            filePath: _artifactPath,
-            platform: _releasePlatform,
-            onPick: _busy ? null : _pickArtifact,
-            onClear: hasArtifact && !_busy
-                ? () {
-                    setState(() {
-                      _artifactPath = null;
-                      _artifactBytes = null;
-                      _artifactFileName = null;
-                    });
-                  }
-                : null,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _externalUrlController,
-            enabled: !hasArtifact,
-            decoration: const InputDecoration(
-              labelText: 'رابط تحميل مباشر بديل',
-              hintText: 'https://example.com/update.zip',
-              prefixIcon: Icon(Iconsax.link),
-            ),
-            textDirection: TextDirection.ltr,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _notesController,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: 'ملاحظات الإصدار',
-              alignLabelWithHint: true,
-              prefixIcon: Icon(Iconsax.note_text),
-            ),
-          ),
-          if (_releasePlatform == 'desktop_windows') ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _silentArgsController,
-              decoration: const InputDecoration(
-                labelText: 'وسائط التثبيت الصامت',
-                prefixIcon: Icon(Iconsax.code),
-              ),
-              textDirection: TextDirection.ltr,
-            ),
-          ],
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _InlineSwitch(
-                label: 'تفعيل بعد الحفظ',
-                value: _releaseEnabled,
-                onChanged: _busy
-                    ? null
-                    : (value) => setState(() => _releaseEnabled = value),
-              ),
-              _InlineSwitch(
-                label: 'إجباري',
-                value: _releaseMandatory,
-                onChanged: _busy
-                    ? null
-                    : (value) => setState(() => _releaseMandatory = value),
-              ),
-            ],
-          ),
-          if (_busy && _uploadTotal > 0) ...[
-            const SizedBox(height: 12),
-            _UploadProgress(current: _uploadProgress, total: _uploadTotal),
-          ],
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _createRelease,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: ButtonLoadingIndicator(),
-                    )
-                  : const Icon(Iconsax.archive_tick, size: 18),
-              label: Text(_busy ? 'جاري الحفظ...' : 'حفظ الإصدار'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReleaseListPanel() {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _SectionTitle(
-            icon: Iconsax.box,
-            title: 'الإصدارات المرفوعة',
-            subtitle:
-                'عدد الإصدارات: ${_filteredReleases.length}. يمكنك اختيار إصدار للإرسال أو إيقافه أو حذفه.',
-          ),
-          const SizedBox(height: 12),
-          if (_filteredReleases.isEmpty)
-            const _EmptyState(message: 'لا توجد إصدارات مرفوعة بعد.')
-          else
-            ..._filteredReleases.map(_buildReleaseTile),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReleaseTile(ManagedUpdateRelease release) {
-    final selected = release.id == _selectedReleaseId;
-    final statusColor = release.isEnabled
-        ? const Color(0xFF16A34A)
-        : const Color(0xFF64748B);
-    final subtitleParts = <String>[
-      release.platform,
-      release.channel,
-      if (release.fileSize > 0) formatFileSize(release.fileSize),
-      if (release.createdAt != null) formatDate(release.createdAt!),
-    ];
-    return _InsetTile(
-      leading: Radio<String>(
-        value: release.id,
-        groupValue: _selectedReleaseId,
-        onChanged: _busy
-            ? null
-            : (value) => setState(() => _selectedReleaseId = value),
-      ),
-      title: 'v${release.version}${release.mandatory ? '  •  إجباري' : ''}',
-      subtitle: subtitleParts.join('  •  '),
-      trailing: Wrap(
-        spacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          _StatusPill(
-            label: release.isEnabled ? 'مفعل' : 'متوقف',
-            color: statusColor,
-          ),
-          Tooltip(
-            message: release.isEnabled ? 'إيقاف الإصدار' : 'تفعيل الإصدار',
-            child: Switch(
-              value: release.isEnabled,
-              onChanged: _busy
-                  ? null
-                  : (value) => _toggleReleaseEnabled(release, value),
-            ),
-          ),
-          IconButton(
-            tooltip: selected ? 'الإصدار محدد للإرسال' : 'اختيار للإرسال',
-            onPressed: _busy
-                ? null
-                : () => setState(() => _selectedReleaseId = release.id),
-            icon: Icon(
-              selected ? Iconsax.tick_circle : Iconsax.send_2,
-              color: selected ? const Color(0xFF16A34A) : null,
-            ),
-          ),
-          IconButton(
-            tooltip: 'حذف الإصدار',
-            onPressed: _busy ? null : () => _deleteRelease(release),
-            icon: const Icon(Iconsax.trash, color: Color(0xFFDC2626)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDistributionPanel() {
-    final releases = _filteredReleases;
-    final validSelected =
-        _selectedReleaseId != null &&
-        releases.any((release) => release.id == _selectedReleaseId);
-    if (!validSelected && releases.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _selectedReleaseId = releases.first.id);
-      });
-    }
-
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _StepHeader(
-            number: 2,
-            title: 'ارسل التحديث',
-            subtitle:
-                'اختر الإصدار والنطاق. لو اخترت أجهزة محددة، حددها من القائمة الجانبية.',
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  initialValue: releases.isEmpty
-                      ? null
-                      : (validSelected
-                            ? _selectedReleaseId
-                            : releases.first.id),
-                  decoration: const InputDecoration(
-                    labelText: 'الإصدار',
-                    prefixIcon: Icon(Iconsax.box),
-                  ),
-                  items: releases
-                      .map(
-                        (release) => DropdownMenuItem(
-                          value: release.id,
-                          child: Text(
-                            'v${release.version}  ${release.platform}  ${release.channel}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _busy
-                      ? null
-                      : (value) => setState(() => _selectedReleaseId = value),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 190,
-                child: _FilterMenu(
-                  value: _targetType,
-                  label: 'النطاق',
-                  items: const {
-                    'all': 'كل الأجهزة',
-                    'branch': 'حسب الفرع',
-                    'devices': 'أجهزة محددة',
-                  },
-                  onChanged: (value) => setState(() => _targetType = value),
-                ),
-              ),
-            ],
-          ),
-          if (_targetType == 'branch') ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _targetBranchesController,
-              decoration: const InputDecoration(
-                labelText: 'الفروع',
-                hintText: 'main,cairo,alex',
-                prefixIcon: Icon(Iconsax.routing),
-              ),
-              textDirection: TextDirection.ltr,
-            ),
-          ],
-          const SizedBox(height: 12),
-          TextField(
-            controller: _noteController,
-            decoration: const InputDecoration(
-              labelText: 'ملاحظة اختيارية للمهمة',
-              prefixIcon: Icon(Iconsax.message_text),
-            ),
-          ),
-          if (_currentDeviceUid != null) ...[
-            const SizedBox(height: 8),
-            CheckboxListTile(
-              value: _excludeCurrentDevice,
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              onChanged: _busy
-                  ? null
-                  : (value) =>
-                        setState(() => _excludeCurrentDevice = value == true),
-              title: const Text('استثناء هذا الجهاز من المهمة'),
-            ),
-          ],
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _createUpdateJob,
-              icon: const Icon(Iconsax.send_2, size: 18),
-              label: const Text('إرسال التحديث الآن'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDevicesPanel({bool showAll = false}) {
-    final visibleDevices = showAll ? _devices : _devices.take(12).toList();
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _SectionTitle(
-            icon: Iconsax.monitor,
-            title: 'الأجهزة',
-            subtitle: showAll
-                ? 'كل الأجهزة المسجلة وحالة كل جهاز.'
-                : _targetType == 'devices'
-                ? 'حدد الأجهزة التي ستستقبل التحديث.'
-                : 'اختيار الأجهزة يعمل عند تحديد نطاق أجهزة محددة.',
-          ),
-          const SizedBox(height: 10),
-          if (_devices.isEmpty)
-            const _EmptyState(message: 'لا توجد أجهزة مطابقة للفلاتر الحالية.')
-          else ...[
-            ...visibleDevices.map(_buildDeviceTile),
-            if (!showAll && _devices.length > visibleDevices.length)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  'يعرض أول ${visibleDevices.length} جهاز من ${_devices.length}. استخدم البحث للوصول لجهاز معين.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF64748B),
-                  ),
-                ),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeviceTile(ManagedUpdateDevice device) {
-    final selected = _selectedDeviceIds.contains(device.id);
-    final canSelect = _targetType == 'devices';
-    final name = device.deviceName ?? device.hostName ?? 'Desktop';
-    final user = device.lastKnownFullName ?? device.lastKnownUsername ?? '-';
-    return _InsetTile(
-      leading: Checkbox(
-        value: selected,
-        onChanged: canSelect
-            ? (value) {
-                setState(() {
-                  if (value == true) {
-                    _selectedDeviceIds.add(device.id);
-                  } else {
-                    _selectedDeviceIds.remove(device.id);
-                  }
-                });
-              }
-            : null,
-      ),
-      title: '$name  v${device.appVersion}',
-      subtitle:
-          '$user • ${device.branchCode} • ${device.isOnline ? 'متصل' : 'غير متصل'} • آخر نبضة ${device.lastHeartbeatAt == null ? '-' : formatDate(device.lastHeartbeatAt!)}',
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _StatusPill(
-            label: _statusLabel(device.updateStatus),
-            color: _statusColor(device.updateStatus),
-          ),
-          const SizedBox(width: 8),
-          Switch(
-            value: device.isActive,
-            onChanged: _busy
-                ? null
-                : (value) => _toggleDeviceActive(device, value),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildJobsPanel({bool showAll = false}) {
-    final visibleJobs = showAll ? _jobs : _jobs.take(8).toList();
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _StepHeader(
-            number: 3,
-            title: 'تابع التنفيذ',
-            subtitle: 'راقب آخر مهام التحديث ونسبة اكتمالها.',
-          ),
-          const SizedBox(height: 12),
-          if (_jobs.isEmpty)
-            const _EmptyState(message: 'لم يتم إرسال مهام تحديث بعد.')
-          else
-            ...visibleJobs.map(_buildJobTile),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildJobTile(ManagedUpdateJob job) {
-    final completedRatio = job.total <= 0 ? 0.0 : job.completed / job.total;
-    final canCancel = job.status == 'running' || job.status == 'queued';
-    return _InsetTile(
-      leading: _IconBadge(
-        icon: Iconsax.flash_1,
-        color: _statusColor(job.status),
-      ),
-      title: 'v${job.releaseVersion} • ${_targetLabel(job.targetType)}',
-      subtitle:
-          'الإجمالي ${job.total} • اكتمل ${job.completed} • فشل ${job.failed} • ${job.createdAt == null ? '-' : formatDate(job.createdAt!)}',
-      trailing: SizedBox(
-        width: 180,
-        child: Row(
-          children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  value: completedRatio.clamp(0, 1),
-                  minHeight: 7,
-                ),
-              ),
-            ),
-            if (canCancel) ...[
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'إلغاء المهمة',
-                onPressed: _busy ? null : () => _cancelJob(job),
-                icon: const Icon(Icons.cancel_outlined),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _statusLabel(String status) => switch (status) {
-    'pending' => 'منتظر',
-    'acknowledged' => 'تم الاستلام',
-    'downloading' => 'تحميل',
-    'installing' => 'تثبيت',
-    'completed' => 'مكتمل',
-    'failed' => 'فشل',
-    'cancelled' => 'ملغي',
-    'running' => 'قيد التشغيل',
-    'queued' => 'في الانتظار',
-    'partial_failed' => 'فشل جزئي',
-    _ => 'خامل',
-  };
-
-  String _targetLabel(String value) => switch (value) {
-    'branch' => 'حسب الفرع',
-    'devices' => 'أجهزة محددة',
-    _ => 'كل الأجهزة',
-  };
-  Color _statusColor(String status) => switch (status) {
-    'completed' => const Color(0xFF16A34A),
-    'failed' || 'partial_failed' => const Color(0xFFDC2626),
-    'downloading' || 'installing' || 'running' => const Color(0xFF2563EB),
-    'cancelled' => const Color(0xFF64748B),
-    _ => const Color(0xFF7C3AED),
-  };
-}
-
-class _HeaderBar extends StatelessWidget {
-  const _HeaderBar({required this.busy, required this.onRefresh});
-
-  final bool busy;
-  final VoidCallback onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const _IconBadge(icon: Iconsax.cloud_change, color: Color(0xFF2563EB)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'تحديثات التطبيق',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF0F172A),
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'أضف إصدار، اختار الأجهزة، وتابع التثبيت من نفس الصفحة.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF64748B),
-                ),
-              ),
-            ],
-          ),
-        ),
-        OutlinedButton.icon(
-          onPressed: busy ? null : onRefresh,
-          icon: const Icon(Iconsax.refresh, size: 18),
-          label: const Text('تحديث'),
-        ),
-      ],
-    );
-  }
-}
-
-class _SectionTabs extends StatelessWidget {
-  const _SectionTabs({required this.value, required this.onChanged});
-
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    const items = [
-      _SectionTabData('releases', 'الإصدارات', Iconsax.box),
-      _SectionTabData('send', 'إرسال تحديث', Iconsax.send_2),
-      _SectionTabData('devices', 'الأجهزة', Iconsax.monitor),
-      _SectionTabData('jobs', 'المهام', Iconsax.activity),
-    ];
-    return _Panel(
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final item in items)
-            _SectionTabButton(
-              data: item,
-              selected: value == item.value,
-              onTap: () => onChanged(item.value),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionTabData {
-  const _SectionTabData(this.value, this.label, this.icon);
-
-  final String value;
-  final String label;
-  final IconData icon;
-}
-
-class _SectionTabButton extends StatelessWidget {
-  const _SectionTabButton({
-    required this.data,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final _SectionTabData data;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? const Color(0xFF2563EB) : const Color(0xFF475569);
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF2563EB).withValues(alpha: 0.12)
-              : const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? const Color(0xFF93C5FD) : const Color(0xFFE5E7EB),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(data.icon, size: 18, color: color),
-            const SizedBox(width: 8),
-            Text(
-              data.label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SummaryStrip extends StatelessWidget {
-  const _SummaryStrip({
-    required this.devices,
-    required this.online,
-    required this.releases,
-    required this.updating,
-    required this.failed,
-  });
-
-  final int devices;
-  final int online;
-  final int releases;
-  final int updating;
-  final int failed;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _SectionTitle(
-            icon: Iconsax.status_up,
-            title: 'ملخص سريع',
-            subtitle: 'أرقام تساعدك قبل إرسال أي تحديث.',
-          ),
-          const SizedBox(height: 12),
-          _MetricRow(
-            label: 'الأجهزة',
-            value: '$devices',
-            icon: Iconsax.monitor,
-          ),
-          _MetricRow(label: 'متصل الآن', value: '$online', icon: Iconsax.wifi),
-          _MetricRow(label: 'الإصدارات', value: '$releases', icon: Iconsax.box),
-          _MetricRow(
-            label: 'قيد التحديث',
-            value: '$updating',
-            icon: Iconsax.refresh,
-          ),
-          _MetricRow(
-            label: 'فشل',
-            value: '$failed',
-            icon: Iconsax.warning_2,
-            color: const Color(0xFFDC2626),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricRow extends StatelessWidget {
-  const _MetricRow({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.color = const Color(0xFF2563EB),
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        children: [
-          _IconBadge(icon: icon, color: color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.color = const Color(0xFF2563EB),
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      width: 180,
-      child: Row(
-        children: [
-          _IconBadge(icon: icon, color: color),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              Text(
-                label,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Panel extends StatelessWidget {
-  const _Panel({required this.child, this.width});
-
-  final Widget child;
-  final double? width;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: width,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E7EB),
-        ),
-      ),
-      child: child,
-    );
-  }
-}
-
-class _StepHeader extends StatelessWidget {
-  const _StepHeader({
-    required this.number,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final int number;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildHeader(bool isDark) {
     return Row(
       children: [
         Container(
-          width: 34,
-          height: 34,
-          alignment: Alignment.center,
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFF2563EB),
-            borderRadius: BorderRadius.circular(10),
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(16),
           ),
-          child: Text(
-            '$number',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
+          child: Icon(
+            Iconsax.refresh_2,
+            color: Theme.of(context).colorScheme.primary,
+            size: 26,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              const Text(
+                'إدارة التحديثات ونشر الإصدارات',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
-                subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
+                'رفع وتوزيع حزم التحديثات (.exe) ومراقبة أجهزة المنظومة في الشبكة الداخلية',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                ),
               ),
             ],
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _IconBadge(icon: icon, color: const Color(0xFF2563EB)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              Text(
-                subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
-              ),
-            ],
+        FilledButton.tonalIcon(
+          onPressed: _busy ? null : _reload,
+          style: FilledButton.styleFrom(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Iconsax.refresh, size: 18),
+          label: const Text('تحديث البيانات'),
         ),
       ],
     );
   }
-}
 
-class _InlineSwitch extends StatelessWidget {
-  const _InlineSwitch({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String label;
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 40,
-      padding: const EdgeInsetsDirectional.only(start: 12, end: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+  Widget _buildMetricsStrip(bool isDark) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 760;
+        final children = [
+          _buildMetricCard(
+            isDark: isDark,
+            icon: Iconsax.monitor,
+            iconColor: const Color(0xFF10B981),
+            title: 'الأجهزة المتصلة',
+            value: '$_onlineDevices / ${_devices.length}',
+            subtitle: '${_devices.length - _onlineDevices} غير متصل حالياً',
           ),
-          Switch(value: value, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
-}
+          _buildMetricCard(
+            isDark: isDark,
+            icon: Iconsax.box,
+            iconColor: const Color(0xFF38BDF8),
+            title: 'إصدارات المنظومة',
+            value: '${_releases.length}',
+            subtitle: _releases.isNotEmpty ? 'أحدث إصدار: v${_releases.first.version}' : 'لا توجد إصدارات',
+          ),
+          _buildMetricCard(
+            isDark: isDark,
+            icon: Iconsax.task,
+            iconColor: const Color(0xFFF59E0B),
+            title: 'مهام التوزيع',
+            value: '${_jobs.length}',
+            subtitle: '${_jobs.where((j) => j.status == 'in_progress' || j.status == 'running').length} قيد التشغيل',
+          ),
+          _buildMetricCard(
+            isDark: isDark,
+            icon: Iconsax.status,
+            iconColor: const Color(0xFF8B5CF6),
+            title: 'حالة التحديث',
+            value: '${_devices.length - _failedDevices} مستقرة',
+            subtitle: _failedDevices > 0 ? '$_failedDevices بحاجة لإعادة محاولة' : 'كل الأجهزة مستقرة',
+          ),
+        ];
 
-class _IconBadge extends StatelessWidget {
-  const _IconBadge({required this.icon, required this.color});
-
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Icon(icon, size: 18, color: color),
-    );
-  }
-}
-
-class _FilterMenu extends StatelessWidget {
-  const _FilterMenu({
-    required this.value,
-    required this.items,
-    required this.onChanged,
-    this.label,
-  });
-
-  final String value;
-  final Map<String, String> items;
-  final ValueChanged<String> onChanged;
-  final String? label;
-
-  @override
-  Widget build(BuildContext context) {
-    return DropdownButtonFormField<String>(
-      initialValue: value,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: label,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-      ),
-      items: items.entries
-          .map(
-            (entry) => DropdownMenuItem(
-              value: entry.key,
-              child: Text(entry.value, overflow: TextOverflow.ellipsis),
-            ),
-          )
-          .toList(),
-      onChanged: (next) {
-        if (next != null) onChanged(next);
+        if (wide) {
+          return Row(
+            children: children
+                .map((card) => Expanded(child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: card,
+                    )))
+                .toList(),
+          );
+        } else {
+          return Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: children
+                .map((card) => SizedBox(
+                      width: (constraints.maxWidth - 12) / 2,
+                      child: card,
+                    ))
+                .toList(),
+          );
+        }
       },
     );
   }
-}
 
-class _FileDropSurface extends StatelessWidget {
-  const _FileDropSurface({
-    required this.fileName,
-    required this.filePath,
-    required this.platform,
-    required this.onPick,
-    required this.onClear,
-  });
-
-  final String? fileName;
-  final String? filePath;
-  final String platform;
-  final VoidCallback? onPick;
-  final VoidCallback? onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasFile = filePath != null && filePath!.isNotEmpty;
+  Widget _buildMetricCard({
+    required bool isDark,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String value,
+    required String subtitle,
+  }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF2563EB).withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFBFDBFE)),
-      ),
-      child: Row(
-        children: [
-          const _IconBadge(
-            icon: Iconsax.document_upload,
-            color: Color(0xFF2563EB),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  hasFile ? fileName ?? 'ملف تحديث' : 'ملف التحديث',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  hasFile
-                      ? filePath!
-                      : platform == 'mobile_android'
-                      ? 'APK فقط'
-                      : 'ZIP أو MSI أو Setup EXE',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textDirection: hasFile
-                      ? TextDirection.ltr
-                      : TextDirection.rtl,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF64748B),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (onClear != null)
-            IconButton(
-              tooltip: 'إزالة الملف',
-              onPressed: onClear,
-              icon: const Icon(Icons.close_rounded),
-            ),
-          OutlinedButton.icon(
-            onPressed: onPick,
-            icon: const Icon(Iconsax.folder_open, size: 18),
-            label: Text(hasFile ? 'تغيير' : 'اختيار'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToggleRow extends StatelessWidget {
-  const _ToggleRow({
-    required this.title,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SwitchListTile(
-      value: value,
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      onChanged: onChanged,
-    );
-  }
-}
-
-class _UploadProgress extends StatelessWidget {
-  const _UploadProgress({required this.current, required this.total});
-
-  final int current;
-  final int total;
-
-  @override
-  Widget build(BuildContext context) {
-    final ratio = total <= 0 ? 0.0 : current / total;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            const Expanded(child: Text('جار رفع الإصدار')),
-            Text('${formatFileSize(current)} / ${formatFileSize(total)}'),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: ratio.clamp(0, 1),
-            minHeight: 8,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _InsetTile extends StatelessWidget {
-  const _InsetTile({
-    required this.leading,
-    required this.title,
-    required this.subtitle,
-    required this.trailing,
-  });
-
-  final Widget leading;
-  final String title;
-  final String subtitle;
-  final Widget trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: const BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.6),
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
         ),
       ),
       child: Row(
         children: [
-          leading,
-          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: iconColor, size: 22),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 Text(
                   subtitle,
-                  maxLines: 2,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                  ),
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF64748B),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTabs(bool isDark) {
+    final tabs = [
+      {'id': 'releases', 'label': 'الإصدارات والرفع', 'icon': Iconsax.box},
+      {'id': 'jobs', 'label': 'مهام التوزيع (Rollout)', 'icon': Iconsax.send_2},
+      {'id': 'devices', 'label': 'أجهزة المنظومة (Fleet)', 'icon': Iconsax.monitor},
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0).withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: tabs.map((tab) {
+          final isSelected = _selectedSection == tab['id'];
+          final color = isSelected
+              ? Theme.of(context).colorScheme.primary
+              : (isDark ? Colors.white70 : const Color(0xFF64748B));
+          return Expanded(
+            child: InkWell(
+              onTap: () => setState(() => _selectedSection = tab['id'] as String),
+              borderRadius: BorderRadius.circular(12),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? (isDark ? const Color(0xFF0F172A) : Colors.white)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(tab['icon'] as IconData, size: 18, color: color),
+                    const SizedBox(width: 8),
+                    Text(
+                      tab['label'] as String,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                        color: color,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildActiveSectionContent(bool wide, bool isDark) {
+    return switch (_selectedSection) {
+      'jobs' => _buildJobsSection(wide, isDark),
+      'devices' => _buildDevicesSection(wide, isDark),
+      _ => _buildReleasesSection(wide, isDark),
+    };
+  }
+
+  // --- TAB 1: RELEASES & UPLOAD ---
+  Widget _buildReleasesSection(bool wide, bool isDark) {
+    if (!wide) {
+      return Column(
+        children: [
+          _buildReleaseUploader(isDark),
+          const SizedBox(height: 18),
+          _buildReleasesCatalog(isDark),
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(flex: 5, child: _buildReleaseUploader(isDark)),
+        const SizedBox(width: 18),
+        Expanded(flex: 6, child: _buildReleasesCatalog(isDark)),
+      ],
+    );
+  }
+
+  Widget _buildReleaseUploader(bool isDark) {
+    final hasArtifact = _artifactPath != null && _artifactPath!.isNotEmpty;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primaryColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Iconsax.cloud_add, color: primaryColor, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'رفع حزمة تحديث جديدة (.exe / .msi)',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // File Picker Zone
+          InkWell(
+            onTap: _busy ? null : _pickArtifact,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: hasArtifact
+                    ? const Color(0xFF10B981).withValues(alpha: 0.08)
+                    : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9)),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: hasArtifact
+                      ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                      : (isDark ? Colors.white12 : const Color(0xFFCBD5E1)),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    hasArtifact ? Icons.check_circle_rounded : Iconsax.document_upload,
+                    color: hasArtifact ? const Color(0xFF10B981) : primaryColor,
+                    size: 38,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    hasArtifact
+                        ? (_artifactFileName ?? 'تم تحديد ملف التحديث')
+                        : 'انقر لاختيار ملف التحديث من جهازك (.exe أو .msi)',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: hasArtifact ? const Color(0xFF10B981) : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (hasArtifact) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'الملف جاهز للرفع والتحقق الرقمي',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Inputs row: Version + Channel
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _versionController,
+                  decoration: InputDecoration(
+                    labelText: 'رقم الإصدار (مثل 1.2.0)',
+                    prefixIcon: const Icon(Iconsax.tag, size: 18),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  textDirection: TextDirection.ltr,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _releaseChannel,
+                  decoration: InputDecoration(
+                    labelText: 'القناة',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'stable', child: Text('Stable')),
+                    DropdownMenuItem(value: 'beta', child: Text('Beta')),
+                    DropdownMenuItem(value: 'internal', child: Text('Internal')),
+                  ],
+                  onChanged: (val) => setState(() => _releaseChannel = val ?? 'stable'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Release Notes
+          TextField(
+            controller: _notesController,
+            minLines: 2,
+            maxLines: 4,
+            decoration: InputDecoration(
+              labelText: 'سجل التغييرات ومميزات التحديث',
+              hintText: 'اكتب ما تم إضافته أو إصلاحه في هذا الإصدار...',
+              alignLabelWithHint: true,
+              prefixIcon: const Icon(Iconsax.note_text, size: 18),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Toggles: Mandatory & Enabled
+          Row(
+            children: [
+              Expanded(
+                child: SwitchListTile(
+                  title: const Text('تفعيل الإصدار فوراً', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  value: _releaseEnabled,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: _busy ? null : (v) => setState(() => _releaseEnabled = v),
+                ),
+              ),
+              Expanded(
+                child: SwitchListTile(
+                  title: const Text('تحديث إجباري', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  value: _releaseMandatory,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: _busy ? null : (v) => setState(() => _releaseMandatory = v),
+                ),
+              ),
+            ],
+          ),
+
+          // Upload progress bar if busy
+          if (_busy && _uploadTotal > 0) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                value: _uploadProgress / _uploadTotal,
+                minHeight: 8,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'جارٍ الرفع: ${formatFileSize(_uploadProgress)} من ${formatFileSize(_uploadTotal)}',
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white60 : const Color(0xFF64748B),
+              ),
+              textAlign: TextAlign.center,
+              textDirection: TextDirection.ltr,
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          // Submit Button
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
+              onPressed: _busy ? null : _createRelease,
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: _busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : const Icon(Iconsax.direct_up, size: 20),
+              label: Text(
+                _busy ? 'جارٍ رفع الحزمة وحفظ الإصدار...' : 'نشر الإصدار الجديد',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReleasesCatalog(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.box, size: 20, color: Color(0xFF38BDF8)),
+              const SizedBox(width: 10),
+              Text(
+                'قائمة الإصدارات المتوفرة (${_filteredReleases.length})',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_filteredReleases.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(32),
+              alignment: Alignment.center,
+              child: Text(
+                'لا توجد إصدارات مسجلة حتى الآن.',
+                style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8)),
+              ),
+            )
+          else
+            ..._filteredReleases.map((release) => _buildReleaseCard(release, isDark)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReleaseCard(ManagedUpdateRelease release, bool isDark) {
+    final isSelected = release.id == _selectedReleaseId;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+            : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.4)
+              : (isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
+          width: isSelected ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'v${release.version}',
+                  style: const TextStyle(
+                    color: Color(0xFF10B981),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                  textDirection: TextDirection.ltr,
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (release.mandatory)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'إجباري',
+                    style: TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              const Spacer(),
+              Tooltip(
+                message: release.isEnabled ? 'الإصدار مفعل' : 'الإصدار متوقف',
+                child: Switch(
+                  value: release.isEnabled,
+                  onChanged: _busy ? null : (v) => _toggleReleaseEnabled(release, v),
+                ),
+              ),
+              IconButton(
+                tooltip: 'حذف الإصدار',
+                icon: const Icon(Iconsax.trash, size: 18, color: Color(0xFFEF4444)),
+                onPressed: _busy ? null : () => _deleteRelease(release),
+              ),
+            ],
+          ),
+          if (release.notes.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              release.notes.trim(),
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white70 : const Color(0xFF475569),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Text(
+                'المنصة: ${release.platform} • الحجم: ${formatFileSize(release.fileSize)}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                ),
+              ),
+              const Spacer(),
+              FilledButton.tonal(
+                onPressed: _busy
+                    ? null
+                    : () {
+                        setState(() {
+                          _selectedReleaseId = release.id;
+                          _selectedSection = 'jobs';
+                        });
+                      },
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                ),
+                child: const Text('توزيع هذا الإصدار', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- TAB 2: ROLLOUT JOBS ---
+  Widget _buildJobsSection(bool wide, bool isDark) {
+    return Column(
+      children: [
+        _buildRolloutLauncher(isDark),
+        const SizedBox(height: 18),
+        _buildJobsHistory(isDark),
+      ],
+    );
+  }
+
+  Widget _buildRolloutLauncher(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.send_square, size: 20, color: Color(0xFFF59E0B)),
+              const SizedBox(width: 10),
+              const Text(
+                'إطلاق مهمة ترقية جديدة لأجهزة المنظومة',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: DropdownButtonFormField<String>(
+                  value: _selectedReleaseId,
+                  decoration: InputDecoration(
+                    labelText: 'الإصدار المراد توزيعه',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: _releases.map((release) {
+                    return DropdownMenuItem(
+                      value: release.id,
+                      child: Text('v${release.version} (${release.platform})'),
+                    );
+                  }).toList(),
+                  onChanged: (val) => setState(() => _selectedReleaseId = val),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _targetType,
+                  decoration: InputDecoration(
+                    labelText: 'نطاق التوزيع',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('كل أجهزة المنظومة')),
+                    DropdownMenuItem(value: 'branch', child: Text('فروع محددة')),
+                    DropdownMenuItem(value: 'devices', child: Text('أجهزة محددة')),
+                  ],
+                  onChanged: (val) => setState(() => _targetType = val ?? 'all'),
+                ),
+              ),
+            ],
+          ),
+          if (_targetType == 'branch') ...[
+            const SizedBox(height: 16),
+            _buildBranchSelector(isDark),
+          ],
+          if (_targetType == 'devices') ...[
+            const SizedBox(height: 16),
+            _buildDeviceSelector(isDark),
+          ],
+          const SizedBox(height: 14),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeColor: const Color(0xFF8B5CF6),
+            title: const Text(
+              'استثناء جهازي الحالي من التحديث التلقائي',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            subtitle: Text(
+              _currentDeviceUid != null && _currentDeviceUid!.isNotEmpty
+                  ? 'معرف جهازك: $_currentDeviceUid'
+                  : 'تفعيل هذا الخيار يمنع تحديث جهاز الإدارة الحالي',
+              style: const TextStyle(fontSize: 12),
+            ),
+            value: _excludeCurrentDevice,
+            onChanged: (val) => setState(() => _excludeCurrentDevice = val),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _noteController,
+            decoration: InputDecoration(
+              labelText: 'ملاحظة أو تعليمات التوزيع (اختياري)',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _busy ? null : _createUpdateJob,
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            icon: const Icon(Iconsax.play, size: 18),
+            label: const Text('بدء مهمة التوزيع الآن', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJobsHistory(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.activity, size: 20, color: Color(0xFF8B5CF6)),
+              const SizedBox(width: 10),
+              Text(
+                'سجل مهام التوزيع السابقة والجارية (${_jobs.length})',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_jobs.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(32),
+              alignment: Alignment.center,
+              child: Text(
+                'لا توجد مهام توزيع مسجلة.',
+                style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8)),
+              ),
+            )
+          else
+            ..._jobs.map((job) => _buildJobCard(job, isDark)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildJobCard(ManagedUpdateJob job, bool isDark) {
+    final isRunning = job.status == 'running' || job.status == 'in_progress';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isRunning
+              ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
+              : (isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: (isRunning ? const Color(0xFFF59E0B) : const Color(0xFF10B981)).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isRunning ? Iconsax.refresh_right_square : Icons.check_circle_outline_rounded,
+              color: isRunning ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'المهمة: ${job.id.substring(0, job.id.length > 8 ? 8 : job.id.length)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: (isRunning ? const Color(0xFFF59E0B) : const Color(0xFF10B981)).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        isRunning ? 'قيد التنفيذ' : (job.status == 'cancelled' ? 'ملغية' : 'مكتملة'),
+                        style: TextStyle(
+                          color: isRunning ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'النطاق: ${job.targetType} • الأجهزة: ${job.total} (مكتمل: ${job.completed} • قيد التنزيل: ${job.downloading})',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : const Color(0xFF64748B),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          trailing,
+          if (isRunning)
+            TextButton(
+              onPressed: _busy ? null : () => _cancelJob(job),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('إلغاء المهمة'),
+            ),
         ],
       ),
     );
   }
-}
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
+  // --- TAB 3: FLEET DEVICES ---
+  Widget _buildDevicesSection(bool wide, bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
         ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.monitor, size: 20, color: Color(0xFF10B981)),
+              const SizedBox(width: 10),
+              Text(
+                'أجهزة المنظومة في الشبكة (${_devices.length})',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+              // Search field
+              SizedBox(
+                width: 280,
+                height: 42,
+                child: TextField(
+                  onChanged: (v) {
+                    _deviceSearch = v.trim();
+                  },
+                  onSubmitted: (_) => _reload(),
+                  decoration: InputDecoration(
+                    hintText: 'بحث باسم الجهاز أو المستخدم...',
+                    prefixIcon: const Icon(Iconsax.search_normal, size: 16),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_devices.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(32),
+              alignment: Alignment.center,
+              child: Text(
+                'لم يتم العثور على أجهزة مطابقة للبحث.',
+                style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8)),
+              ),
+            )
+          else
+            ..._devices.map((device) => _buildDeviceCard(device, isDark)),
+        ],
       ),
     );
   }
-}
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message});
+  Widget _buildDeviceCard(ManagedUpdateDevice device, bool isDark) {
+    final name = (device.deviceName?.isNotEmpty == true)
+        ? device.deviceName!
+        : (device.hostName?.isNotEmpty == true ? device.hostName! : 'جهاز غير مسمى');
+    final userName = device.lastKnownFullName ?? device.lastKnownUsername ?? '-';
+    final ip = device.localIp ?? '-';
 
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Center(
-        child: Text(
-          message,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
         ),
+      ),
+      child: Row(
+        children: [
+          // Online dot
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: device.isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'v${device.appVersion}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF38BDF8),
+                        ),
+                        textDirection: TextDirection.ltr,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'المستخدم: ' + userName + ' • الفرع: ' + device.branchCode + ' • IP: ' + ip,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Tooltip(
+            message: device.isActive ? 'تعطيل الجهاز من التحديثات' : 'تفعيل الجهاز',
+            child: Switch(
+              value: device.isActive,
+              onChanged: _busy ? null : (v) => _toggleDeviceActive(device, v),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBranchSelector(bool isDark) {
+    // Gather all unique branch codes from both _availableBranches and _devices
+    final branchMap = <String, String>{};
+    for (final b in _availableBranches) {
+      if (b.code.isNotEmpty) {
+        branchMap[b.code] = b.name.isNotEmpty ? b.name : b.code;
+      }
+    }
+    for (final d in _devices) {
+      if (d.branchCode.isNotEmpty && !branchMap.containsKey(d.branchCode)) {
+        branchMap[d.branchCode] = d.branchCode;
+      }
+    }
+    if (branchMap.isEmpty) {
+      branchMap['main'] = 'الفرع الرئيسي (main)';
+    }
+
+    final allCodes = branchMap.keys.toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.buildings, size: 18, color: Color(0xFF8B5CF6)),
+              const SizedBox(width: 8),
+              const Text(
+                'اختر الفروع المستهدفة بالتحديث:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    if (_selectedBranchCodes.length == allCodes.length) {
+                      _selectedBranchCodes.clear();
+                    } else {
+                      _selectedBranchCodes.addAll(allCodes);
+                    }
+                  });
+                },
+                child: Text(
+                  _selectedBranchCodes.length == allCodes.length
+                      ? 'إلغاء تحديد الكل'
+                      : 'تحديد كل الفروع (${allCodes.length})',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: allCodes.map((code) {
+              final name = branchMap[code]!;
+              final deviceCount = _devices.where((d) => d.branchCode == code).length;
+              final isSelected = _selectedBranchCodes.contains(code);
+              return FilterChip(
+                selected: isSelected,
+                selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                checkmarkColor: const Color(0xFF8B5CF6),
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name == code ? code : '$name ($code)',
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFF8B5CF6) : null,
+                      ),
+                    ),
+                    if (deviceCount > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF8B5CF6)
+                              : (isDark ? Colors.white12 : Colors.black12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$deviceCount أجهزة',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isSelected ? Colors.white : null,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                onSelected: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedBranchCodes.add(code);
+                    } else {
+                      _selectedBranchCodes.remove(code);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _targetBranchesController,
+            decoration: InputDecoration(
+              labelText: 'إضافة فروع إضافية يدويًا (اختياري، مفصولة بفاصلة)',
+              hintText: 'مثال: branch1, branch2',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeviceSelector(bool isDark) {
+    final query = _targetDeviceSearch.trim().toLowerCase();
+    final filtered = _devices.where((d) {
+      if (query.isEmpty) return true;
+      final name = (d.deviceName ?? '').toLowerCase();
+      final host = (d.hostName ?? '').toLowerCase();
+      final user = (d.lastKnownUsername ?? '').toLowerCase();
+      final branch = d.branchCode.toLowerCase();
+      final ip = (d.localIp ?? '').toLowerCase();
+      return name.contains(query) ||
+          host.contains(query) ||
+          user.contains(query) ||
+          branch.contains(query) ||
+          ip.contains(query);
+    }).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.monitor, size: 18, color: Color(0xFF8B5CF6)),
+              const SizedBox(width: 8),
+              const Text(
+                'اختر الأجهزة المستهدفة بالتحديث:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'تم اختيار ${_selectedDeviceIds.length} من أصل ${_devices.length} جهاز',
+                  style: const TextStyle(
+                    color: Color(0xFF8B5CF6),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  onChanged: (val) => setState(() => _targetDeviceSearch = val),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Iconsax.search_normal, size: 18),
+                    hintText: 'بحث باسم الجهاز أو الموظف أو الفرع أو IP...',
+                    isDense: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    final allVisibleIds = filtered.map((d) => d.id).toSet();
+                    if (_selectedDeviceIds.containsAll(allVisibleIds)) {
+                      _selectedDeviceIds.removeAll(allVisibleIds);
+                    } else {
+                      _selectedDeviceIds.addAll(allVisibleIds);
+                    }
+                  });
+                },
+                child: Text(
+                  _selectedDeviceIds.containsAll(filtered.map((d) => d.id).toSet()) && filtered.isNotEmpty
+                      ? 'إلغاء تحديد الكل'
+                      : 'تحديد الكل',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: filtered.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _devices.isEmpty
+                            ? 'لا توجد أجهزة مسجلة في النظام حتى الآن.'
+                            : 'لا توجد أجهزة مطابقة للبحث.',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                : Scrollbar(
+                    thumbVisibility: true,
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final device = filtered[index];
+                        final isSelected = _selectedDeviceIds.contains(device.id);
+                        final displayName = device.deviceName?.isNotEmpty == true
+                            ? device.deviceName!
+                            : (device.hostName ?? 'جهاز بدون اسم');
+                        final userName = device.lastKnownFullName?.isNotEmpty == true
+                            ? device.lastKnownFullName!
+                            : (device.lastKnownUsername ?? 'غير معروف');
+
+                        return CheckboxListTile(
+                          dense: true,
+                          value: isSelected,
+                          activeColor: const Color(0xFF8B5CF6),
+                          onChanged: (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selectedDeviceIds.add(device.id);
+                              } else {
+                                _selectedDeviceIds.remove(device.id);
+                              }
+                            });
+                          },
+                          secondary: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(0xFF8B5CF6).withValues(alpha: 0.15)
+                                  : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.computer_rounded,
+                              size: 20,
+                              color: isSelected ? const Color(0xFF8B5CF6) : (device.isOnline ? Colors.green : Colors.grey),
+                            ),
+                          ),
+                          title: Row(
+                            children: [
+                              Text(
+                                displayName,
+                                style: TextStyle(
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: device.isOnline ? Colors.green : Colors.grey.shade400,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.white10 : Colors.black12,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'الإصدار: ${device.appVersion}',
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            'الموظف: $userName • الفرع: ${device.branchCode} • IP: ${device.localIp ?? "غير معروف"}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.white60 : Colors.black54,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }

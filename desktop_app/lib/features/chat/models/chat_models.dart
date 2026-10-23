@@ -114,6 +114,7 @@ class ChatDirectoryUser {
     required this.id,
     required this.username,
     required this.fullName,
+    this.jobTitle = '',
     required this.role,
     required this.departmentId,
     this.departmentIds = const [],
@@ -130,6 +131,7 @@ class ChatDirectoryUser {
   final String id;
   final String username;
   final String fullName;
+  final String jobTitle;
   final String role;
   final String? departmentId;
   final List<String> departmentIds;
@@ -150,6 +152,7 @@ class ChatDirectoryUser {
       'id': id,
       'username': username,
       'fullName': fullName,
+      'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
       'departmentIds': departmentIds,
@@ -169,12 +172,13 @@ class ChatDirectoryUser {
       id: (json['_id'] ?? json['id'])?.toString() ?? '',
       username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
+      jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
-      departmentId: json['departmentId'] as String?,
+      departmentId: json['departmentId'] is Map ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString() : json['departmentId']?.toString(),
       departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
           .map((entry) => entry.toString())
           .toList(),
-      branchId: json['branchId'] as String?,
+      branchId: json['branchId'] is Map ? (json['branchId']['_id'] ?? json['branchId']['id'])?.toString() : json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       presenceStatus: json['presenceStatus'] as String? ?? 'offline',
@@ -233,7 +237,7 @@ class DepartmentSummary {
           .map((entry) => entry.toString())
           .toList(),
       membersCount: json['membersCount'] as int? ?? 0,
-      defaultConversationId: json['defaultConversationId'] as String?,
+      defaultConversationId: json['defaultConversationId'] is Map ? (json['defaultConversationId']['_id'] ?? json['defaultConversationId']['id'])?.toString() : json['defaultConversationId']?.toString(),
     );
   }
 }
@@ -314,8 +318,8 @@ class ChatLastMessage {
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
     return ChatLastMessage(
-      content: (map['content'] ?? map['text'] ?? '') as String,
-      senderId: map['senderId'] as String?,
+      content: (map['content'] ?? map['text'] ?? '').toString(),
+      senderId: map['senderId'] is Map ? (map['senderId']['_id'] ?? map['senderId']['id'])?.toString() : map['senderId']?.toString(),
       senderName: map['senderName'] as String? ?? '',
       messageType: map['messageType'] as String? ?? 'text',
       createdAt: map['createdAt'] is String
@@ -376,6 +380,7 @@ class ChatConversation {
     required this.type,
     required this.name,
     required this.description,
+    this.avatarUrl,
     required this.departmentId,
     required this.createdBy,
     required this.members,
@@ -399,6 +404,7 @@ class ChatConversation {
   final String type;
   final String name;
   final String description;
+  final String? avatarUrl;
   final String? departmentId;
   final String? createdBy;
   final List<ChatDirectoryUser> members;
@@ -435,6 +441,7 @@ class ChatConversation {
   ChatConversation copyWith({
     String? name,
     String? description,
+    String? avatarUrl,
     List<ChatDirectoryUser>? members,
     List<ChatDirectoryUser>? admins,
     List<String>? broadcastPublisherIds,
@@ -456,6 +463,7 @@ class ChatConversation {
       type: type,
       name: name ?? this.name,
       description: description ?? this.description,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
       departmentId: departmentId,
       createdBy: createdBy,
       members: members ?? this.members,
@@ -486,6 +494,7 @@ class ChatConversation {
       'type': type,
       'name': name,
       'description': description,
+      'avatarUrl': avatarUrl,
       'departmentId': departmentId,
       'createdBy': createdBy,
       'members': members.map((e) => e.toJson()).toList(),
@@ -512,8 +521,9 @@ class ChatConversation {
       type: json['type'] as String? ?? 'direct',
       name: json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
-      departmentId: json['departmentId'] as String?,
-      createdBy: json['createdBy'] as String?,
+      avatarUrl: json['avatarUrl'] as String?,
+      departmentId: json['departmentId'] is Map ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString() : json['departmentId']?.toString(),
+      createdBy: json['createdBy'] is Map ? (json['createdBy']['_id'] ?? json['createdBy']['id'])?.toString() : json['createdBy']?.toString(),
       members: (json['members'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(ChatDirectoryUser.fromJson)
@@ -574,7 +584,11 @@ class ChatReceipt {
 
   factory ChatReceipt.fromJson(Map<String, dynamic> json) {
     return ChatReceipt(
-      userId: json['userId'] as String,
+      userId: (json['userId'] is Map
+              ? (json['userId']['_id'] ?? json['userId']['id'])
+              : json['userId'])
+          ?.toString() ??
+          '',
       at: json['at'] is String ? DateTime.tryParse(json['at'] as String) : null,
     );
   }
@@ -594,6 +608,8 @@ class ChatMessage {
     required this.mimeType,
     required this.replyToMessageId,
     required this.isDeleted,
+    this.isScheduled = false,
+    this.scheduledFor,
     required this.metadata,
     required this.createdAt,
     required this.updatedAt,
@@ -613,11 +629,16 @@ class ChatMessage {
   final String? mimeType;
   final String? replyToMessageId;
   final bool isDeleted;
+  final bool isScheduled;
+  final DateTime? scheduledFor;
   final Map<String, dynamic>? metadata;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<ChatReceipt> seenBy;
   final List<ChatReceipt> deliveredTo;
+
+  bool get isFailed => id.startsWith('temp_') && metadata?['status'] == 'failed';
+  bool get isPending => id.startsWith('temp_') && metadata?['status'] == 'pending';
 
   bool get isAudioMessage =>
       messageType == 'audio' ||
@@ -629,7 +650,8 @@ class ChatMessage {
 
   /// Sticker files are regular local image attachments, marked in metadata to
   /// stay compatible with older servers and clients.
-  bool get isStickerMessage => metadata?['sticker'] == true;
+  bool get isStickerMessage =>
+      metadata?['sticker'] == true || metadata?['isSticker'] == true;
   bool get isPollMessage => messageType == 'poll' || messageType == 'checklist';
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';
@@ -687,11 +709,13 @@ class ChatMessage {
 
   bool get attachmentDownloadAllowed =>
       _attachmentPolicy?['allowDownload'] != false;
-  bool get attachmentForwardAllowed =>
-      _attachmentPolicy?['allowForward'] != false;
+  bool get attachmentForwardAllowed {
+    if (metadata?['allowForward'] == false) return false;
+    return _attachmentPolicy?['allowForward'] != false;
+  }
   bool get isAttachmentViewOnly =>
-      hasAttachment &&
-      (!attachmentDownloadAllowed || !attachmentForwardAllowed);
+      !attachmentForwardAllowed ||
+      (hasAttachment && !attachmentDownloadAllowed);
   List<String> get broadcastTargetDepartmentIds {
     final broadcastTargets = metadata?['broadcastTargets'];
     if (broadcastTargets is! Map) {
@@ -728,6 +752,36 @@ class ChatMessage {
       return false;
     }
     return broadcastTargets['sentToAllDepartments'] == true;
+  }
+
+  List<String> get broadcastTargetUserIds {
+    final broadcastTargets = metadata?['broadcastTargets'];
+    if (broadcastTargets is! Map) {
+      return const <String>[];
+    }
+    final raw = broadcastTargets['userIds'];
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((entry) => entry.toString())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
+  }
+
+  List<String> get broadcastTargetUserNames {
+    final broadcastTargets = metadata?['broadcastTargets'];
+    if (broadcastTargets is! Map) {
+      return const <String>[];
+    }
+    final raw = broadcastTargets['userNames'];
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((entry) => entry.toString())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
   }
 
   String? get forwardedFromName {
@@ -784,6 +838,8 @@ class ChatMessage {
     String? mimeType,
     String? replyToMessageId,
     bool? isDeleted,
+    bool? isScheduled,
+    DateTime? scheduledFor,
     Map<String, dynamic>? metadata,
     DateTime? updatedAt,
     List<ChatReceipt>? seenBy,
@@ -802,6 +858,8 @@ class ChatMessage {
       mimeType: mimeType ?? this.mimeType,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       isDeleted: isDeleted ?? this.isDeleted,
+      isScheduled: isScheduled ?? this.isScheduled,
+      scheduledFor: scheduledFor ?? this.scheduledFor,
       metadata: metadata ?? this.metadata,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -824,6 +882,8 @@ class ChatMessage {
       'mimeType': mimeType,
       'replyToMessageId': replyToMessageId,
       'isDeleted': isDeleted,
+      'isScheduled': isScheduled,
+      'scheduledFor': scheduledFor?.toIso8601String(),
       'metadata': metadata,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -837,8 +897,10 @@ class ChatMessage {
       id: (json['_id'] ?? json['id'])?.toString() ?? '',
       conversationId: json['conversationId']?.toString() ?? '',
       senderId: json['senderId']?.toString() ?? '',
-      sender: json['sender'] is Map<String, dynamic>
-          ? ChatDirectoryUser.fromJson(json['sender'] as Map<String, dynamic>)
+      sender: json['sender'] is Map
+          ? ChatDirectoryUser.fromJson(
+              Map<String, dynamic>.from(json['sender'] as Map),
+            )
           : null,
       content: json['content'] as String? ?? '',
       messageType: json['messageType'] as String? ?? 'text',
@@ -848,9 +910,32 @@ class ChatMessage {
       mimeType: json['mimeType'] as String?,
       replyToMessageId: json['replyToMessageId'] as String?,
       isDeleted: json['isDeleted'] == true,
-      metadata: json['metadata'] is Map<String, dynamic>
-          ? Map<String, dynamic>.from(json['metadata'] as Map<String, dynamic>)
+      isScheduled: json['isScheduled'] == true,
+      scheduledFor: json['scheduledFor'] is String
+          ? DateTime.tryParse(json['scheduledFor'] as String)
           : null,
+      metadata: () {
+        final raw = json['metadata'];
+        final meta = raw is Map<String, dynamic>
+            ? Map<String, dynamic>.from(raw)
+            : (raw is Map
+                ? Map<String, dynamic>.from(raw)
+                : <String, dynamic>{});
+        final msgId = (json['_id'] ?? json['id'])?.toString() ?? '';
+        // If message has an official server ID (not temp_), it was confirmed by the server.
+        // It can NEVER be in failed status. Strip any historical/stale failed status.
+        if (!msgId.startsWith('temp_')) {
+          meta.remove('status');
+          meta.remove('error');
+        }
+        final topLevelClientMsgId = json['clientMessageId']?.toString();
+        if (topLevelClientMsgId != null &&
+            topLevelClientMsgId.isNotEmpty &&
+            !meta.containsKey('clientMessageId')) {
+          meta['clientMessageId'] = topLevelClientMsgId;
+        }
+        return meta.isEmpty ? null : meta;
+      }(),
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
@@ -858,12 +943,12 @@ class ChatMessage {
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       seenBy: (json['seenBy'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       deliveredTo: (json['deliveredTo'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
     );
   }

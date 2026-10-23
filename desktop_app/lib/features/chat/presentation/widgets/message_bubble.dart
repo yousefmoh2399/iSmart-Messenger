@@ -10,15 +10,22 @@ import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
 import '../chat_appearance.dart';
 import 'authenticated_attachment_image.dart';
+import 'bundled_quick_emoji.dart';
 import 'chat_animated_reaction_picker.dart';
 import 'chat_audio_attachment_player.dart';
 import 'chat_poll_bubble.dart';
 import 'chat_text_parser.dart';
 
 const List<String> _kReactionEmojiFontFallbacks = <String>[
-  'Apple Color Emoji',
   'Segoe UI Emoji',
+  'Apple Color Emoji',
+  'Noto Color Emoji',
+  'Segoe UI Symbol',
 ];
+
+final RegExp _singleEmojiRegex = RegExp(
+  r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
+);
 
 class MessageBubble extends StatefulWidget {
   const MessageBubble({
@@ -57,6 +64,8 @@ class MessageBubble extends StatefulWidget {
     this.chatPreferences = ChatPreferences.defaults,
     this.albumMessages = const [],
     this.onOpenAlbum,
+    this.onRetry,
+    this.onForward,
   });
 
   final ChatMessage message;
@@ -93,6 +102,8 @@ class MessageBubble extends StatefulWidget {
   final ChatPreferences chatPreferences;
   final List<ChatMessage> albumMessages;
   final ValueChanged<ChatMessage>? onOpenAlbum;
+  final VoidCallback? onRetry;
+  final VoidCallback? onForward;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -116,6 +127,9 @@ class _MessageBubbleState extends State<MessageBubble> {
       case _BubbleMenuAction.reply:
         widget.onReply();
         break;
+      case _BubbleMenuAction.forward:
+        widget.onForward?.call();
+        break;
       case _BubbleMenuAction.copy:
         await Clipboard.setData(ClipboardData(text: widget.message.content));
         widget.onCopy();
@@ -138,96 +152,143 @@ class _MessageBubbleState extends State<MessageBubble> {
       case _BubbleMenuAction.pin:
         widget.onPin?.call();
         break;
+      case _BubbleMenuAction.retry:
+        widget.onRetry?.call();
+        break;
     }
   }
 
   Future<void> _showContextMenuAt(Offset position) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final isFailed = widget.message.metadata?['status'] == 'failed';
     final selected = await showMenu<_BubbleMenuAction>(
       context: context,
       position: RelativeRect.fromRect(
         Rect.fromLTWH(position.dx, position.dy, 1, 1),
         Offset.zero & overlay.size,
       ),
-      items: [
-        const PopupMenuItem(
-          value: _BubbleMenuAction.react,
-          child: _PopupActionRow(
-            icon: Icons.add_reaction_outlined,
-            label: 'إضافة تفاعل',
-            color: Color(0xFF3390EC),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _BubbleMenuAction.reply,
-          child: _PopupActionRow(
-            icon: Icons.reply_rounded,
-            label: 'رد',
-            color: Color(0xFF3390EC),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _BubbleMenuAction.favorite,
-          child: _PopupActionRow(
-            icon: Icons.star_outline_rounded,
-            label: 'تبديل المفضلة',
-            color: Color(0xFFF59E0B),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _BubbleMenuAction.copy,
-          child: _PopupActionRow(
-            icon: Icons.content_copy_rounded,
-            label: 'نسخ',
-            color: Color(0xFF708499),
-          ),
-        ),
-        if (widget.message.hasAttachment && widget.onSaveAttachment != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.saveAttachment,
-            child: _PopupActionRow(
-              icon: Icons.save_alt_rounded,
-              label: 'حفظ الملف',
-              color: Color(0xFF2E7D32),
-            ),
-          ),
-        if (widget.message.isStickerMessage && widget.onSaveSticker != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.saveSticker,
-            child: _PopupActionRow(
-              icon: Icons.sticky_note_2_outlined,
-              label: 'حفظ ضمن الملصقات',
-              color: Color(0xFF7B61FF),
-            ),
-          ),
-        if (widget.onEdit != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.edit,
-            child: _PopupActionRow(
-              icon: Icons.edit_outlined,
-              label: 'تعديل',
-              color: Color(0xFFF59E0B),
-            ),
-          ),
-        if (widget.onPin != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.pin,
-            child: _PopupActionRow(
-              icon: Icons.push_pin_outlined,
-              label: 'تثبيت',
-              color: Color(0xFF9A6400),
-            ),
-          ),
-        if (widget.onDelete != null)
-          const PopupMenuItem(
-            value: _BubbleMenuAction.delete,
-            child: _PopupActionRow(
-              icon: Icons.delete_outline_rounded,
-              label: 'حذف',
-              color: Color(0xFFE53935),
-            ),
-          ),
-      ],
+      items: isFailed
+          ? [
+              if (widget.onRetry != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.retry,
+                  child: _PopupActionRow(
+                    icon: Icons.refresh_rounded,
+                    label: 'إعادة المحاولة',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+              if (widget.onDelete != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.delete,
+                  child: _PopupActionRow(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'حذف',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+            ]
+          : [
+              if (widget.onRetry != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.retry,
+                  child: _PopupActionRow(
+                    icon: Icons.refresh_rounded,
+                    label: 'إعادة المحاولة',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.react,
+                child: _PopupActionRow(
+                  icon: Icons.add_reaction_outlined,
+                  label: 'إضافة تفاعل',
+                  color: Color(0xFF3390EC),
+                ),
+              ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.reply,
+                child: _PopupActionRow(
+                  icon: Icons.reply_rounded,
+                  label: 'رد',
+                  color: Color(0xFF3390EC),
+                ),
+              ),
+              if (widget.onForward != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.forward,
+                  child: _PopupActionRow(
+                    icon: Icons.shortcut_rounded,
+                    label: 'إعادة توجيه',
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
+              PopupMenuItem(
+                value: _BubbleMenuAction.favorite,
+                child: _PopupActionRow(
+                  icon: widget.message.isFavoritedBy(widget.currentUserId)
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  label: widget.message.isFavoritedBy(widget.currentUserId)
+                      ? 'إزالة من المفضلة'
+                      : 'إضافة إلى المفضلة',
+                  color: const Color(0xFFF59E0B),
+                ),
+              ),
+              const PopupMenuItem(
+                value: _BubbleMenuAction.copy,
+                child: _PopupActionRow(
+                  icon: Icons.content_copy_rounded,
+                  label: 'نسخ',
+                  color: Color(0xFF708499),
+                ),
+              ),
+              if (widget.message.hasAttachment && widget.onSaveAttachment != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.saveAttachment,
+                  child: _PopupActionRow(
+                    icon: Icons.save_alt_rounded,
+                    label: 'حفظ الملف',
+                    color: Color(0xFF2E7D32),
+                  ),
+                ),
+              if (widget.onSaveSticker != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.saveSticker,
+                  child: _PopupActionRow(
+                    icon: Icons.auto_awesome_motion_rounded,
+                    label: 'حفظ ضمن الملصقات',
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
+              if (widget.onEdit != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.edit,
+                  child: _PopupActionRow(
+                    icon: Icons.edit_outlined,
+                    label: 'تعديل',
+                    color: Color(0xFFF59E0B),
+                  ),
+                ),
+              if (widget.onPin != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.pin,
+                  child: _PopupActionRow(
+                    icon: Icons.push_pin_outlined,
+                    label: 'تثبيت',
+                    color: Color(0xFF9A6400),
+                  ),
+                ),
+              if (widget.onDelete != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.delete,
+                  child: _PopupActionRow(
+                    icon: Icons.delete_outline_rounded,
+                    label: 'حذف',
+                    color: Color(0xFFE53935),
+                  ),
+                ),
+            ],
     );
     if (selected != null) {
       await _handleMenuAction(selected);
@@ -257,13 +318,49 @@ class _MessageBubbleState extends State<MessageBubble> {
         ? resolved.outgoingBorderColor
         : resolved.incomingBorderColor;
 
-    final subColor = widget.isMine
+        final subColor = widget.isMine
         ? (bubbleUsesDarkTone
               ? const Color(0xFFC9DDF2)
               : const Color(0xFF5C748B))
         : (bubbleUsesDarkTone
               ? const Color(0xFF9BB0C3)
               : const Color(0xFF7A8A99));
+
+    final forwardColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? const Color(0xFFE0F2FE)
+            : const Color(0xFF0369A1))
+        : (isDark
+            ? const Color(0xFF38BDF8)
+            : const Color(0xFF0284C7));
+
+    final replyBgColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? Colors.black.withValues(alpha: 0.20)
+            : Colors.black.withValues(alpha: 0.08))
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.08)
+            : const Color(0xFFF1F5F9));
+
+    final replyBorderColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? const Color(0xFF38BDF8)
+            : const Color(0xFF0284C7))
+        : resolved.accent;
+
+    final replySenderColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? Colors.white
+            : const Color(0xFF0F172A))
+        : resolved.accent;
+
+    final replyTextColor = widget.isMine
+        ? (bubbleUsesDarkTone
+            ? const Color(0xFFE2E8F0)
+            : const Color(0xFF334155))
+        : (isDark
+            ? const Color(0xFFCBD5E1)
+            : const Color(0xFF475569));
 
     final selectedFill = const Color(0xFF3390EC).withValues(alpha: 0.14);
     final searchMatchFill = isDark
@@ -360,10 +457,10 @@ class _MessageBubbleState extends State<MessageBubble> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.forward_rounded,
                             size: 15,
-                            color: Color(0xFF3390EC),
+                            color: forwardColor,
                           ),
                           const SizedBox(width: 6),
                           Flexible(
@@ -372,7 +469,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: resolved.accent,
+                                color: forwardColor,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -382,7 +479,8 @@ class _MessageBubbleState extends State<MessageBubble> {
                       ),
                     ),
                   if (widget.message.sentToAllDepartments ||
-                      widget.message.broadcastTargetDepartmentNames.isNotEmpty)
+                      widget.message.broadcastTargetDepartmentNames.isNotEmpty ||
+                      widget.message.broadcastTargetUserNames.isNotEmpty)
                     Container(
                       width: double.infinity,
                       margin: const EdgeInsets.only(bottom: 8),
@@ -396,8 +494,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                       ),
                       child: Text(
                         widget.message.sentToAllDepartments
-                            ? 'إرسال إلى كل الأقسام'
-                            : 'إرسال إلى: ${widget.message.broadcastTargetDepartmentNames.join('، ')}',
+                            ? 'إرسال إلى: كل الأقسام والموظفين'
+                            : (widget.message.broadcastTargetDepartmentNames.isNotEmpty &&
+                                    widget.message.broadcastTargetUserNames.isNotEmpty)
+                                ? 'إرسال إلى أقسام: ${widget.message.broadcastTargetDepartmentNames.join('، ')} • وموظفون: ${widget.message.broadcastTargetUserNames.join('، ')}'
+                                : widget.message.broadcastTargetDepartmentNames.isNotEmpty
+                                    ? 'إرسال إلى: ${widget.message.broadcastTargetDepartmentNames.join('، ')}'
+                                    : 'إرسال إلى: ${widget.message.broadcastTargetUserNames.join('، ')}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -417,16 +520,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: widget.isMine
-                            ? resolved.outgoingReplyColor
-                            : resolved.incomingReplyColor,
+                        color: replyBgColor,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border(
-                          left: BorderSide(
-                            color: widget.isMine
-                                ? resolved.accent.withValues(alpha: 0.92)
-                                : resolved.accent,
-                            width: 3,
+                        border: BorderDirectional(
+                          start: BorderSide(
+                            color: replyBorderColor,
+                            width: 3.5,
                           ),
                         ),
                       ),
@@ -442,7 +541,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  color: resolved.accent,
+                                  color: replySenderColor,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -453,7 +552,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: subColor,
+                              color: replyTextColor,
                               fontSize: 12,
                               height: 1.3,
                             ),
@@ -475,26 +574,27 @@ class _MessageBubbleState extends State<MessageBubble> {
                     child: widget.message.isDeleted
                         ? Text(
                             'تم حذف هذه الرسالة',
-                            key: ValueKey('deleted_${widget.message.id}'),
+                            key: ValueKey(
+                              'deleted_${widget.message.metadata?['clientMessageId']?.toString() ?? widget.message.id}',
+                            ),
                             style: TextStyle(
                               color: subColor,
                               fontStyle: FontStyle.italic,
                             ),
                           )
                         : Column(
-                            key: ValueKey('message_${widget.message.id}'),
+                            key: ValueKey(
+                              'message_${widget.message.metadata?['clientMessageId']?.toString() ?? widget.message.id}',
+                            ),
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (widget.message.content.isNotEmpty)
                                 () {
                                   final text = widget.message.content.trim();
-                                  final emojiRegex = RegExp(
-                                    r'^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])$',
-                                  );
                                   final isSingle =
                                       text.runes.length == 1 &&
-                                      emojiRegex.hasMatch(text);
+                                      _singleEmojiRegex.hasMatch(text);
 
                                   return ChatRichText(
                                     text: widget.message.content,
@@ -560,6 +660,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     textColor: textColor,
                                     onOpen: widget.onOpenAttachment,
                                     onPrint: widget.onPrintAttachment,
+                                    onSaveSticker: widget.onSaveSticker,
                                     token: widget.token,
                                     isMine: widget.isMine,
                                   ),
@@ -571,6 +672,19 @@ class _MessageBubbleState extends State<MessageBubble> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (widget.message.isAttachmentViewOnly ||
+                          !widget.message.attachmentForwardAllowed ||
+                          widget.message.metadata?['allowForward'] == false) ...[
+                        const Tooltip(
+                          message: 'محتوى محمي: غير مسموح بإعادة التوجيه',
+                          child: Icon(
+                            Icons.lock_rounded,
+                            size: 11.5,
+                            color: Color(0xFF10B981),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       Text(
                         formatEgyptTime(widget.message.createdAt),
                         style: TextStyle(
@@ -590,9 +704,38 @@ class _MessageBubbleState extends State<MessageBubble> {
                           ),
                         ),
                       ],
+                      if (widget.message.isFavoritedBy(widget.currentUserId)) ...[
+                        const SizedBox(width: 4),
+                        const Tooltip(
+                          message: 'رسالة مفضلة',
+                          child: Icon(
+                            Icons.star_rounded,
+                            size: 13.5,
+                            color: Color(0xFFF59E0B),
+                          ),
+                        ),
+                      ],
                       if (status != null) ...[
                         const SizedBox(width: 6),
-                        Icon(status.icon, size: 15, color: status.color),
+                        if (widget.message.metadata?['status'] == 'failed')
+                          Tooltip(
+                            message: 'خيارات الرسالة (إعادة المحاولة / حذف)',
+                            child: InkWell(
+                              onTapDown: (details) =>
+                                  _showContextMenuAt(details.globalPosition),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Icon(
+                                  status.icon,
+                                  size: 15,
+                                  color: status.color,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Icon(status.icon, size: 15, color: status.color),
                       ],
                     ],
                   ),
@@ -792,6 +935,7 @@ class _AttachmentPreview extends StatelessWidget {
     required this.token,
     required this.isMine,
     this.onPrint,
+    this.onSaveSticker,
   });
 
   final ChatMessage message;
@@ -800,6 +944,7 @@ class _AttachmentPreview extends StatelessWidget {
   final String? token;
   final bool isMine;
   final VoidCallback? onPrint;
+  final VoidCallback? onSaveSticker;
 
   @override
   Widget build(BuildContext context) {
@@ -807,6 +952,88 @@ class _AttachmentPreview extends StatelessWidget {
 
     if (message.fileUrl == null || message.fileUrl!.isEmpty) {
       return const SizedBox.shrink();
+    }
+
+    if (message.isStickerMessage) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          InkWell(
+            onTap: onSaveSticker ?? onOpen,
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(
+                maxWidth: 180,
+                maxHeight: 180,
+              ),
+              child: Hero(
+                tag: 'image_${message.id}',
+                child: AuthenticatedAttachmentImage(
+                  message: message,
+                  fit: BoxFit.contain,
+                  errorFallback: Container(
+                    height: 120,
+                    width: 120,
+                    alignment: Alignment.center,
+                    color: Colors.transparent,
+                    child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (onSaveSticker != null)
+            Positioned(
+              bottom: 2,
+              left: 2,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onSaveSticker,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: (isDark ? const Color(0xFF1C1C1E) : Colors.white).withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                        width: 0.8,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome_motion_rounded,
+                          size: 12,
+                          color: Color(0xFF007AFF),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'حفظ كملصق',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
     }
 
     if (message.isImageMessage) {
@@ -909,7 +1136,7 @@ class _DesktopMediaAlbum extends StatelessWidget {
               color: Colors.black54,
               child: Center(
                 child: Text(
-                  '+${overflowCount}',
+                  '+$overflowCount',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -1051,6 +1278,7 @@ class _ReactionBar extends StatelessWidget {
 enum _BubbleMenuAction {
   react,
   reply,
+  forward,
   favorite,
   copy,
   saveAttachment,
@@ -1058,6 +1286,7 @@ enum _BubbleMenuAction {
   edit,
   delete,
   pin,
+  retry,
 }
 
 class _PopupActionRow extends StatelessWidget {
@@ -1149,6 +1378,7 @@ class _AnimatedReactionChipState extends State<_AnimatedReactionChip>
     final emojiStyle = TextStyle(
       fontSize: 17,
       height: 1.05,
+      fontFamily: 'Segoe UI Emoji',
       fontFamilyFallback: _kReactionEmojiFontFallbacks,
     );
 
@@ -1180,8 +1410,13 @@ class _AnimatedReactionChipState extends State<_AnimatedReactionChip>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(widget.emoji, style: emojiStyle),
-              const SizedBox(width: 3),
+              BundledQuickEmoji(
+                emoji: widget.emoji,
+                size: 18,
+                animate: false,
+                textFallbackStyle: emojiStyle,
+              ),
+              const SizedBox(width: 4),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
                 transitionBuilder: (child, anim) => ScaleTransition(
@@ -1219,6 +1454,13 @@ class _MessageStatus {
 _MessageStatus? _messageStatus(ChatMessage message, String currentUserId) {
   if (message.sender?.id != currentUserId) {
     return null;
+  }
+  final msgStatus = message.metadata?['status']?.toString();
+  if (msgStatus == 'failed') {
+    return const _MessageStatus(Icons.error_outline_rounded, Color(0xFFEF4444));
+  }
+  if (msgStatus == 'pending' || message.id.startsWith('temp_')) {
+    return const _MessageStatus(Icons.access_time_rounded, Color(0xFF94A3B8));
   }
   if (message.seenBy.any((entry) => entry.userId != currentUserId)) {
     return const _MessageStatus(Icons.done_all_rounded, Color(0xFF4FC3F7));
