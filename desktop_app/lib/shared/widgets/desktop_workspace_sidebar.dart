@@ -1,8 +1,8 @@
 import 'dart:ui';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:iconsax/iconsax.dart';
 
 import '../models/app_user.dart';
 import '../providers/providers.dart';
@@ -106,10 +106,13 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
     final displayName = (user?.fullName.trim().isNotEmpty ?? false)
         ? user!.fullName.trim()
         : (user?.username ?? 'المستخدم');
-    final actionButtons = <Widget>[
+
+    // 1. Main navigation items
+    final mainActions = <Widget>[
       _DesktopWorkspaceIconButton(
         tooltip: 'المحادثات',
-        icon: Iconsax.message5,
+        icon: CupertinoIcons.chat_bubble_2,
+        selectedIcon: CupertinoIcons.chat_bubble_2_fill,
         selected: activeSection == DesktopWorkspaceSection.chat,
         isDark: isDark,
         accentColor: accentColor,
@@ -117,24 +120,9 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
         onPressed: onOpenChat,
       ),
       _DesktopWorkspaceIconButton(
-        tooltip: switch (currentThemeMode) {
-          ThemeMode.dark => 'الوضع الداكن',
-          ThemeMode.system => 'الوضع الفاتح',
-          ThemeMode.light => 'الوضع الفاتح',
-        },
-        icon: switch (currentThemeMode) {
-          ThemeMode.dark => Icons.dark_mode_rounded,
-          ThemeMode.system => Icons.light_mode_rounded,
-          ThemeMode.light => Icons.light_mode_rounded,
-        },
-        isDark: isDark,
-        accentColor: accentColor,
-        accent: true,
-        onPressed: onToggleTheme,
-      ),
-      _DesktopWorkspaceIconButton(
         tooltip: 'الملفات',
-        icon: Iconsax.folder5,
+        icon: CupertinoIcons.folder,
+        selectedIcon: CupertinoIcons.folder_fill,
         selected: activeSection == DesktopWorkspaceSection.files,
         isDark: isDark,
         accentColor: accentColor,
@@ -142,7 +130,8 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
       ),
       _DesktopWorkspaceIconButton(
         tooltip: 'مساحة العمل والملاحظات',
-        icon: Iconsax.note_21,
+        icon: CupertinoIcons.doc_text,
+        selectedIcon: CupertinoIcons.doc_text_fill,
         selected: activeSection == DesktopWorkspaceSection.workspace,
         isDark: isDark,
         accentColor: accentColor,
@@ -155,38 +144,33 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
       ),
       if (showServersShortcut)
         _DesktopWorkspaceIconButton(
-          tooltip: 'السيرفرات',
-          icon: Icons.dns_rounded,
+          tooltip: 'السيرفرات والخدمات',
+          icon: CupertinoIcons.cloud,
+          selectedIcon: CupertinoIcons.cloud_fill,
           selected: activeSection == DesktopWorkspaceSection.servers,
           isDark: isDark,
           accentColor: accentColor,
           onPressed: onOpenServers,
         ),
+    ];
+
+    // 2. Operational & Admin items (when enabled/available)
+    final opsActions = <Widget>[
       _DesktopWorkspaceIconButton(
-        tooltip: 'الملف الشخصي',
-        icon: Icons.account_circle_rounded,
-        selected: activeSection == DesktopWorkspaceSection.profile,
+        tooltip: 'تذاكر الدعم',
+        icon: CupertinoIcons.tickets,
+        selectedIcon: CupertinoIcons.tickets_fill,
+        selected: activeSection == DesktopWorkspaceSection.tickets,
         isDark: isDark,
         accentColor: accentColor,
-        onPressed: onOpenProfile,
+        badgeCount: pendingTicketsCount,
+        onPressed: onOpenTickets,
       ),
-      if (onOpenUpdates != null)
-        _DesktopWorkspaceIconButton(
-          tooltip: hasPrepared
-              ? 'تحديث جاهز للتثبيت (اضغط لإعادة التشغيل)'
-              : hasAvailable
-              ? 'يوجد تحديث جديد متاح للمنظومة'
-              : 'التحديثات',
-          icon: Icons.system_update_alt_rounded,
-          isDark: isDark,
-          accentColor: accentColor,
-          hasPulsingBadge: showPulsing,
-          onPressed: onOpenUpdates!,
-        ),
       if (onOpenSystemMonitor != null)
         _DesktopWorkspaceIconButton(
           tooltip: 'مراقبة النظام',
-          icon: Iconsax.monitor,
+          icon: CupertinoIcons.speedometer,
+          selectedIcon: CupertinoIcons.speedometer,
           selected: activeSection == DesktopWorkspaceSection.systemMonitor,
           isDark: isDark,
           accentColor: accentColor,
@@ -195,7 +179,8 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
       if (onOpenAdmin != null)
         _DesktopWorkspaceIconButton(
           tooltip: 'لوحة الإدارة',
-          icon: Icons.admin_panel_settings_rounded,
+          icon: CupertinoIcons.shield,
+          selectedIcon: CupertinoIcons.shield_fill,
           selected: activeSection == DesktopWorkspaceSection.admin,
           isDark: isDark,
           accentColor: accentColor,
@@ -204,62 +189,99 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
       if (onOpenPrinters != null)
         _DesktopWorkspaceIconButton(
           tooltip: 'إدارة الطابعات',
-          icon: Icons.print_rounded,
+          icon: CupertinoIcons.printer,
+          selectedIcon: CupertinoIcons.printer_fill,
           selected: activeSection == DesktopWorkspaceSection.printers,
           isDark: isDark,
           accentColor: accentColor,
           onPressed: onOpenPrinters!,
         ),
-
-      // if (onOpenPurchaseRequests != null)
-      //   _DesktopWorkspaceIconButton(
-      //     tooltip: 'طلبات الشراء',
-      //     icon: Icons.shopping_cart_checkout_rounded,
-      //     selected: activeSection == DesktopWorkspaceSection.purchaseRequests,
-      //     isDark: isDark,
-      //     accentColor: accentColor,
-      //     onPressed: onOpenPurchaseRequests!,
-      //   ),
-      _DesktopWorkspaceIconButton(
-        tooltip: 'تذاكر الدعم',
-        icon: Icons.support_agent_rounded,
-        selected: activeSection == DesktopWorkspaceSection.tickets,
-        isDark: isDark,
-        accentColor: accentColor,
-        badgeCount: pendingTicketsCount,
-        onPressed: onOpenTickets,
-      ),
       if (onOpenSnipeit != null)
         _DesktopWorkspaceIconButton(
           tooltip: 'Snipe-IT',
-          icon: Icons.computer_rounded,
+          icon: CupertinoIcons.desktopcomputer,
+          selectedIcon: CupertinoIcons.desktopcomputer,
           selected: activeSection == DesktopWorkspaceSection.snipeit,
           isDark: isDark,
           accentColor: accentColor,
           onPressed: onOpenSnipeit!,
         ),
+    ];
+
+    // 3. System & user utility items at the bottom
+    final bottomActions = <Widget>[
+      if (onOpenUpdates != null)
+        _DesktopWorkspaceIconButton(
+          tooltip: hasPrepared
+              ? 'تحديث جاهز للتثبيت (اضغط لإعادة التشغيل)'
+              : hasAvailable
+              ? 'يوجد تحديث جديد متاح للمنظومة'
+              : 'التحديثات',
+          icon: CupertinoIcons.arrow_down_circle,
+          selectedIcon: CupertinoIcons.arrow_down_circle_fill,
+          isDark: isDark,
+          accentColor: accentColor,
+          hasPulsingBadge: showPulsing,
+          onPressed: onOpenUpdates!,
+        ),
+      _DesktopWorkspaceIconButton(
+        tooltip: isDark
+            ? 'التبديل إلى الوضع الفاتح'
+            : 'التبديل إلى الوضع الداكن',
+        icon: isDark
+            ? CupertinoIcons.moon_stars_fill
+            : CupertinoIcons.sun_max_fill,
+        isDark: isDark,
+        accentColor: accentColor,
+        customIconColor: isDark
+            ? const Color(0xFFFBBF24)
+            : const Color(0xFFF59E0B),
+        onPressed: onToggleTheme,
+      ),
+      _DesktopWorkspaceIconButton(
+        tooltip: 'الملف الشخصي',
+        icon: CupertinoIcons.person_crop_circle,
+        selectedIcon: CupertinoIcons.person_crop_circle_fill,
+        selected: activeSection == DesktopWorkspaceSection.profile,
+        isDark: isDark,
+        accentColor: accentColor,
+        onPressed: onOpenProfile,
+      ),
       _DesktopWorkspaceIconButton(
         tooltip: 'تسجيل الخروج',
-        icon: Iconsax.logout5,
+        icon: CupertinoIcons.square_arrow_right,
+        selectedIcon: CupertinoIcons.square_arrow_right_fill,
         isDark: isDark,
-        accentColor: const Color(0xFFDC2626),
+        accentColor: const Color(0xFFEF4444),
         onPressed: onLogout,
       ),
     ];
 
+    Widget buildDivider() {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+        child: Container(
+          height: 1,
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
+      );
+    }
+
     return Container(
-      width: 80,
+      width: 76,
       height: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 20),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       decoration: BoxDecoration(
         color: isDark
-            ? const Color(0xFF1C1C1E)
-            : const Color(0xFFF6F6F6),
+            ? const Color(0xFF161618)
+            : const Color(0xFFF8F9FA),
         border: Border(
           left: BorderSide(
             color: isDark
-                ? Colors.white.withValues(alpha: 0.1)
-                : Colors.black.withValues(alpha: 0.05),
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
             width: 1.0,
           ),
         ),
@@ -273,19 +295,37 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
               displayName: displayName,
               isDark: isDark,
               accentColor: accentColor,
+              onTap: onOpenProfile,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             Expanded(
               child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
                 child: Column(
-                  children: actionButtons
-                      .map(
+                  children: [
+                    ...mainActions.map(
+                      (btn) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: btn,
+                      ),
+                    ),
+                    if (opsActions.isNotEmpty) ...[
+                      buildDivider(),
+                      ...opsActions.map(
                         (btn) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          padding: const EdgeInsets.symmetric(vertical: 3),
                           child: btn,
                         ),
-                      )
-                      .toList(),
+                      ),
+                    ],
+                    buildDivider(),
+                    ...bottomActions.map(
+                      (btn) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: btn,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -304,36 +344,48 @@ class _DesktopWorkspaceUserPill extends StatelessWidget {
     required this.displayName,
     required this.isDark,
     required this.accentColor,
+    this.onTap,
   });
 
   final AppUser? user;
   final String displayName;
   final bool isDark;
   final Color accentColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.18),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+    return GestureDetector(
+      onTap: onTap,
+      child: Tooltip(
+        message: displayName,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: accentColor.withValues(alpha: isDark ? 0.35 : 0.22),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: accentColor.withValues(alpha: isDark ? 0.16 : 0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: SafeNetworkAvatar(
-        radius: 22,
-        backgroundColor: accentColor.withValues(alpha: 0.18),
-        imageUrl: user?.avatarUrl,
-        fallbackText: displayName.isEmpty
-            ? '?'
-            : displayName.substring(0, 1).toUpperCase(),
-        fallbackTextStyle: TextStyle(
-          color: accentColor,
-          fontWeight: FontWeight.w800,
+          child: SafeNetworkAvatar(
+            radius: 20,
+            backgroundColor: accentColor.withValues(alpha: 0.15),
+            imageUrl: user?.avatarUrl,
+            fallbackText: displayName.isEmpty
+                ? '?'
+                : displayName.substring(0, 1).toUpperCase(),
+            fallbackTextStyle: TextStyle(
+              color: accentColor,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ),
       ),
     );
@@ -344,6 +396,7 @@ class _DesktopWorkspaceIconButton extends StatefulWidget {
   const _DesktopWorkspaceIconButton({
     required this.tooltip,
     required this.icon,
+    this.selectedIcon,
     required this.isDark,
     required this.accentColor,
     required this.onPressed,
@@ -351,6 +404,7 @@ class _DesktopWorkspaceIconButton extends StatefulWidget {
     this.accent = false,
     this.badgeCount = 0,
     this.hasPulsingBadge = false,
+    this.customIconColor,
     this.statusColor,
   });
 
@@ -358,8 +412,10 @@ class _DesktopWorkspaceIconButton extends StatefulWidget {
   final int badgeCount;
   final bool hasPulsingBadge;
   final IconData icon;
+  final IconData? selectedIcon;
   final bool isDark;
   final Color accentColor;
+  final Color? customIconColor;
   final VoidCallback onPressed;
   final bool selected;
   final bool accent;
@@ -378,27 +434,49 @@ class _DesktopWorkspaceIconButtonState
   @override
   Widget build(BuildContext context) {
     final selected = widget.selected;
-    final accent = widget.accent;
     final isDark = widget.isDark;
     final accentColor = widget.accentColor;
 
-    final bgColor = selected
-        ? accentColor.withValues(alpha: isDark ? 0.15 : 0.1)
-        : _hovered
-        ? (isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.black.withValues(alpha: 0.04))
-        : Colors.transparent;
+    // Apple minimalist translucent tile colors
+    final Color bgColor;
+    final Color borderColor;
+    if (selected) {
+      bgColor = accentColor.withValues(alpha: isDark ? 0.2 : 0.12);
+      borderColor = accentColor.withValues(alpha: isDark ? 0.35 : 0.25);
+    } else if (_hovered) {
+      bgColor = isDark
+          ? Colors.white.withValues(alpha: 0.08)
+          : Colors.black.withValues(alpha: 0.05);
+      borderColor = isDark
+          ? Colors.white.withValues(alpha: 0.12)
+          : Colors.black.withValues(alpha: 0.06);
+    } else {
+      bgColor = Colors.transparent;
+      borderColor = Colors.transparent;
+    }
 
-    final iconColor = selected
-        ? accentColor
-        : accent
-        ? accentColor.withValues(alpha: 0.95)
-        : (isDark ? Colors.white70 : const Color(0xFF728397));
+    final Color iconColor;
+    if (widget.customIconColor != null) {
+      iconColor = widget.customIconColor!;
+    } else if (selected) {
+      iconColor = accentColor;
+    } else if (widget.accent) {
+      iconColor = accentColor.withValues(alpha: 0.95);
+    } else {
+      iconColor = isDark
+          ? const Color(0xFF94A3B8) // Slate 400
+          : const Color(0xFF64748B); // Slate 500
+    }
+
+    final activeIcon = (selected && widget.selectedIcon != null)
+        ? widget.selectedIcon!
+        : widget.icon;
 
     return Tooltip(
       message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 350),
       child: MouseRegion(
+        cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() {
           _hovered = false;
@@ -410,44 +488,48 @@ class _DesktopWorkspaceIconButtonState
           onTapCancel: () => setState(() => _pressed = false),
           onTap: selected ? null : widget.onPressed,
           child: AnimatedScale(
-            scale: _pressed ? 0.92 : (_hovered ? 1.06 : 1.0),
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
+            scale: _pressed ? 0.93 : (_hovered ? 1.05 : 1.0),
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
+              duration: const Duration(milliseconds: 200),
               curve: Curves.easeOutCubic,
-              width: selected ? 56 : 50,
-              height: selected ? 56 : 50,
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(
-                  16,
-                ), // A slightly cleaner radius
+                borderRadius: BorderRadius.circular(13),
                 color: bgColor,
-                // border: Border.all(color: borderColor), // not needed since it's transparent
+                border: Border.all(color: borderColor, width: 1.0),
               ),
               child: Stack(
                 alignment: Alignment.center,
                 clipBehavior: Clip.none,
                 children: [
-                  Icon(widget.icon, size: selected ? 24 : 22, color: iconColor),
+                  Icon(activeIcon, size: 22, color: iconColor),
                   if (widget.badgeCount > 0)
                     Positioned(
-                      top: 4,
-                      right: 4,
+                      top: 2,
+                      right: 2,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 5,
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE11D48), // Rose red
+                          color: const Color(0xFFE11D48), // Apple rose red
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: isDark
-                                ? const Color(0xFF1F2C38)
+                                ? const Color(0xFF1C1C1E)
                                 : Colors.white,
                             width: 1.5,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFE11D48).withValues(alpha: 0.35),
+                              blurRadius: 4,
+                            ),
+                          ],
                         ),
                         constraints: const BoxConstraints(
                           minWidth: 16,
@@ -455,7 +537,7 @@ class _DesktopWorkspaceIconButtonState
                         ),
                         child: Center(
                           child: Text(
-                            '${widget.badgeCount}',
+                            widget.badgeCount > 99 ? '99+' : '${widget.badgeCount}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 9,
@@ -468,18 +550,18 @@ class _DesktopWorkspaceIconButtonState
                     ),
                   if (widget.hasPulsingBadge)
                     const Positioned(
-                      top: 4,
-                      right: 4,
+                      top: 3,
+                      right: 3,
                       child: _PulsingUpdateBadge(),
                     ),
                   AnimatedPositioned(
-                    duration: const Duration(milliseconds: 220),
+                    duration: const Duration(milliseconds: 200),
                     curve: Curves.easeOutCubic,
-                    bottom: selected ? 6 : 2,
+                    bottom: selected ? 4 : 1,
                     child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      width: selected ? 18 : 0,
-                      height: 3,
+                      duration: const Duration(milliseconds: 200),
+                      width: selected ? 16 : 0,
+                      height: 2.5,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(99),
                         color: accentColor,
@@ -488,12 +570,12 @@ class _DesktopWorkspaceIconButtonState
                   ),
                   if (widget.statusColor != null)
                     Positioned(
-                      right: 8,
-                      bottom: 8,
+                      right: 6,
+                      bottom: 6,
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width: 10,
-                        height: 10,
+                        duration: const Duration(milliseconds: 200),
+                        width: 8,
+                        height: 8,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: widget.statusColor,
@@ -583,8 +665,8 @@ class _DesktopWorkspaceConnectionIconState
               alignment: Alignment.center,
               children: [
                 Icon(
-                  Icons.dns_rounded,
-                  size: 20,
+                  CupertinoIcons.antenna_radiowaves_left_right,
+                  size: 18,
                   color: widget.isDark
                       ? Colors.white70
                       : const Color(0xFF728397),
