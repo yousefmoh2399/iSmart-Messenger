@@ -79,6 +79,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _listenToSocket();
     ref.onDispose(() {
       _disposed = true;
+      _overviewCacheDebounceTimer?.cancel();
       _eventsSubscription?.cancel();
     });
     return _loadOverview();
@@ -488,7 +489,17 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         ? DateTime.tryParse(event.payload['lastActiveAt'] as String)
         : null;
 
-    _setStateAndCache(
+    final matchingUser = current.users.cast<ChatDirectoryUser?>().firstWhere(
+      (u) => u?.id == userId,
+      orElse: () => null,
+    );
+    if (matchingUser != null &&
+        matchingUser.isOnline == isOnline &&
+        matchingUser.presenceStatus == presenceStatus) {
+      return;
+    }
+
+    state = AsyncData(
       ChatOverviewData(
         conversations: current.conversations
             .map(
@@ -1232,6 +1243,8 @@ Future<ChatConversation> uploadConversationAvatar({
     return conversation;
   }
 
+  Timer? _overviewCacheDebounceTimer;
+
   Future<void> _saveStateToCache(ChatOverviewData data) async {
     try {
       final jsonList = data.conversations.map((c) => c.toJson()).toList();
@@ -1241,9 +1254,16 @@ Future<ChatConversation> uploadConversationAvatar({
     } catch (_) {}
   }
 
-  void _setStateAndCache(ChatOverviewData data) {
+  void _setStateAndCache(ChatOverviewData data, {bool immediate = false}) {
     state = AsyncData(data);
-    _saveStateToCache(data);
+    _overviewCacheDebounceTimer?.cancel();
+    if (immediate) {
+      _saveStateToCache(data);
+    } else {
+      _overviewCacheDebounceTimer = Timer(const Duration(seconds: 4), () {
+        _saveStateToCache(data);
+      });
+    }
   }
 }
 
@@ -1313,6 +1333,7 @@ class ConversationMessagesController
     _listenToSocket(arg);
     ref.onDispose(() {
       _disposed = true;
+      _messagesCacheDebounceTimer?.cancel();
       _eventsSubscription?.cancel();
       _socketService?.leaveConversation(arg);
     });
@@ -2077,6 +2098,8 @@ class ConversationMessagesController
   void sendTyping() => _socketService?.sendTyping(arg);
   void stopTyping() => _socketService?.stopTyping(arg);
 
+  Timer? _messagesCacheDebounceTimer;
+
   Future<void> _saveStateToCache(ConversationMessagesState data) async {
     try {
       final jsonList = data.messages.map((m) => m.toJson()).toList();
@@ -2087,9 +2110,16 @@ class ConversationMessagesController
     } catch (_) {}
   }
 
-  void _setStateAndCache(ConversationMessagesState data) {
+  void _setStateAndCache(ConversationMessagesState data, {bool immediate = false}) {
     state = AsyncData(data);
-    _saveStateToCache(data);
+    _messagesCacheDebounceTimer?.cancel();
+    if (immediate) {
+      _saveStateToCache(data);
+    } else {
+      _messagesCacheDebounceTimer = Timer(const Duration(seconds: 4), () {
+        _saveStateToCache(data);
+      });
+    }
   }
 }
 

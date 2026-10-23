@@ -247,9 +247,8 @@ function getAggregatedPresence(io, userId) {
 async function publishAggregatedPresence(io, userId, extra = {}) {
   const aggregated = getAggregatedPresence(io, userId);
   const nextSignature = `${aggregated.isOnline ? "1" : "0"}:${aggregated.status}`;
-  const hasExtra = extra && Object.keys(extra).length > 0;
   const currentSignature = publishedPresenceState.get(userId);
-  if (!hasExtra && currentSignature === nextSignature) {
+  if (currentSignature === nextSignature) {
     return;
   }
   await setUserPresence(userId, {

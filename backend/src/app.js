@@ -102,7 +102,14 @@ app.use(
   "/api",
   rateLimit({
     windowMs: 60 * 1000,
-    max: 600,
+    max: 3000,
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      if (auth && typeof auth === "string" && auth.startsWith("Bearer ")) {
+        return "user_" + auth.slice(-32);
+      }
+      return req.ip;
+    },
     skip: (req) =>
       req.method === "POST" &&
       /^\/api\/updates\/tasks\/[a-f0-9]{24}\/progress$/i.test(

@@ -458,6 +458,9 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("renderer-process-limit", "3");
 
 // V8 32-bit Memory Optimization: constrain heap to 512MB to trigger fast, non-blocking GC pauses
 // preventing memory fragmentation and 1-2 second freezes on low-RAM branch PCs.
