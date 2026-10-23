@@ -18,6 +18,7 @@ import '../features/auth/presentation/auth_controller.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/data/chat_socket_service.dart';
 import '../features/profile/presentation/profile_screen.dart';
+import '../features/updates/presentation/update_center_screen.dart';
 import '../shared/providers/providers.dart';
 import '../shared/services/desktop_update_agent.dart'
     if (dart.library.html) '../shared/services/desktop_update_agent_web.dart';
@@ -911,6 +912,38 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         .events
         .listen((event) {
           if (!mounted) {
+            return;
+          }
+          if (event.type == 'update_available') {
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              SnackBar(
+                backgroundColor: const Color(0xFF1E293B),
+                duration: const Duration(seconds: 10),
+                content: Row(
+                  children: [
+                    const Icon(Icons.system_update_rounded, color: Color(0xFF38BDF8), size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        event.message,
+                        style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'عرض التحديث',
+                  textColor: const Color(0xFF38BDF8),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const UpdateCenterScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
             return;
           }
           if (event.type == 'status') {

@@ -3419,13 +3419,14 @@ function downloadFile(url, destinationPath, token, onProgress) {
           return;
         }
 
-        const totalBytes = parseInt(response.headers["content-length"] || "0", 10);
+        const totalHeader = response.headers["content-length"] || response.headers["x-file-size"];
+        const totalBytes = totalHeader ? parseInt(totalHeader, 10) : 0;
         let receivedBytes = 0;
 
         response.on("data", (chunk) => {
           receivedBytes += chunk.length;
           fileStream.write(chunk);
-          if (onProgress && totalBytes > 0) {
+          if (onProgress) {
             onProgress(receivedBytes, totalBytes);
           }
         });
@@ -3490,8 +3491,8 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
         payload.status === "downloading" &&
         progress !== 0 &&
         progress !== 100 &&
-        progress - lastProgressValue < 2 &&
-        now - lastProgressEventAt < 700
+        progress === lastProgressValue &&
+        now - lastProgressEventAt < 150
       ) {
         return;
       }
@@ -3507,11 +3508,22 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
     }, { force: true });
 
     await downloadFile(downloadUrl, updateZipPath, token, (received, total) => {
-      const progress = Math.round((received / total) * 100);
+      let progress = 0;
+      let message = "";
+      if (total > 0) {
+        progress = Math.min(95, Math.round((received / total) * 100));
+        const receivedMb = (received / (1024 * 1024)).toFixed(1);
+        const totalMb = (total / (1024 * 1024)).toFixed(1);
+        message = `جاري تحميل التحديث: ${progress}% (${receivedMb} / ${totalMb} MB)`;
+      } else {
+        const receivedMb = (received / (1024 * 1024)).toFixed(1);
+        progress = Math.min(90, Math.round((received / (60 * 1024 * 1024)) * 100));
+        message = `جاري تحميل التحديث: ${receivedMb} MB`;
+      }
       sendUpdaterProgress({
         status: "downloading",
         progress: progress,
-        message: `جاري تحميل التحديث: ${progress}%`,
+        message: message,
       });
     });
 
@@ -3602,30 +3614,53 @@ Log-Msg "Extraction path: $extractedPath"
 Log-Msg "App Dir: $appDir"
 Log-Msg "Exe Path: $exePath"
 
-# 1. Wait for parent process to exit
+# 1. Wait for parent process to exit and force-kill lingering instances
 Log-Msg "Waiting for parent process ${process.pid} to exit..."
 $parentPid = ${process.pid}
-while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
-    Start-Sleep -m 200
-}
-Log-Msg "Parent process has exited."
-
-# 2. Force kill any remaining iSmart Messenger or Electron processes in the app directory to prevent file locks
 $procName = [System.IO.Path]::GetFileNameWithoutExtension($exePath)
-Log-Msg "Checking for other running instances of $procName..."
-$timeout = 50
-while ((Get-Process -Name $procName -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
-    Log-Msg "Waiting for remaining child or auxiliary processes to exit..."
+
+$timeout = 20
+while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
     Start-Sleep -m 200
     $timeout--
 }
+if (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
+    Log-Msg "Terminating parent PID $parentPid forcefully..."
+    Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue
+}
 
-if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-    Log-Msg "Forcefully terminating remaining $procName processes..."
-    Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
+Log-Msg "Terminating any other running instances of $procName or electron in appDir..."
+Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "electron" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*$appDir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -m 800
+
+# 2. Check if the update package is directly an executable installer (.exe)
+$isExeInstaller = $false
+try {
+    $fileBytes = [System.IO.File]::ReadAllBytes($zipPath)
+    if ($fileBytes.Length -gt 2 -and $fileBytes[0] -eq 0x4D -and $fileBytes[1] -eq 0x5A) {
+        # MZ header -> Native Windows Executable
+        $isExeInstaller = $true
+    }
+} catch {
+    if ($zipPath.ToLower().EndsWith(".exe")) { $isExeInstaller = $true }
+}
+
+if ($isExeInstaller) {
+    Log-Msg "Package is a direct executable installer. Executing silent installation..."
+    try {
+        $instProc = Start-Process "$zipPath" -ArgumentList "/S", "/silent", "/NORESTART", "/SP-" -PassThru -Wait
+        Log-Msg "Installer process finished with exit code: $($instProc.ExitCode)"
+    } catch {
+        Log-Msg "ERROR executing installer: $($_.Exception.Message)"
+    }
     Start-Sleep -s 1
-} else {
-    Log-Msg "All other instances of $procName have exited cleanly."
+    Log-Msg "Relaunching application..."
+    Start-Process "$exePath"
+    Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
+    Log-Msg "=== Direct installer update finished ==="
+    Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+    exit 0
 }
 
 # 3. Clear extraction folder
@@ -3636,81 +3671,121 @@ if (Test-Path "$extractedPath") {
 New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
 
 # 4. Extract Zip
-Log-Msg "Extracting update package..."
+Log-Msg "Extracting zip update package..."
+$extractedOk = $false
 try {
     Add-Type -Assembly "System.IO.Compression.FileSystem"
     [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractedPath)
-    Log-Msg "Extraction completed successfully via .NET."
+    $extractedOk = $true
+    Log-Msg "Extraction completed successfully via .NET ZipFile."
 } catch {
-    Log-Msg "Fallback to Shell COM extraction due to: $($_.Exception.Message)"
-    if (Test-Path "$extractedPath") {
-        Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
-    
-    $shell = New-Object -ComObject Shell.Application
-    $zip = $shell.NameSpace("$zipPath")
-    $dest = $shell.NameSpace("$extractedPath")
-    $dest.CopyHere($zip.Items(), 0x14)
-    
-    function Get-FolderSize($p) {
-        $files = Get-ChildItem -Path $p -Recurse -ErrorAction SilentlyContinue
-        if ($files) { ($files | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum } else { 0 }
-    }
-    
-    $lastSize = -1
-    $sameCount = 0
-    while ($sameCount -lt 3) {
-        $currentSize = Get-FolderSize "$extractedPath"
-        Log-Msg "Current extracted size: $currentSize bytes"
-        if ($currentSize -eq $lastSize -and $currentSize -gt 0) {
-            $sameCount++
-        } else {
-            $lastSize = $currentSize
-            $sameCount = 0
-        }
-        Start-Sleep -m 500
-    }
-    Log-Msg "Shell COM extraction completed."
+    Log-Msg "Extraction via .NET failed: $($_.Exception.Message). Falling back to Shell COM..."
 }
 
-Start-Sleep -s 1
-
-# 5. Copy files with Retry Loop (up to 5 retries)
-Log-Msg "Copying files to $appDir..."
-$copied = $false
-for ($i = 1; $i -le 5; $i++) {
+if (-not $extractedOk) {
     try {
-        Copy-Item -Path "$extractedPath/app/*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
-        $copied = $true
-        Log-Msg "Files copied successfully on attempt $i."
-        break
-    } catch {
-        Log-Msg "Attempt $i to copy files failed: $($_.Exception.Message). Retrying in 1 second..."
-        if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
+        if (Test-Path "$extractedPath") {
+            Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
         }
-        Start-Sleep -s 1
+        New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
+        $shell = New-Object -ComObject Shell.Application
+        $zip = $shell.NameSpace("$zipPath")
+        $dest = $shell.NameSpace("$extractedPath")
+        $dest.CopyHere($zip.Items(), 0x14)
+        Start-Sleep -s 3
+        $extractedOk = $true
+        Log-Msg "Shell COM extraction finished."
+    } catch {
+        Log-Msg "Shell COM extraction failed: $($_.Exception.Message)"
+    }
+}
+
+Start-Sleep -m 500
+
+# 5. Determine the actual application directory inside the extracted zip
+# Could be: $extractedPath/app, or $extractedPath directly, or a single subfolder containing resources/app.asar
+$sourceDir = ""
+if (Test-Path "$extractedPath\app") {
+    $sourceDir = "$extractedPath\app"
+} elseif (Test-Path "$extractedPath\resources") {
+    $sourceDir = "$extractedPath"
+} else {
+    $subdirs = Get-ChildItem -Path "$extractedPath" -Directory -ErrorAction SilentlyContinue
+    $matchedSub = $null
+    foreach ($sd in $subdirs) {
+        if ((Test-Path (Join-Path $sd.FullName "resources")) -or (Test-Path (Join-Path $sd.FullName "$procName.exe"))) {
+            $matchedSub = $sd.FullName
+            break
+        }
+    }
+    if ($matchedSub) {
+        $sourceDir = $matchedSub
+    } else {
+        $sourceDir = "$extractedPath"
+    }
+}
+Log-Msg "Resolved update source directory: $sourceDir"
+
+# Check if an installer executable exists inside the extracted files
+$nestedInstaller = Get-ChildItem -Path "$sourceDir" -Filter "*installer*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $nestedInstaller) {
+    $nestedInstaller = Get-ChildItem -Path "$sourceDir" -Filter "*setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+}
+
+$copied = $false
+if ($nestedInstaller) {
+    Log-Msg "Found nested installer executable: $($nestedInstaller.FullName). Running silent installation..."
+    try {
+        $instProc = Start-Process "$($nestedInstaller.FullName)" -ArgumentList "/S", "/silent", "/NORESTART", "/SP-" -PassThru -Wait
+        Log-Msg "Nested installer finished with exit code: $($instProc.ExitCode)"
+        $copied = $true
+    } catch {
+        Log-Msg "Nested installer failed: $($_.Exception.Message)"
+    }
+} else {
+    # 6. Copy files with Retry Loop (up to 10 retries)
+    Log-Msg "Copying updated files from $sourceDir to $appDir..."
+    for ($i = 1; $i -le 10; $i++) {
+        try {
+            Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path "$sourceDir\*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
+            $copied = $true
+            Log-Msg "Files copied successfully on attempt $i."
+            break
+        } catch {
+            Log-Msg "Attempt $i to copy files failed: $($_.Exception.Message). Retrying in 1 second..."
+            Start-Sleep -s 1
+        }
     }
 }
 
 if (-not $copied) {
-    Log-Msg "CRITICAL ERROR: Failed to copy files after 5 attempts."
-    Log-Msg "Relaunching app anyway..."
-    Start-Process "$exePath"
-    exit 1
+    Log-Msg "CRITICAL ERROR: Failed to apply update files."
+} else {
+    Log-Msg "Update files applied successfully."
 }
 
-# 6. Relaunch app
+# 7. Relaunch app
 Log-Msg "Relaunching application..."
+Start-Sleep -s 1
 try {
-    Start-Process "$exePath"
-    Log-Msg "Application relaunched successfully."
+    if (Test-Path "$exePath") {
+        Start-Process "$exePath"
+        Log-Msg "Application relaunched from $exePath."
+    } else {
+        $fallbackExe = Join-Path $appDir "$procName.exe"
+        if (Test-Path "$fallbackExe") {
+            Start-Process "$fallbackExe"
+            Log-Msg "Application relaunched from $fallbackExe."
+        } else {
+            Log-Msg "Could not find executable to relaunch!"
+        }
+    }
 } catch {
     Log-Msg "ERROR: Could not relaunch application: $($_.Exception.Message)"
 }
 
-# 7. Cleanup
+# 8. Cleanup
 Log-Msg "Cleaning up update artifacts..."
 Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue

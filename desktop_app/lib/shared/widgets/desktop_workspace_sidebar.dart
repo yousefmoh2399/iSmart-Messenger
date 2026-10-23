@@ -93,10 +93,15 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
           }).length
         : 0;
 
-    return ValueListenableBuilder<bool>(
-      valueListenable: agent.hasPreparedUpdateNotifier,
-      builder: (context, hasPrepared, _) {
-        final showPulsing = hasPrepared || hasPulsingUpdate;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        agent.hasPreparedUpdateNotifier,
+        agent.hasUpdateAvailableNotifier,
+      ]),
+      builder: (context, _) {
+        final hasPrepared = agent.hasPreparedUpdateNotifier.value;
+        final hasAvailable = agent.hasUpdateAvailableNotifier.value;
+        final showPulsing = hasPrepared || hasAvailable || hasPulsingUpdate;
 
     final displayName = (user?.fullName.trim().isNotEmpty ?? false)
         ? user!.fullName.trim()
@@ -167,7 +172,11 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
       ),
       if (onOpenUpdates != null)
         _DesktopWorkspaceIconButton(
-          tooltip: 'التحديثات',
+          tooltip: hasPrepared
+              ? 'تحديث جاهز للتثبيت (اضغط لإعادة التشغيل)'
+              : hasAvailable
+              ? 'يوجد تحديث جديد متاح للمنظومة'
+              : 'التحديثات',
           icon: Icons.system_update_alt_rounded,
           isDark: isDark,
           accentColor: accentColor,

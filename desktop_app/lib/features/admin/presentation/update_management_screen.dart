@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/providers/providers.dart';
 import '../models/update_management_models.dart';
+import '../../chat/models/chat_models.dart';
 
 class UpdateManagementScreen extends ConsumerStatefulWidget {
   const UpdateManagementScreen({super.key});
@@ -25,7 +26,7 @@ class _UpdateManagementScreenState
   final String _deviceStatusFilter = 'all';
   final String _platformFilter = 'all';
   String _deviceSearch = '';
-  final bool _excludeCurrentDevice = true;
+  bool _excludeCurrentDevice = false;
   String? _currentDeviceUid;
 
   int _uploadProgress = 0;
@@ -34,10 +35,13 @@ class _UpdateManagementScreenState
   List<ManagedUpdateDevice> _devices = const [];
   List<ManagedUpdateRelease> _releases = const [];
   List<ManagedUpdateJob> _jobs = const [];
+  List<BranchSummary> _availableBranches = const [];
 
   String? _selectedReleaseId;
   String _targetType = 'all';
   final Set<String> _selectedDeviceIds = <String>{};
+  final Set<String> _selectedBranchCodes = <String>{};
+  String _targetDeviceSearch = '';
 
   final _versionController = TextEditingController();
   final _notesController = TextEditingController();
@@ -87,6 +91,10 @@ class _UpdateManagementScreenState
     setState(() => _loading = true);
     try {
       final repository = ref.read(updateManagementRepositoryProvider);
+      final branchFuture = ref
+          .read(chatRepositoryProvider)
+          .fetchBranches()
+          .catchError((_) => <BranchSummary>[]);
       final results = await Future.wait([
         repository.listDevices(
           status: _deviceStatusFilter,
@@ -96,12 +104,14 @@ class _UpdateManagementScreenState
         ),
         repository.listReleases(),
         repository.listUpdateJobs(limit: 150),
+        branchFuture,
       ]);
       if (!mounted) return;
       setState(() {
         _devices = results[0] as List<ManagedUpdateDevice>;
         _releases = results[1] as List<ManagedUpdateRelease>;
         _jobs = results[2] as List<ManagedUpdateJob>;
+        _availableBranches = results[3] as List<BranchSummary>;
         final selectedExists =
             _selectedReleaseId != null &&
             _releases.any((release) => release.id == _selectedReleaseId);
@@ -296,12 +306,15 @@ class _UpdateManagementScreenState
       _showSnack('اختر إصداراً أولاً لإرسال التحديث.', isError: true);
       return;
     }
-    final branches = _targetBranchesController.text
+    final textBranches = _targetBranchesController.text
         .split(',')
         .map((entry) => entry.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toSet()
-        .toList();
+        .where((entry) => entry.isNotEmpty);
+    final branches = <String>{
+      ..._selectedBranchCodes,
+      ...textBranches,
+    }.toList();
+
     final targetDevices = _selectedDeviceIds.toList();
     final excludeUids =
         _excludeCurrentDevice && (_currentDeviceUid?.isNotEmpty ?? false)
@@ -309,11 +322,11 @@ class _UpdateManagementScreenState
         : const <String>[];
 
     if (_targetType == 'branch' && branches.isEmpty) {
-      _showSnack('أدخل اسماً لفرع واحد على الأقل.', isError: true);
+      _showSnack('اختر فرعاً واحداً على الأقل من القائمة أدناه.', isError: true);
       return;
     }
     if (_targetType == 'devices' && targetDevices.isEmpty) {
-      _showSnack('اختر جهازاً واحداً على الأقل من القائمة.', isError: true);
+      _showSnack('اختر جهازاً واحداً على الأقل من قائمة الأجهزة أدناه.', isError: true);
       return;
     }
 
@@ -1138,16 +1151,30 @@ class _UpdateManagementScreenState
             ],
           ),
           if (_targetType == 'branch') ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _targetBranchesController,
-              decoration: InputDecoration(
-                labelText: 'أسماء الفروع (مفصولة بفاصلة)',
-                hintText: 'مثال: shubra, dokki, main',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
+            const SizedBox(height: 16),
+            _buildBranchSelector(isDark),
           ],
+          if (_targetType == 'devices') ...[
+            const SizedBox(height: 16),
+            _buildDeviceSelector(isDark),
+          ],
+          const SizedBox(height: 14),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeColor: const Color(0xFF8B5CF6),
+            title: const Text(
+              'استثناء جهازي الحالي من التحديث التلقائي',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            subtitle: Text(
+              _currentDeviceUid != null && _currentDeviceUid!.isNotEmpty
+                  ? 'معرف جهازك: $_currentDeviceUid'
+                  : 'تفعيل هذا الخيار يمنع تحديث جهاز الإدارة الحالي',
+              style: const TextStyle(fontSize: 12),
+            ),
+            value: _excludeCurrentDevice,
+            onChanged: (val) => setState(() => _excludeCurrentDevice = val),
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _noteController,
@@ -1424,6 +1451,333 @@ class _UpdateManagementScreenState
               value: device.isActive,
               onChanged: _busy ? null : (v) => _toggleDeviceActive(device, v),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBranchSelector(bool isDark) {
+    // Gather all unique branch codes from both _availableBranches and _devices
+    final branchMap = <String, String>{};
+    for (final b in _availableBranches) {
+      if (b.code.isNotEmpty) {
+        branchMap[b.code] = b.name.isNotEmpty ? b.name : b.code;
+      }
+    }
+    for (final d in _devices) {
+      if (d.branchCode.isNotEmpty && !branchMap.containsKey(d.branchCode)) {
+        branchMap[d.branchCode] = d.branchCode;
+      }
+    }
+    if (branchMap.isEmpty) {
+      branchMap['main'] = 'الفرع الرئيسي (main)';
+    }
+
+    final allCodes = branchMap.keys.toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.buildings, size: 18, color: Color(0xFF8B5CF6)),
+              const SizedBox(width: 8),
+              const Text(
+                'اختر الفروع المستهدفة بالتحديث:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    if (_selectedBranchCodes.length == allCodes.length) {
+                      _selectedBranchCodes.clear();
+                    } else {
+                      _selectedBranchCodes.addAll(allCodes);
+                    }
+                  });
+                },
+                child: Text(
+                  _selectedBranchCodes.length == allCodes.length
+                      ? 'إلغاء تحديد الكل'
+                      : 'تحديد كل الفروع (${allCodes.length})',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: allCodes.map((code) {
+              final name = branchMap[code]!;
+              final deviceCount = _devices.where((d) => d.branchCode == code).length;
+              final isSelected = _selectedBranchCodes.contains(code);
+              return FilterChip(
+                selected: isSelected,
+                selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                checkmarkColor: const Color(0xFF8B5CF6),
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name == code ? code : '$name ($code)',
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFF8B5CF6) : null,
+                      ),
+                    ),
+                    if (deviceCount > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF8B5CF6)
+                              : (isDark ? Colors.white12 : Colors.black12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$deviceCount أجهزة',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isSelected ? Colors.white : null,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                onSelected: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedBranchCodes.add(code);
+                    } else {
+                      _selectedBranchCodes.remove(code);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _targetBranchesController,
+            decoration: InputDecoration(
+              labelText: 'إضافة فروع إضافية يدويًا (اختياري، مفصولة بفاصلة)',
+              hintText: 'مثال: branch1, branch2',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeviceSelector(bool isDark) {
+    final query = _targetDeviceSearch.trim().toLowerCase();
+    final filtered = _devices.where((d) {
+      if (query.isEmpty) return true;
+      final name = (d.deviceName ?? '').toLowerCase();
+      final host = (d.hostName ?? '').toLowerCase();
+      final user = (d.lastKnownUsername ?? '').toLowerCase();
+      final branch = d.branchCode.toLowerCase();
+      final ip = (d.localIp ?? '').toLowerCase();
+      return name.contains(query) ||
+          host.contains(query) ||
+          user.contains(query) ||
+          branch.contains(query) ||
+          ip.contains(query);
+    }).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.monitor, size: 18, color: Color(0xFF8B5CF6)),
+              const SizedBox(width: 8),
+              const Text(
+                'اختر الأجهزة المستهدفة بالتحديث:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'تم اختيار ${_selectedDeviceIds.length} من أصل ${_devices.length} جهاز',
+                  style: const TextStyle(
+                    color: Color(0xFF8B5CF6),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  onChanged: (val) => setState(() => _targetDeviceSearch = val),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Iconsax.search_normal, size: 18),
+                    hintText: 'بحث باسم الجهاز أو الموظف أو الفرع أو IP...',
+                    isDense: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    final allVisibleIds = filtered.map((d) => d.id).toSet();
+                    if (_selectedDeviceIds.containsAll(allVisibleIds)) {
+                      _selectedDeviceIds.removeAll(allVisibleIds);
+                    } else {
+                      _selectedDeviceIds.addAll(allVisibleIds);
+                    }
+                  });
+                },
+                child: Text(
+                  _selectedDeviceIds.containsAll(filtered.map((d) => d.id).toSet()) && filtered.isNotEmpty
+                      ? 'إلغاء تحديد الكل'
+                      : 'تحديد الكل',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: filtered.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _devices.isEmpty
+                            ? 'لا توجد أجهزة مسجلة في النظام حتى الآن.'
+                            : 'لا توجد أجهزة مطابقة للبحث.',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                : Scrollbar(
+                    thumbVisibility: true,
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final device = filtered[index];
+                        final isSelected = _selectedDeviceIds.contains(device.id);
+                        final displayName = device.deviceName?.isNotEmpty == true
+                            ? device.deviceName!
+                            : (device.hostName ?? 'جهاز بدون اسم');
+                        final userName = device.lastKnownFullName?.isNotEmpty == true
+                            ? device.lastKnownFullName!
+                            : (device.lastKnownUsername ?? 'غير معروف');
+
+                        return CheckboxListTile(
+                          dense: true,
+                          value: isSelected,
+                          activeColor: const Color(0xFF8B5CF6),
+                          onChanged: (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selectedDeviceIds.add(device.id);
+                              } else {
+                                _selectedDeviceIds.remove(device.id);
+                              }
+                            });
+                          },
+                          secondary: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(0xFF8B5CF6).withValues(alpha: 0.15)
+                                  : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.computer_rounded,
+                              size: 20,
+                              color: isSelected ? const Color(0xFF8B5CF6) : (device.isOnline ? Colors.green : Colors.grey),
+                            ),
+                          ),
+                          title: Row(
+                            children: [
+                              Text(
+                                displayName,
+                                style: TextStyle(
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: device.isOnline ? Colors.green : Colors.grey.shade400,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.white10 : Colors.black12,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'الإصدار: ${device.appVersion}',
+                                  style: const TextStyle(fontSize: 10),
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            'الموظف: $userName • الفرع: ${device.branchCode} • IP: ${device.localIp ?? "غير معروف"}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.white60 : Colors.black54,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
           ),
         ],
       ),

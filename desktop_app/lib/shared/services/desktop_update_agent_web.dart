@@ -79,6 +79,20 @@ class DesktopUpdateEvent {
   factory DesktopUpdateEvent.heartbeatError(String message) {
     return DesktopUpdateEvent(type: 'heartbeat_error', message: message);
   }
+
+  factory DesktopUpdateEvent.updateAvailable({
+    required String version,
+    required String message,
+    String? taskId,
+  }) {
+    return DesktopUpdateEvent(
+      type: 'update_available',
+      taskId: taskId,
+      status: 'available',
+      message: message,
+      progress: 0,
+    );
+  }
 }
 
 class DesktopUpdateAgent {
@@ -103,6 +117,7 @@ class DesktopUpdateAgent {
   String? _lastReportedStatus;
 
   final ValueNotifier<bool> hasPreparedUpdateNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> hasUpdateAvailableNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<double?> downloadProgressNotifier = ValueNotifier<double?>(null);
   final ValueNotifier<String?> statusMessageNotifier = ValueNotifier<String?>(null);
 
@@ -199,6 +214,30 @@ class DesktopUpdateAgent {
         silentInstallEnabled: true,
       );
       _lastHeartbeatResponse = response;
+      final hasPending = response.pendingTasks.isNotEmpty;
+      final hasNewer = response.latestRelease != null &&
+          !_areVersionsEqual(appVersion, response.latestRelease!.version);
+
+      if (hasPending || hasNewer) {
+        hasUpdateAvailableNotifier.value = true;
+        final targetVer = hasPending
+            ? response.pendingTasks.first.release.version
+            : response.latestRelease!.version;
+        _eventsController.add(
+          DesktopUpdateEvent.updateAvailable(
+            version: targetVer,
+            message: 'يتوفر إصدار جديد (' + targetVer + ') لتطبيق المنظومة.',
+            taskId: hasPending ? response.pendingTasks.first.id : null,
+          ),
+        );
+        unawaited(
+          web_bridge.showBrowserNotification(
+            title: 'تحديث جديد متاح',
+            body: 'يتوفر إصدار جديد (' + targetVer + ') لتطبيق المنظومة. انقر للاطلاع عليه.',
+          ),
+        );
+      }
+
       if (response.pendingTasks.isNotEmpty && !_isTaskRunning) {
         unawaited(_executePendingTask(response.pendingTasks.first));
       }
@@ -289,12 +328,19 @@ class DesktopUpdateAgent {
 
       final token = await _repository.getAccessToken();
 
+      hasUpdateAvailableNotifier.value = true;
+      downloadProgressNotifier.value = 0.0;
+      statusMessageNotifier.value = 'جاري بدء تحميل التحديث...';
+
       web_bridge.setElectronUpdaterProgressHandler((payload) {
         final status = payload['status']?.toString() ?? 'downloading';
         final progress = payload['progress'] is int
             ? payload['progress'] as int
             : int.tryParse(payload['progress']?.toString() ?? '') ?? 0;
         final message = payload['message']?.toString() ?? '';
+
+        downloadProgressNotifier.value = progress / 100.0;
+        statusMessageNotifier.value = message;
 
         if (status == 'downloading') {
           _eventsController.add(
@@ -334,11 +380,23 @@ class DesktopUpdateAgent {
         artifactSha256: task.release.checksumSha256 ?? '',
       );
 
+      hasPreparedUpdateNotifier.value = true;
+      hasUpdateAvailableNotifier.value = true;
+      downloadProgressNotifier.value = 1.0;
+      statusMessageNotifier.value = 'جاهز لإعادة التشغيل والتثبيت';
+
       await _reportTaskProgress(
         taskId: task.id,
         status: 'downloading',
         progress: 100,
         message: 'تم تحميل التحديث بالكامل وجاهز لإعادة التشغيل.',
+      );
+
+      unawaited(
+        web_bridge.showBrowserNotification(
+          title: 'اكتمل تحميل التحديث',
+          body: 'تم تنزيل الإصدار ' + task.release.version + ' بنجاح. أعد تشغيل التطبيق لإكمال التثبيت.',
+        ),
       );
 
       _eventsController.add(
@@ -414,22 +472,101 @@ class DesktopUpdateAgent {
   }
 
   Future<void> downloadRelease(ManagedUpdateRelease release) async {
-    // Web updater stub
+    if (_isTaskRunning) return;
+    _isTaskRunning = true;
+    try {
+      final electronInfo = await web_bridge.getElectronDeviceInfo();
+      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
+
+      hasUpdateAvailableNotifier.value = true;
+      downloadProgressNotifier.value = 0.0;
+      statusMessageNotifier.value = 'جاري بدء تحميل التحديث...';
+
+      await _stateStore.markDownloading(
+        taskId: 'manual_' + release.id,
+        releaseId: release.id,
+        targetVersion: release.version,
+        packageType: release.packageType,
+        installerKind: release.installerKind,
+        packageLayout: release.packageLayout,
+        entryExecutable: release.entryExecutable,
+        silentInstallArgs: release.silentInstallArgs,
+        fileName: release.fileName ?? ('release-' + release.version + '.zip'),
+        currentVersion: currentVersion,
+      );
+
+      final resolvedUrl = (release.downloadUrl ?? release.externalDownloadUrl ?? '').trim();
+      final base = _repository.baseUrl;
+      final absoluteUrl = resolvedUrl.startsWith('http')
+          ? resolvedUrl
+          : (base.endsWith('/') ? base : base + '/') + (resolvedUrl.startsWith('/') ? resolvedUrl.substring(1) : resolvedUrl);
+      final token = await _repository.getAccessToken();
+
+      web_bridge.setElectronUpdaterProgressHandler((payload) {
+        final progress = payload['progress'] is int
+            ? payload['progress'] as int
+            : int.tryParse(payload['progress']?.toString() ?? '') ?? 0;
+        final message = payload['message']?.toString() ?? '';
+        downloadProgressNotifier.value = progress / 100.0;
+        statusMessageNotifier.value = message;
+      });
+
+      final downloadResult = await web_bridge.startElectronUpdate(
+        downloadUrl: absoluteUrl,
+        token: token,
+        checksumSha256: release.checksumSha256,
+      );
+
+      if (downloadResult['success'] != true) {
+        throw StateError(downloadResult['error']?.toString() ?? 'فشل تحميل التحديث.');
+      }
+
+      await _stateStore.markDownloaded(
+        artifactPath: downloadResult['zipPath']?.toString() ?? 'app-update.zip',
+        artifactSha256: release.checksumSha256 ?? '',
+      );
+
+      hasPreparedUpdateNotifier.value = true;
+      hasUpdateAvailableNotifier.value = true;
+      downloadProgressNotifier.value = 1.0;
+      statusMessageNotifier.value = 'تم تحميل التحديث بنجاح وجاهز للتثبيت.';
+
+      unawaited(
+        web_bridge.showBrowserNotification(
+          title: 'اكتمل تنزيل التحديث',
+          body: 'الإصدار ' + release.version + ' جاهز للتثبيت عند إعادة التشغيل.',
+        ),
+      );
+
+      _eventsController.add(
+        DesktopUpdateEvent.readyToRestart(
+          taskId: 'manual_' + release.id,
+          message: 'تم تنزيل التحديث ' + release.version + '. يمكنك إعادة تشغيل التطبيق لتثبيته.',
+        ),
+      );
+    } catch (e) {
+      statusMessageNotifier.value = 'فشل تحميل التحديث: ' + e.toString();
+      downloadProgressNotifier.value = null;
+      rethrow;
+    } finally {
+      _isTaskRunning = false;
+    }
   }
 
   Future<void> restartToApplyPreparedUpdate() async {
     final state = await _stateStore.load();
-    final taskId = state.taskId?.trim();
-    if (taskId == null || taskId.isEmpty || state.status != 'downloaded') {
+    if (state.status != 'downloaded') {
       throw StateError('لا توجد حزمة تحديث جاهزة للتثبيت على هذا الجهاز.');
     }
-
-    await _reportTaskProgress(
-      taskId: taskId,
-      status: 'installing',
-      progress: 80,
-      message: 'يتم الآن إغلاق التطبيق لتثبيت التحديث تلقائياً.',
-    );
+    final taskId = state.taskId?.trim();
+    if (taskId != null && taskId.isNotEmpty && !taskId.startsWith('manual_')) {
+      await _reportTaskProgress(
+        taskId: taskId,
+        status: 'installing',
+        progress: 80,
+        message: 'يتم الآن إغلاق التطبيق لتثبيت التحديث تلقائياً.',
+      );
+    }
     await _stateStore.markInstalling();
 
     final installResult = await web_bridge.applyElectronUpdate();
@@ -437,14 +574,16 @@ class DesktopUpdateAgent {
       final errMsg =
           installResult['error']?.toString() ?? 'فشل تطبيق التحديث في إلكترون.';
       await _stateStore.markFailed(errMsg);
-      await _reportTaskProgress(
-        taskId: taskId,
-        status: 'failed',
-        progress: 100,
-        message: errMsg,
-      );
+      if (taskId != null && taskId.isNotEmpty && !taskId.startsWith('manual_')) {
+        await _reportTaskProgress(
+          taskId: taskId,
+          status: 'failed',
+          progress: 100,
+          message: errMsg,
+        );
+      }
       _eventsController.add(
-        DesktopUpdateEvent.failed(taskId: taskId, message: errMsg),
+        DesktopUpdateEvent.failed(taskId: taskId ?? 'unknown', message: errMsg),
       );
       return;
     }

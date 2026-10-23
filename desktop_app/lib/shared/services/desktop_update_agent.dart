@@ -87,6 +87,20 @@ class DesktopUpdateEvent {
   factory DesktopUpdateEvent.heartbeatError(String message) {
     return DesktopUpdateEvent(type: 'heartbeat_error', message: message);
   }
+
+  factory DesktopUpdateEvent.updateAvailable({
+    required String version,
+    required String message,
+    String? taskId,
+  }) {
+    return DesktopUpdateEvent(
+      type: 'update_available',
+      taskId: taskId,
+      status: 'available',
+      message: message,
+      progress: 0,
+    );
+  }
 }
 
 class DesktopUpdateAgent {
@@ -114,6 +128,7 @@ class DesktopUpdateAgent {
   _QueuedTaskReport? _queuedProgressReport;
 
   final ValueNotifier<bool> hasPreparedUpdateNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> hasUpdateAvailableNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<double?> downloadProgressNotifier = ValueNotifier<double?>(null);
   final ValueNotifier<String?> statusMessageNotifier = ValueNotifier<String?>(null);
 
