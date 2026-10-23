@@ -428,9 +428,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
           width: 0.8,
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         leading: Container(
           width: 40,
           height: 40,
@@ -468,6 +470,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
             widget.onInsertBelow?.call(type);
           }
         },
+        ),
       ),
     );
   }

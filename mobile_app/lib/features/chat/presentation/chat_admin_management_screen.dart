@@ -115,21 +115,24 @@ class _ChatAdminManagementScreenState
                     color: cardBg,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Column(
-                    children: children.asMap().entries.map((entry) {
-                      final isLast = entry.key == children.length - 1;
-                      return Column(
-                        children: [
-                          entry.value,
-                          if (!isLast)
-                            const Divider(
-                              height: 0.5,
-                              thickness: 0.5,
-                              indent: 56,
-                            ),
-                        ],
-                      );
-                    }).toList(),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Column(
+                      children: children.asMap().entries.map((entry) {
+                        final isLast = entry.key == children.length - 1;
+                        return Column(
+                          children: [
+                            entry.value,
+                            if (!isLast)
+                              const Divider(
+                                height: 0.5,
+                                thickness: 0.5,
+                                indent: 56,
+                              ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
                   ),
                 ),
               ],
@@ -995,19 +998,21 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
                           color: cardBg,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Column(
-                          children: filtered.asMap().entries.map((entry) {
-                            final isLast = entry.key == filtered.length - 1;
-                            final document = entry.value;
-                            final ownerName =
-                                document.ownerFullName?.trim().isNotEmpty ==
-                                    true
-                                ? document.ownerFullName!
-                                : (document.ownerUsername ?? 'غير معروف');
+                        child: Material(
+                          color: Colors.transparent,
+                          child: Column(
+                            children: filtered.asMap().entries.map((entry) {
+                              final isLast = entry.key == filtered.length - 1;
+                              final document = entry.value;
+                              final ownerName =
+                                  document.ownerFullName?.trim().isNotEmpty ==
+                                      true
+                                  ? document.ownerFullName!
+                                  : (document.ownerUsername ?? 'غير معروف');
 
-                            return Column(
-                              children: [
-                                ListTile(
+                              return Column(
+                                children: [
+                                  ListTile(
                                   leading: Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
@@ -1101,6 +1106,7 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
                               ],
                             );
                           }).toList(),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -1660,14 +1666,16 @@ class _UsersTab extends ConsumerWidget {
                   color: cardBg,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Column(
-                  children: users.asMap().entries.map((entry) {
-                    final isLast = entry.key == users.length - 1;
-                    final user = entry.value;
+                child: Material(
+                  color: Colors.transparent,
+                  child: Column(
+                    children: users.asMap().entries.map((entry) {
+                      final isLast = entry.key == users.length - 1;
+                      final user = entry.value;
 
-                    return Column(
-                      children: [
-                        ListTile(
+                      return Column(
+                        children: [
+                          ListTile(
                           leading: CircleAvatar(
                             backgroundColor: Theme.of(
                               context,
@@ -1785,6 +1793,7 @@ class _UsersTab extends ConsumerWidget {
                       ],
                     );
                   }).toList(),
+                  ),
                 ),
               ),
             const SizedBox(height: 12),
@@ -2788,41 +2797,44 @@ class _DepartmentsTabState extends ConsumerState<_DepartmentsTab> {
                             ),
                           ),
                         )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: filteredUsers.length,
-                          itemBuilder: (context, idx) {
-                            final user = filteredUsers[idx];
-                            final isSelected = selectedManagers.contains(
-                              user.id,
-                            );
-                            return CheckboxListTile(
-                              dense: true,
-                              value: isSelected,
-                              onChanged: isSaving
-                                  ? null
-                                  : (checked) {
-                                      setDialogState(() {
-                                        if (checked == true) {
-                                          selectedManagers.add(user.id);
-                                        } else {
-                                          selectedManagers.remove(user.id);
-                                        }
-                                      });
-                                    },
-                              title: Text(
-                                user.displayName,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13,
+                      : Material(
+                          color: Colors.transparent,
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: filteredUsers.length,
+                            itemBuilder: (context, idx) {
+                              final user = filteredUsers[idx];
+                              final isSelected = selectedManagers.contains(
+                                user.id,
+                              );
+                              return CheckboxListTile(
+                                dense: true,
+                                value: isSelected,
+                                onChanged: isSaving
+                                    ? null
+                                    : (checked) {
+                                        setDialogState(() {
+                                          if (checked == true) {
+                                            selectedManagers.add(user.id);
+                                          } else {
+                                            selectedManagers.remove(user.id);
+                                          }
+                                        });
+                                      },
+                                title: Text(
+                                  user.displayName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                  ),
                                 ),
-                              ),
-                              subtitle: Text(
-                                '@${user.username} • ${user.role}',
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                            );
-                          },
+                                subtitle: Text(
+                                  '@${user.username} • ${user.role}',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              );
+                            },
+                          ),
                         ),
                 ),
                 if (errorText != null) ...[
@@ -3915,67 +3927,70 @@ class _RoomsTabState extends ConsumerState<_RoomsTab> {
                           : const Color(0xFFE2E8F0),
                     ),
                   ),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: filteredUsers.length,
-                    itemBuilder: (context, idx) {
-                      final user = filteredUsers[idx];
-                      final isMember = selectedMembers.contains(user.id);
-                      final isAdmin = selectedAdmins.contains(user.id);
-                      return ListTile(
-                        dense: true,
-                        leading: Checkbox(
-                          value: isMember,
-                          onChanged: isSaving
-                              ? null
-                              : (checked) {
-                                  setDialogState(() {
-                                    if (checked == true) {
-                                      selectedMembers.add(user.id);
-                                    } else {
-                                      selectedMembers.remove(user.id);
-                                      selectedAdmins.remove(user.id);
-                                    }
-                                  });
-                                },
-                        ),
-                        title: Text(
-                          user.displayName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filteredUsers.length,
+                      itemBuilder: (context, idx) {
+                        final user = filteredUsers[idx];
+                        final isMember = selectedMembers.contains(user.id);
+                        final isAdmin = selectedAdmins.contains(user.id);
+                        return ListTile(
+                          dense: true,
+                          leading: Checkbox(
+                            value: isMember,
+                            onChanged: isSaving
+                                ? null
+                                : (checked) {
+                                    setDialogState(() {
+                                      if (checked == true) {
+                                        selectedMembers.add(user.id);
+                                      } else {
+                                        selectedMembers.remove(user.id);
+                                        selectedAdmins.remove(user.id);
+                                      }
+                                    });
+                                  },
                           ),
-                        ),
-                        subtitle: Text(
-                          '@${user.username} • ${user.role}',
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        trailing: IconButton(
-                          tooltip: 'تعيين كمشرف للغرفة',
-                          onPressed: isSaving
-                              ? null
-                              : () {
-                                  setDialogState(() {
-                                    if (isAdmin) {
-                                      selectedAdmins.remove(user.id);
-                                    } else {
-                                      selectedMembers.add(user.id);
-                                      selectedAdmins.add(user.id);
-                                    }
-                                  });
-                                },
-                          icon: Icon(
-                            isAdmin
-                                ? Icons.verified_user_rounded
-                                : Icons.shield_outlined,
-                            size: 18,
-                            color: isAdmin
-                                ? const Color(0xFF0D9488)
-                                : Colors.grey,
+                          title: Text(
+                            user.displayName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                          subtitle: Text(
+                            '@${user.username} • ${user.role}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          trailing: IconButton(
+                            tooltip: 'تعيين كمشرف للغرفة',
+                            onPressed: isSaving
+                                ? null
+                                : () {
+                                    setDialogState(() {
+                                      if (isAdmin) {
+                                        selectedAdmins.remove(user.id);
+                                      } else {
+                                        selectedMembers.add(user.id);
+                                        selectedAdmins.add(user.id);
+                                      }
+                                    });
+                                  },
+                            icon: Icon(
+                              isAdmin
+                                  ? Icons.verified_user_rounded
+                                  : Icons.shield_outlined,
+                              size: 18,
+                              color: isAdmin
+                                  ? const Color(0xFF0D9488)
+                                  : Colors.grey,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
                 if (errorText != null) ...[
@@ -4117,37 +4132,40 @@ class _RoomsTabState extends ConsumerState<_RoomsTab> {
                         : const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Column(
-                    children: [
-                      SwitchListTile.adaptive(
-                        dense: true,
-                        value: isActive,
-                        onChanged: isSaving
-                            ? null
-                            : (v) => setDialogState(() => isActive = v),
-                        title: const Text(
-                          'الغرفة نشطة ومفعلة للمحادثات',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Column(
+                      children: [
+                        SwitchListTile.adaptive(
+                          dense: true,
+                          value: isActive,
+                          onChanged: isSaving
+                              ? null
+                              : (v) => setDialogState(() => isActive = v),
+                          title: const Text(
+                            'الغرفة نشطة ومفعلة للمحادثات',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                      SwitchListTile.adaptive(
-                        dense: true,
-                        value: isArchived,
-                        onChanged: isSaving
-                            ? null
-                            : (v) => setDialogState(() => isArchived = v),
-                        title: const Text(
-                          'أرشفة الغرفة وإخفاؤها من القائمة النشطة',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                        SwitchListTile.adaptive(
+                          dense: true,
+                          value: isArchived,
+                          onChanged: isSaving
+                              ? null
+                              : (v) => setDialogState(() => isArchived = v),
+                          title: const Text(
+                            'أرشفة الغرفة وإخفاؤها من القائمة النشطة',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -4189,67 +4207,70 @@ class _RoomsTabState extends ConsumerState<_RoomsTab> {
                           : const Color(0xFFE2E8F0),
                     ),
                   ),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: filteredUsers.length,
-                    itemBuilder: (context, idx) {
-                      final user = filteredUsers[idx];
-                      final isMember = selectedMembers.contains(user.id);
-                      final isAdmin = selectedAdmins.contains(user.id);
-                      return ListTile(
-                        dense: true,
-                        leading: Checkbox(
-                          value: isMember,
-                          onChanged: isSaving
-                              ? null
-                              : (checked) {
-                                  setDialogState(() {
-                                    if (checked == true) {
-                                      selectedMembers.add(user.id);
-                                    } else {
-                                      selectedMembers.remove(user.id);
-                                      selectedAdmins.remove(user.id);
-                                    }
-                                  });
-                                },
-                        ),
-                        title: Text(
-                          user.displayName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filteredUsers.length,
+                      itemBuilder: (context, idx) {
+                        final user = filteredUsers[idx];
+                        final isMember = selectedMembers.contains(user.id);
+                        final isAdmin = selectedAdmins.contains(user.id);
+                        return ListTile(
+                          dense: true,
+                          leading: Checkbox(
+                            value: isMember,
+                            onChanged: isSaving
+                                ? null
+                                : (checked) {
+                                    setDialogState(() {
+                                      if (checked == true) {
+                                        selectedMembers.add(user.id);
+                                      } else {
+                                        selectedMembers.remove(user.id);
+                                        selectedAdmins.remove(user.id);
+                                      }
+                                    });
+                                  },
                           ),
-                        ),
-                        subtitle: Text(
-                          '@${user.username} • ${user.role}',
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        trailing: IconButton(
-                          tooltip: 'تعيين كمشرف للغرفة',
-                          onPressed: isSaving
-                              ? null
-                              : () {
-                                  setDialogState(() {
-                                    if (isAdmin) {
-                                      selectedAdmins.remove(user.id);
-                                    } else {
-                                      selectedMembers.add(user.id);
-                                      selectedAdmins.add(user.id);
-                                    }
-                                  });
-                                },
-                          icon: Icon(
-                            isAdmin
-                                ? Icons.verified_user_rounded
-                                : Icons.shield_outlined,
-                            size: 18,
-                            color: isAdmin
-                                ? const Color(0xFF0D9488)
-                                : Colors.grey,
+                          title: Text(
+                            user.displayName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                          subtitle: Text(
+                            '@${user.username} • ${user.role}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          trailing: IconButton(
+                            tooltip: 'تعيين كمشرف للغرفة',
+                            onPressed: isSaving
+                                ? null
+                                : () {
+                                    setDialogState(() {
+                                      if (isAdmin) {
+                                        selectedAdmins.remove(user.id);
+                                      } else {
+                                        selectedMembers.add(user.id);
+                                        selectedAdmins.add(user.id);
+                                      }
+                                    });
+                                  },
+                            icon: Icon(
+                              isAdmin
+                                  ? Icons.verified_user_rounded
+                                  : Icons.shield_outlined,
+                              size: 18,
+                              color: isAdmin
+                                  ? const Color(0xFF0D9488)
+                                  : Colors.grey,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
                 if (errorText != null) ...[
@@ -5948,54 +5969,57 @@ class _AuditLogsTab extends StatelessWidget {
                   color: cardBg,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Column(
-                  children: logs.asMap().entries.map((entry) {
-                    final isLast = entry.key == logs.length - 1;
-                    final log = entry.value;
+                child: Material(
+                  color: Colors.transparent,
+                  child: Column(
+                    children: logs.asMap().entries.map((entry) {
+                      final isLast = entry.key == logs.length - 1;
+                      final log = entry.value;
 
-                    return Column(
-                      children: [
-                        ListTile(
-                          leading: const Icon(
-                            Icons.bolt_rounded,
-                            color: Colors.amber,
-                          ),
-                          title: Text(
-                            log.action,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
+                      return Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(
+                              Icons.bolt_rounded,
+                              color: Colors.amber,
+                            ),
+                            title: Text(
+                              log.action,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${log.entityType} • ${log.entityId}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            trailing: Text(
+                              formatEgyptDateTime(log.createdAt),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant
+                                    .withValues(alpha: 0.7),
+                              ),
                             ),
                           ),
-                          subtitle: Text(
-                            '${log.entityType} • ${log.entityId}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
+                          if (!isLast)
+                            const Divider(
+                              height: 0.5,
+                              thickness: 0.5,
+                              indent: 56,
                             ),
-                          ),
-                          trailing: Text(
-                            formatEgyptDateTime(log.createdAt),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant
-                                  .withValues(alpha: 0.7),
-                            ),
-                          ),
-                        ),
-                        if (!isLast)
-                          const Divider(
-                            height: 0.5,
-                            thickness: 0.5,
-                            indent: 56,
-                          ),
-                      ],
-                    );
-                  }).toList(),
+                        ],
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
             ],
@@ -6063,95 +6087,98 @@ class _SystemErrorsTab extends StatelessWidget {
                   color: cardBg,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Column(
-                  children: errors.asMap().entries.map((entry) {
-                    final isLast = entry.key == errors.length - 1;
-                    final entryItem = entry.value;
+                child: Material(
+                  color: Colors.transparent,
+                  child: Column(
+                    children: errors.asMap().entries.map((entry) {
+                      final isLast = entry.key == errors.length - 1;
+                      final entryItem = entry.value;
 
-                    return Column(
-                      children: [
-                        Theme(
-                          data: Theme.of(
-                            context,
-                          ).copyWith(dividerColor: Colors.transparent),
-                          child: ExpansionTile(
-                            leading: const Icon(
-                              Icons.error_outline_rounded,
-                              color: Colors.red,
-                            ),
-                            title: Text(
-                              '${entryItem.statusCode} • ${entryItem.errorName}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
+                      return Column(
+                        children: [
+                          Theme(
+                            data: Theme.of(
+                              context,
+                            ).copyWith(dividerColor: Colors.transparent),
+                            child: ExpansionTile(
+                              leading: const Icon(
+                                Icons.error_outline_rounded,
+                                color: Colors.red,
                               ),
-                            ),
-                            subtitle: Text(
-                              entryItem.path,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            childrenPadding: const EdgeInsets.fromLTRB(
-                              16,
-                              0,
-                              16,
-                              16,
-                            ),
-                            children: [
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  entryItem.message,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                              title: Text(
+                                '${entryItem.statusCode} • ${entryItem.errorName}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  '${entryItem.method} • ${formatEgyptDateTime(entryItem.createdAt)}',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
+                              subtitle: Text(
+                                entryItem.path,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
                                 ),
                               ),
-                              if (entryItem.stack != null &&
-                                  entryItem.stack!.isNotEmpty) ...[
-                                const SizedBox(height: 12),
-                                Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.surfaceContainerHighest,
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: SelectableText(
-                                    entryItem.stack!,
+                              childrenPadding: const EdgeInsets.fromLTRB(
+                                16,
+                                0,
+                                16,
+                                16,
+                              ),
+                              children: [
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    entryItem.message,
                                     style: const TextStyle(
-                                      fontFamily: 'monospace',
-                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ),
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    '${entryItem.method} • ${formatEgyptDateTime(entryItem.createdAt)}',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                                if (entryItem.stack != null &&
+                                    entryItem.stack!.isNotEmpty) ...[
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: SelectableText(
+                                      entryItem.stack!,
+                                      style: const TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
-                        if (!isLast) const Divider(height: 0.5, thickness: 0.5),
-                      ],
-                    );
-                  }).toList(),
+                          if (!isLast) const Divider(height: 0.5, thickness: 0.5),
+                        ],
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
             ],
