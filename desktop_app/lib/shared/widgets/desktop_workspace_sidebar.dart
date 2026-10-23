@@ -135,15 +135,19 @@ class DesktopWorkspaceSidebar extends ConsumerWidget {
         accentColor: accentColor,
         onPressed: onOpenFiles,
       ),
-      if (onOpenWorkspace != null)
-        _DesktopWorkspaceIconButton(
-          tooltip: 'مساحة العمل (Notion)',
-          icon: Icons.edit_note_rounded,
-          selected: activeSection == DesktopWorkspaceSection.workspace,
-          isDark: isDark,
-          accentColor: const Color(0xFF5856D6),
-          onPressed: onOpenWorkspace!,
-        ),
+      _DesktopWorkspaceIconButton(
+        tooltip: 'مساحة العمل والملاحظات (Notion)',
+        icon: Iconsax.note_21,
+        selected: activeSection == DesktopWorkspaceSection.workspace,
+        isDark: isDark,
+        accentColor: accentColor,
+        onPressed: onOpenWorkspace ??
+            () {
+              ref.read(activeSectionProvider.notifier).state =
+                  DesktopWorkspaceSection.workspace;
+              ref.read(chatSectionVisibleProvider.notifier).state = false;
+            },
+      ),
       if (showServersShortcut)
         _DesktopWorkspaceIconButton(
           tooltip: 'السيرفرات',

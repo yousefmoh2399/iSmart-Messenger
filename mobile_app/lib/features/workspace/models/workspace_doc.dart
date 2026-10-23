@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 enum WorkspaceBlockType {
   heading1,
   heading2,
+  heading3,
   text,
   todo,
   bullet,
@@ -11,6 +12,7 @@ enum WorkspaceBlockType {
   quote,
   code,
   toggle,
+  table,
   divider,
 }
 
@@ -19,33 +21,52 @@ class WorkspaceBlock {
     String? id,
     required this.type,
     required this.content,
+    this.subContent = '',
+    this.colorHex = 'blue',
     this.isChecked = false,
     this.calloutIcon = '💡',
     this.isExpanded = true,
-  }) : id = id ?? const Uuid().v4();
+    List<List<String>>? tableData,
+  })  : id = id ?? const Uuid().v4(),
+        tableData = tableData ??
+            [
+              ['البند', 'الحالة', 'ملاحظات'],
+              ['', '', ''],
+              ['', '', ''],
+            ];
 
   final String id;
   WorkspaceBlockType type;
   String content;
+  String subContent;
+  String colorHex;
   bool isChecked;
   String calloutIcon;
   bool isExpanded;
+  List<List<String>> tableData;
 
   WorkspaceBlock copyWith({
     String? id,
     WorkspaceBlockType? type,
     String? content,
+    String? subContent,
+    String? colorHex,
     bool? isChecked,
     String? calloutIcon,
     bool? isExpanded,
+    List<List<String>>? tableData,
   }) {
     return WorkspaceBlock(
       id: id ?? this.id,
       type: type ?? this.type,
       content: content ?? this.content,
+      subContent: subContent ?? this.subContent,
+      colorHex: colorHex ?? this.colorHex,
       isChecked: isChecked ?? this.isChecked,
       calloutIcon: calloutIcon ?? this.calloutIcon,
       isExpanded: isExpanded ?? this.isExpanded,
+      tableData: tableData ??
+          this.tableData.map((row) => List<String>.from(row)).toList(),
     );
   }
 
@@ -54,13 +75,23 @@ class WorkspaceBlock {
       'id': id,
       'type': type.name,
       'content': content,
+      'subContent': subContent,
+      'colorHex': colorHex,
       'isChecked': isChecked,
       'calloutIcon': calloutIcon,
       'isExpanded': isExpanded,
+      'tableData': tableData,
     };
   }
 
   factory WorkspaceBlock.fromJson(Map<String, dynamic> json) {
+    final rawTable = json['tableData'] as List<dynamic>?;
+    List<List<String>>? parsedTable;
+    if (rawTable != null && rawTable.isNotEmpty) {
+      parsedTable = rawTable
+          .map((row) => (row as List<dynamic>).map((c) => c.toString()).toList())
+          .toList();
+    }
     return WorkspaceBlock(
       id: json['id'] as String? ?? const Uuid().v4(),
       type: WorkspaceBlockType.values.firstWhere(
@@ -68,9 +99,12 @@ class WorkspaceBlock {
         orElse: () => WorkspaceBlockType.text,
       ),
       content: json['content'] as String? ?? '',
+      subContent: json['subContent'] as String? ?? '',
+      colorHex: json['colorHex'] as String? ?? 'blue',
       isChecked: json['isChecked'] as bool? ?? false,
       calloutIcon: json['calloutIcon'] as String? ?? '💡',
       isExpanded: json['isExpanded'] as bool? ?? true,
+      tableData: parsedTable,
     );
   }
 }
@@ -81,7 +115,7 @@ class WorkspaceDoc {
     required this.userId,
     required this.title,
     this.icon = '📝',
-    this.coverColor = '0xFFE2E8F0',
+    this.coverColor = '0xFFE0F2FE',
     this.category = 'عام',
     this.isPinned = false,
     this.isFavorite = false,
@@ -115,7 +149,7 @@ class WorkspaceDoc {
   int get wordCount {
     int count = 0;
     for (final b in blocks) {
-      final trimmed = b.content.trim();
+      final trimmed = '${b.content} ${b.subContent}'.trim();
       if (trimmed.isNotEmpty) {
         count += trimmed.split(RegExp(r'\s+')).length;
       }
@@ -126,7 +160,7 @@ class WorkspaceDoc {
   int get characterCount {
     int count = 0;
     for (final b in blocks) {
-      count += b.content.length;
+      count += b.content.length + b.subContent.length;
     }
     return count;
   }
@@ -137,7 +171,7 @@ class WorkspaceDoc {
         return b.content.trim();
       }
     }
-    return 'مستند فارغ...';
+    return 'صفحة فارغة — اضغط للبدء بالكتابة...';
   }
 
   String toMarkdown() {
@@ -152,6 +186,10 @@ class WorkspaceDoc {
           break;
         case WorkspaceBlockType.heading2:
           buffer.writeln('\n## ${b.content}\n');
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.heading3:
+          buffer.writeln('\n### ${b.content}\n');
           numIndex = 1;
           break;
         case WorkspaceBlockType.todo:
@@ -180,6 +218,22 @@ class WorkspaceDoc {
           break;
         case WorkspaceBlockType.toggle:
           buffer.writeln('▶ ${b.content}');
+          if (b.subContent.trim().isNotEmpty) {
+            buffer.writeln('  ${b.subContent}');
+          }
+          numIndex = 1;
+          break;
+        case WorkspaceBlockType.table:
+          if (b.tableData.isNotEmpty) {
+            for (var r = 0; r < b.tableData.length; r++) {
+              buffer.writeln('| ${b.tableData[r].join(' | ')} |');
+              if (r == 0) {
+                buffer.writeln(
+                    '| ${b.tableData[r].map((_) => '---').join(' | ')} |');
+              }
+            }
+            buffer.writeln();
+          }
           numIndex = 1;
           break;
         case WorkspaceBlockType.divider:
@@ -217,7 +271,8 @@ class WorkspaceDoc {
       category: category ?? this.category,
       isPinned: isPinned ?? this.isPinned,
       isFavorite: isFavorite ?? this.isFavorite,
-      blocks: blocks ?? List<WorkspaceBlock>.from(this.blocks),
+      blocks: blocks ??
+          this.blocks.map((b) => b.copyWith()).toList(),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -245,7 +300,7 @@ class WorkspaceDoc {
       userId: json['userId'] as String? ?? '',
       title: json['title'] as String? ?? 'بدون عنوان',
       icon: json['icon'] as String? ?? '📝',
-      coverColor: json['coverColor'] as String? ?? '0xFFE2E8F0',
+      coverColor: json['coverColor'] as String? ?? '0xFFE0F2FE',
       category: json['category'] as String? ?? 'عام',
       isPinned: json['isPinned'] as bool? ?? false,
       isFavorite: json['isFavorite'] as bool? ?? false,

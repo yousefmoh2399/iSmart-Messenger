@@ -66,7 +66,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
     showCupertinoDialog(
       context: context,
       builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('حذف المستند'),
+        title: const Text('حذف الصفحة'),
         content: Text('هل أنت متأكد من حذف "${doc.title}"؟ لا يمكن التراجع عن هذا الإجراء.'),
         actions: [
           CupertinoDialogAction(
@@ -97,7 +97,6 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
     var result = docs;
     final query = _searchController.text.trim().toLowerCase();
 
-    // Category filter
     if (_selectedCategory == 'المثبتة 📌') {
       result = result.where((d) => d.isPinned).toList();
     } else if (_selectedCategory == 'المفضلة ⭐') {
@@ -106,11 +105,12 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
       result = result.where((d) => d.category == _selectedCategory).toList();
     }
 
-    // Search query filter
     if (query.isNotEmpty) {
       result = result.where((d) {
         final titleMatch = d.title.toLowerCase().contains(query);
-        final contentMatch = d.blocks.any((b) => b.content.toLowerCase().contains(query));
+        final contentMatch = d.blocks.any((b) =>
+            b.content.toLowerCase().contains(query) ||
+            b.subContent.toLowerCase().contains(query));
         return titleMatch || contentMatch;
       }).toList();
     }
@@ -129,13 +129,31 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
         backgroundColor: isDark ? const Color(0xFF161618) : Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0.5,
-        title: const Text(
-          'مساحة العمل (Notion)',
-          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+        title: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: const Text('📝', style: TextStyle(fontSize: 15)),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'مساحة العمل (Notion)',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17.5, letterSpacing: -0.3),
+            ),
+          ],
         ),
         actions: [
           IconButton(
-            icon: Icon(_isGridView ? CupertinoIcons.list_bullet : CupertinoIcons.square_grid_2x2, size: 20),
+            icon: Icon(
+              _isGridView ? CupertinoIcons.list_bullet : CupertinoIcons.square_grid_2x2,
+              size: 20,
+            ),
             tooltip: _isGridView ? 'عرض كقائمة' : 'عرض كشبكة',
             onPressed: () {
               HapticFeedback.selectionClick();
@@ -155,17 +173,60 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
             child: CircularProgressIndicator(color: Color(0xFF007AFF)),
           ),
           error: (err, _) => Center(
-            child: Text('خطأ في تحميل المستندات: $err'),
+            child: Text('خطأ في تحميل الصفحات: $err'),
           ),
           data: (docs) {
             final filtered = _filterDocs(docs);
+            final pinnedCount = docs.where((d) => d.isPinned).length;
+            final totalTodos = docs.fold<int>(0, (sum, d) => sum + d.todoCount);
+            final completedTodos = docs.fold<int>(0, (sum, d) => sum + d.completedTodoCount);
 
             return CustomScrollView(
               slivers: [
-                // 1. Search Bar
+                // 1. Summary Metrics Strip (Apple Notes / Notion iOS style)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _buildMiniStatCard(
+                            icon: CupertinoIcons.doc_text_fill,
+                            color: const Color(0xFF007AFF),
+                            value: '${docs.length}',
+                            label: 'صفحة',
+                            isDark: isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildMiniStatCard(
+                            icon: CupertinoIcons.pin_fill,
+                            color: const Color(0xFFFF9500),
+                            value: '$pinnedCount',
+                            label: 'مثبتة',
+                            isDark: isDark,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildMiniStatCard(
+                            icon: CupertinoIcons.checkmark_circle_fill,
+                            color: const Color(0xFF34C759),
+                            value: '$completedTodos/$totalTodos',
+                            label: 'مهام منجزة',
+                            isDark: isDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // 2. Search Bar
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
                     child: Container(
                       decoration: BoxDecoration(
                         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
@@ -193,9 +254,9 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                                 color: isDark ? Colors.white : const Color(0xFF0F172A),
                               ),
                               decoration: InputDecoration(
-                                hintText: 'البحث في العناوين والمحتوى...',
+                                hintText: 'البحث في الصفحات والملاحظات والجداول...',
                                 hintStyle: TextStyle(
-                                  fontSize: 14,
+                                  fontSize: 13.5,
                                   color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
                                 ),
                                 border: InputBorder.none,
@@ -218,7 +279,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                   ),
                 ),
 
-                // 2. Templates Carousel (Notion One-Tap Templates)
+                // 3. Templates Carousel (Notion One-Tap Templates)
                 SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,17 +288,19 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
                         child: Row(
                           children: [
-                            const Text(
-                              'قوالب جاهزة سريعة',
+                            const Icon(CupertinoIcons.sparkles, size: 15, color: Color(0xFF007AFF)),
+                            const SizedBox(width: 6),
+                            Text(
+                              'قوالب Notion الذكية',
                               style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF64748B),
+                                fontWeight: FontWeight.w800,
+                                color: isDark ? Colors.white70 : const Color(0xFF334155),
                               ),
                             ),
                             const Spacer(),
                             Text(
-                              'اضغط للإنشاء الفوري',
+                              'تحتوي على جداول وقوائم جاهزة',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
@@ -247,7 +310,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                         ),
                       ),
                       SizedBox(
-                        height: 95,
+                        height: 98,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
                           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -262,7 +325,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                   ),
                 ),
 
-                // 3. Category Filter Chips
+                // 4. Category Filter Chips
                 SliverToBoxAdapter(
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -301,7 +364,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                   ),
                 ),
 
-                // 4. Documents Feed (Grid or List)
+                // 5. Documents Feed (Grid or List)
                 if (filtered.isEmpty)
                   SliverFillRemaining(
                     hasScrollBody: false,
@@ -316,7 +379,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            docs.isEmpty ? 'لا توجد مستندات بعد' : 'لا توجد نتائج مطابقة للبحث',
+                            docs.isEmpty ? 'لا توجد صفحات بعد' : 'لا توجد نتائج مطابقة للبحث',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
@@ -339,11 +402,11 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                   )
                 else if (_isGridView)
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 85),
                     sliver: SliverGrid(
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
-                        childAspectRatio: 0.88,
+                        childAspectRatio: 0.85,
                         crossAxisSpacing: 10,
                         mainAxisSpacing: 10,
                       ),
@@ -367,7 +430,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.only(bottom: 80),
+                    padding: const EdgeInsets.only(bottom: 85),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -403,9 +466,69 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
     );
   }
 
+  Widget _buildMiniStatCard({
+    required IconData icon,
+    required Color color,
+    required String value,
+    required String label,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.06) : const Color(0xFFE2E8F0),
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 15, color: color),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTemplateCard(WorkspaceTemplate template, bool isDark) {
     return Container(
-      width: 140,
+      width: 152,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
@@ -428,12 +551,35 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
               children: [
                 Row(
                   children: [
-                    Text(template.icon, style: const TextStyle(fontSize: 20)),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: template.accentColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(template.icon, style: const TextStyle(fontSize: 15)),
+                    ),
                     const Spacer(),
-                    Icon(Icons.add_circle_outline_rounded, size: 16, color: template.accentColor),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: template.accentColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '+ استخدام',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: template.accentColor,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 Text(
                   template.title,
                   maxLines: 1,

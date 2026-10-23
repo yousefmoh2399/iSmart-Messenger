@@ -28,28 +28,29 @@ class WorkspaceTemplates {
     WorkspaceTemplate(
       id: 'daily_plan',
       title: 'خطة عمل اليوم',
-      description: 'تنظيم مهام الفرع، الأولويات، ومتابعة العمل اليومي',
+      description: 'تنظيم مهام الفرع، الأولويات، ومتابعة الإنجاز اليومي',
       icon: '📋',
       category: 'مهام الفرع',
-      coverColor: '0xFFE0F2FE', // Light Sky Blue
-      accentColor: const Color(0xFF0284C7),
+      coverColor: '0xFFE0F2FE',
+      accentColor: const Color(0xFF007AFF),
       blocksBuilder: () => [
         WorkspaceBlock(
           type: WorkspaceBlockType.callout,
-          content: '🎯 الهدف الرئيسي لليوم: إنجاز معاملات العملاء والالتزام بجودة الخدمة',
+          content: 'الهدف الرئيسي لليوم: إنجاز معاملات العملاء بأعلى سرعة وجودة',
           calloutIcon: '🎯',
+          colorHex: 'blue',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'مهام الصباح وتجهيز الفرع',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'فتح الصالة والتأكد من النظافة والمظهر العام',
+          type: WorkspaceBlockType.heading2,
+          content: '☀️ مهام الصباح وتجهيز الفرع',
         ),
         WorkspaceBlock(
           type: WorkspaceBlockType.todo,
-          content: 'تشغيل أجهزة الكمبيوتر والتأكد من اتصال الطابعات الحرارية',
+          content: 'فتح الصالة والتأكد من جاهزية المكاتب والمظهر العام',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.todo,
+          content: 'فحص اتصال الطابعات الحرارية وتوافر رولات الورق',
         ),
         WorkspaceBlock(
           type: WorkspaceBlockType.todo,
@@ -60,208 +61,182 @@ class WorkspaceTemplates {
           content: '',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'المعاملات والمتابعات الهامة',
+          type: WorkspaceBlockType.heading2,
+          content: '📊 جدول متابعة المعاملات الهامة',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'متابعة الطلبات المعلقة من الشفت السابق',
+          type: WorkspaceBlockType.table,
+          content: 'جدول المعاملات',
+          tableData: [
+            ['رقم الطلب / العميل', 'الخدمة المطلوبة', 'الحالة'],
+            ['#1042 - شركة النور', 'تجديد عقود وطباعة', 'قيد التنفيذ'],
+            ['#1045 - عميل فرع', 'مراجعة مستندات', 'مكتمل ✅'],
+          ],
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'التواصل مع العملاء للرد على الاستفسارات',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.callout,
-          content: '💡 ملاحظة: رفع تقرير المعاملات المنجزة قبل انتهاء الدوام',
-          calloutIcon: '💡',
+          type: WorkspaceBlockType.toggle,
+          content: 'ملاحظات إضافية لنهاية الدوام',
+          subContent: 'التأكد من إغلاق كافة الأجهزة ورفع التقرير اليومي للإدارة قبل المغادرة.',
+          isExpanded: true,
         ),
       ],
     ),
     WorkspaceTemplate(
       id: 'shift_handover',
       title: 'استلام وتسليم الشفت',
-      description: 'توثيق العهدة، الخزينة، والملاحظات للزميل القادم',
+      description: 'توثيق العهدة، الطابعات، والملاحظات للزميل المستلم',
       icon: '🤝',
       category: 'استلام وتسليم',
-      coverColor: '0xFFDCFCE7', // Light Emerald
-      accentColor: const Color(0xFF059669),
+      coverColor: '0xFFDCFCE7',
+      accentColor: const Color(0xFF10B981),
       blocksBuilder: () => [
         WorkspaceBlock(
           type: WorkspaceBlockType.callout,
-          content: 'سجل رسمي لتوثيق تسليم وتسلم الشفت والعهدة بدقة',
+          content: 'سجل رسمي لتسليم وتسلم الوردية والعهدة والأجهزة بدقة',
           calloutIcon: '🧾',
+          colorHex: 'green',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'الرصيد النقدي والعهدة',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'جرد رصيد الدرج النقدي ومطابقته مع مبيعات اليوم',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'تسليم بطاقات النظام والمفاتيح للزميل المستلم',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.divider,
-          content: '',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'حالة الطابعات والمستهلكات',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.bullet,
-          content: 'رولات الورق الحراري: كافية للشفت القادم',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.bullet,
-          content: 'مستوى الحبر والأجهزة: تعمل بكفاءة وبدون أعطال',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.divider,
-          content: '',
+          type: WorkspaceBlockType.table,
+          content: 'بيانات التسليم',
+          tableData: [
+            ['البيان', 'التفاصيل / القيمة', 'التأكيد'],
+            ['الموظف المسلّم', 'اكتب الاسم هنا', 'تم التوقيع'],
+            ['الموظف المستلم', 'اكتب الاسم هنا', 'تم الاستلام'],
+            ['حالة الطابعات والورق', 'ممتازة - 4 رولات احتياطي', 'جاهز ✅'],
+          ],
         ),
         WorkspaceBlock(
           type: WorkspaceBlockType.heading2,
-          content: 'ملاحظات وتنبيهات معلقة',
+          content: '☑️ قائمة التحقق قبل المغادرة',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.todo,
+          content: 'جرد الدرج النقدي ومطابقته مع تقارير النظام',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.todo,
+          content: 'تسليم المفاتيح وبطاقات الدخول للزميل المستلم',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.heading2,
+          content: '📌 طلبات معلقة للمتابعة في الشفت القادم',
         ),
         WorkspaceBlock(
           type: WorkspaceBlockType.quote,
-          content: 'يرجى متابعة العميل الخاص بالطلب رقم #1042 عند حضوره لاستلام المستندات.',
-        ),
-      ],
-    ),
-    WorkspaceTemplate(
-      id: 'ideas_proposals',
-      title: 'فكرة أو مقترح جديد',
-      description: 'توثيق أفكار مبتكرة لتطوير أداء الفرع وزيادة الإنتاجية',
-      icon: '💡',
-      category: 'أفكار ومشاريع',
-      coverColor: '0xFFFEF3C7', // Light Amber
-      accentColor: const Color(0xFFD97706),
-      blocksBuilder: () => [
-        WorkspaceBlock(
-          type: WorkspaceBlockType.callout,
-          content: 'الأفكار الصغيرة المستمرة تصنع التميز الكبير للفرع!',
-          calloutIcon: '✨',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'ملخص الفكرة أو الفرصة',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.text,
-          content: 'شرح موجز للفكرة وما هي المشكلة التي تعالجها في الفرع...',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'خطوات التنفيذ المقترحة',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'الخطوة 1: دراسة الاحتياج والتكلفة',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'الخطوة 2: مناقشة الفكرة مع مدير الفرع',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'الخطوة 3: تجربة الفكرة وقياس الأثر',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.divider,
-          content: '',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.heading2,
-          content: 'الفوائد والنتائج المتوقعة',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.bullet,
-          content: 'تسريع وقت خدمة العميل وتقليل الانتظار',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.bullet,
-          content: 'تسهيل عمل الموظفين والحد من الأخطاء',
+          content: 'العميل صاحب المعاملة رقم #208 سيحضر الساعة 5 مساءً لاستلام الأصل.',
         ),
       ],
     ),
     WorkspaceTemplate(
       id: 'meeting_notes',
-      title: 'محضر اجتماع ومتابعة',
-      description: 'تسجيل وقائع الاجتماعات والقرارات والمسؤوليات',
+      title: 'محضر اجتماع الفرع',
+      description: 'تدوين النقاط الرئيسية، القرارات، وتوزيع المهام',
       icon: '👥',
       category: 'اجتماعات',
-      coverColor: '0xFFF3E8FF', // Light Violet
-      accentColor: const Color(0xFF7C3AED),
+      coverColor: '0xFFF3E8FF',
+      accentColor: const Color(0xFF8B5CF6),
       blocksBuilder: () => [
         WorkspaceBlock(
           type: WorkspaceBlockType.callout,
-          content: 'محضر توثيقي للقرارات والتكليفات المعتمدة في الاجتماع',
-          calloutIcon: '📌',
+          content: 'اجتماع فريق العمل الدوري لمناقشة تحسين الأداء وخدمة العملاء',
+          calloutIcon: '👥',
+          colorHex: 'purple',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'أبرز النقاط التي نوقشت',
+          type: WorkspaceBlockType.heading2,
+          content: 'محاور الاجتماع',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.bullet,
-          content: 'مراجعة أداء الفرع ومؤشرات الجودة خلال الأسبوع الماضي',
+          type: WorkspaceBlockType.numbered,
+          content: 'مراجعة سرعة الإنجاز وتقليل وقت انتظار العملاء',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.bullet,
-          content: 'مناقشة خطط التطوير وتلبية طلبات الإدارة',
+          type: WorkspaceBlockType.numbered,
+          content: 'تنظيم أرشيف الملفات والمستندات الممسوحة ضوئياً',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.divider,
-          content: '',
-        ),
-        WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'القرارات والتكليفات المتفق عليها',
+          type: WorkspaceBlockType.heading2,
+          content: 'القرارات والمهام المتفق عليها',
         ),
         WorkspaceBlock(
           type: WorkspaceBlockType.todo,
-          content: 'تحديث بيانات المخزون والأجهزة',
+          content: 'تحديث قوالب الطباعة السريعة على جميع الأجهزة',
         ),
         WorkspaceBlock(
           type: WorkspaceBlockType.todo,
-          content: 'إرسال التقرير المالي الأسبوعي للإدارة',
+          content: 'مراجعة مخزون الأحبار والورق الأسبوعي',
         ),
       ],
     ),
     WorkspaceTemplate(
-      id: 'quick_checklist',
-      title: 'قائمة مهام تفاعلية',
-      description: 'قائمة مهام سريعة ومرتبة للمتابعة الفورية',
-      icon: '🎯',
-      category: 'مهام الفرع',
-      coverColor: '0xFFFCE7F3', // Light Pink
-      accentColor: const Color(0xFFDB2777),
+      id: 'ideas_proposals',
+      title: 'أفكار ومقترحات تطويرية',
+      description: 'مساحة لتدوين الأفكار الإبداعية وحلول المشكلات بالفرع',
+      icon: '💡',
+      category: 'أفكار ومشاريع',
+      coverColor: '0xFFFEF3C7',
+      accentColor: const Color(0xFFF59E0B),
       blocksBuilder: () => [
         WorkspaceBlock(
-          type: WorkspaceBlockType.heading1,
-          content: 'قائمة الأولويات والمهام',
+          type: WorkspaceBlockType.callout,
+          content: 'فكرة جديدة لتسريع العمل وتحسين تجربة الموظف والعميل',
+          calloutIcon: '💡',
+          colorHex: 'amber',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'المهمة الأولى ذات الأولوية القصوى',
+          type: WorkspaceBlockType.heading2,
+          content: 'وصف الفكرة والهدف منها',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'المهمة الثانية ومتابعة المستندات',
+          type: WorkspaceBlockType.text,
+          content: 'اكتب هنا تفاصيل المقترح وكيف سيساعد في توفير الوقت أو الجهد...',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'المهمة الثالثة وأرشفة الإيصالات',
+          type: WorkspaceBlockType.heading2,
+          content: 'خطوات التنفيذ المقترحة',
         ),
         WorkspaceBlock(
-          type: WorkspaceBlockType.todo,
-          content: 'المهمة الرابعة والتأكد من إغلاق الصندوق',
+          type: WorkspaceBlockType.bullet,
+          content: 'الخطوة الأولى: تجربة الفكرة لمدة أسبوع في الفرع',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.bullet,
+          content: 'الخطوة الثانية: قياس النتيجة ومشاركتها مع الإدارة',
+        ),
+      ],
+    ),
+    WorkspaceTemplate(
+      id: 'tech_reference',
+      title: 'دليل الأرقام والأكواد السريعة',
+      description: 'حفظ أرقام الطابعات، عناوين IP، والتحويلات الهامة',
+      icon: '⚡',
+      category: 'شخصي',
+      coverColor: '0xFFFCE7F3',
+      accentColor: const Color(0xFFEC4899),
+      blocksBuilder: () => [
+        WorkspaceBlock(
+          type: WorkspaceBlockType.callout,
+          content: 'مرجع سريع للبيانات التقنية والتحويلات الداخلية للفرع',
+          calloutIcon: '⚡',
+          colorHex: 'rose',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.table,
+          content: 'أرقام وتحويلات هامة',
+          tableData: [
+            ['الجهة / القسم', 'رقم التحويلة / التواصل', 'ملاحظات'],
+            ['الدعم الفني IT', '101', 'متاح طوال اليوم'],
+            ['إدارة المشتريات', '105', 'لطلب الورق والأحبار'],
+          ],
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.heading2,
+          content: 'إعدادات الطابعة والشبكة',
+        ),
+        WorkspaceBlock(
+          type: WorkspaceBlockType.code,
+          content: 'Printer IP: 192.168.1.200\nPort: 9100 (Thermal RAW)',
         ),
       ],
     ),

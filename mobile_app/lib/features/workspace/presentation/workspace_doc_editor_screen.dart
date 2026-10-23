@@ -24,20 +24,21 @@ class _WorkspaceDocEditorScreenState
     extends ConsumerState<WorkspaceDocEditorScreen> {
   late WorkspaceDoc _doc;
   late TextEditingController _titleController;
+  final Map<String, FocusNode> _blockFocusNodes = {};
 
   static const List<String> _popularIcons = [
     '📝', '💡', '🎯', '📋', '🚀', '📌', '💼', '📊',
     '🛠️', '🧾', '👥', '✨', '🏢', '⚡', '🔍', '⭐',
+    '🔥', '✅', '🗂️', '📅', '🤝', '💻', '📦', '🏆',
   ];
 
   static const List<Map<String, dynamic>> _coverPresets = [
-    {'color': '0xFFE0F2FE', 'name': 'سماوي'},
-    {'color': '0xFFDCFCE7', 'name': 'أخضر'},
-    {'color': '0xFFFEF3C7', 'name': 'أصفر'},
-    {'color': '0xFFF3E8FF', 'name': 'بنفسجي'},
-    {'color': '0xFFFCE7F3', 'name': 'وردي'},
-    {'color': '0xFFF1F5F9', 'name': 'رمادي'},
-    {'color': '0xFF1E293B', 'name': 'ليلي'},
+    {'color': '0xFFE0F2FE', 'name': 'أزرق سماوي', 'c1': 0xFF007AFF, 'c2': 0xFF38BDF8},
+    {'color': '0xFFDCFCE7', 'name': 'أخضر زمردي', 'c1': 0xFF059669, 'c2': 0xFF34D399},
+    {'color': '0xFFFEF3C7', 'name': 'ذهبي دافئ', 'c1': 0xFFD97706, 'c2': 0xFFFBBF24},
+    {'color': '0xFFF3E8FF', 'name': 'بنفسجي ملكي', 'c1': 0xFF7C3AED, 'c2': 0xFFA78BFA},
+    {'color': '0xFFFCE7F3', 'name': 'وردي ناعم', 'c1': 0xFFDB2777, 'c2': 0xFFF472B6},
+    {'color': '0xFF1E293B', 'name': 'ليلي داكن', 'c1': 0xFF0F172A, 'c2': 0xFF334155},
   ];
 
   static const List<String> _categories = [
@@ -59,7 +60,22 @@ class _WorkspaceDocEditorScreenState
   @override
   void dispose() {
     _titleController.dispose();
+    for (final node in _blockFocusNodes.values) {
+      node.dispose();
+    }
     super.dispose();
+  }
+
+  FocusNode _getFocusNode(String blockId) {
+    return _blockFocusNodes.putIfAbsent(blockId, () => FocusNode());
+  }
+
+  void _focusBlock(String blockId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final node = _getFocusNode(blockId);
+      node.requestFocus();
+    });
   }
 
   void _saveDoc() {
@@ -67,17 +83,40 @@ class _WorkspaceDocEditorScreenState
     setState(() {});
   }
 
-  void _addBlock(WorkspaceBlockType type) {
+  void _addBlock(WorkspaceBlockType type, {int? insertAtIndex, String initialContent = ''}) {
     HapticFeedback.lightImpact();
+    final newBlock = WorkspaceBlock(
+      type: type,
+      content: initialContent,
+    );
     setState(() {
-      _doc.blocks.add(
-        WorkspaceBlock(
-          type: type,
-          content: '',
-        ),
-      );
+      if (insertAtIndex != null &&
+          insertAtIndex >= 0 &&
+          insertAtIndex <= _doc.blocks.length) {
+        _doc.blocks.insert(insertAtIndex, newBlock);
+      } else {
+        _doc.blocks.add(newBlock);
+      }
     });
     _saveDoc();
+    if (type != WorkspaceBlockType.divider && type != WorkspaceBlockType.table) {
+      _focusBlock(newBlock.id);
+    }
+  }
+
+  void _handleEnterOnBlock(int index, String remainderText) {
+    final current = _doc.blocks[index];
+    WorkspaceBlockType nextType = WorkspaceBlockType.text;
+    if (current.type == WorkspaceBlockType.todo ||
+        current.type == WorkspaceBlockType.bullet ||
+        current.type == WorkspaceBlockType.numbered) {
+      nextType = current.type;
+    }
+    _addBlock(
+      nextType,
+      insertAtIndex: index + 1,
+      initialContent: remainderText,
+    );
   }
 
   void _moveBlock(int index, int delta) {
@@ -94,35 +133,40 @@ class _WorkspaceDocEditorScreenState
   void _duplicateBlock(int index) {
     HapticFeedback.lightImpact();
     final original = _doc.blocks[index];
+    final copy = original.copyWith(id: null);
     setState(() {
-      _doc.blocks.insert(
-        index + 1,
-        WorkspaceBlock(
-          type: original.type,
-          content: original.content,
-          calloutIcon: original.calloutIcon,
-          isChecked: original.isChecked,
-          isExpanded: original.isExpanded,
-        ),
-      );
+      _doc.blocks.insert(index + 1, copy);
     });
     _saveDoc();
   }
 
   void _transformBlockType(int index, WorkspaceBlockType newType) {
     HapticFeedback.selectionClick();
+    final block = _doc.blocks[index];
     setState(() {
-      _doc.blocks[index].type = newType;
+      block.type = newType;
     });
     _saveDoc();
+    _focusBlock(block.id);
   }
 
   void _deleteBlock(int index) {
     HapticFeedback.mediumImpact();
+    final removed = _doc.blocks[index];
+    _blockFocusNodes.remove(removed.id)?.dispose();
     setState(() {
       _doc.blocks.removeAt(index);
     });
     _saveDoc();
+  }
+
+  List<Color> _resolveCoverGradient(String coverHex) {
+    for (final preset in _coverPresets) {
+      if (preset['color'] == coverHex) {
+        return [Color(preset['c1'] as int), Color(preset['c2'] as int)];
+      }
+    }
+    return [const Color(0xFF007AFF), const Color(0xFF38BDF8)];
   }
 
   void _pickIcon() {
@@ -130,49 +174,47 @@ class _WorkspaceDocEditorScreenState
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
                   'اختر أيقونة الصفحة',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                 ),
                 const SizedBox(height: 16),
                 Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
+                  spacing: 10,
+                  runSpacing: 10,
                   children: _popularIcons.map((emoji) {
                     final isSelected = _doc.icon == emoji;
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          _doc.icon = emoji;
-                        });
+                        setState(() => _doc.icon = emoji);
                         _saveDoc();
                         Navigator.of(ctx).pop();
                       },
                       child: Container(
-                        width: 44,
-                        height: 44,
+                        width: 46,
+                        height: 46,
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? (isDark ? Colors.white24 : const Color(0xFFE2E8F0))
-                              : (isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF8FAFC)),
-                          borderRadius: BorderRadius.circular(10),
+                              ? const Color(0xFF007AFF).withValues(alpha: 0.15)
+                              : (isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF1F5F9)),
+                          borderRadius: BorderRadius.circular(12),
                           border: isSelected
                               ? Border.all(color: const Color(0xFF007AFF), width: 2)
                               : null,
                         ),
                         alignment: Alignment.center,
-                        child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                        child: Text(emoji, style: const TextStyle(fontSize: 24)),
                       ),
                     );
                   }).toList(),
@@ -190,50 +232,59 @@ class _WorkspaceDocEditorScreenState
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'لون غلاف الصفحة',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  'اختر مظهر غلاف الصفحة',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
                   children: _coverPresets.map((preset) {
                     final hexStr = preset['color'] as String;
-                    final colorVal = Color(int.parse(hexStr));
+                    final c1 = Color(preset['c1'] as int);
+                    final c2 = Color(preset['c2'] as int);
                     final isSelected = _doc.coverColor == hexStr;
 
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          _doc.coverColor = hexStr;
-                        });
+                        setState(() => _doc.coverColor = hexStr);
                         _saveDoc();
                         Navigator.of(ctx).pop();
                       },
                       child: Container(
-                        width: 38,
-                        height: 38,
+                        width: 95,
+                        height: 54,
                         decoration: BoxDecoration(
-                          color: colorVal,
-                          shape: BoxShape.circle,
+                          gradient: LinearGradient(colors: [c1, c2]),
+                          borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isSelected ? const Color(0xFF007AFF) : Colors.black12,
-                            width: isSelected ? 3 : 1,
+                            color: isSelected ? Colors.white : Colors.transparent,
+                            width: 2.5,
+                          ),
+                          boxShadow: isSelected
+                              ? [BoxShadow(color: c1.withValues(alpha: 0.4), blurRadius: 8)]
+                              : null,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          preset['name'] as String,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        child: isSelected
-                            ? const Icon(Icons.check, size: 20, color: Color(0xFF007AFF))
-                            : null,
                       ),
                     );
                   }).toList(),
@@ -251,31 +302,36 @@ class _WorkspaceDocEditorScreenState
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'تصنيف المستند',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  'تصنيف الصفحة',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 ..._categories.map((cat) {
                   final isSelected = _doc.category == cat;
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: Text(cat, style: TextStyle(fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500)),
-                    trailing: isSelected ? const Icon(Icons.check_rounded, color: Color(0xFF007AFF)) : null,
+                    title: Text(
+                      cat,
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                      ),
+                    ),
+                    trailing: isSelected
+                        ? const Icon(CupertinoIcons.checkmark_alt, color: Color(0xFF007AFF))
+                        : null,
                     onTap: () {
-                      setState(() {
-                        _doc.category = cat;
-                      });
+                      setState(() => _doc.category = cat);
                       _saveDoc();
                       Navigator.of(ctx).pop();
                     },
@@ -291,11 +347,10 @@ class _WorkspaceDocEditorScreenState
 
   void _shareAsMarkdown() {
     HapticFeedback.lightImpact();
-    final md = _doc.toMarkdown();
-    Clipboard.setData(ClipboardData(text: md));
+    Clipboard.setData(ClipboardData(text: _doc.toMarkdown()));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('تم نسخ المستند كـ Markdown إلى الحافظة!'),
+        content: Text('تم نسخ الصفحة بالكامل إلى الحافظة ✓'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -310,7 +365,7 @@ class _WorkspaceDocEditorScreenState
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
         return SafeArea(
@@ -318,11 +373,10 @@ class _WorkspaceDocEditorScreenState
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    Text(_doc.icon, style: const TextStyle(fontSize: 24)),
+                    Text(_doc.icon, style: const TextStyle(fontSize: 26)),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -335,8 +389,6 @@ class _WorkspaceDocEditorScreenState
                   ],
                 ),
                 const Divider(height: 24, thickness: 0.5),
-
-                // Stats Grid
                 Row(
                   children: [
                     _buildStatCard('الكلمات', '${_doc.wordCount}', isDark),
@@ -351,43 +403,33 @@ class _WorkspaceDocEditorScreenState
                   ],
                 ),
                 const SizedBox(height: 16),
-
-                // Details List
                 _buildInfoRow('التصنيف', _doc.category, CupertinoIcons.tag),
-                _buildInfoRow('تاريخ الإنشاء', DateFormat('d MMMM yyyy - hh:mm a', 'ar').format(_doc.createdAt), CupertinoIcons.calendar),
-                _buildInfoRow('آخر تعديل', DateFormat('d MMMM yyyy - hh:mm a', 'ar').format(_doc.updatedAt), CupertinoIcons.time),
-
-                const Divider(height: 20, thickness: 0.5),
-
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(CupertinoIcons.printer, size: 16),
-                        label: const Text('طباعة'),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _printDoc();
-                        },
-                      ),
+                _buildInfoRow(
+                  'تاريخ الإنشاء',
+                  DateFormat('d MMM yyyy - hh:mm a', 'ar').format(_doc.createdAt),
+                  CupertinoIcons.calendar,
+                ),
+                _buildInfoRow(
+                  'آخر تعديل',
+                  DateFormat('d MMM yyyy - hh:mm a', 'ar').format(_doc.updatedAt),
+                  CupertinoIcons.time,
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF007AFF),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 16),
-                        label: const Text('نسخ Markdown'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF007AFF),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _shareAsMarkdown();
-                        },
-                      ),
-                    ),
-                  ],
+                    icon: const Icon(CupertinoIcons.doc_on_clipboard, size: 18),
+                    label: const Text('نسخ المحتوى لمشاركته في الشات'),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _shareAsMarkdown();
+                    },
+                  ),
                 ),
               ],
             ),
@@ -400,12 +442,11 @@ class _WorkspaceDocEditorScreenState
   Widget _buildStatCard(String label, String value, bool isDark) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
         ),
-        alignment: Alignment.center,
         child: Column(
           children: [
             Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
@@ -413,7 +454,7 @@ class _WorkspaceDocEditorScreenState
             Text(
               label,
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 10.5,
                 color: isDark ? Colors.white38 : const Color(0xFF64748B),
               ),
             ),
@@ -438,29 +479,17 @@ class _WorkspaceDocEditorScreenState
     );
   }
 
-  void _printDoc() {
-    HapticFeedback.lightImpact();
-    // Copy for printing / branch thermal preview
-    final md = _doc.toMarkdown();
-    Clipboard.setData(ClipboardData(text: md));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('تم تجهيز المستند للطباعة ونسخ المحتوى بالكامل!'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final coverColorVal = Color(int.tryParse(_doc.coverColor) ?? 0xFFE2E8F0);
+    final gradColors = _resolveCoverGradient(_doc.coverColor);
+    final totalTodos = _doc.todoCount;
+    final completedTodos = _doc.completedTodoCount;
 
-    // Calculate dynamic numbered index
     int numberedCounter = 1;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF000000) : const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? const Color(0xFF000000) : Colors.white,
       appBar: AppBar(
         backgroundColor: isDark ? const Color(0xFF161618) : Colors.white,
         elevation: 0,
@@ -478,7 +507,7 @@ class _WorkspaceDocEditorScreenState
                 _doc.title.trim().isNotEmpty ? _doc.title : 'بدون عنوان',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
               ),
             ),
           ],
@@ -486,133 +515,173 @@ class _WorkspaceDocEditorScreenState
         actions: [
           IconButton(
             icon: Icon(
-              _doc.isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
-              size: 20,
-              color: _doc.isPinned ? const Color(0xFFF59E0B) : (isDark ? Colors.white60 : Colors.black54),
+              _doc.isPinned ? CupertinoIcons.pin_fill : CupertinoIcons.pin,
+              size: 19,
+              color: _doc.isPinned
+                  ? const Color(0xFFF59E0B)
+                  : (isDark ? Colors.white60 : Colors.black54),
             ),
-            tooltip: _doc.isPinned ? 'إلغاء التثبيت' : 'تثبيت في الأعلى',
             onPressed: () {
-              setState(() {
-                _doc.isPinned = !_doc.isPinned;
-              });
+              setState(() => _doc.isPinned = !_doc.isPinned);
               _saveDoc();
             },
           ),
           IconButton(
             icon: Icon(
-              _doc.isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
-              size: 20,
-              color: _doc.isFavorite ? const Color(0xFFF59E0B) : (isDark ? Colors.white60 : Colors.black54),
+              _doc.isFavorite ? CupertinoIcons.star_fill : CupertinoIcons.star,
+              size: 19,
+              color: _doc.isFavorite
+                  ? const Color(0xFFF59E0B)
+                  : (isDark ? Colors.white60 : Colors.black54),
             ),
-            tooltip: _doc.isFavorite ? 'إزالة من المفضلة' : 'إضافة للمفضلة',
             onPressed: () {
-              setState(() {
-                _doc.isFavorite = !_doc.isFavorite;
-              });
+              setState(() => _doc.isFavorite = !_doc.isFavorite);
               _saveDoc();
             },
           ),
           IconButton(
-            icon: const Icon(CupertinoIcons.info_circle, size: 20),
-            tooltip: 'إحصائيات وخيارات المستند',
+            icon: const Icon(CupertinoIcons.share, size: 19),
+            onPressed: _shareAsMarkdown,
+          ),
+          IconButton(
+            icon: const Icon(CupertinoIcons.ellipsis_circle, size: 20),
             onPressed: _showDocInfoModal,
           ),
         ],
       ),
       body: Column(
         children: [
-          // Content Editor Scrollable
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.only(bottom: 80),
+              padding: const EdgeInsets.only(bottom: 100),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 1. Cover Banner (Notion style)
-                  GestureDetector(
-                    onTap: _pickCoverColor,
-                    child: Container(
-                      height: 72,
-                      decoration: BoxDecoration(
-                        color: coverColorVal,
-                      ),
-                      alignment: Alignment.bottomLeft,
-                      padding: const EdgeInsets.all(8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(6),
+                  // 1. Notion Cover + Overlapping Floating Emoji Icon
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      GestureDetector(
+                        onTap: _pickCoverColor,
+                        child: Container(
+                          height: 110,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: gradColors,
+                              begin: Alignment.topRight,
+                              end: Alignment.bottomLeft,
+                            ),
+                          ),
+                          alignment: Alignment.topLeft,
+                          padding: const EdgeInsets.all(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.28),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(CupertinoIcons.paintbrush_fill, color: Colors.white, size: 12),
+                                SizedBox(width: 5),
+                                Text(
+                                  'تغيير الغلاف',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        child: const Text(
-                          'تغيير الغلاف 🎨',
-                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600),
-                        ),
                       ),
-                    ),
-                  ),
-
-                  // 2. Icon & Category header
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        // Big Emoji Icon
-                        GestureDetector(
+                      Positioned(
+                        bottom: -28,
+                        right: 20,
+                        child: GestureDetector(
                           onTap: _pickIcon,
                           child: Container(
-                            width: 56,
-                            height: 56,
+                            width: 64,
+                            height: 64,
                             decoration: BoxDecoration(
                               color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: isDark ? Colors.black : Colors.white,
+                                width: 3,
+                              ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.04),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
+                                  color: Colors.black.withValues(alpha: 0.12),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
                                 ),
                               ],
                             ),
                             alignment: Alignment.center,
-                            child: Text(
-                              _doc.icon,
-                              style: const TextStyle(fontSize: 32),
-                            ),
+                            child: Text(_doc.icon, style: const TextStyle(fontSize: 34)),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        // Category pill
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 36),
+
+                  // 2. Metadata Bar (Category + Todo Progress + Auto-save)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
                         GestureDetector(
                           onTap: _pickCategory,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+                              color: gradColors.first.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                Icon(CupertinoIcons.tag_fill, size: 11, color: gradColors.first),
+                                const SizedBox(width: 5),
                                 Text(
                                   _doc.category,
                                   style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark ? Colors.white70 : const Color(0xFF334155),
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: gradColors.first,
                                   ),
                                 ),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.arrow_drop_down, size: 16),
                               ],
                             ),
                           ),
                         ),
-                        const Spacer(),
-                        // Auto-save badge
+                        if (totalTodos > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '☑️ $completedTodos/$totalTodos مهام منجزة',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF10B981),
+                              ),
+                            ),
+                          ),
                         Text(
-                          'محفوظ تلقائياً ✓',
+                          '• محفوظ تلقائياً',
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
@@ -622,28 +691,37 @@ class _WorkspaceDocEditorScreenState
                     ),
                   ),
 
-                  // 3. Document Title
+                  // 3. Page Title
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                    child: TextFormField(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
+                    child: TextField(
                       controller: _titleController,
                       maxLines: null,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) {
+                        if (_doc.blocks.isEmpty) {
+                          _addBlock(WorkspaceBlockType.text);
+                        } else {
+                          _focusBlock(_doc.blocks.first.id);
+                        }
+                      },
                       onChanged: (val) {
                         _doc.title = val;
                         _saveDoc();
                       },
                       style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w900,
                         letterSpacing: -0.5,
+                        height: 1.25,
                         color: isDark ? Colors.white : const Color(0xFF0F172A),
                       ),
                       decoration: InputDecoration(
                         hintText: 'عنوان الصفحة...',
                         hintStyle: TextStyle(
-                          color: isDark ? Colors.white24 : Colors.black26,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
                         ),
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.zero,
@@ -651,15 +729,18 @@ class _WorkspaceDocEditorScreenState
                     ),
                   ),
 
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(height: 1, thickness: 0.5),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // 4. Interactive Notion Blocks
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                    child: Divider(
+                      height: 1,
+                      thickness: 0.6,
+                      color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+
+                  // 4. Notion Blocks List
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: List.generate(_doc.blocks.length, (index) {
@@ -674,6 +755,7 @@ class _WorkspaceDocEditorScreenState
                         return WorkspaceBlockWidget(
                           key: ValueKey(block.id),
                           block: block,
+                          focusNode: _getFocusNode(block.id),
                           numberIndex: currentNumber,
                           isEditable: true,
                           isDark: isDark,
@@ -684,9 +766,14 @@ class _WorkspaceDocEditorScreenState
                                 .toggleTodoItem(_doc.id, block.id);
                             setState(() {});
                           },
+                          onInsertBelow: (type) =>
+                              _addBlock(type, insertAtIndex: index + 1),
+                          onEnterPressed: (rem) => _handleEnterOnBlock(index, rem),
                           onDelete: () => _deleteBlock(index),
                           onMoveUp: index > 0 ? () => _moveBlock(index, -1) : null,
-                          onMoveDown: index < _doc.blocks.length - 1 ? () => _moveBlock(index, 1) : null,
+                          onMoveDown: index < _doc.blocks.length - 1
+                              ? () => _moveBlock(index, 1)
+                              : null,
                           onDuplicate: () => _duplicateBlock(index),
                           onTransformType: (type) => _transformBlockType(index, type),
                         );
@@ -694,34 +781,48 @@ class _WorkspaceDocEditorScreenState
                     ),
                   ),
 
-                  if (_doc.blocks.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Center(
-                        child: Text(
-                          'الصفحة فارغة. استخدم الشريط أدناه لإضافة أول كتلة!',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
+                  // 5. Tap-to-add-new-block Canvas Area (Just like Notion!)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _addBlock(WorkspaceBlockType.text),
+                    child: Container(
+                      height: 140,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      alignment: Alignment.topRight,
+                      child: Row(
+                        children: [
+                          Icon(
+                            CupertinoIcons.plus_circle,
+                            size: 16,
+                            color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'اضغط هنا للكتابة أو إضافة سطر جديد...',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
           ),
 
-          // -----------------------------------------------------------------
-          // 5. NOTION QUICK-INSERT TOOLBAR (Bottom Bar)
-          // -----------------------------------------------------------------
+          // 6. Floating Quick-Insert Bar above Keyboard
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF161618) : Colors.white,
+              color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF8FAFC),
               border: Border(
                 top: BorderSide(
-                  color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : const Color(0xFFE2E8F0),
                   width: 0.8,
                 ),
               ),
@@ -730,17 +831,17 @@ class _WorkspaceDocEditorScreenState
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _buildInsertChip('نص', Icons.short_text_rounded, () => _addBlock(WorkspaceBlockType.text), isDark),
-                  _buildInsertChip('مهمة ☑️', Icons.check_box_outlined, () => _addBlock(WorkspaceBlockType.todo), isDark),
-                  _buildInsertChip('عنوان H1', Icons.title_rounded, () => _addBlock(WorkspaceBlockType.heading1), isDark),
-                  _buildInsertChip('عنوان H2', Icons.format_size_rounded, () => _addBlock(WorkspaceBlockType.heading2), isDark),
-                  _buildInsertChip('نقطة •', Icons.format_list_bulleted_rounded, () => _addBlock(WorkspaceBlockType.bullet), isDark),
-                  _buildInsertChip('ترقيم 1.', Icons.format_list_numbered_rounded, () => _addBlock(WorkspaceBlockType.numbered), isDark),
-                  _buildInsertChip('صندوق 💡', Icons.lightbulb_outline_rounded, () => _addBlock(WorkspaceBlockType.callout), isDark),
-                  _buildInsertChip('اقتباس ❝', Icons.format_quote_rounded, () => _addBlock(WorkspaceBlockType.quote), isDark),
-                  _buildInsertChip('كود 💻', Icons.code_rounded, () => _addBlock(WorkspaceBlockType.code), isDark),
-                  _buildInsertChip('قائمة طي ▶', Icons.arrow_right_rounded, () => _addBlock(WorkspaceBlockType.toggle), isDark),
-                  _buildInsertChip('فاصل ──', Icons.horizontal_rule_rounded, () => _addBlock(WorkspaceBlockType.divider), isDark),
+                  _buildToolbarChip('مهمة ☑️', CupertinoIcons.checkmark_square, const Color(0xFF10B981), () => _addBlock(WorkspaceBlockType.todo), isDark),
+                  _buildToolbarChip('جدول 📊', CupertinoIcons.table, const Color(0xFF059669), () => _addBlock(WorkspaceBlockType.table), isDark),
+                  _buildToolbarChip('عنوان H1', CupertinoIcons.textformat, const Color(0xFF007AFF), () => _addBlock(WorkspaceBlockType.heading1), isDark),
+                  _buildToolbarChip('عنوان H2', CupertinoIcons.textformat_size, const Color(0xFF5856D6), () => _addBlock(WorkspaceBlockType.heading2), isDark),
+                  _buildToolbarChip('نقطة •', CupertinoIcons.list_bullet, const Color(0xFFF59E0B), () => _addBlock(WorkspaceBlockType.bullet), isDark),
+                  _buildToolbarChip('ترقيم 1.', CupertinoIcons.list_number, const Color(0xFF0EA5E9), () => _addBlock(WorkspaceBlockType.numbered), isDark),
+                  _buildToolbarChip('قائمة طي ▶', CupertinoIcons.chevron_down_square, const Color(0xFF6366F1), () => _addBlock(WorkspaceBlockType.toggle), isDark),
+                  _buildToolbarChip('صندوق 💡', CupertinoIcons.lightbulb, const Color(0xFFD97706), () => _addBlock(WorkspaceBlockType.callout), isDark),
+                  _buildToolbarChip('كود 💻', CupertinoIcons.chevron_left_slash_chevron_right, const Color(0xFF334155), () => _addBlock(WorkspaceBlockType.code), isDark),
+                  _buildToolbarChip('اقتباس ❝', CupertinoIcons.quote_bubble, const Color(0xFFEC4899), () => _addBlock(WorkspaceBlockType.quote), isDark),
+                  _buildToolbarChip('فاصل ──', CupertinoIcons.minus, const Color(0xFF94A3B8), () => _addBlock(WorkspaceBlockType.divider), isDark),
                 ],
               ),
             ),
@@ -750,28 +851,41 @@ class _WorkspaceDocEditorScreenState
     );
   }
 
-  Widget _buildInsertChip(String label, IconData icon, VoidCallback onTap, bool isDark) {
+  Widget _buildToolbarChip(
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+    bool isDark,
+  ) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 3),
       child: Material(
-        color: isDark ? Colors.white.withValues(alpha: 0.06) : const Color(0xFFF1F5F9),
+        color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(10),
-          child: Padding(
+          child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                width: 0.7,
+              ),
+            ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 14, color: const Color(0xFF007AFF)),
-                const SizedBox(width: 4),
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 5),
                 Text(
                   label,
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : const Color(0xFF334155),
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF1E293B),
                   ),
                 ),
               ],

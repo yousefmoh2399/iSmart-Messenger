@@ -19,6 +19,7 @@ void main() {
       block.isChecked = true;
       expect(block.isChecked, isTrue);
 
+      // Test transform type
       block.type = WorkspaceBlockType.heading1;
       expect(block.type, WorkspaceBlockType.heading1);
     });
@@ -28,9 +29,15 @@ void main() {
         final block = WorkspaceBlock(
           type: type,
           content: 'Test content for ${type.name}',
+          subContent: 'Sub details for ${type.name}',
           isChecked: true,
           calloutIcon: '🔥',
+          colorHex: '0xFF007AFF',
           isExpanded: false,
+          tableData: [
+            ['العنصر', 'الحالة'],
+            ['الطابعة', 'جاهزة'],
+          ],
         );
 
         final json = block.toJson();
@@ -38,15 +45,19 @@ void main() {
 
         expect(restored.type, type);
         expect(restored.content, block.content);
+        expect(restored.subContent, block.subContent);
         expect(restored.isChecked, block.isChecked);
         expect(restored.calloutIcon, block.calloutIcon);
+        expect(restored.colorHex, block.colorHex);
         expect(restored.isExpanded, block.isExpanded);
+        expect(restored.tableData.length, 2);
+        expect(restored.tableData[1][1], 'جاهزة');
       }
     });
 
     test('WorkspaceDoc todo counts and word counts', () {
       final doc = WorkspaceDoc(
-        userId: 'desktop_user_1',
+        userId: 'user_123',
         title: 'مهام الفرع اليومية',
         blocks: [
           WorkspaceBlock(type: WorkspaceBlockType.heading1, content: 'صباح الخير للجميع'),
@@ -56,7 +67,7 @@ void main() {
           WorkspaceBlock(type: WorkspaceBlockType.numbered, content: 'أولا مراجعة الخزينة'),
           WorkspaceBlock(type: WorkspaceBlockType.numbered, content: 'ثانيا فحص الطابعات'),
           WorkspaceBlock(type: WorkspaceBlockType.code, content: 'net stop spooler'),
-          WorkspaceBlock(type: WorkspaceBlockType.toggle, content: 'تفاصيل إضافية'),
+          WorkspaceBlock(type: WorkspaceBlockType.toggle, content: 'تفاصيل إضافية', subContent: 'ملاحظات داخلية للقائمة'),
         ],
       );
 
@@ -66,34 +77,46 @@ void main() {
       expect(doc.characterCount, greaterThan(30));
     });
 
-    test('WorkspaceDoc Markdown Export', () {
+    test('WorkspaceDoc Markdown Export including tables and heading3', () {
       final doc = WorkspaceDoc(
-        userId: 'desktop_user_1',
+        userId: 'user_123',
         title: 'خطة العمل',
         icon: '📋',
         blocks: [
           WorkspaceBlock(type: WorkspaceBlockType.heading1, content: 'القسم الأول'),
+          WorkspaceBlock(type: WorkspaceBlockType.heading3, content: 'عنوان فرعي ثالث'),
           WorkspaceBlock(type: WorkspaceBlockType.todo, content: 'إنهاء التقارير', isChecked: true),
           WorkspaceBlock(type: WorkspaceBlockType.numbered, content: 'الخطوة الأولى'),
           WorkspaceBlock(type: WorkspaceBlockType.code, content: 'echo Hello'),
           WorkspaceBlock(type: WorkspaceBlockType.callout, content: 'تنبيه هام', calloutIcon: '⚠️'),
           WorkspaceBlock(type: WorkspaceBlockType.quote, content: 'اقتباس اليوم'),
+          WorkspaceBlock(
+            type: WorkspaceBlockType.table,
+            content: 'جدول المهام',
+            tableData: [
+              ['المهمة', 'المسؤول'],
+              ['جرد الصندوق', 'أحمد'],
+            ],
+          ),
           WorkspaceBlock(type: WorkspaceBlockType.divider, content: ''),
         ],
       );
 
       final md = doc.toMarkdown();
       expect(md, contains('# 📋 خطة العمل'));
+      expect(md, contains('### عنوان فرعي ثالث'));
       expect(md, contains('[x] إنهاء التقارير'));
       expect(md, contains('1. الخطوة الأولى'));
       expect(md, contains('echo Hello'));
       expect(md, contains('> ⚠️ تنبيه هام'));
+      expect(md, contains('| المهمة | المسؤول |'));
+      expect(md, contains('| جرد الصندوق | أحمد |'));
       expect(md, contains('---'));
     });
 
     test('WorkspaceDoc JSON serialization and deserialization', () {
       final doc = WorkspaceDoc(
-        userId: 'desktop_emp_99',
+        userId: 'emp_99',
         title: 'استلام وتسليم',
         icon: '🤝',
         category: 'استلام وتسليم',
@@ -109,7 +132,7 @@ void main() {
       final restored = WorkspaceDoc.fromJson(json);
 
       expect(restored.id, doc.id);
-      expect(restored.userId, 'desktop_emp_99');
+      expect(restored.userId, 'emp_99');
       expect(restored.title, 'استلام وتسليم');
       expect(restored.icon, '🤝');
       expect(restored.isPinned, isTrue);

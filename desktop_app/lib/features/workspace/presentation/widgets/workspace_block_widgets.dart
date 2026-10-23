@@ -7,12 +7,15 @@ class WorkspaceBlockWidget extends StatefulWidget {
   const WorkspaceBlockWidget({
     super.key,
     required this.block,
+    this.focusNode,
     this.numberIndex = 1,
     required this.isEditable,
     required this.isDark,
     required this.onChanged,
     required this.onToggleTodo,
     required this.onDelete,
+    this.onInsertBelow,
+    this.onEnterPressed,
     this.onMoveUp,
     this.onMoveDown,
     this.onDuplicate,
@@ -20,12 +23,15 @@ class WorkspaceBlockWidget extends StatefulWidget {
   });
 
   final WorkspaceBlock block;
+  final FocusNode? focusNode;
   final int numberIndex;
   final bool isEditable;
   final bool isDark;
   final VoidCallback onChanged;
   final VoidCallback onToggleTodo;
   final VoidCallback onDelete;
+  final ValueChanged<WorkspaceBlockType>? onInsertBelow;
+  final ValueChanged<String>? onEnterPressed;
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
   final VoidCallback? onDuplicate;
@@ -37,12 +43,14 @@ class WorkspaceBlockWidget extends StatefulWidget {
 
 class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   late TextEditingController _controller;
+  late TextEditingController _subController;
   bool _isHovered = false;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.block.content);
+    _subController = TextEditingController(text: widget.block.subContent);
   }
 
   @override
@@ -51,43 +59,194 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     if (oldWidget.block.id != widget.block.id ||
         (oldWidget.block.content != widget.block.content &&
             _controller.text != widget.block.content)) {
-      _controller.text = widget.block.content;
+      _controller.value = TextEditingValue(
+        text: widget.block.content,
+        selection: TextSelection.collapsed(offset: widget.block.content.length),
+      );
+    }
+    if (oldWidget.block.id != widget.block.id ||
+        (oldWidget.block.subContent != widget.block.subContent &&
+            _subController.text != widget.block.subContent)) {
+      _subController.text = widget.block.subContent;
     }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _subController.dispose();
     super.dispose();
   }
 
-  void _onTextChange(String val) {
-    widget.block.content = val;
+  void _handleTextChanged(String val) {
+    final block = widget.block;
+
+    // 1. Detect Slash Command `/` on empty block
+    if (val == '/' && block.type == WorkspaceBlockType.text) {
+      _controller.clear();
+      block.content = '';
+      widget.onChanged();
+      _showSlashCommandModal(context, replaceCurrent: true);
+      return;
+    }
+
+    // 2. Detect Markdown live shortcuts at start of text
+    if (block.type == WorkspaceBlockType.text) {
+      if (val.startsWith('# ')) {
+        _applyShortcut(WorkspaceBlockType.heading1, val.substring(2));
+        return;
+      } else if (val.startsWith('## ')) {
+        _applyShortcut(WorkspaceBlockType.heading2, val.substring(3));
+        return;
+      } else if (val.startsWith('### ')) {
+        _applyShortcut(WorkspaceBlockType.heading3, val.substring(4));
+        return;
+      } else if (val.startsWith('- ') || val.startsWith('* ')) {
+        _applyShortcut(WorkspaceBlockType.bullet, val.substring(2));
+        return;
+      } else if (val.startsWith('1. ')) {
+        _applyShortcut(WorkspaceBlockType.numbered, val.substring(3));
+        return;
+      } else if (val.startsWith('[] ') || val.startsWith('[ ] ')) {
+        final rest = val.startsWith('[] ') ? val.substring(3) : val.substring(4);
+        _applyShortcut(WorkspaceBlockType.todo, rest);
+        return;
+      } else if (val.startsWith('> ')) {
+        _applyShortcut(WorkspaceBlockType.quote, val.substring(2));
+        return;
+      } else if (val == '---') {
+        _controller.clear();
+        block.content = '';
+        widget.onTransformType?.call(WorkspaceBlockType.divider);
+        widget.onEnterPressed?.call('');
+        return;
+      }
+    }
+
+    // 3. Detect Enter key in single-flow blocks
+    if (block.type != WorkspaceBlockType.code &&
+        val.contains('\n') &&
+        widget.onEnterPressed != null) {
+      final parts = val.split('\n');
+      final firstLine = parts.first;
+      final remainder = parts.sublist(1).join('\n');
+
+      if (firstLine.trim().isEmpty &&
+          remainder.trim().isEmpty &&
+          (block.type == WorkspaceBlockType.todo ||
+              block.type == WorkspaceBlockType.bullet ||
+              block.type == WorkspaceBlockType.numbered ||
+              block.type == WorkspaceBlockType.quote)) {
+        _controller.clear();
+        block.content = '';
+        widget.onTransformType?.call(WorkspaceBlockType.text);
+        return;
+      }
+
+      _controller.value = TextEditingValue(
+        text: firstLine,
+        selection: TextSelection.collapsed(offset: firstLine.length),
+      );
+      block.content = firstLine;
+      widget.onChanged();
+      widget.onEnterPressed!(remainder);
+      return;
+    }
+
+    block.content = val;
     widget.onChanged();
   }
 
-  void _showTransformDialog(BuildContext context) {
+  void _applyShortcut(WorkspaceBlockType newType, String remainingText) {
+    _controller.value = TextEditingValue(
+      text: remainingText,
+      selection: TextSelection.collapsed(offset: remainingText.length),
+    );
+    widget.block.content = remainingText;
+    if (widget.onTransformType != null) {
+      widget.onTransformType!(newType);
+    } else {
+      setState(() => widget.block.type = newType);
+      widget.onChanged();
+    }
+  }
+
+  void _showSlashCommandModal(BuildContext context, {bool replaceCurrent = false}) {
+    final isDark = widget.isDark;
+
     showDialog(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('تحويل الكتلة إلى نوع آخر', style: TextStyle(fontSize: 16)),
-          content: SizedBox(
-            width: 320,
+        return Dialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            width: 440,
+            constraints: const BoxConstraints(maxHeight: 540),
+            padding: const EdgeInsets.symmetric(vertical: 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildTransformTile(ctx, WorkspaceBlockType.text, 'نص فقرة عادية', CupertinoIcons.text_quote),
-                _buildTransformTile(ctx, WorkspaceBlockType.heading1, 'عنوان رئيسي H1', CupertinoIcons.textformat),
-                _buildTransformTile(ctx, WorkspaceBlockType.heading2, 'عنوان فرعي H2', CupertinoIcons.textformat_size),
-                _buildTransformTile(ctx, WorkspaceBlockType.todo, 'مهمة فحص ☑️', CupertinoIcons.check_mark_circled),
-                _buildTransformTile(ctx, WorkspaceBlockType.bullet, 'نقطة •', CupertinoIcons.list_bullet),
-                _buildTransformTile(ctx, WorkspaceBlockType.numbered, 'قائمة مرقمة 1.', CupertinoIcons.list_number),
-                _buildTransformTile(ctx, WorkspaceBlockType.callout, 'صندوق مميز 💡', CupertinoIcons.lightbulb),
-                _buildTransformTile(ctx, WorkspaceBlockType.quote, 'اقتباس ❝', CupertinoIcons.quote_bubble),
-                _buildTransformTile(ctx, WorkspaceBlockType.code, 'كتلة نص برمجي/أوامر 💻', CupertinoIcons.chevron_left_slash_chevron_right),
-                _buildTransformTile(ctx, WorkspaceBlockType.toggle, 'قائمة قابلة للطي ▶', CupertinoIcons.arrowtriangle_right_fill),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          CupertinoIcons.sparkles,
+                          size: 18,
+                          color: Color(0xFF007AFF),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        replaceCurrent ? 'تغيير نوع العنصر (/)' : 'إدراج عنصر نوشن جديد',
+                        style: TextStyle(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(CupertinoIcons.xmark_circle_fill, size: 20, color: Colors.grey),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, thickness: 0.5),
+                Flexible(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    shrinkWrap: true,
+                    children: [
+                      _buildSectionHeader('النصوص والعناوين', isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.text, 'نص عادي (Paragraph)', 'كتابة فقرة نصية بسيطة', CupertinoIcons.text_alignright, const Color(0xFF64748B), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.heading1, 'عنوان رئيسي كبير (H1)', 'اختصار: اكتب # ثم مسافة', CupertinoIcons.textformat, const Color(0xFF007AFF), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.heading2, 'عنوان متوسط (H2)', 'اختصار: اكتب ## ثم مسافة', CupertinoIcons.textformat_size, const Color(0xFF5856D6), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.heading3, 'عنوان فرعي (H3)', 'اختصار: اكتب ### ثم مسافة', CupertinoIcons.textformat_alt, const Color(0xFF8B5CF6), replaceCurrent, isDark),
+                      const SizedBox(height: 10),
+                      _buildSectionHeader('القوائم والمهام التفاعلية', isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.todo, 'قائمة مهام (To-do List)', 'اختصار: اكتب [] ثم مسافة', CupertinoIcons.checkmark_square_fill, const Color(0xFF10B981), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.bullet, 'قائمة نقطية (Bullet List)', 'اختصار: اكتب - ثم مسافة', CupertinoIcons.list_bullet, const Color(0xFFF59E0B), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.numbered, 'قائمة مرقمة (1, 2, 3)', 'اختصار: اكتب 1. ثم مسافة', CupertinoIcons.list_number, const Color(0xFF0EA5E9), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.toggle, 'قائمة قابلة للطي (Toggle)', 'عنوان يفتح ويغلق بداخله تفاصيل كاملة', CupertinoIcons.chevron_down_square_fill, const Color(0xFF6366F1), replaceCurrent, isDark),
+                      const SizedBox(height: 10),
+                      _buildSectionHeader('الجداول والعناصر المتقدمة', isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.table, 'جدول بيانات تفاعلي (Table)', 'صفوف وأعمدة قابلة للتعديل والإضافة', CupertinoIcons.table, const Color(0xFF059669), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.callout, 'صندوق ملاحظة ملون (Callout)', 'إبراز تنبيه أو معلومة هامة بألوان وأيقونة', CupertinoIcons.lightbulb_fill, const Color(0xFFD97706), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.quote, 'اقتباس (Quote)', 'اختصار: اكتب > ثم مسافة', CupertinoIcons.quote_bubble_fill, const Color(0xFFEC4899), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.code, 'صندوق كود / بيانات تقنية (Code)', 'لحفظ الأكواد، عناوين IP، والأوامر مع زر نسخ', CupertinoIcons.chevron_left_slash_chevron_right, const Color(0xFF334155), replaceCurrent, isDark),
+                      _buildSlashTile(ctx, WorkspaceBlockType.divider, 'فاصل أفقي (Divider)', 'اختصار: اكتب ---', CupertinoIcons.minus, const Color(0xFF94A3B8), replaceCurrent, isDark),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -96,22 +255,77 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     );
   }
 
-  Widget _buildTransformTile(BuildContext ctx, WorkspaceBlockType type, String title, IconData icon) {
-    return ListTile(
-      leading: Icon(icon, size: 18, color: const Color(0xFF5856D6)),
-      title: Text(title, style: const TextStyle(fontSize: 13.5)),
-      dense: true,
-      onTap: () {
-        Navigator.pop(ctx);
-        if (widget.onTransformType != null) {
-          widget.onTransformType!(type);
-        } else {
-          setState(() {
-            widget.block.type = type;
-          });
-          widget.onChanged();
-        }
-      },
+  Widget _buildSectionHeader(String title, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6, right: 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSlashTile(
+    BuildContext ctx,
+    WorkspaceBlockType type,
+    String title,
+    String subtitle,
+    IconData icon,
+    Color color,
+    bool replaceCurrent,
+    bool isDark,
+  ) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 5),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.04) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ListTile(
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        leading: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(
+            fontSize: 11,
+            color: isDark ? Colors.white54 : const Color(0xFF64748B),
+          ),
+        ),
+        onTap: () {
+          Navigator.pop(ctx);
+          if (replaceCurrent) {
+            if (widget.onTransformType != null) {
+              widget.onTransformType!(type);
+            } else {
+              setState(() => widget.block.type = type);
+              widget.onChanged();
+            }
+          } else {
+            widget.onInsertBelow?.call(type);
+          }
+        },
+      ),
     );
   }
 
@@ -127,75 +341,109 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Content
-            Expanded(child: _buildBlockContent(context, block)),
-
-            // Desktop Hover Action Handle
-            if (widget.isEditable && block.type != WorkspaceBlockType.divider)
+            // Notion-style Left/Right Gutter Handles (+ and ⋮⋮)
+            if (widget.isEditable)
               AnimatedOpacity(
-                duration: const Duration(milliseconds: 150),
-                opacity: _isHovered ? 0.8 : 0.0,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (widget.onMoveUp != null)
-                      IconButton(
-                        icon: const Icon(CupertinoIcons.chevron_up, size: 14),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                        tooltip: 'تحريك لأعلى',
-                        onPressed: widget.onMoveUp,
-                      ),
-                    if (widget.onMoveDown != null)
-                      IconButton(
-                        icon: const Icon(CupertinoIcons.chevron_down, size: 14),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                        tooltip: 'تحريك لأسفل',
-                        onPressed: widget.onMoveDown,
-                      ),
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_horiz_rounded, size: 16),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                      tooltip: 'خيارات الكتلة',
-                      onSelected: (val) {
-                        if (val == 'up') widget.onMoveUp?.call();
-                        if (val == 'down') widget.onMoveDown?.call();
-                        if (val == 'dup') widget.onDuplicate?.call();
-                        if (val == 'transform') _showTransformDialog(context);
-                        if (val == 'delete') widget.onDelete();
-                      },
-                      itemBuilder: (ctx) => [
-                        if (widget.onMoveUp != null)
-                          const PopupMenuItem(
-                            value: 'up',
-                            child: Row(children: [Icon(CupertinoIcons.arrow_up, size: 16), SizedBox(width: 8), Text('تحريك لأعلى')]),
+                duration: const Duration(milliseconds: 140),
+                opacity: _isHovered ? 1.0 : 0.0,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => _showSlashCommandModal(context, replaceCurrent: false),
+                        child: Tooltip(
+                          message: 'إدراج كتلة بالأسفل (+)',
+                          child: Padding(
+                            padding: const EdgeInsets.all(3),
+                            child: Icon(
+                              CupertinoIcons.plus,
+                              size: 15,
+                              color: widget.isDark ? Colors.white54 : const Color(0xFF64748B),
+                            ),
                           ),
-                        if (widget.onMoveDown != null)
-                          const PopupMenuItem(
-                            value: 'down',
-                            child: Row(children: [Icon(CupertinoIcons.arrow_down, size: 16), SizedBox(width: 8), Text('تحريك لأسفل')]),
-                          ),
-                        if (widget.onDuplicate != null)
-                          const PopupMenuItem(
-                            value: 'dup',
-                            child: Row(children: [Icon(CupertinoIcons.plus_square_on_square, size: 16), SizedBox(width: 8), Text('تكرار الكتلة')]),
-                          ),
-                        const PopupMenuItem(
-                          value: 'transform',
-                          child: Row(children: [Icon(CupertinoIcons.arrow_2_squarepath, size: 16), SizedBox(width: 8), Text('تحويل إلى نوع آخر...')]),
                         ),
-                        const PopupMenuDivider(),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Row(children: [Icon(CupertinoIcons.trash, size: 16, color: Colors.red), SizedBox(width: 8), Text('حذف الكتلة', style: TextStyle(color: Colors.red))]),
+                      ),
+                      PopupMenuButton<String>(
+                        tooltip: 'خيارات الكتلة (تحويل، ترتيب، حذف)',
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        icon: Icon(
+                          Icons.drag_indicator_rounded,
+                          size: 16,
+                          color: widget.isDark ? Colors.white54 : const Color(0xFF64748B),
                         ),
-                      ],
-                    ),
-                  ],
+                        onSelected: (val) {
+                          if (val == 'up') widget.onMoveUp?.call();
+                          if (val == 'down') widget.onMoveDown?.call();
+                          if (val == 'dup') widget.onDuplicate?.call();
+                          if (val == 'transform') _showSlashCommandModal(context, replaceCurrent: true);
+                          if (val == 'delete') widget.onDelete();
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(
+                            value: 'transform',
+                            child: Row(
+                              children: [
+                                Icon(CupertinoIcons.arrow_2_squarepath, size: 16, color: Color(0xFF007AFF)),
+                                SizedBox(width: 8),
+                                Text('تحويل نوع العنصر...', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                          if (widget.onMoveUp != null)
+                            const PopupMenuItem(
+                              value: 'up',
+                              child: Row(
+                                children: [
+                                  Icon(CupertinoIcons.arrow_up, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('تحريك لأعلى', style: TextStyle(fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                          if (widget.onMoveDown != null)
+                            const PopupMenuItem(
+                              value: 'down',
+                              child: Row(
+                                children: [
+                                  Icon(CupertinoIcons.arrow_down, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('تحريك لأسفل', style: TextStyle(fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                          if (widget.onDuplicate != null)
+                            const PopupMenuItem(
+                              value: 'dup',
+                              child: Row(
+                                children: [
+                                  Icon(CupertinoIcons.plus_square_on_square, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('تكرار الكتلة', style: TextStyle(fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(CupertinoIcons.trash, size: 16, color: Colors.redAccent),
+                                SizedBox(width: 8),
+                                Text('حذف الكتلة', style: TextStyle(fontSize: 13, color: Colors.redAccent)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
+            Expanded(child: _buildBlockContent(context, block)),
           ],
         ),
       ),
@@ -205,9 +453,11 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   Widget _buildBlockContent(BuildContext context, WorkspaceBlock block) {
     switch (block.type) {
       case WorkspaceBlockType.heading1:
-        return _buildHeading(context, fontSize: 24, fontWeight: FontWeight.w800);
+        return _buildHeading(context, fontSize: 25, fontWeight: FontWeight.w800, hint: 'عنوان رئيسي H1...', topPad: 14);
       case WorkspaceBlockType.heading2:
-        return _buildHeading(context, fontSize: 19, fontWeight: FontWeight.w700);
+        return _buildHeading(context, fontSize: 20, fontWeight: FontWeight.w700, hint: 'عنوان متوسط H2...', topPad: 10);
+      case WorkspaceBlockType.heading3:
+        return _buildHeading(context, fontSize: 17, fontWeight: FontWeight.w700, hint: 'عنوان فرعي H3...', topPad: 8);
       case WorkspaceBlockType.todo:
         return _buildTodo(context);
       case WorkspaceBlockType.bullet:
@@ -222,6 +472,8 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         return _buildCode(context);
       case WorkspaceBlockType.toggle:
         return _buildToggle(context);
+      case WorkspaceBlockType.table:
+        return _buildTable(context);
       case WorkspaceBlockType.divider:
         return _buildDivider(context);
       case WorkspaceBlockType.text:
@@ -229,24 +481,32 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     }
   }
 
-  Widget _buildHeading(BuildContext context, {required double fontSize, required FontWeight fontWeight}) {
+  Widget _buildHeading(
+    BuildContext context, {
+    required double fontSize,
+    required FontWeight fontWeight,
+    required String hint,
+    required double topPad,
+  }) {
     final isDark = widget.isDark;
     return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 6),
-      child: TextFormField(
+      padding: EdgeInsets.only(top: topPad, bottom: 4),
+      child: TextField(
         controller: _controller,
-        onChanged: _onTextChange,
+        focusNode: widget.focusNode,
+        onChanged: _handleTextChanged,
         maxLines: null,
         style: TextStyle(
           fontSize: fontSize,
           fontWeight: fontWeight,
           letterSpacing: -0.3,
+          height: 1.3,
           color: isDark ? Colors.white : const Color(0xFF0F172A),
         ),
         decoration: InputDecoration(
-          hintText: widget.block.type == WorkspaceBlockType.heading1 ? 'عنوان رئيسي H1...' : 'عنوان فرعي H2...',
+          hintText: hint,
           hintStyle: TextStyle(
-            color: isDark ? Colors.white30 : Colors.black26,
+            color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
             fontSize: fontSize,
             fontWeight: fontWeight,
           ),
@@ -262,20 +522,21 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     final isDark = widget.isDark;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: TextFormField(
+      child: TextField(
         controller: _controller,
-        onChanged: _onTextChange,
+        focusNode: widget.focusNode,
+        onChanged: _handleTextChanged,
         maxLines: null,
         style: TextStyle(
-          fontSize: 15,
-          height: 1.55,
+          fontSize: 15.5,
+          height: 1.6,
           color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
         ),
         decoration: InputDecoration(
-          hintText: 'اكتب نصاً، أو أدرج كتلة جديدة من الشريط أدناه...',
+          hintText: "اكتب نصاً، أو اكتب '/' لإدراج قائمة أو جدول أو عنوان...",
           hintStyle: TextStyle(
-            color: isDark ? Colors.white24 : Colors.black26,
-            fontSize: 15,
+            color: isDark ? Colors.white24 : const Color(0xFF94A3B8),
+            fontSize: 14.5,
           ),
           border: InputBorder.none,
           isDense: true,
@@ -290,7 +551,7 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     final block = widget.block;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -298,37 +559,38 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
             onTap: widget.onToggleTodo,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              margin: const EdgeInsets.only(top: 3, left: 8),
-              width: 19,
-              height: 19,
+              margin: const EdgeInsets.only(top: 3, left: 10),
+              width: 20,
+              height: 20,
               decoration: BoxDecoration(
                 color: block.isChecked
-                    ? const Color(0xFF5856D6)
+                    ? const Color(0xFF007AFF)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
                   color: block.isChecked
-                      ? const Color(0xFF5856D6)
+                      ? const Color(0xFF007AFF)
                       : (isDark ? Colors.white38 : const Color(0xFF94A3B8)),
-                  width: 1.6,
+                  width: 1.7,
                 ),
               ),
               child: block.isChecked
                   ? const Icon(
                       Icons.check_rounded,
-                      size: 13,
+                      size: 14,
                       color: Colors.white,
                     )
                   : null,
             ),
           ),
           Expanded(
-            child: TextFormField(
+            child: TextField(
               controller: _controller,
-              onChanged: _onTextChange,
+              focusNode: widget.focusNode,
+              onChanged: _handleTextChanged,
               maxLines: null,
               style: TextStyle(
-                fontSize: 15,
+                fontSize: 15.5,
                 height: 1.45,
                 decoration: block.isChecked ? TextDecoration.lineThrough : null,
                 color: block.isChecked
@@ -336,10 +598,10 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
                     : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B)),
               ),
               decoration: InputDecoration(
-                hintText: 'مهمة جديدة...',
+                hintText: 'مهمة جديدة (اضغط Enter لإضافة مهمة تالية)...',
                 hintStyle: TextStyle(
-                  color: isDark ? Colors.white24 : Colors.black26,
-                  fontSize: 15,
+                  color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                  fontSize: 14.5,
                 ),
                 border: InputBorder.none,
                 isDense: true,
@@ -360,31 +622,32 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(top: 7, left: 10, right: 2),
+            padding: const EdgeInsets.only(top: 8, left: 10, right: 4),
             child: Container(
-              width: 5.5,
-              height: 5.5,
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white70 : const Color(0xFF475569),
+              width: 6.5,
+              height: 6.5,
+              decoration: const BoxDecoration(
+                color: Color(0xFF007AFF),
                 shape: BoxShape.circle,
               ),
             ),
           ),
           Expanded(
-            child: TextFormField(
+            child: TextField(
               controller: _controller,
-              onChanged: _onTextChange,
+              focusNode: widget.focusNode,
+              onChanged: _handleTextChanged,
               maxLines: null,
               style: TextStyle(
-                fontSize: 15,
+                fontSize: 15.5,
                 height: 1.5,
                 color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
               ),
               decoration: InputDecoration(
-                hintText: 'نقطة...',
+                hintText: 'عنصر قائمة (اضغط Enter للبند التالي)...',
                 hintStyle: TextStyle(
-                  color: isDark ? Colors.white24 : Colors.black26,
-                  fontSize: 15,
+                  color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                  fontSize: 14.5,
                 ),
                 border: InputBorder.none,
                 isDense: true,
@@ -404,39 +667,38 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 2, left: 8, right: 2),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                '${widget.numberIndex}.',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white70 : const Color(0xFF475569),
-                ),
+          Container(
+            margin: const EdgeInsets.only(top: 2, left: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '${widget.numberIndex}',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF007AFF),
               ),
             ),
           ),
           Expanded(
-            child: TextFormField(
+            child: TextField(
               controller: _controller,
-              onChanged: _onTextChange,
+              focusNode: widget.focusNode,
+              onChanged: _handleTextChanged,
               maxLines: null,
               style: TextStyle(
-                fontSize: 15,
+                fontSize: 15.5,
                 height: 1.5,
                 color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
               ),
               decoration: InputDecoration(
-                hintText: 'عنصر في قائمة مرقمة...',
+                hintText: 'خطوة مرقمة (اضغط Enter للخطوة التالية)...',
                 hintStyle: TextStyle(
-                  color: isDark ? Colors.white24 : Colors.black26,
-                  fontSize: 15,
+                  color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+                  fontSize: 14.5,
                 ),
                 border: InputBorder.none,
                 isDense: true,
@@ -449,67 +711,129 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     );
   }
 
+  Map<String, Color> _resolveCalloutPalette(String colorKey, bool isDark) {
+    switch (colorKey) {
+      case 'green':
+        return {
+          'bg': isDark ? const Color(0xFF064E3B).withValues(alpha: 0.4) : const Color(0xFFECFDF5),
+          'border': isDark ? const Color(0xFF10B981).withValues(alpha: 0.3) : const Color(0xFFA7F3D0),
+          'dot': const Color(0xFF10B981),
+        };
+      case 'amber':
+        return {
+          'bg': isDark ? const Color(0xFF78350F).withValues(alpha: 0.4) : const Color(0xFFFFFBEB),
+          'border': isDark ? const Color(0xFFF59E0B).withValues(alpha: 0.3) : const Color(0xFFFDE68A),
+          'dot': const Color(0xFFF59E0B),
+        };
+      case 'purple':
+        return {
+          'bg': isDark ? const Color(0xFF4C1D95).withValues(alpha: 0.4) : const Color(0xFFF5F3FF),
+          'border': isDark ? const Color(0xFF8B5CF6).withValues(alpha: 0.3) : const Color(0xFFDDD6FE),
+          'dot': const Color(0xFF8B5CF6),
+        };
+      case 'rose':
+        return {
+          'bg': isDark ? const Color(0xFF881337).withValues(alpha: 0.4) : const Color(0xFFFFF1F2),
+          'border': isDark ? const Color(0xFFF43F5E).withValues(alpha: 0.3) : const Color(0xFFFECDD3),
+          'dot': const Color(0xFFF43F5E),
+        };
+      case 'blue':
+      default:
+        return {
+          'bg': isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.35) : const Color(0xFFEFF6FF),
+          'border': isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.3) : const Color(0xFFBFDBFE),
+          'dot': const Color(0xFF007AFF),
+        };
+    }
+  }
+
   Widget _buildCallout(BuildContext context) {
     final isDark = widget.isDark;
     final block = widget.block;
+    final palette = _resolveCalloutPalette(block.colorHex, isDark);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0xFF1E293B).withValues(alpha: 0.6)
-            : const Color(0xFFF1F5F9),
+        color: palette['bg'],
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
-          width: 0.8,
-        ),
+        border: Border.all(color: palette['border']!, width: 1),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
             onTap: () {
-              final emojis = ['💡', '🎯', '⚠️', '📌', '🚀', '✅', '💬', '🔥'];
+              const emojis = ['💡', '🎯', '⚠️', '📌', '🚀', '✅', '🧾', '🔥', '💬', '⭐'];
               final curIdx = emojis.indexOf(block.calloutIcon);
-              final nextEmoji = emojis[(curIdx + 1) % emojis.length];
               setState(() {
-                block.calloutIcon = nextEmoji;
+                block.calloutIcon = emojis[(curIdx + 1) % emojis.length];
               });
               widget.onChanged();
             },
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              child: Text(
-                block.calloutIcon,
-                style: const TextStyle(fontSize: 22),
+            child: Tooltip(
+              message: 'اضغط لتغيير الأيقونة',
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.black26 : Colors.white.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Text(block.calloutIcon, style: const TextStyle(fontSize: 20)),
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
-            child: TextFormField(
+            child: TextField(
               controller: _controller,
-              onChanged: _onTextChange,
+              focusNode: widget.focusNode,
+              onChanged: (val) {
+                block.content = val;
+                widget.onChanged();
+              },
               maxLines: null,
               style: TextStyle(
                 fontSize: 14.5,
                 height: 1.5,
-                fontWeight: FontWeight.w500,
-                color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
               decoration: InputDecoration(
-                hintText: 'ملاحظة مميزة أو تنبيه هام...',
+                hintText: 'اكتب ملاحظة بارزة أو تنبيه هام...',
                 hintStyle: TextStyle(
-                  color: isDark ? Colors.white30 : Colors.black38,
+                  color: isDark ? Colors.white38 : Colors.black38,
                   fontSize: 14,
                 ),
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: EdgeInsets.zero,
+                contentPadding: const EdgeInsets.only(top: 6),
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              const colors = ['blue', 'green', 'amber', 'purple', 'rose'];
+              final idx = colors.indexOf(block.colorHex);
+              setState(() {
+                block.colorHex = colors[(idx + 1) % colors.length];
+              });
+              widget.onChanged();
+            },
+            child: Tooltip(
+              message: 'تغيير لون الصندوق',
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, right: 4),
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: palette['dot'],
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
               ),
             ),
           ),
@@ -522,30 +846,36 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     final isDark = widget.isDark;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.only(right: 12, top: 4, bottom: 4),
-      decoration: const BoxDecoration(
-        border: Border(
+      padding: const EdgeInsets.fromLTRB(12, 6, 14, 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.03)
+            : const Color(0xFFF8FAFC),
+        borderRadius: const BorderRadius.horizontal(left: Radius.circular(10)),
+        border: const Border(
           right: BorderSide(
-            color: Color(0xFF5856D6),
-            width: 3.5,
+            color: Color(0xFF007AFF),
+            width: 4,
           ),
         ),
       ),
-      child: TextFormField(
+      child: TextField(
         controller: _controller,
-        onChanged: _onTextChange,
+        focusNode: widget.focusNode,
+        onChanged: _handleTextChanged,
         maxLines: null,
         style: TextStyle(
           fontSize: 15,
           height: 1.55,
           fontStyle: FontStyle.italic,
+          fontWeight: FontWeight.w500,
           color: isDark ? Colors.white70 : const Color(0xFF334155),
         ),
         decoration: InputDecoration(
-          hintText: 'اقتباس أو نص مقتبس...',
+          hintText: 'اكتب اقتباساً أو ملاحظة مرجعية...',
           hintStyle: TextStyle(
-            color: isDark ? Colors.white24 : Colors.black26,
-            fontSize: 15,
+            color: isDark ? Colors.white24 : const Color(0xFFCBD5E1),
+            fontSize: 14.5,
           ),
           border: InputBorder.none,
           isDense: true,
@@ -556,13 +886,12 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
   }
 
   Widget _buildCode(BuildContext context) {
-    final isDark = widget.isDark;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(10),
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white12, width: 0.8),
       ),
       child: Column(
@@ -570,59 +899,72 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
         children: [
           Row(
             children: [
-              const Icon(Icons.code_rounded, color: Colors.white54, size: 14),
+              const Icon(CupertinoIcons.chevron_left_slash_chevron_right, color: Color(0xFF38BDF8), size: 14),
               const SizedBox(width: 6),
               const Text(
-                'نص برمجي / أمر نظام',
-                style: TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
+                'CODE / TERMINAL',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
               ),
               const Spacer(),
-              GestureDetector(
+              InkWell(
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: _controller.text));
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('تم نسخ الكود للحافظة'),
+                      content: Text('تم نسخ النص البرمجي إلى الحافظة ✓'),
                       duration: Duration(seconds: 1),
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
                 },
+                borderRadius: BorderRadius.circular(6),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.white12,
-                    borderRadius: BorderRadius.circular(4),
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.copy_rounded, size: 12, color: Colors.white70),
+                      Icon(CupertinoIcons.doc_on_doc, size: 12, color: Colors.white70),
                       SizedBox(width: 4),
-                      Text('نسخ', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                      Text('نسخ', style: TextStyle(color: Colors.white, fontSize: 11)),
                     ],
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _controller,
-            onChanged: _onTextChange,
-            maxLines: null,
-            style: const TextStyle(
-              fontSize: 13,
-              height: 1.45,
-              fontFamily: 'monospace',
-              color: Color(0xFF38BDF8),
-            ),
-            decoration: const InputDecoration(
-              hintText: 'اكتب كود أو رقم أو نص تقني...',
-              hintStyle: TextStyle(color: Colors.white24, fontSize: 13),
-              border: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
+          const SizedBox(height: 8),
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: TextField(
+              controller: _controller,
+              focusNode: widget.focusNode,
+              onChanged: (val) {
+                widget.block.content = val;
+                widget.onChanged();
+              },
+              maxLines: null,
+              style: const TextStyle(
+                fontSize: 13.5,
+                height: 1.5,
+                fontFamily: 'Consolas',
+                color: Color(0xFF38BDF8),
+              ),
+              decoration: const InputDecoration(
+                hintText: 'Write code, IP address, or command...',
+                hintStyle: TextStyle(color: Colors.white24, fontSize: 13),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
             ),
           ),
         ],
@@ -635,68 +977,110 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     final block = widget.block;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: 5),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.03) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(8),
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    block.isExpanded = !block.isExpanded;
-                  });
-                  widget.onChanged();
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 6, left: 6, right: 2),
-                  child: Icon(
-                    block.isExpanded
-                        ? CupertinoIcons.arrowtriangle_down_fill
-                        : CupertinoIcons.arrowtriangle_right_fill,
-                    size: 13,
-                    color: isDark ? Colors.white70 : const Color(0xFF475569),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: TextFormField(
-                  controller: _controller,
-                  onChanged: _onTextChange,
-                  maxLines: null,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'عنوان قائمة الطي...',
-                    hintStyle: TextStyle(
-                      color: isDark ? Colors.white24 : Colors.black26,
-                      fontSize: 15,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Row(
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(7),
+                  onTap: () {
+                    setState(() {
+                      block.isExpanded = !block.isExpanded;
+                    });
+                    widget.onChanged();
+                  },
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF007AFF).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(7),
                     ),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Icon(
+                      block.isExpanded
+                          ? CupertinoIcons.chevron_down
+                          : CupertinoIcons.chevron_back,
+                      size: 14,
+                      color: const Color(0xFF007AFF),
+                    ),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: widget.focusNode,
+                    onChanged: (val) {
+                      block.content = val;
+                      widget.onChanged();
+                    },
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'عنوان القائمة القابلة للطي...',
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
+                        fontSize: 14.5,
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           if (block.isExpanded)
-            Padding(
-              padding: const EdgeInsets.only(right: 24, left: 12, bottom: 8),
-              child: Text(
-                'يمكنك إضافة بنود أو ملاحظات تحت هذا العنوان للطي والتوسيع.',
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 16, 12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.2)
+                    : const Color(0xFFF8FAFC),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                border: Border(
+                  top: BorderSide(
+                    color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                    width: 0.6,
+                  ),
+                ),
+              ),
+              child: TextField(
+                controller: _subController,
+                onChanged: (val) {
+                  block.subContent = val;
+                  widget.onChanged();
+                },
+                maxLines: null,
                 style: TextStyle(
-                  fontSize: 12,
-                  fontStyle: FontStyle.italic,
-                  color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                  fontSize: 14,
+                  height: 1.5,
+                  color: isDark ? Colors.white70 : const Color(0xFF334155),
+                ),
+                decoration: InputDecoration(
+                  hintText: 'اكتب التفاصيل والبنود المخفية داخل هذا القسم هنا...',
+                  hintStyle: TextStyle(
+                    color: isDark ? Colors.white24 : const Color(0xFF94A3B8),
+                    fontSize: 13.5,
+                  ),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
             ),
@@ -705,13 +1089,154 @@ class _WorkspaceBlockWidgetState extends State<WorkspaceBlockWidget> {
     );
   }
 
+  Widget _buildTable(BuildContext context) {
+    final isDark = widget.isDark;
+    final block = widget.block;
+    if (block.tableData.isEmpty) {
+      block.tableData = [
+        ['العمود 1', 'العمود 2', 'العمود 3'],
+        ['', '', ''],
+      ];
+    }
+    final rows = block.tableData;
+    final colCount = rows.first.length;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+          width: 0.9,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Column(
+            children: List.generate(rows.length, (rIdx) {
+              final isHeader = rIdx == 0;
+              return Container(
+                decoration: BoxDecoration(
+                  color: isHeader
+                      ? (isDark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : const Color(0xFFF1F5F9))
+                      : Colors.transparent,
+                  border: rIdx < rows.length - 1
+                      ? Border(
+                          bottom: BorderSide(
+                            color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                          ),
+                        )
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    ...List.generate(colCount, (cIdx) {
+                      return Expanded(
+                        child: Container(
+                          decoration: cIdx < colCount - 1
+                              ? BoxDecoration(
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: TextFormField(
+                            key: ValueKey('${block.id}_r${rIdx}_c$cIdx'),
+                            initialValue: rows[rIdx][cIdx],
+                            onChanged: (val) {
+                              rows[rIdx][cIdx] = val;
+                              widget.onChanged();
+                            },
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: isHeader ? FontWeight.w700 : FontWeight.w500,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
+                            decoration: InputDecoration(
+                              hintText: isHeader ? 'عنوان العمود...' : 'اكتب هنا...',
+                              hintStyle: TextStyle(
+                                color: isDark ? Colors.white24 : Colors.black26,
+                                fontSize: 12.5,
+                              ),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    if (!isHeader && rows.length > 2)
+                      IconButton(
+                        tooltip: 'حذف الصف',
+                        icon: const Icon(CupertinoIcons.minus_circle, size: 15, color: Colors.redAccent),
+                        onPressed: () {
+                          setState(() {
+                            rows.removeAt(rIdx);
+                          });
+                          widget.onChanged();
+                        },
+                      ),
+                  ],
+                ),
+              );
+            }),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withValues(alpha: 0.03) : const Color(0xFFF8FAFC),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+            ),
+            child: Row(
+              children: [
+                TextButton.icon(
+                  icon: const Icon(CupertinoIcons.add, size: 13, color: Color(0xFF007AFF)),
+                  label: const Text('إضافة صف جديد', style: TextStyle(fontSize: 12, color: Color(0xFF007AFF), fontWeight: FontWeight.w600)),
+                  onPressed: () {
+                    setState(() {
+                      rows.add(List.filled(colCount, ''));
+                    });
+                    widget.onChanged();
+                  },
+                ),
+                const SizedBox(width: 12),
+                if (colCount < 6)
+                  TextButton.icon(
+                    icon: const Icon(CupertinoIcons.add_circled, size: 13, color: Color(0xFF5856D6)),
+                    label: const Text('إضافة عمود', style: TextStyle(fontSize: 12, color: Color(0xFF5856D6), fontWeight: FontWeight.w600)),
+                    onPressed: () {
+                      setState(() {
+                        for (final r in rows) {
+                          r.add('');
+                        }
+                        rows.first[rows.first.length - 1] = 'عمود ${rows.first.length}';
+                      });
+                      widget.onChanged();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDivider(BuildContext context) {
     final isDark = widget.isDark;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Divider(
         height: 1,
-        thickness: 0.8,
+        thickness: 1,
         color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
       ),
     );

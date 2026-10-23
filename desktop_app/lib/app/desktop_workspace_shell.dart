@@ -277,6 +277,8 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                 onRefresh: () =>
                     ref.read(chatOverviewControllerProvider.notifier).refresh(),
                 onOpenFiles: () => _navigateTo(DesktopWorkspaceSection.files),
+                onOpenWorkspace: () =>
+                    _navigateTo(DesktopWorkspaceSection.workspace),
                 showServersShortcut: showServersShortcut,
                 onOpenServers: () =>
                     _navigateTo(DesktopWorkspaceSection.servers),
