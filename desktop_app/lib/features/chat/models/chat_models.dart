@@ -174,11 +174,11 @@ class ChatDirectoryUser {
       fullName: json['fullName'] as String? ?? '',
       jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
-      departmentId: json['departmentId'] as String?,
+      departmentId: json['departmentId'] is Map ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString() : json['departmentId']?.toString(),
       departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
           .map((entry) => entry.toString())
           .toList(),
-      branchId: json['branchId'] as String?,
+      branchId: json['branchId'] is Map ? (json['branchId']['_id'] ?? json['branchId']['id'])?.toString() : json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       presenceStatus: json['presenceStatus'] as String? ?? 'offline',
@@ -237,7 +237,7 @@ class DepartmentSummary {
           .map((entry) => entry.toString())
           .toList(),
       membersCount: json['membersCount'] as int? ?? 0,
-      defaultConversationId: json['defaultConversationId'] as String?,
+      defaultConversationId: json['defaultConversationId'] is Map ? (json['defaultConversationId']['_id'] ?? json['defaultConversationId']['id'])?.toString() : json['defaultConversationId']?.toString(),
     );
   }
 }
@@ -318,8 +318,8 @@ class ChatLastMessage {
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
     return ChatLastMessage(
-      content: (map['content'] ?? map['text'] ?? '') as String,
-      senderId: map['senderId'] as String?,
+      content: (map['content'] ?? map['text'] ?? '').toString(),
+      senderId: map['senderId'] is Map ? (map['senderId']['_id'] ?? map['senderId']['id'])?.toString() : map['senderId']?.toString(),
       senderName: map['senderName'] as String? ?? '',
       messageType: map['messageType'] as String? ?? 'text',
       createdAt: map['createdAt'] is String
@@ -522,8 +522,8 @@ class ChatConversation {
       name: json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
       avatarUrl: json['avatarUrl'] as String?,
-      departmentId: json['departmentId'] as String?,
-      createdBy: json['createdBy'] as String?,
+      departmentId: json['departmentId'] is Map ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString() : json['departmentId']?.toString(),
+      createdBy: json['createdBy'] is Map ? (json['createdBy']['_id'] ?? json['createdBy']['id'])?.toString() : json['createdBy']?.toString(),
       members: (json['members'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(ChatDirectoryUser.fromJson)

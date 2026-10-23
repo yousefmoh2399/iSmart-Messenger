@@ -228,16 +228,29 @@ class DepartmentSummary {
   final String? defaultConversationId;
 
   factory DepartmentSummary.fromJson(Map<String, dynamic> json) {
+    final rawDefaultConv = json['defaultConversationId'];
+    final defaultConversationId = rawDefaultConv is Map
+        ? (rawDefaultConv['_id'] ?? rawDefaultConv['id'])?.toString()
+        : rawDefaultConv?.toString();
     return DepartmentSummary(
-      id: json['id'] as String,
-      name: json['name'] as String? ?? '',
-      code: json['code'] as String? ?? '',
-      description: json['description'] as String? ?? '',
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      code: json['code']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
       managers: (json['managers'] as List<dynamic>? ?? const [])
-          .map((entry) => entry.toString())
+          .where((entry) => entry != null)
+          .map(
+            (entry) => entry is Map
+                ? (entry['_id'] ?? entry['id'])?.toString() ?? ''
+                : entry.toString(),
+          )
+          .where((entry) => entry.isNotEmpty)
           .toList(),
-      membersCount: json['membersCount'] as int? ?? 0,
-      defaultConversationId: json['defaultConversationId'] as String?,
+      membersCount: (json['membersCount'] as num?)?.toInt() ?? 0,
+      defaultConversationId:
+          defaultConversationId != null && defaultConversationId.isNotEmpty
+          ? defaultConversationId
+          : null,
     );
   }
 }
@@ -259,11 +272,11 @@ class BranchSummary {
 
   factory BranchSummary.fromJson(Map<String, dynamic> json) {
     return BranchSummary(
-      id: json['id'] as String,
-      name: json['name'] as String? ?? '',
-      code: json['code'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      membersCount: json['membersCount'] as int? ?? 0,
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      code: json['code']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      membersCount: (json['membersCount'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -281,8 +294,8 @@ class ChatRole {
 
   factory ChatRole.fromJson(Map<String, dynamic> json) {
     return ChatRole(
-      id: json['id'] as String,
-      roleName: json['roleName'] as String? ?? 'user',
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      roleName: json['roleName']?.toString() ?? 'user',
       permissions: ChatPermissionSet.fromJson(
         json['permissions'] as Map<String, dynamic>?,
       ),
@@ -307,11 +320,15 @@ class ChatLastMessage {
 
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
+    final rawSender = map['senderId'];
+    final senderId = rawSender is Map
+        ? (rawSender['_id'] ?? rawSender['id'])?.toString()
+        : rawSender?.toString();
     return ChatLastMessage(
-      content: (map['content'] ?? map['text'] ?? '') as String,
-      senderId: map['senderId'] as String?,
-      senderName: map['senderName'] as String? ?? '',
-      messageType: map['messageType'] as String? ?? 'text',
+      content: (map['content'] ?? map['text'] ?? '').toString(),
+      senderId: senderId,
+      senderName: map['senderName']?.toString() ?? '',
+      messageType: map['messageType']?.toString() ?? 'text',
       createdAt: map['createdAt'] is String
           ? DateTime.tryParse(map['createdAt'] as String)
           : null,
@@ -348,15 +365,19 @@ class ChatPinnedMessage {
 
   factory ChatPinnedMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
+    final rawSetBy = map['setBy'];
+    final setBy = rawSetBy is Map
+        ? (rawSetBy['_id'] ?? rawSetBy['id'])?.toString()
+        : rawSetBy?.toString();
     return ChatPinnedMessage(
-      messageId: map['messageId'] as String?,
-      content: map['content'] as String? ?? '',
-      setBy: map['setBy'] as String?,
-      setByName: map['setByName'] as String? ?? '',
-      createdAt: map['createdAt'] != null
+      messageId: map['messageId']?.toString(),
+      content: map['content']?.toString() ?? '',
+      setBy: setBy,
+      setByName: map['setByName']?.toString() ?? '',
+      createdAt: map['createdAt'] is String
           ? DateTime.tryParse(map['createdAt'] as String)
           : null,
-      updatedAt: map['updatedAt'] != null
+      updatedAt: map['updatedAt'] is String
           ? DateTime.tryParse(map['updatedAt'] as String)
           : null,
     );
@@ -489,14 +510,26 @@ class ChatConversation {
   }
 
   factory ChatConversation.fromJson(Map<String, dynamic> json) {
+    final rawDept = json['departmentId'];
+    final departmentId = rawDept is Map
+        ? (rawDept['_id'] ?? rawDept['id'])?.toString()
+        : rawDept?.toString();
+    final rawCreatedBy = json['createdBy'];
+    final createdBy = rawCreatedBy is Map
+        ? (rawCreatedBy['_id'] ?? rawCreatedBy['id'])?.toString()
+        : rawCreatedBy?.toString();
+    String fallbackName = json['name']?.toString() ?? '';
+    if (fallbackName.trim().isEmpty && rawDept is Map) {
+      fallbackName = rawDept['name']?.toString() ?? '';
+    }
     return ChatConversation(
-      id: json['id'] as String,
-      type: json['type'] as String? ?? 'direct',
-      name: json['name'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      avatarUrl: json['avatarUrl'] as String?,
-      departmentId: json['departmentId'] as String?,
-      createdBy: json['createdBy'] as String?,
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      type: json['type']?.toString() ?? 'direct',
+      name: fallbackName,
+      description: json['description']?.toString() ?? '',
+      avatarUrl: json['avatarUrl']?.toString(),
+      departmentId: departmentId,
+      createdBy: createdBy,
       members: (json['members'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(ChatDirectoryUser.fromJson)
@@ -507,12 +540,22 @@ class ChatConversation {
           .toList(),
       broadcastPublisherIds: _normalizeStringList(
         (json['broadcastPublisherIds'] as List<dynamic>?)
-            ?.map((entry) => entry.toString())
+            ?.where((entry) => entry != null)
+            .map(
+              (entry) => entry is Map
+                  ? (entry['_id'] ?? entry['id'])?.toString() ?? ''
+                  : entry.toString(),
+            )
             .toList(),
       ),
       blockedMemberIds: _normalizeStringList(
         (json['blockedMemberIds'] as List<dynamic>?)
-            ?.map((entry) => entry.toString())
+            ?.where((entry) => entry != null)
+            .map(
+              (entry) => entry is Map
+                  ? (entry['_id'] ?? entry['id'])?.toString() ?? ''
+                  : entry.toString(),
+            )
             .toList(),
       ),
       blockedMembers: (json['blockedMembers'] as List<dynamic>? ?? const [])
@@ -529,17 +572,17 @@ class ChatConversation {
               json['lastMessage'] as Map<String, dynamic>,
             )
           : null,
-      unreadCount: json['unreadCount'] as int? ?? 0,
+      unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       isArchived: json['isArchived'] == true,
       isMuted: json['isMuted'] == true,
       isPinned: json['isPinned'] == true,
       isFavorite: json['isFavorite'] == true,
       isActive: json['isActive'] != false,
       createdAt:
-          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       updatedAt:
-          DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
           DateTime.now(),
     );
   }

@@ -5167,6 +5167,14 @@ class _RoomsAdminTab extends ConsumerStatefulWidget {
 class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
   final TextEditingController _searchController = TextEditingController();
   String _typeFilter = 'all'; // all, group, department, broadcast, archived
+  List<ChatConversation> _fetchedRooms = const <ChatConversation>[];
+  bool _isLoadingRooms = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(_reloadRooms);
+  }
 
   @override
   void dispose() {
@@ -5174,16 +5182,145 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
     super.dispose();
   }
 
+  Future<void> _reloadRooms() async {
+    if (!mounted || _isLoadingRooms) return;
+    setState(() => _isLoadingRooms = true);
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final results = await Future.wait<List<ChatConversation>>([
+        repo.fetchManageableConversations().catchError(
+          (_) => const <ChatConversation>[],
+        ),
+        repo.fetchConversations().catchError(
+          (_) => const <ChatConversation>[],
+        ),
+      ]);
+      final merged = <String, ChatConversation>{};
+      for (final list in results) {
+        for (final conv in list) {
+          if (conv.type != 'direct' && conv.id.isNotEmpty) {
+            merged[conv.id] = conv;
+          }
+        }
+      }
+      final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+      final depts = widget.departments.isNotEmpty
+          ? widget.departments
+          : (overview?.departments ?? const <DepartmentSummary>[]);
+      for (final dept in depts) {
+        final convId = dept.defaultConversationId;
+        if (convId != null && convId.isNotEmpty && !merged.containsKey(convId)) {
+          try {
+            final conv = await repo.fetchConversation(convId);
+            if (conv.id.isNotEmpty) {
+              merged[conv.id] = conv;
+            }
+          } catch (_) {
+            // Synthesize department room entry if individual fetch fails
+            merged[convId] = ChatConversation(
+              id: convId,
+              type: 'department',
+              name: 'غرفة ${dept.name}',
+              description: dept.description,
+              departmentId: dept.id,
+              createdBy: null,
+              members: widget.users
+                  .where(
+                    (u) =>
+                        u.departmentId == dept.id ||
+                        u.departmentIds.contains(dept.id),
+                  )
+                  .toList(),
+              admins: widget.users
+                  .where((u) => dept.managers.contains(u.id))
+                  .toList(),
+              broadcastPublisherIds: const [],
+              blockedMemberIds: const [],
+              pinnedMessage: null,
+              lastMessage: null,
+              unreadCount: 0,
+              isArchived: false,
+              isMuted: false,
+              isPinned: false,
+              isFavorite: false,
+              isActive: true,
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            );
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _fetchedRooms = merged.values.toList();
+        _isLoadingRooms = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoadingRooms = false);
+      }
+    }
+  }
+
   List<ChatConversation> _mergedRooms(ChatOverviewData? overview) {
     final map = <String, ChatConversation>{};
+    for (final c
+        in overview?.manageableConversations ?? const <ChatConversation>[]) {
+      if (c.type != 'direct' && c.id.isNotEmpty) {
+        map[c.id] = c;
+      }
+    }
     for (final c in overview?.conversations ?? const <ChatConversation>[]) {
-      if (c.type != 'direct') {
+      if (c.type != 'direct' && c.id.isNotEmpty) {
         map[c.id] = c;
       }
     }
     for (final c in widget.conversations) {
-      if (c.type != 'direct') {
+      if (c.type != 'direct' && c.id.isNotEmpty) {
         map[c.id] = c;
+      }
+    }
+    for (final c in _fetchedRooms) {
+      if (c.type != 'direct' && c.id.isNotEmpty) {
+        map[c.id] = c;
+      }
+    }
+    final depts = widget.departments.isNotEmpty
+        ? widget.departments
+        : (overview?.departments ?? const <DepartmentSummary>[]);
+    for (final dept in depts) {
+      final convId = dept.defaultConversationId;
+      if (convId != null && convId.isNotEmpty && !map.containsKey(convId)) {
+        map[convId] = ChatConversation(
+          id: convId,
+          type: 'department',
+          name: 'غرفة ${dept.name}',
+          description: dept.description,
+          departmentId: dept.id,
+          createdBy: null,
+          members: widget.users
+              .where(
+                (u) =>
+                    u.departmentId == dept.id ||
+                    u.departmentIds.contains(dept.id),
+              )
+              .toList(),
+          admins: widget.users
+              .where((u) => dept.managers.contains(u.id))
+              .toList(),
+          broadcastPublisherIds: const [],
+          blockedMemberIds: const [],
+          pinnedMessage: null,
+          lastMessage: null,
+          unreadCount: 0,
+          isArchived: false,
+          isMuted: false,
+          isPinned: false,
+          isFavorite: false,
+          isActive: true,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
       }
     }
     final list = map.values.toList();
@@ -5695,6 +5832,7 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
 
     if (created == true && context.mounted) {
       await overviewController.refresh();
+      await _reloadRooms();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('تم إنشاء الغرفة بنجاح.')),
@@ -6055,7 +6193,10 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
         },
       ),
     );
-    if (saved == true && context.mounted) await overviewController.refresh();
+    if (saved == true && context.mounted) {
+      await overviewController.refresh();
+      await _reloadRooms();
+    }
   }
 
   @override
@@ -6177,6 +6318,27 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                       value: '$broadcastsCount',
                       color: const Color(0xFFF59E0B),
                       isDark: isDark,
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filledTonal(
+                      tooltip: 'تحديث قائمة الغرف والمجموعات',
+                      onPressed: _isLoadingRooms
+                          ? null
+                          : () async {
+                              await _reloadRooms();
+                              if (mounted) {
+                                await ref
+                                    .read(chatOverviewControllerProvider.notifier)
+                                    .refresh();
+                              }
+                            },
+                      icon: _isLoadingRooms
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: ButtonLoadingIndicator(),
+                            )
+                          : const Icon(Icons.refresh_rounded, size: 18),
                     ),
                     const SizedBox(width: 10),
                     if (canCreateRooms) ...[
@@ -6567,6 +6729,14 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                                                 .notifier,
                                           )
                                           .deleteManagedConversation(room.id);
+                                      if (mounted) {
+                                        setState(() {
+                                          _fetchedRooms = _fetchedRooms
+                                              .where((r) => r.id != room.id)
+                                              .toList();
+                                        });
+                                        await _reloadRooms();
+                                      }
                                       if (!context.mounted) return;
                                       ScaffoldMessenger.of(
                                         context,

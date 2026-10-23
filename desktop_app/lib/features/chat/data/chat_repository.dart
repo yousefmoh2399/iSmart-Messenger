@@ -55,15 +55,31 @@ class ChatRepository {
     return Duration(seconds: seconds);
   }
 
+  List<ChatConversation> _parseConversationsSafely(
+    List<Map<String, dynamic>> rawItems,
+  ) {
+    final parsed = <ChatConversation>[];
+    for (final item in rawItems) {
+      try {
+        final conv = ChatConversation.fromJson(item);
+        if (conv.id.isNotEmpty) {
+          parsed.add(conv);
+        }
+      } catch (_) {
+        // Ignore single malformed conversation so others still load
+      }
+    }
+    return parsed;
+  }
+
   Future<List<ChatConversation>> fetchConversations() async {
     try {
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
         '/api/chat/conversations',
       );
-      final list = _extractList(
-        response.data,
-        'conversations',
-      ).map(ChatConversation.fromJson).toList();
+      final list = _parseConversationsSafely(
+        _extractList(response.data, 'conversations'),
+      );
       if (response.data != null) {
         await _cache.saveRawJson('conversations', response.data!);
       }
@@ -72,7 +88,9 @@ class ChatRepository {
       if (e is DioException) {
         final cached = await _cache.loadRawJson('conversations');
         if (cached != null) {
-          return _extractList(cached, 'conversations').map(ChatConversation.fromJson).toList();
+          return _parseConversationsSafely(
+            _extractList(cached, 'conversations'),
+          );
         }
       }
       rethrow;
@@ -83,10 +101,9 @@ class ChatRepository {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/admin/conversations',
     );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    return _parseConversationsSafely(
+      _extractList(response.data, 'conversations'),
+    );
   }
 
   Future<ChatConversation> fetchConversation(String conversationId) async {

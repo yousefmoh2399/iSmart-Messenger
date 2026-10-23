@@ -340,15 +340,35 @@ function isAdminRole(role) {
 }
 
 function serializeUserLite(user) {
+  if (!user) {
+    return {
+      id: "",
+      username: "",
+      fullName: "",
+      jobTitle: "",
+      role: "user",
+      departmentId: null,
+      departmentIds: [],
+      branchId: null,
+      branchCode: "MAIN",
+      isOnline: false,
+      presenceStatus: "offline",
+      isActive: false,
+      avatarUrl: null,
+      lastSeen: null,
+      lastActiveAt: null,
+    };
+  }
+  const id = (user._id || user.id || "").toString();
   return {
-    id: user._id.toString(),
-    username: user.username,
-    fullName: user.fullName,
+    id,
+    username: user.username || "",
+    fullName: user.fullName || "",
     jobTitle: user.jobTitle || "",
-    role: user.role,
+    role: user.role || "user",
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     departmentIds: Array.isArray(user.departmentIds)
-      ? user.departmentIds.map((entry) => entry.toString())
+      ? user.departmentIds.filter(Boolean).map((entry) => entry.toString())
       : user.departmentId
         ? [user.departmentId.toString()]
         : [],
@@ -389,12 +409,16 @@ function serializeReceipt(entry) {
 }
 
 async function serializeConversation(conversation, currentUserId) {
-  const members = (conversation.members || []).map((member) =>
-    member._id ? serializeUserLite(member) : { id: member.toString() },
-  );
-  const admins = (conversation.admins || []).map((admin) =>
-    admin._id ? serializeUserLite(admin) : { id: admin.toString() },
-  );
+  const members = (conversation.members || [])
+    .filter(Boolean)
+    .map((member) =>
+      member._id ? serializeUserLite(member) : { id: member.toString() },
+    );
+  const admins = (conversation.admins || [])
+    .filter(Boolean)
+    .map((admin) =>
+      admin._id ? serializeUserLite(admin) : { id: admin.toString() },
+    );
 
   const memberState = await ConversationMemberState.findOne({
     conversationId: conversation._id,
@@ -435,18 +459,22 @@ async function serializeConversation(conversation, currentUserId) {
         ? conversation.departmentId._id.toString()
         : conversation.departmentId.toString()
       : null,
-    createdBy: conversation.createdBy?.toString?.() || conversation.createdBy,
+    createdBy: conversation.createdBy?._id
+      ? conversation.createdBy._id.toString()
+      : conversation.createdBy?.toString?.() || conversation.createdBy,
     members,
     admins,
-    broadcastPublisherIds: (conversation.broadcastPublisherIds || []).map(
-      (entry) => (entry._id ? entry._id.toString() : entry.toString()),
-    ),
-    blockedMemberIds: (conversation.blockedMembers || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString(),
-    ),
-    blockedMembers: (conversation.blockedMembers || []).map((entry) =>
-      entry._id ? serializeUserLite(entry) : { id: entry.toString() },
-    ),
+    broadcastPublisherIds: (conversation.broadcastPublisherIds || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+    blockedMemberIds: (conversation.blockedMembers || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+    blockedMembers: (conversation.blockedMembers || [])
+      .filter(Boolean)
+      .map((entry) =>
+        entry._id ? serializeUserLite(entry) : { id: entry.toString() },
+      ),
     pinnedMessage: conversation.pinnedMessage
       ? {
           content: conversation.pinnedMessage.content || "",
@@ -530,6 +558,7 @@ async function buildDeliveryReceipts(userIds) {
 
 async function createSystemConversationMessage(conversation, actor, payload) {
   const recipientIds = (conversation.members || [])
+    .filter(Boolean)
     .map((entry) => (entry._id ? entry._id.toString() : entry.toString()))
     .filter((userId) => userId !== actor.id);
 
@@ -771,9 +800,9 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
-  const memberIds = (conversation.members || []).map((entry) =>
-    entry._id ? entry._id.toString() : entry.toString(),
-  );
+  const memberIds = (conversation.members || [])
+    .filter(Boolean)
+    .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
 
   if (conversation.type === "department") {
     const conversationDepartmentId =
@@ -804,10 +833,12 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   if (conversation.type === "direct" && currentUser.role === "user") {
-    const target = (conversation.members || []).find((entry) => {
-      const entryId = entry._id ? entry._id.toString() : entry.toString();
-      return entryId !== currentUserId;
-    });
+    const target = (conversation.members || [])
+      .filter(Boolean)
+      .find((entry) => {
+        const entryId = entry._id ? entry._id.toString() : entry.toString();
+        return entryId !== currentUserId;
+      });
     if (isRestrictedDirectTarget(currentUser, target)) {
       throw new ApiError(403, "Conversation access denied.");
     }
@@ -843,18 +874,18 @@ async function assertConversationManagementAccess(currentUser, conversation) {
   }
 
   if (conversation.type === "direct") {
-    const memberIds = (conversation.members || []).map((entry) =>
-      entry._id ? entry._id.toString() : entry.toString(),
-    );
+    const memberIds = (conversation.members || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
     const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
     if (currentUserId && memberIds.includes(currentUserId)) {
       return;
     }
   }
 
-  const adminIds = (conversation.admins || []).map((entry) =>
-    entry._id ? entry._id.toString() : entry.toString(),
-  );
+  const adminIds = (conversation.admins || [])
+    .filter(Boolean)
+    .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
   const createdById = getObjectIdString(conversation.createdBy);
   if (currentUserId && (adminIds.includes(currentUserId) || createdById === currentUserId)) {
@@ -1009,10 +1040,14 @@ async function listManageableConversations(currentUser) {
 
   const visible = [];
   for (const conversation of conversations) {
-    if (conversation.type === "direct") {
+    if (!conversation || conversation.type === "direct") {
       continue;
     }
-    visible.push(await serializeConversation(conversation, currentUser.id));
+    try {
+      visible.push(await serializeConversation(conversation, currentUser.id));
+    } catch (_) {
+      // Skip malformed conversation without failing the entire manageable list
+    }
   }
   return visible;
 }
