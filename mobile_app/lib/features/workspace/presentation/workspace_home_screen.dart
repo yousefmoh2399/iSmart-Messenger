@@ -78,6 +78,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
             isDestructiveAction: true,
             onPressed: () {
               Navigator.pop(ctx);
+              if (!mounted) return;
               ref.read(workspaceDocsProvider.notifier).deleteDoc(doc.id);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(

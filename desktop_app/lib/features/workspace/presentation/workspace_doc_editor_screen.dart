@@ -96,6 +96,7 @@ class _WorkspaceDocEditorScreenState
   }
 
   void _saveDoc() {
+    if (!mounted) return;
     ref.read(workspaceDocsProvider.notifier).updateDoc(_doc);
     setState(() {});
   }

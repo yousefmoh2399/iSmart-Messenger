@@ -76,14 +76,19 @@ class _PrinterMonitoringScreenState
       _fullSyncRunning = true;
     });
     try {
-      await ref.read(printerRepositoryProvider).fullSync();
-      await ref.read(printerControllerProvider.notifier).refresh();
+      final printerRepo = ref.read(printerRepositoryProvider);
+      final printerCtrl = ref.read(printerControllerProvider.notifier);
+      await printerRepo.fullSync();
+      await printerCtrl.refresh();
       if (!mounted) {
         return;
       }
       setState(() => _busy = false);
       await _showFullSyncProgressDialog();
-      await ref.read(printerControllerProvider.notifier).refresh();
+      if (!mounted) {
+        return;
+      }
+      await printerCtrl.refresh();
       await _refreshSelectedDashboard();
     } catch (error) {
       if (!mounted) {

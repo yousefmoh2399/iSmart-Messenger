@@ -274,30 +274,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (result == null || !mounted) return;
 
+    final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
+    final publicSettingsService = ref.read(publicAppSettingsServiceProvider);
+    final authRepository = ref.read(authRepositoryProvider);
+    final serverConnCtrl = ref.read(
+      serverConnectionControllerProvider.notifier,
+    );
+
     if (result == '__reset__') {
-      await ref.read(apiBaseUrlControllerProvider.notifier).reset();
+      await apiBaseUrlCtrl.reset();
       try {
-        final defaults = await ref
-            .read(publicAppSettingsServiceProvider)
-            .fetchDefaults();
+        final defaults = await publicSettingsService.fetchDefaults();
         final desktopBaseUrl = defaults.desktopBaseUrl?.trim();
         if (desktopBaseUrl != null && desktopBaseUrl.isNotEmpty) {
-          await ref
-              .read(apiBaseUrlControllerProvider.notifier)
-              .applyAdminDefault(desktopBaseUrl);
+          await apiBaseUrlCtrl.applyAdminDefault(desktopBaseUrl);
         }
       } catch (_) {}
     } else if (result.isNotEmpty) {
-      await ref.read(apiBaseUrlControllerProvider.notifier).save(result);
+      await apiBaseUrlCtrl.save(result);
     }
 
-    await ref.read(authRepositoryProvider).clearLocalSessionForServerChange();
+    await authRepository.clearLocalSessionForServerChange();
+    if (!mounted) return;
     ref.read(serverRecoveryRevisionProvider.notifier).state++;
     ref.invalidate(authControllerProvider);
     ref.invalidate(documentsControllerProvider);
     ref.invalidate(adminDocumentsControllerProvider);
     ref.invalidate(usersControllerProvider);
-    await ref.read(serverConnectionControllerProvider.notifier).refresh();
+    await serverConnCtrl.refresh();
 
     if (!mounted) return;
     setState(() => _errorMessage = null);

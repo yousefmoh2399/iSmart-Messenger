@@ -66,6 +66,7 @@ class _ChatAdminPanelState extends ConsumerState<ChatAdminPanel>
   }
 
   Future<void> _ensureUsersLoaded() async {
+    if (!mounted) return;
     if (!widget.currentUser.isAdmin &&
         !widget.currentUser.can('canCreateUsers')) {
       return;
@@ -123,10 +124,19 @@ class _ChatAdminPanelState extends ConsumerState<ChatAdminPanel>
   }
 
   Future<void> _refreshAll() async {
-    await ref.read(chatOverviewControllerProvider.notifier).refresh();
-    await ref.read(usersControllerProvider.notifier).refresh();
-    await ref.read(adminAnnouncementsControllerProvider.notifier).refresh();
-    await ref.read(adminDocumentsControllerProvider.notifier).refresh();
+    if (!mounted) return;
+    final overviewController = ref.read(chatOverviewControllerProvider.notifier);
+    final usersController = ref.read(usersControllerProvider.notifier);
+    final adminAnnouncementsController = ref.read(
+      adminAnnouncementsControllerProvider.notifier,
+    );
+    final adminDocumentsController = ref.read(
+      adminDocumentsControllerProvider.notifier,
+    );
+    await overviewController.refresh();
+    await usersController.refresh();
+    await adminAnnouncementsController.refresh();
+    await adminDocumentsController.refresh();
     if (mounted) {
       setState(_reloadLogs);
     }
@@ -1145,6 +1155,7 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
   void _onSearchChanged(String val) {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
       final query = _searchController.text.trim();
       ref.read(adminDocumentsControllerProvider.notifier).setSearch(
             query.isEmpty ? null : query,
@@ -1218,12 +1229,14 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
       ),
     );
 
-    if (result == null || result.isEmpty) return;
+    if (result == null || result.isEmpty || !mounted) return;
     try {
-      await ref
-          .read(documentRepositoryProvider)
-          .renameDocument(document.id, result);
-      await ref.read(adminDocumentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final adminDocsController = ref.read(
+        adminDocumentsControllerProvider.notifier,
+      );
+      await docRepository.renameDocument(document.id, result);
+      await adminDocsController.refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1250,11 +1263,15 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
         ) ??
         false;
 
-    if (!shouldDelete) return;
+    if (!shouldDelete || !mounted) return;
 
     try {
-      await ref.read(documentRepositoryProvider).deleteDocument(document.id);
-      await ref.read(adminDocumentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final adminDocsController = ref.read(
+        adminDocumentsControllerProvider.notifier,
+      );
+      await docRepository.deleteDocument(document.id);
+      await adminDocsController.refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1519,6 +1536,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
   }
 
   void _applyFilters() {
+    if (!mounted) return;
     final query = _searchController.text.trim();
     ref.read(usersControllerProvider.notifier).setFilters(
           search: query.isEmpty ? null : query,
@@ -1570,11 +1588,16 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         onConfirm: () => Navigator.pop(context, true),
       ),
     );
-    if (approved != true) return;
+    if (approved != true || !mounted) return;
     try {
-      await ref.read(userManagementRepositoryProvider).deleteUser(user.id);
-      await ref.read(usersControllerProvider.notifier).refresh();
-      await ref.read(chatOverviewControllerProvider.notifier).refresh();
+      final userRepository = ref.read(userManagementRepositoryProvider);
+      final usersController = ref.read(usersControllerProvider.notifier);
+      final overviewController = ref.read(
+        chatOverviewControllerProvider.notifier,
+      );
+      await userRepository.deleteUser(user.id);
+      await usersController.refresh();
+      await overviewController.refresh();
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(
         context,
@@ -1600,12 +1623,12 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         onConfirm: () => Navigator.pop(context, true),
       ),
     );
-    if (approved != true) return;
+    if (approved != true || !mounted) return;
     try {
-      await ref
-          .read(userManagementRepositoryProvider)
-          .forceLogoutAllDevices(user.id);
-      await ref.read(usersControllerProvider.notifier).refresh();
+      final userRepository = ref.read(userManagementRepositoryProvider);
+      final usersController = ref.read(usersControllerProvider.notifier);
+      await userRepository.forceLogoutAllDevices(user.id);
+      await usersController.refresh();
       if (!context.mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(
@@ -2528,17 +2551,24 @@ class _ManagedUserStatusSwitchState
   }
 
   Future<void> _updateStatus(bool value) async {
+    if (!mounted) return;
     final previousValue = _isActive;
+    final userRepository = ref.read(userManagementRepositoryProvider);
+    final usersController = ref.read(usersControllerProvider.notifier);
+    final overviewController = ref.read(
+      chatOverviewControllerProvider.notifier,
+    );
     setState(() {
       _isSaving = true;
       _isActive = value;
     });
     try {
-      await ref
-          .read(userManagementRepositoryProvider)
-          .updateUserStatus(userId: widget.userId, isActive: value);
-      await ref.read(usersControllerProvider.notifier).refresh();
-      await ref.read(chatOverviewControllerProvider.notifier).refresh();
+      await userRepository.updateUserStatus(
+        userId: widget.userId,
+        isActive: value,
+      );
+      await usersController.refresh();
+      await overviewController.refresh();
       if (!mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
@@ -3134,7 +3164,9 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
                                             Navigator.pop(ctx, true),
                                       ),
                                     );
-                                    if (confirmed != true || !context.mounted) {
+                                    if (confirmed != true ||
+                                        !context.mounted ||
+                                        !mounted) {
                                       return;
                                     }
                                     try {
@@ -4059,24 +4091,24 @@ class _AnnouncementsAdminTabState
                                 value: announcement.isActive,
                                 activeColor: const Color(0xFF10B981),
                                 onChanged: (value) async {
-                                  await ref
-                                      .read(announcementRepositoryProvider)
+                                  if (!mounted) return;
+                                  final announcementRepository = ref.read(
+                                    announcementRepositoryProvider,
+                                  );
+                                  final adminAnnouncementsController = ref.read(
+                                    adminAnnouncementsControllerProvider
+                                        .notifier,
+                                  );
+                                  final announcementsController = ref.read(
+                                    announcementsControllerProvider.notifier,
+                                  );
+                                  await announcementRepository
                                       .updateAnnouncementStatus(
                                         announcementId: announcement.id,
                                         isActive: value,
                                       );
-                                  await ref
-                                      .read(
-                                        adminAnnouncementsControllerProvider
-                                            .notifier,
-                                      )
-                                      .refresh();
-                                  await ref
-                                      .read(
-                                        announcementsControllerProvider
-                                            .notifier,
-                                      )
-                                      .refresh();
+                                  await adminAnnouncementsController.refresh();
+                                  await announcementsController.refresh();
                                 },
                               ),
                             ],
@@ -4144,24 +4176,25 @@ class _AnnouncementsAdminTabState
                                       onConfirm: () => Navigator.pop(ctx, true),
                                     ),
                                   );
-                                  if (confirmed != true || !context.mounted) {
+                                  if (confirmed != true ||
+                                      !context.mounted ||
+                                      !mounted) {
                                     return;
                                   }
-                                  await ref
-                                      .read(announcementRepositoryProvider)
+                                  final announcementRepository = ref.read(
+                                    announcementRepositoryProvider,
+                                  );
+                                  final adminAnnouncementsController = ref.read(
+                                    adminAnnouncementsControllerProvider
+                                        .notifier,
+                                  );
+                                  final announcementsController = ref.read(
+                                    announcementsControllerProvider.notifier,
+                                  );
+                                  await announcementRepository
                                       .deleteAnnouncement(announcement.id);
-                                  await ref
-                                      .read(
-                                        adminAnnouncementsControllerProvider
-                                            .notifier,
-                                      )
-                                      .refresh();
-                                  await ref
-                                      .read(
-                                        announcementsControllerProvider
-                                            .notifier,
-                                      )
-                                      .refresh();
+                                  await adminAnnouncementsController.refresh();
+                                  await announcementsController.refresh();
                                 },
                                 icon: const Icon(Iconsax.trash, size: 16),
                                 label: const Text('حذف'),
@@ -4873,7 +4906,9 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
                                             Navigator.pop(ctx, true),
                                       ),
                                     );
-                                    if (confirmed != true || !context.mounted) {
+                                    if (confirmed != true ||
+                                        !context.mounted ||
+                                        !mounted) {
                                       return;
                                     }
                                     try {
@@ -6520,7 +6555,9 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                                             Navigator.pop(ctx, true),
                                       ),
                                     );
-                                    if (confirmed != true || !context.mounted) {
+                                    if (confirmed != true ||
+                                        !context.mounted ||
+                                        !mounted) {
                                       return;
                                     }
                                     try {

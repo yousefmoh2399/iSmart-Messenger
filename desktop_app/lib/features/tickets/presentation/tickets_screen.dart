@@ -685,13 +685,15 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
       ),
     );
 
-    if (selected == null || selected == details.ticket.status) return;
+    if (selected == null || selected == details.ticket.status || !mounted) return;
 
     try {
-      await ref
-          .read(ticketDetailsControllerProvider(widget.ticketId).notifier)
-          .updateStatus(selected);
-      await ref.read(ticketsControllerProvider.notifier).refresh();
+      final detailsCtrl = ref.read(
+        ticketDetailsControllerProvider(widget.ticketId).notifier,
+      );
+      final ticketsCtrl = ref.read(ticketsControllerProvider.notifier);
+      await detailsCtrl.updateStatus(selected);
+      await ticketsCtrl.refresh();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1038,13 +1040,15 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
       ),
     );
 
-    if (selected == currentAssignedId) return;
+    if (selected == currentAssignedId || !mounted) return;
 
     try {
-      await ref
-          .read(ticketDetailsControllerProvider(widget.ticketId).notifier)
-          .assignTo(selected);
-      await ref.read(ticketsControllerProvider.notifier).refresh();
+      final detailsCtrl = ref.read(
+        ticketDetailsControllerProvider(widget.ticketId).notifier,
+      );
+      final ticketsCtrl = ref.read(ticketsControllerProvider.notifier);
+      await detailsCtrl.assignTo(selected);
+      await ticketsCtrl.refresh();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2094,10 +2098,9 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
     });
 
     try {
-      final departments = await ref
-          .read(chatRepositoryProvider)
-          .fetchDepartments();
-      final users = await ref.read(chatRepositoryProvider).fetchUsers();
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final departments = await chatRepo.fetchDepartments();
+      final users = await chatRepo.fetchUsers();
       if (!mounted) return;
       setState(() {
         _departments = departments;

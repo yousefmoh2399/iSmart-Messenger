@@ -289,18 +289,21 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _syncAdminServerDefaults() async {
+    if (!mounted) return;
     try {
-      final defaults = await ref
-          .read(appSettingsServiceProvider)
-          .fetchDefaults();
+      final appSettingsService = ref.read(appSettingsServiceProvider);
+      final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
+      final serverConnCtrl = ref.read(
+        serverConnectionControllerProvider.notifier,
+      );
+      final defaults = await appSettingsService.fetchDefaults();
       final desktopUrl = defaults.desktopBaseUrl?.trim();
-      if (desktopUrl == null || desktopUrl.isEmpty) {
+      if (desktopUrl == null || desktopUrl.isEmpty || !mounted) {
         return;
       }
-      await ref
-          .read(apiBaseUrlControllerProvider.notifier)
-          .applyAdminDefault(desktopUrl);
-      await ref.read(serverConnectionControllerProvider.notifier).refresh();
+      await apiBaseUrlCtrl.applyAdminDefault(desktopUrl);
+      if (!mounted) return;
+      await serverConnCtrl.refresh();
     } catch (_) {}
   }
 
@@ -385,7 +388,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _refreshDataAfterServerRestored() async {
-    if (_serverRestoreRefreshInFlight) {
+    if (_serverRestoreRefreshInFlight || !mounted) {
       return;
     }
     _serverRestoreRefreshInFlight = true;
@@ -447,12 +450,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _retryServerConnection() async {
+    if (!mounted) return;
     try {
       await ref.read(serverConnectionControllerProvider.notifier).refresh();
+      if (!mounted) return;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
+      if (!mounted) return;
       try {
         ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
       } catch (_) {}
@@ -515,7 +521,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
 
+    if (!mounted) return;
     await ref.read(authRepositoryProvider).clearLocalSessionForServerChange();
+    if (!mounted) return;
     ref.read(serverRecoveryRevisionProvider.notifier).state++;
     ref.invalidate(authControllerProvider);
     ref.invalidate(documentsControllerProvider);
@@ -1054,9 +1062,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _ensureLanTransferServiceRunning() async {
+    if (!mounted) return;
     try {
-      await ref.read(lanFileTransferServiceProvider).start();
-      await ref.read(lanFileTransferServiceProvider).refreshLocalIpv4s();
+      final lanService = ref.read(lanFileTransferServiceProvider);
+      await lanService.start();
+      await lanService.refreshLocalIpv4s();
     } catch (error) {
       if (!mounted) {
         return;
@@ -1153,11 +1163,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _publishPrinterCatalog() async {
+    if (!mounted) return;
     try {
-      final catalog = await ref
-          .read(desktopPrintServiceProvider)
-          .getPrinterCatalog();
-      await ref.read(chatSocketServiceProvider).emitWithAck('printers:update', {
+      final printService = ref.read(desktopPrintServiceProvider);
+      final socketService = ref.read(chatSocketServiceProvider);
+      final catalog = await printService.getPrinterCatalog();
+      await socketService.emitWithAck('printers:update', {
         'printers': catalog.printers,
         'defaultPrinter': catalog.defaultPrinter,
       });
@@ -1165,6 +1176,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _publishDesktopStorageConfig() async {
+    if (!mounted) return;
     try {
       final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
       await ref.read(chatSocketServiceProvider).emitWithAck(
@@ -1175,6 +1187,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _handlePrintJob(Map<String, dynamic> payload) async {
+    if (!mounted) return;
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
     final processor = ref.read(printJobProcessorProvider);
     final result = await processor.process(
@@ -1203,7 +1216,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _handleFileSaveJob(Map<String, dynamic> payload) async {
+    if (!mounted) return;
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
+    final socketService = ref.read(chatSocketServiceProvider);
     final preferredDirectoryPath = _preferredDirectoryForFileSave(
       payload,
       prefs,
@@ -1220,20 +1235,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                 required String message,
                 String? savedPath,
               }) {
-                ref
-                    .read(chatSocketServiceProvider)
-                    .emitEvent('file_save_progress', {
-                      'jobId': payload['jobId']?.toString(),
-                      'stage': stage,
-                      'progress': progress,
-                      'message': message,
-                      if (savedPath != null && savedPath.trim().isNotEmpty)
-                        'savedPath': savedPath,
-                    });
+                socketService.emitEvent('file_save_progress', {
+                  'jobId': payload['jobId']?.toString(),
+                  'stage': stage,
+                  'progress': progress,
+                  'message': message,
+                  if (savedPath != null && savedPath.trim().isNotEmpty)
+                    'savedPath': savedPath,
+                });
               },
         );
 
-    ref.read(chatSocketServiceProvider).emitEvent('file_save_result', {
+    socketService.emitEvent('file_save_result', {
       'jobId': payload['jobId']?.toString(),
       'success': result.success,
       'message': result.message,

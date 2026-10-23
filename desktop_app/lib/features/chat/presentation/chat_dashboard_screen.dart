@@ -479,15 +479,16 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
       ),
     );
 
-    if (action == null) {
+    if (action == null || !mounted) {
       return;
     }
 
     try {
+      final overviewController = ref.read(
+        chatOverviewControllerProvider.notifier,
+      );
       if (action == 'leave') {
-        await ref
-            .read(chatOverviewControllerProvider.notifier)
-            .leaveConversation(conversation.id);
+        await overviewController.leaveConversation(conversation.id);
         if (!mounted) return;
         if (_selectedConversationId == conversation.id) {
           _selectConversation(null);
@@ -520,13 +521,12 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
         if (shouldDeleteGlobal != true) {
           return;
         }
-        await ref
-            .read(chatOverviewControllerProvider.notifier)
-            .deleteConversation(conversation.id, deleteForEveryone: true);
+        await overviewController.deleteConversation(
+          conversation.id,
+          deleteForEveryone: true,
+        );
       } else {
-        await ref
-            .read(chatOverviewControllerProvider.notifier)
-            .deleteConversation(conversation.id);
+        await overviewController.deleteConversation(conversation.id);
       }
 
       if (!mounted) return;
@@ -839,10 +839,13 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                     );
                   },
                   onRefresh: () async {
-                    await ref
-                        .read(chatOverviewControllerProvider.notifier)
-                        .refresh();
-                    await ref.read(chatFoldersProvider.notifier).refresh();
+                    if (!mounted) return;
+                    final overviewCtrl = ref.read(
+                      chatOverviewControllerProvider.notifier,
+                    );
+                    final foldersCtrl = ref.read(chatFoldersProvider.notifier);
+                    await overviewCtrl.refresh();
+                    await foldersCtrl.refresh();
                   },
                   onOpenAdmin: () {
                     setState(() {

@@ -42,10 +42,19 @@ class _ChatAdminManagementScreenState
   }
 
   Future<void> _refreshAll() async {
-    await ref.read(chatOverviewControllerProvider.notifier).refresh();
-    await ref.read(usersControllerProvider.notifier).refresh();
-    await ref.read(adminAnnouncementsControllerProvider.notifier).refresh();
-    await ref.read(adminDocumentsControllerProvider.notifier).refresh();
+    if (!mounted) return;
+    final overviewCtrl = ref.read(chatOverviewControllerProvider.notifier);
+    final usersCtrl = ref.read(usersControllerProvider.notifier);
+    final adminAnnouncementsCtrl = ref.read(
+      adminAnnouncementsControllerProvider.notifier,
+    );
+    final adminDocumentsCtrl = ref.read(
+      adminDocumentsControllerProvider.notifier,
+    );
+    await overviewCtrl.refresh();
+    await usersCtrl.refresh();
+    await adminAnnouncementsCtrl.refresh();
+    await adminDocumentsCtrl.refresh();
     if (mounted) {
       setState(_reloadLogs);
     }
@@ -882,13 +891,15 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
       ),
     );
 
-    if (result == null || result.isEmpty) return;
+    if (result == null || result.isEmpty || !mounted) return;
 
     try {
-      await ref
-          .read(documentRepositoryProvider)
-          .renameDocument(document.id, result);
-      await ref.read(adminDocumentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final adminDocsController = ref.read(
+        adminDocumentsControllerProvider.notifier,
+      );
+      await docRepository.renameDocument(document.id, result);
+      await adminDocsController.refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -915,11 +926,15 @@ class _AdminDocumentsTabState extends ConsumerState<_AdminDocumentsTab> {
         ) ??
         false;
 
-    if (!shouldDelete) return;
+    if (!shouldDelete || !mounted) return;
 
     try {
-      await ref.read(documentRepositoryProvider).deleteDocument(document.id);
-      await ref.read(adminDocumentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final adminDocsController = ref.read(
+        adminDocumentsControllerProvider.notifier,
+      );
+      await docRepository.deleteDocument(document.id);
+      await adminDocsController.refresh();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1289,6 +1304,8 @@ class _UsersTab extends ConsumerWidget {
     WidgetRef ref,
     ManagedUser user,
   ) async {
+    final usersCtrl = ref.read(usersControllerProvider.notifier);
+    final overviewCtrl = ref.read(chatOverviewControllerProvider.notifier);
     final displayName = user.fullName.isEmpty ? user.username : user.fullName;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1304,8 +1321,8 @@ class _UsersTab extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
 
     try {
-      await ref.read(usersControllerProvider.notifier).deleteUser(user.id);
-      await ref.read(chatOverviewControllerProvider.notifier).refresh();
+      await usersCtrl.deleteUser(user.id);
+      await overviewCtrl.refresh();
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1323,6 +1340,7 @@ class _UsersTab extends ConsumerWidget {
     WidgetRef ref,
     ManagedUser user,
   ) async {
+    final usersCtrl = ref.read(usersControllerProvider.notifier);
     final displayName = user.fullName.isEmpty ? user.username : user.fullName;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1339,7 +1357,7 @@ class _UsersTab extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
 
     try {
-      await ref.read(usersControllerProvider.notifier).logoutUserAll(user.id);
+      await usersCtrl.logoutUserAll(user.id);
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم إنهاء جميع جلسات المستخدم بنجاح.')),
@@ -1847,17 +1865,22 @@ class _ManagedUserStatusSwitchState
   }
 
   Future<void> _updateStatus(bool value) async {
+    if (!mounted) return;
     final previousValue = _isActive;
+    final userRepository = ref.read(userManagementRepositoryProvider);
+    final usersCtrl = ref.read(usersControllerProvider.notifier);
+    final overviewCtrl = ref.read(chatOverviewControllerProvider.notifier);
     setState(() {
       _isSaving = true;
       _isActive = value;
     });
     try {
-      await ref
-          .read(userManagementRepositoryProvider)
-          .updateUserStatus(userId: widget.userId, isActive: value);
-      await ref.read(usersControllerProvider.notifier).refresh();
-      await ref.read(chatOverviewControllerProvider.notifier).refresh();
+      await userRepository.updateUserStatus(
+        userId: widget.userId,
+        isActive: value,
+      );
+      await usersCtrl.refresh();
+      await overviewCtrl.refresh();
       if (!mounted) return;
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
@@ -2349,12 +2372,17 @@ class _AnnouncementsTabState extends ConsumerState<_AnnouncementsTab> {
         onConfirm: () => Navigator.of(dialogContext).pop(true),
       ),
     );
-    if (confirmed != true) return;
-    await ref
-        .read(announcementRepositoryProvider)
-        .deleteAnnouncement(item.id);
-    await ref.read(adminAnnouncementsControllerProvider.notifier).refresh();
-    await ref.read(announcementsControllerProvider.notifier).refresh();
+    if (confirmed != true || !mounted) return;
+    final announcementRepo = ref.read(announcementRepositoryProvider);
+    final adminAnnouncementsCtrl = ref.read(
+      adminAnnouncementsControllerProvider.notifier,
+    );
+    final announcementsCtrl = ref.read(
+      announcementsControllerProvider.notifier,
+    );
+    await announcementRepo.deleteAnnouncement(item.id);
+    await adminAnnouncementsCtrl.refresh();
+    await announcementsCtrl.refresh();
   }
 
   @override

@@ -564,14 +564,13 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
   }
 
   Future<void> _printDocument(RemoteDocument document) async {
+    if (!mounted) return;
     try {
       final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
-      final bytes = await ref
-          .read(documentRepositoryProvider)
-          .fetchDocumentBytes(document);
-      final result = await ref
-          .read(desktopPrintServiceProvider)
-          .executePrintJob({
+      final docRepository = ref.read(documentRepositoryProvider);
+      final printService = ref.read(desktopPrintServiceProvider);
+      final bytes = await docRepository.fetchDocumentBytes(document);
+      final result = await printService.executePrintJob({
             'fileName': document.fileName,
             'mimeType': 'application/pdf',
             'inlineFileBase64': base64Encode(bytes),
@@ -611,12 +610,12 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
         ],
       ),
     );
-    if (result == null || result.isEmpty) return;
+    if (result == null || result.isEmpty || !mounted) return;
     try {
-      await ref
-          .read(documentRepositoryProvider)
-          .renameDocument(document.id, result);
-      await ref.read(documentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final docsController = ref.read(documentsControllerProvider.notifier);
+      await docRepository.renameDocument(document.id, result);
+      await docsController.refresh();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -645,10 +644,12 @@ class _FilesDashboardScreenState extends ConsumerState<FilesDashboardScreen> {
           ),
         ) ??
         false;
-    if (!shouldDelete) return;
+    if (!shouldDelete || !mounted) return;
     try {
-      await ref.read(documentRepositoryProvider).deleteDocument(document.id);
-      await ref.read(documentsControllerProvider.notifier).refresh();
+      final docRepository = ref.read(documentRepositoryProvider);
+      final docsController = ref.read(documentsControllerProvider.notifier);
+      await docRepository.deleteDocument(document.id);
+      await docsController.refresh();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(

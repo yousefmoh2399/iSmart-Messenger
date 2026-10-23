@@ -79,6 +79,7 @@ class _WorkspaceHomeScreenState extends ConsumerState<WorkspaceHomeScreen> {
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
             onPressed: () {
               Navigator.pop(ctx);
+              if (!mounted) return;
               if (_selectedDocId == doc.id) {
                 setState(() => _selectedDocId = null);
               }
