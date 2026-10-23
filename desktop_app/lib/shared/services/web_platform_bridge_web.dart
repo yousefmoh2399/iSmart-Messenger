@@ -1090,17 +1090,23 @@ Future<Map<String, dynamic>> startElectronUpdate({
   required String downloadUrl,
   String? token,
   String? checksumSha256,
+  String? fileName,
+  String? silentInstallArgs,
+  String? installerKind,
 }) async {
   final result = await _callElectron('startUpdate', {
     'downloadUrl': downloadUrl,
     if (token != null) 'token': token,
     if (checksumSha256 != null) 'checksumSha256': checksumSha256,
+    if (fileName != null) 'fileName': fileName,
+    if (silentInstallArgs != null) 'silentInstallArgs': silentInstallArgs,
+    if (installerKind != null) 'installerKind': installerKind,
   });
   return _asStringMap(result);
 }
 
-Future<Map<String, dynamic>> applyElectronUpdate() async {
-  final result = await _callElectron('applyUpdate');
+Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]) async {
+  final result = await _callElectron('applyUpdate', options ?? {});
   return _asStringMap(result);
 }
 

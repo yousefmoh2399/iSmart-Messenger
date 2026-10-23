@@ -46,9 +46,7 @@ class _UpdateManagementScreenState
   final _versionController = TextEditingController();
   final _notesController = TextEditingController();
   final _externalUrlController = TextEditingController();
-  final _silentArgsController = TextEditingController(
-    text: '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-',
-  );
+  final _silentArgsController = TextEditingController(text: '');
   final _targetBranchesController = TextEditingController();
   final _noteController = TextEditingController();
 

@@ -3463,19 +3463,59 @@ function downloadFile(url, destinationPath, token, onProgress) {
   });
 }
 
+function detectFileType(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return "none";
+    const stat = fs.statSync(filePath);
+    if (stat.size < 4) return "unknown";
+    const fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(4);
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+    
+    // Check for MZ (0x4D, 0x5A) -> Windows Executable (.exe)
+    if (buffer[0] === 0x4d && buffer[1] === 0x5a) {
+      return "exe";
+    }
+    // Check for PK (0x50, 0x4B) -> Zip Archive (.zip)
+    if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+      return "zip";
+    }
+    // Check for MSI compound document (0xD0, 0xCF, 0x11, 0xE0)
+    if (buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0) {
+      return "msi";
+    }
+  } catch (err) {
+    console.error("detectFileType error:", err);
+  }
+  return "unknown";
+}
+
 ipcMain.handle("updater:start-update", async (event, payload = {}) => {
-  const { downloadUrl, token, checksumSha256 } = payload;
+  const { downloadUrl, token, checksumSha256, fileName, silentInstallArgs, installerKind } = payload;
   if (!downloadUrl) {
     throw new Error("Missing download URL");
   }
 
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
-  const updateZipPath = path.join(tempDir, "app-update.zip");
 
-  if (fs.existsSync(updateZipPath)) {
-    try { fs.unlinkSync(updateZipPath); } catch (_) {}
+  // Clean up any previous update artifacts
+  const cleanups = [
+    "update-download.tmp",
+    "update-installer.exe",
+    "update-installer.msi",
+    "update-package.zip",
+    "app-update.zip",
+  ];
+  for (const c of cleanups) {
+    try {
+      const p = path.join(tempDir, c);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    } catch (_) {}
   }
+
+  const tempDownloadPath = path.join(tempDir, "update-download.tmp");
 
   try {
     let lastProgressEventAt = 0;
@@ -3507,7 +3547,7 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       message: "جاري بدء تحميل التحديث...",
     }, { force: true });
 
-    await downloadFile(downloadUrl, updateZipPath, token, (received, total) => {
+    await downloadFile(downloadUrl, tempDownloadPath, token, (received, total) => {
       let progress = 0;
       let message = "";
       if (total > 0) {
@@ -3533,11 +3573,50 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
         progress: 95,
         message: "جاري التحقق من سلامة ملف التحديث...",
       }, { force: true });
-      const calculatedHash = await calculateFileSha256(updateZipPath);
+      const calculatedHash = await calculateFileSha256(tempDownloadPath);
       if (calculatedHash.toLowerCase() !== checksumSha256.trim().toLowerCase()) {
         throw new Error(`بصمة الملف غير مطابقة! المتوقع: ${checksumSha256.trim().toLowerCase()}، المحسوب: ${calculatedHash.toLowerCase()}`);
       }
     }
+
+    // Inspect file magic bytes to determine real file type
+    const detectedType = detectFileType(tempDownloadPath);
+    let finalPackagePath = "";
+    if (detectedType === "exe") {
+      finalPackagePath = path.join(tempDir, "update-installer.exe");
+    } else if (detectedType === "msi") {
+      finalPackagePath = path.join(tempDir, "update-installer.msi");
+    } else if (detectedType === "zip") {
+      finalPackagePath = path.join(tempDir, "update-package.zip");
+    } else {
+      // Fallback based on fileName or downloadUrl
+      const lower = (fileName || downloadUrl).toLowerCase();
+      if (lower.includes(".msi")) {
+        finalPackagePath = path.join(tempDir, "update-installer.msi");
+      } else if (lower.includes(".zip")) {
+        finalPackagePath = path.join(tempDir, "update-package.zip");
+      } else {
+        // Default to executable installer
+        finalPackagePath = path.join(tempDir, "update-installer.exe");
+      }
+    }
+
+    if (fs.existsSync(finalPackagePath)) {
+      try { fs.unlinkSync(finalPackagePath); } catch (_) {}
+    }
+    fs.renameSync(tempDownloadPath, finalPackagePath);
+
+    // Save update metadata for updater:apply-update
+    const meta = {
+      packagePath: finalPackagePath,
+      packageType: detectedType,
+      fileName: fileName || path.basename(finalPackagePath),
+      downloadUrl: downloadUrl,
+      silentInstallArgs: silentInstallArgs || "",
+      installerKind: installerKind || "",
+      downloadedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(tempDir, "update-meta.json"), JSON.stringify(meta, null, 2), "utf8");
 
     sendUpdaterProgress({
       status: "downloaded",
@@ -3545,7 +3624,7 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       message: "تم تحميل التحديث بنجاح وجاهز للتثبيت.",
     }, { force: true });
 
-    return { success: true, zipPath: updateZipPath };
+    return { success: true, filePath: finalPackagePath, packageType: detectedType };
   } catch (error) {
     console.error("Update download failed:", error);
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
@@ -3559,7 +3638,7 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
   }
 });
 
-ipcMain.handle("updater:apply-update", async () => {
+ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
   
@@ -3572,30 +3651,74 @@ ipcMain.handle("updater:apply-update", async () => {
 
   writeLog("=== Starting JS apply-update handler ===");
 
-  const updateZipPath = path.join(tempDir, "app-update.zip");
-  const extractedPath = path.join(tempDir, "extracted");
-  const appDir = path.dirname(process.execPath);
-  const exePath = process.execPath;
+  // Read metadata if available
+  let meta = {};
+  const metaPath = path.join(tempDir, "update-meta.json");
+  if (fs.existsSync(metaPath)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    } catch (_) {}
+  }
 
-  writeLog(`Paths - tempDir: ${tempDir}, zip: ${updateZipPath}, appDir: ${appDir}, exe: ${exePath}`);
+  // Merge any runtime payload options
+  if (payload && typeof payload === "object") {
+    meta = { ...meta, ...payload };
+  }
 
-  if (!fs.existsSync(updateZipPath)) {
-    writeLog("ERROR: update zip path does not exist!");
+  // Locate the update package file
+  let packagePath = meta.packagePath;
+  if (!packagePath || !fs.existsSync(packagePath)) {
+    const candidates = [
+      path.join(tempDir, "update-installer.exe"),
+      path.join(tempDir, "update-installer.msi"),
+      path.join(tempDir, "update-package.zip"),
+      path.join(tempDir, "app-update.zip"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        packagePath = c;
+        break;
+      }
+    }
+  }
+
+  if (!packagePath || !fs.existsSync(packagePath)) {
+    writeLog("ERROR: update package file does not exist in tempDir!");
     throw new Error("ملف التحديث غير موجود! يرجى تحميله أولاً.");
   }
 
-  const zipPathNormalized = updateZipPath.replace(/\\/g, "/");
-  const extractedPathNormalized = extractedPath.replace(/\\/g, "/");
+  const detectedType = detectFileType(packagePath);
+  const isExe = detectedType === "exe" || packagePath.toLowerCase().endsWith(".exe");
+  const isMsi = detectedType === "msi" || packagePath.toLowerCase().endsWith(".msi");
+
+  const appDir = path.dirname(process.execPath);
+  const exePath = process.execPath;
+  const procName = path.basename(exePath, path.extname(exePath));
+  const parentPid = process.pid;
+
+  writeLog(`Found update package: ${packagePath} (type: ${detectedType}, isExe: ${isExe}, isMsi: ${isMsi})`);
+  writeLog(`appDir: ${appDir}, exePath: ${exePath}, procName: ${procName}, PID: ${parentPid}`);
+
+  const packagePathNormalized = packagePath.replace(/\\/g, "/");
   const appDirNormalized = appDir.replace(/\\/g, "/");
   const exePathNormalized = exePath.replace(/\\/g, "/");
   const logPathNormalized = path.join(tempDir, "update_log.txt").replace(/\\/g, "/");
 
   const psScriptPath = path.join(app.getPath("temp"), "apply_update.ps1");
-  const psScriptContent = `
+  let psScriptContent = "";
+
+  if (isExe) {
+    // -------------------------------------------------------------
+    // Direct Executable Installer (.exe) - Electron NSIS setup
+    // Requests Windows Administrator privileges (RunAs / UAC),
+    // closes the application, installs into Program Files, and relaunches.
+    // -------------------------------------------------------------
+    writeLog("Generating PowerShell script for Executable Installer (RunAs / UAC elevation)...");
+    psScriptContent = `
 $logPath = "${logPathNormalized}"
-$zipPath = "${zipPathNormalized}"
-$extractedPath = "${extractedPathNormalized}"
-$appDir = "${appDirNormalized}"
+$installerPath = "${packagePathNormalized}"
+$procName = "${procName}"
+$parentPid = ${parentPid}
 $exePath = "${exePathNormalized}"
 
 function Log-Msg($msg) {
@@ -3607,19 +3730,15 @@ function Log-Msg($msg) {
     "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
 }
 
-Log-Msg "=== Starting update process ==="
-Log-Msg "Parent PID: ${process.pid}"
-Log-Msg "Zip Path: $zipPath"
-Log-Msg "Extraction path: $extractedPath"
-Log-Msg "App Dir: $appDir"
+Log-Msg "=== Starting Electron Setup Installer Update ==="
+Log-Msg "Installer path: $installerPath"
+Log-Msg "Parent PID: $parentPid"
+Log-Msg "Process Name: $procName"
 Log-Msg "Exe Path: $exePath"
 
-# 1. Wait for parent process to exit and force-kill lingering instances
-Log-Msg "Waiting for parent process ${process.pid} to exit..."
-$parentPid = ${process.pid}
-$procName = [System.IO.Path]::GetFileNameWithoutExtension($exePath)
-
-$timeout = 20
+# 1. Wait for current Electron application to exit
+Log-Msg "Waiting for parent process $parentPid to exit..."
+$timeout = 25
 while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
     Start-Sleep -m 200
     $timeout--
@@ -3629,171 +3748,195 @@ if (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
     Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue
 }
 
-Log-Msg "Terminating any other running instances of $procName or electron in appDir..."
+# Ensure all instances of the application are terminated so no files are locked
+Log-Msg "Terminating any lingering instances of $procName or electron..."
 Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process -Name "electron" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*$appDir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -m 600
+
+# 2. Launch the installer executable with Administrator rights (triggers Windows UAC prompt!)
+Log-Msg "Launching installer with Administrator privileges (Verb: RunAs)..."
+try {
+    # Launching with -Verb RunAs prompts Windows UAC for administrator elevation
+    $inst = Start-Process -FilePath "$installerPath" -Verb RunAs -PassThru -Wait
+    Log-Msg "Installer process finished with exit code: $($inst.ExitCode)"
+} catch {
+    Log-Msg "Installer execution notice/exception (e.g. UAC prompt outcome): $($_.Exception.Message)"
+}
+
+# 3. Verify application launch and relaunch if not already started by installer
+Start-Sleep -s 2
+$running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
+if (-not $running) {
+    Log-Msg "Application not running yet. Searching for installed executable in Program Files..."
+    $pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
+    $pf64 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+    $localApp = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
+
+    $candidates = @(
+        (Join-Path $pf32 "iSmart Messenger\$procName.exe"),
+        (Join-Path $pf64 "iSmart Messenger\$procName.exe"),
+        (Join-Path $pf32 "$procName\$procName.exe"),
+        (Join-Path $pf64 "$procName\$procName.exe"),
+        (Join-Path $localApp "Programs\iSmart Messenger\$procName.exe"),
+        "$exePath"
+    )
+    $launched = $false
+    foreach ($cand in $candidates) {
+        if ($cand -and (Test-Path "$cand")) {
+            Log-Msg "Relaunching application from: $cand"
+            Start-Process -FilePath "$cand"
+            $launched = $true
+            break
+        }
+    }
+    if (-not $launched) {
+        Log-Msg "Could not find Program Files executable, attempting original exePath: $exePath"
+        if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
+    }
+} else {
+    Log-Msg "Application is already running after installer execution."
+}
+
+# 4. Clean up installer file
+Start-Sleep -s 3
+Remove-Item -Path "$installerPath" -Force -ErrorAction SilentlyContinue
+Log-Msg "=== Installer update completed ==="
+
+# Self-destruct script
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+`.trim();
+  } else if (isMsi) {
+    // -------------------------------------------------------------
+    // MSI Package
+    // -------------------------------------------------------------
+    writeLog("Generating PowerShell script for MSI installer...");
+    psScriptContent = `
+$logPath = "${logPathNormalized}"
+$installerPath = "${packagePathNormalized}"
+$procName = "${procName}"
+$parentPid = ${parentPid}
+$exePath = "${exePathNormalized}"
+
+function Log-Msg($msg) {
+    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    "[$ts] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
+}
+
+Log-Msg "=== Starting MSI Package Update ==="
+$timeout = 25
+while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
+    Start-Sleep -m 200
+    $timeout--
+}
+Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -m 600
+
+try {
+    $inst = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$installerPath\`" /passive /norestart" -Verb RunAs -PassThru -Wait
+    Log-Msg "msiexec finished with exit code: $($inst.ExitCode)"
+} catch {
+    Log-Msg "MSI install error: $($_.Exception.Message)"
+}
+
+Start-Sleep -s 2
+$running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
+if (-not $running) {
+    if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
+}
+Remove-Item -Path "$installerPath" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+`.trim();
+  } else {
+    // -------------------------------------------------------------
+    // Zip Archive Package (Portable / Loose files)
+    // -------------------------------------------------------------
+    writeLog("Generating PowerShell script for Zip Archive (clean extract without COM popups)...");
+    const extractedPath = path.join(tempDir, "extracted");
+    const extractedPathNormalized = extractedPath.replace(/\\/g, "/");
+
+    psScriptContent = `
+$logPath = "${logPathNormalized}"
+$zipPath = "${packagePathNormalized}"
+$extractedPath = "${extractedPathNormalized}"
+$appDir = "${appDirNormalized}"
+$exePath = "${exePathNormalized}"
+$procName = "${procName}"
+$parentPid = ${parentPid}
+
+function Log-Msg($msg) {
+    $logParent = [System.IO.Path]::GetDirectoryName($logPath)
+    if (-not (Test-Path "$logParent")) {
+        New-Item -ItemType Directory -Path "$logParent" -Force | Out-Null
+    }
+    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
+}
+
+Log-Msg "=== Starting Zip Update Process ==="
+$timeout = 25
+while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
+    Start-Sleep -m 200
+    $timeout--
+}
+Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -m 800
 
-# 2. Check if the update package is directly an executable installer (.exe)
-$isExeInstaller = $false
-try {
-    $fileBytes = [System.IO.File]::ReadAllBytes($zipPath)
-    if ($fileBytes.Length -gt 2 -and $fileBytes[0] -eq 0x4D -and $fileBytes[1] -eq 0x5A) {
-        # MZ header -> Native Windows Executable
-        $isExeInstaller = $true
-    }
-} catch {
-    if ($zipPath.ToLower().EndsWith(".exe")) { $isExeInstaller = $true }
-}
-
-if ($isExeInstaller) {
-    Log-Msg "Package is a direct executable installer. Executing silent installation..."
-    try {
-        $instProc = Start-Process "$zipPath" -ArgumentList "/S", "/silent", "/NORESTART", "/SP-" -PassThru -Wait
-        Log-Msg "Installer process finished with exit code: $($instProc.ExitCode)"
-    } catch {
-        Log-Msg "ERROR executing installer: $($_.Exception.Message)"
-    }
-    Start-Sleep -s 1
-    Log-Msg "Relaunching application..."
-    Start-Process "$exePath"
-    Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
-    Log-Msg "=== Direct installer update finished ==="
-    Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-    exit 0
-}
-
-# 3. Clear extraction folder
 if (Test-Path "$extractedPath") {
-    Log-Msg "Deleting old extracted folder..."
     Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
 }
 New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
 
-# 4. Extract Zip
-Log-Msg "Extracting zip update package..."
 $extractedOk = $false
 try {
     Add-Type -Assembly "System.IO.Compression.FileSystem"
     [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractedPath)
     $extractedOk = $true
-    Log-Msg "Extraction completed successfully via .NET ZipFile."
+    Log-Msg "Extraction completed via .NET ZipFile."
 } catch {
-    Log-Msg "Extraction via .NET failed: $($_.Exception.Message). Falling back to Shell COM..."
+    Log-Msg "Extraction via .NET failed: $($_.Exception.Message)."
 }
 
 if (-not $extractedOk) {
     try {
-        if (Test-Path "$extractedPath") {
-            Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
-        $shell = New-Object -ComObject Shell.Application
-        $zip = $shell.NameSpace("$zipPath")
-        $dest = $shell.NameSpace("$extractedPath")
-        $dest.CopyHere($zip.Items(), 0x14)
-        Start-Sleep -s 3
+        Expand-Archive -Path "$zipPath" -DestinationPath "$extractedPath" -Force
         $extractedOk = $true
-        Log-Msg "Shell COM extraction finished."
+        Log-Msg "Extraction completed via Expand-Archive."
     } catch {
-        Log-Msg "Shell COM extraction failed: $($_.Exception.Message)"
+        Log-Msg "Expand-Archive failed: $($_.Exception.Message)"
     }
 }
 
-Start-Sleep -m 500
-
-# 5. Determine the actual application directory inside the extracted zip
-# Could be: $extractedPath/app, or $extractedPath directly, or a single subfolder containing resources/app.asar
-$sourceDir = ""
-if (Test-Path "$extractedPath\app") {
-    $sourceDir = "$extractedPath\app"
-} elseif (Test-Path "$extractedPath\resources") {
+$sourceDir = "$extractedPath"
+if (Test-Path "$extractedPath\\app") {
+    $sourceDir = "$extractedPath\\app"
+} elseif (Test-Path "$extractedPath\\resources") {
     $sourceDir = "$extractedPath"
-} else {
-    $subdirs = Get-ChildItem -Path "$extractedPath" -Directory -ErrorAction SilentlyContinue
-    $matchedSub = $null
-    foreach ($sd in $subdirs) {
-        if ((Test-Path (Join-Path $sd.FullName "resources")) -or (Test-Path (Join-Path $sd.FullName "$procName.exe"))) {
-            $matchedSub = $sd.FullName
-            break
-        }
-    }
-    if ($matchedSub) {
-        $sourceDir = $matchedSub
-    } else {
-        $sourceDir = "$extractedPath"
-    }
-}
-Log-Msg "Resolved update source directory: $sourceDir"
-
-# Check if an installer executable exists inside the extracted files
-$nestedInstaller = Get-ChildItem -Path "$sourceDir" -Filter "*installer*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $nestedInstaller) {
-    $nestedInstaller = Get-ChildItem -Path "$sourceDir" -Filter "*setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 }
 
+Log-Msg "Copying updated files from $sourceDir to $appDir..."
 $copied = $false
-if ($nestedInstaller) {
-    Log-Msg "Found nested installer executable: $($nestedInstaller.FullName). Running silent installation..."
+for ($i = 1; $i -le 10; $i++) {
     try {
-        $instProc = Start-Process "$($nestedInstaller.FullName)" -ArgumentList "/S", "/silent", "/NORESTART", "/SP-" -PassThru -Wait
-        Log-Msg "Nested installer finished with exit code: $($instProc.ExitCode)"
+        Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Copy-Item -Path "$sourceDir\\*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
         $copied = $true
+        Log-Msg "Files copied successfully on attempt $i."
+        break
     } catch {
-        Log-Msg "Nested installer failed: $($_.Exception.Message)"
-    }
-} else {
-    # 6. Copy files with Retry Loop (up to 10 retries)
-    Log-Msg "Copying updated files from $sourceDir to $appDir..."
-    for ($i = 1; $i -le 10; $i++) {
-        try {
-            Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            Copy-Item -Path "$sourceDir\*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
-            $copied = $true
-            Log-Msg "Files copied successfully on attempt $i."
-            break
-        } catch {
-            Log-Msg "Attempt $i to copy files failed: $($_.Exception.Message). Retrying in 1 second..."
-            Start-Sleep -s 1
-        }
+        Log-Msg "Attempt $i failed: $($_.Exception.Message). Retrying..."
+        Start-Sleep -s 1
     }
 }
 
-if (-not $copied) {
-    Log-Msg "CRITICAL ERROR: Failed to apply update files."
-} else {
-    Log-Msg "Update files applied successfully."
-}
-
-# 7. Relaunch app
-Log-Msg "Relaunching application..."
 Start-Sleep -s 1
-try {
-    if (Test-Path "$exePath") {
-        Start-Process "$exePath"
-        Log-Msg "Application relaunched from $exePath."
-    } else {
-        $fallbackExe = Join-Path $appDir "$procName.exe"
-        if (Test-Path "$fallbackExe") {
-            Start-Process "$fallbackExe"
-            Log-Msg "Application relaunched from $fallbackExe."
-        } else {
-            Log-Msg "Could not find executable to relaunch!"
-        }
-    }
-} catch {
-    Log-Msg "ERROR: Could not relaunch application: $($_.Exception.Message)"
+if (Test-Path "$exePath") {
+    Start-Process "$exePath"
 }
-
-# 8. Cleanup
-Log-Msg "Cleaning up update artifacts..."
 Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-Log-Msg "=== Update process completed successfully ==="
-
-# Self-destruct script
 Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 `.trim();
+  }
 
   writeLog(`Writing psScriptPath: ${psScriptPath}...`);
   fs.writeFileSync(psScriptPath, psScriptContent, "utf8");
@@ -3825,21 +3968,20 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
       }
     );
     writeLog(`cmd.exe child process spawned successfully (PID: ${child.pid}).`);
-    
-    child.on("error", (err) => {
-      writeLog(`ERROR: Child process error event: ${err.message}`);
-    });
     child.unref();
   } catch (err) {
     writeLog(`ERROR: Exception spawning child process: ${err.message}`);
   }
 
-  writeLog("Waiting 1.5 seconds to ensure script start before quitting...");
+  writeLog("Quitting application so installer can proceed...");
   setTimeout(() => {
-    writeLog("Quitting application...");
+    writeLog("Quitting Electron app now...");
     isQuitting = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.destroy(); } catch (_) {}
+    }
     app.quit();
-  }, 1500);
+  }, 1000);
 
   return { success: true };
 });

@@ -172,7 +172,7 @@ contextBridge.exposeInMainWorld("electronBridge", {
   setStartup: (enabled) => ipcRenderer.invoke("startup:set", enabled),
   getStartup: () => ipcRenderer.invoke("startup:get"),
   startUpdate: (payload) => ipcRenderer.invoke("updater:start-update", payload),
-  applyUpdate: () => ipcRenderer.invoke("updater:apply-update"),
+  applyUpdate: (payload) => ipcRenderer.invoke("updater:apply-update", payload),
   listOpenWindows: () => ipcRenderer.invoke("window:list-open-windows"),
   captureWindow: (payload) => ipcRenderer.invoke("window:capture-window", payload),
   captureScreen: () => ipcRenderer.invoke("window:capture-screen"),

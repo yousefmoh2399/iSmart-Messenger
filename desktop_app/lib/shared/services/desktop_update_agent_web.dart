@@ -366,6 +366,9 @@ class DesktopUpdateAgent {
         downloadUrl: absoluteUrl,
         token: token,
         checksumSha256: task.release.checksumSha256,
+        fileName: task.release.fileName,
+        silentInstallArgs: task.release.silentInstallArgs,
+        installerKind: task.release.installerKind,
       );
 
       if (downloadResult['success'] != true) {
@@ -376,7 +379,7 @@ class DesktopUpdateAgent {
       }
 
       await _stateStore.markDownloaded(
-        artifactPath: downloadResult['zipPath']?.toString() ?? 'app-update.zip',
+        artifactPath: downloadResult['filePath']?.toString() ?? downloadResult['zipPath']?.toString() ?? 'update-installer.exe',
         artifactSha256: task.release.checksumSha256 ?? '',
       );
 
@@ -515,6 +518,9 @@ class DesktopUpdateAgent {
         downloadUrl: absoluteUrl,
         token: token,
         checksumSha256: release.checksumSha256,
+        fileName: release.fileName,
+        silentInstallArgs: release.silentInstallArgs,
+        installerKind: release.installerKind,
       );
 
       if (downloadResult['success'] != true) {
@@ -522,7 +528,7 @@ class DesktopUpdateAgent {
       }
 
       await _stateStore.markDownloaded(
-        artifactPath: downloadResult['zipPath']?.toString() ?? 'app-update.zip',
+        artifactPath: downloadResult['filePath']?.toString() ?? downloadResult['zipPath']?.toString() ?? 'update-installer.exe',
         artifactSha256: release.checksumSha256 ?? '',
       );
 
@@ -569,7 +575,13 @@ class DesktopUpdateAgent {
     }
     await _stateStore.markInstalling();
 
-    final installResult = await web_bridge.applyElectronUpdate();
+    final installResult = await web_bridge.applyElectronUpdate({
+      'targetVersion': state.targetVersion,
+      'fileName': state.fileName,
+      'silentInstallArgs': state.silentInstallArgs,
+      'installerKind': state.installerKind,
+      'packageType': state.packageType,
+    });
     if (installResult['success'] != true) {
       final errMsg =
           installResult['error']?.toString() ?? 'فشل تطبيق التحديث في إلكترون.';

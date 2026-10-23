@@ -254,11 +254,14 @@ Future<Map<String, dynamic>> startElectronUpdate({
   required String downloadUrl,
   String? token,
   String? checksumSha256,
+  String? fileName,
+  String? silentInstallArgs,
+  String? installerKind,
 }) async {
   throw UnsupportedError('Electron is not available on this platform.');
 }
 
-Future<Map<String, dynamic>> applyElectronUpdate() async {
+Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]) async {
   throw UnsupportedError('Electron is not available on this platform.');
 }
 
