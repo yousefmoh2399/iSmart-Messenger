@@ -1,3 +1,4 @@
+const net = require("net");
 const http = require("http");
 const https = require("https");
 const { execFile } = require("child_process");
@@ -34,6 +35,31 @@ const TONER_KEYWORDS = {
 
 const CRAWL_KEYWORDS =
   /status|supply|suppl|toner|usage|counter|report|event|job|history|maint|device|consum|paper|ccrx|log/i;
+
+function isTcpPortOpen(host, port, timeoutMs = 1200) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+
+    const done = (isOpen) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(isOpen);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+
+    try {
+      socket.connect(port, host);
+    } catch (_) {
+      done(false);
+    }
+  });
+}
 
 function requestText(url, timeout = Number(process.env.PRINTER_EWS_TIMEOUT_MS || 3000), redirects = 0) {
   return new Promise((resolve) => {
@@ -81,10 +107,15 @@ function requestText(url, timeout = Number(process.env.PRINTER_EWS_TIMEOUT_MS ||
     });
     req.on("timeout", () => {
       req.destroy();
-      requestTextWithCurl(url, timeout).then(resolve).catch(() => resolve(null));
+      resolve(null);
     });
-    req.on("error", () => {
-      requestTextWithCurl(url, timeout).then(resolve).catch(() => resolve(null));
+    req.on("error", (error) => {
+      const code = String(error?.code || "");
+      if (code.includes("SSL") || code.includes("EPROTO") || code === "ECONNRESET") {
+        requestTextWithCurl(url, timeout).then(resolve).catch(() => resolve(null));
+        return;
+      }
+      resolve(null);
     });
   });
 }
@@ -341,8 +372,12 @@ function parseHpEventLog(logXml) {
 }
 
 async function collectHpLedmDetails(ipAddress) {
-  const [configXml, serviceXml, usageXml, statusXml, logsXml, consumableXml] = await Promise.all([
-    requestDevMgmtXml(ipAddress, "ProductConfigDyn.xml"),
+  const configXml = await requestDevMgmtXml(ipAddress, "ProductConfigDyn.xml");
+  if (!configXml || !/MakeAndModel|ProductInformation/i.test(configXml)) {
+    return null;
+  }
+
+  const [serviceXml, usageXml, statusXml, logsXml, consumableXml] = await Promise.all([
     requestDevMgmtXml(ipAddress, "ProductServiceDyn.xml"),
     requestDevMgmtXml(ipAddress, "ProductUsageDyn.xml"),
     requestDevMgmtXml(ipAddress, "ProductStatusDyn.xml"),
@@ -350,7 +385,7 @@ async function collectHpLedmDetails(ipAddress) {
     requestDevMgmtXml(ipAddress, "ConsumableConfigDyn.xml"),
   ]);
 
-  if (!configXml || !usageXml || !/MakeAndModel|ProductInformation/i.test(configXml)) {
+  if (!usageXml) {
     return null;
   }
 
@@ -584,13 +619,33 @@ function mergeExtendedDetails(snmpPayload, webDetails) {
   };
 }
 
-async function collectGenericWebDetails(ipAddress) {
+async function collectGenericWebDetails(ipAddress, options = {}) {
   const pages = [];
   const visited = new Set();
   const maxPages = Number(process.env.PRINTER_EWS_MAX_PAGES || 10);
 
-  for (const protocol of ["http", "https"]) {
-    const queue = COMMON_PATHS.map((pagePath) => `${protocol}://${ipAddress}${pagePath}`);
+  const protocols = [];
+  if (options.httpOpen !== false) protocols.push("http");
+  if (options.httpsOpen !== false) protocols.push("https");
+
+  for (const protocol of protocols) {
+    const rootUrl = `${protocol}://${ipAddress}/`;
+    visited.add(rootUrl);
+    const rootHtml = await requestText(rootUrl);
+    if (!rootHtml) {
+      // If root does not respond, avoid crawling 18 other paths on this protocol
+      continue;
+    }
+
+    if (hasPrinterContent(rootHtml)) {
+      pages.push({ url: rootUrl, html: rootHtml });
+    }
+
+    const queue = [
+      ...extractRelevantLinks(rootHtml, rootUrl).filter((link) => !visited.has(link)),
+      ...COMMON_PATHS.filter((p) => p !== "/").map((pagePath) => `${protocol}://${ipAddress}${pagePath}`),
+    ];
+
     while (queue.length > 0 && pages.length < maxPages) {
       const url = queue.shift();
       if (!url || visited.has(url)) continue;
@@ -610,9 +665,21 @@ async function collectGenericWebDetails(ipAddress) {
 }
 
 async function collectPrinterWebDetails(ipAddress) {
-  const hpLedm = await collectHpLedmDetails(ipAddress);
-  if (hpLedm) return hpLedm;
-  return collectGenericWebDetails(ipAddress);
+  const [httpOpen, httpsOpen] = await Promise.all([
+    isTcpPortOpen(ipAddress, 80, 1000),
+    isTcpPortOpen(ipAddress, 443, 1000),
+  ]);
+
+  if (!httpOpen && !httpsOpen) {
+    return null;
+  }
+
+  if (httpOpen) {
+    const hpLedm = await collectHpLedmDetails(ipAddress);
+    if (hpLedm) return hpLedm;
+  }
+
+  return collectGenericWebDetails(ipAddress, { httpOpen, httpsOpen });
 }
 
 module.exports = {

@@ -210,9 +210,9 @@ function resolveHostTimeout(options = {}) {
   const value = Number(
     options.hostTimeoutMs ??
       process.env.PRINTER_DISCOVERY_HOST_TIMEOUT_MS ??
-      operationTimeout * 12 + timeout * (retries + 1),
+      Math.min(operationTimeout * 2 + timeout * (retries + 1), 7000),
   );
-  return Number.isFinite(value) && value > 0 ? value : operationTimeout * 12 + timeout * (retries + 1);
+  return Number.isFinite(value) && value > 0 ? value : 7000;
 }
 
 function createDeadline(ms, onTimeout) {
