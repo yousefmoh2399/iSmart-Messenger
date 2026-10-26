@@ -28,6 +28,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   bool _hasMoreUsers = false;
   bool _loadingMoreUsers = false;
   Future<void>? _refreshFuture;
+  final Set<String> _processedIncomingMessageIds = <String>{};
 
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
@@ -602,6 +603,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   }
 
   void _applyIncomingMessage(ChatMessage message) {
+    if (message.id.isNotEmpty) {
+      if (_processedIncomingMessageIds.contains(message.id)) {
+        return;
+      }
+      _processedIncomingMessageIds.add(message.id);
+      if (_processedIncomingMessageIds.length > 500) {
+        _processedIncomingMessageIds.remove(_processedIncomingMessageIds.first);
+      }
+    }
+
     unawaited(_upsertIncomingMessageInCache(message));
 
     final current = state.valueOrNull;
@@ -780,7 +791,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       updated.insert(0, conversation);
     } else {
       updated[index] = conversation.copyWith(
-        unreadCount: updated[index].unreadCount,
+        unreadCount: conversation.unreadCount > 0
+            ? conversation.unreadCount
+            : updated[index].unreadCount,
       );
     }
 
@@ -793,7 +806,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         manageable.insert(0, conversation);
       } else {
         manageable[manageableIndex] = conversation.copyWith(
-          unreadCount: manageable[manageableIndex].unreadCount,
+          unreadCount: conversation.unreadCount > 0
+              ? conversation.unreadCount
+              : manageable[manageableIndex].unreadCount,
         );
       }
     }
@@ -816,16 +831,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
+    final updated = current.conversations
+        .map(
+          (conversation) => conversation.id == conversationId
+              ? conversation.copyWith(unreadCount: unreadCount)
+              : conversation,
+        )
+        .toList();
+
+    final manageable = current.manageableConversations
+        .map(
+          (conversation) => conversation.id == conversationId
+              ? conversation.copyWith(unreadCount: unreadCount)
+              : conversation,
+        )
+        .toList();
+
     state = AsyncData(
       _copyOverview(
         source: current,
-        conversations: current.conversations
-            .map(
-              (conversation) => conversation.id == conversationId
-                  ? conversation.copyWith(unreadCount: unreadCount)
-                  : conversation,
-            )
-            .toList(),
+        conversations: updated,
+        manageableConversations: manageable,
       ),
     );
   }
@@ -1419,10 +1445,10 @@ class ConversationMessagesController
 
       if (event.type == 'message_seen' &&
           event.payload['conversationId']?.toString() == conversationId) {
-        final messageIds =
-            (event.payload['messageIds'] as List<dynamic>? ?? const [])
-                .map((entry) => entry.toString())
-                .toSet();
+        final rawIds = event.payload['messageIds'];
+        final messageIds = (rawIds is List ? rawIds : const [])
+            .map((entry) => entry.toString())
+            .toSet();
         final userId = event.payload['userId']?.toString();
         if (userId == null) {
           return;
@@ -1430,7 +1456,10 @@ class ConversationMessagesController
 
         var matchedAny = false;
         final updatedMessages = current.messages.map((message) {
-          if (!messageIds.contains(message.id)) {
+          final shouldMark = messageIds.isNotEmpty
+              ? messageIds.contains(message.id)
+              : (message.sender?.id ?? message.senderId) != userId;
+          if (!shouldMark) {
             return message;
           }
           matchedAny = true;
@@ -1450,7 +1479,7 @@ class ConversationMessagesController
 
         _setStateAndCache(current.copyWith(messages: updatedMessages));
 
-        if (!matchedAny) {
+        if (!matchedAny && messageIds.isNotEmpty) {
           Future<void>.microtask(() async {
             if (_disposed) {
               return;
@@ -1464,37 +1493,41 @@ class ConversationMessagesController
       if (event.type == 'message_delivered' &&
           event.payload['conversationId']?.toString() == conversationId) {
         final userId = event.payload['userId']?.toString();
+        final rawIds = event.payload['messageIds'];
         final affectedIds = <String>{
           if (event.payload['messageId'] != null)
             event.payload['messageId'].toString(),
-          ...(event.payload['messageIds'] as List<dynamic>? ?? const []).map(
+          ...(rawIds is List ? rawIds : const []).map(
             (entry) => entry.toString(),
           ),
         };
-        if (affectedIds.isEmpty || userId == null) {
+        if (userId == null) {
           return;
         }
 
-        _setStateAndCache(
-          current.copyWith(
-            messages: current.messages
-                .map(
-                  (message) =>
-                      affectedIds.contains(message.id) &&
-                          !message.deliveredTo.any(
-                            (entry) => entry.userId == userId,
-                          )
-                      ? message.copyWith(
-                          deliveredTo: [
-                            ...message.deliveredTo,
-                            ChatReceipt(userId: userId, at: DateTime.now()),
-                          ],
-                        )
-                      : message,
-                )
-                .toList(),
-          ),
-        );
+        final updatedMessages = current.messages.map((message) {
+          final shouldMark = affectedIds.isNotEmpty
+              ? affectedIds.contains(message.id)
+              : (message.sender?.id ?? message.senderId) != userId;
+          if (!shouldMark) {
+            return message;
+          }
+          final alreadyDelivered = message.deliveredTo.any(
+            (entry) => entry.userId == userId,
+          );
+          if (alreadyDelivered) {
+            return message;
+          }
+          return message.copyWith(
+            deliveredTo: [
+              ...message.deliveredTo,
+              ChatReceipt(userId: userId, at: DateTime.now()),
+            ],
+          );
+        }).toList();
+
+        _setStateAndCache(current.copyWith(messages: updatedMessages));
+        return;
       }
     });
   }

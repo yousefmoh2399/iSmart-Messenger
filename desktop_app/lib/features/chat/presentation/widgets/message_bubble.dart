@@ -1452,7 +1452,8 @@ class _MessageStatus {
 }
 
 _MessageStatus? _messageStatus(ChatMessage message, String currentUserId) {
-  if (message.sender?.id != currentUserId) {
+  final senderId = message.sender?.id ?? message.senderId;
+  if (senderId.isEmpty || senderId != currentUserId) {
     return null;
   }
   final msgStatus = message.metadata?['status']?.toString();

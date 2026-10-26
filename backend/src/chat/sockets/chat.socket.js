@@ -349,23 +349,23 @@ function emitMessageToRecipients(io, message, recipientUserIds = []) {
       .filter(Boolean),
   );
 
-  // 1. Emit to the conversation room so whoever is actively viewing the conversation gets it immediately
-  if (message.conversationId) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "receive_message",
-      message,
-    );
-  }
-
-  // 2. Emit to sender's personal room
+  // Deduplicate across rooms using chained .to() so each socket receives receive_message exactly ONCE
+  let messageTarget = io.to(getConversationRoom(message.conversationId));
   if (message.senderId) {
-    io.to(`user:${message.senderId}`).emit("receive_message", message);
+    messageTarget = messageTarget.to(`user:${message.senderId}`);
   }
-
-  // 3. Emit to all recipients' personal rooms
   for (const userId of recipients) {
-    io.to(`user:${userId}`).emit("receive_message", message);
-    io.to(`user:${userId}`).emit("message_delivered", {
+    messageTarget = messageTarget.to(`user:${userId}`);
+  }
+  messageTarget.emit("receive_message", message);
+
+  // Delivery receipts: sender needs to know when delivered!
+  for (const userId of recipients) {
+    let deliveryTarget = io.to(getConversationRoom(message.conversationId));
+    if (message.senderId) {
+      deliveryTarget = deliveryTarget.to(`user:${message.senderId}`);
+    }
+    deliveryTarget.emit("message_delivered", {
       conversationId: message.conversationId,
       messageId: message.id,
       userId,
@@ -706,15 +706,18 @@ function initializeChatSocketServer(httpServer) {
           );
         }
 
-        const deliveredUsers = [
+        const countRecipients = [
           ...new Set(
-            (result.message.deliveredTo || [])
-              .map((entry) => entry.userId?.toString?.() || entry.userId)
-              .filter(Boolean),
+            [
+              ...(result.recipientUserIds || []),
+              ...(result.message.deliveredTo || []).map(
+                (entry) => entry.userId?.toString?.() || entry.userId,
+              ),
+            ].filter(Boolean),
           ),
         ];
         await Promise.all(
-          deliveredUsers.map((userId) =>
+          countRecipients.map((userId) =>
             emitUnreadCount(io, userId, result.message.conversationId),
           ),
         );
@@ -779,14 +782,20 @@ function initializeChatSocketServer(httpServer) {
           currentUser,
           payload.conversationId,
         );
-        io.to(getConversationRoom(payload.conversationId)).emit(
-          "message_seen",
-          {
-            conversationId: payload.conversationId,
-            userId: currentUser.id,
-            messageIds,
-          },
+        const conversation = await getConversationById(payload.conversationId);
+        const memberIds = (conversation?.members || []).map((m) =>
+          m._id ? m._id.toString() : m.toString(),
         );
+
+        let seenTarget = io.to(getConversationRoom(payload.conversationId));
+        for (const mId of memberIds) {
+          seenTarget = seenTarget.to(`user:${mId}`);
+        }
+        seenTarget.emit("message_seen", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+          messageIds,
+        });
         await emitUnreadCount(io, currentUser.id, payload.conversationId);
         socketAck(ack, {
           ok: true,

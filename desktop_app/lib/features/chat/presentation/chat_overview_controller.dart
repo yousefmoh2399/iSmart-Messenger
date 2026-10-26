@@ -19,6 +19,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   int _usersPage = 1;
   bool _hasMoreUsers = false;
   bool _loadingMoreUsers = false;
+  final _processedIncomingMessageIds = <String>{};
 
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
@@ -578,6 +579,15 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   }
 
   void _applyIncomingMessage(ChatMessage message) {
+    if (message.id.isNotEmpty) {
+      if (_processedIncomingMessageIds.contains(message.id)) {
+        return;
+      }
+      _processedIncomingMessageIds.add(message.id);
+      if (_processedIncomingMessageIds.length > 500) {
+        _processedIncomingMessageIds.remove(_processedIncomingMessageIds.first);
+      }
+    }
     unawaited(_upsertIncomingMessageInCache(message));
 
     final current = state.valueOrNull;
@@ -755,9 +765,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     if (index == -1) {
       updated.insert(0, conversation);
     } else {
-      updated[index] = conversation.copyWith(
-        unreadCount: updated[index].unreadCount,
-      );
+      updated[index] = conversation;
     }
 
     final manageable = [...current.manageableConversations];
@@ -768,9 +776,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       if (manageableIndex == -1) {
         manageable.insert(0, conversation);
       } else {
-        manageable[manageableIndex] = conversation.copyWith(
-          unreadCount: manageable[manageableIndex].unreadCount,
-        );
+        manageable[manageableIndex] = conversation;
       }
     }
 
@@ -792,16 +798,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
+    final updated = current.conversations
+        .map(
+          (conversation) => conversation.id == conversationId
+              ? conversation.copyWith(unreadCount: unreadCount)
+              : conversation,
+        )
+        .toList();
+
+    final manageable = current.manageableConversations
+        .map(
+          (conversation) => conversation.id == conversationId
+              ? conversation.copyWith(unreadCount: unreadCount)
+              : conversation,
+        )
+        .toList();
+
     _setStateAndCache(
       _copyOverview(
         source: current,
-        conversations: current.conversations
-            .map(
-              (conversation) => conversation.id == conversationId
-                  ? conversation.copyWith(unreadCount: unreadCount)
-                  : conversation,
-            )
-            .toList(),
+        conversations: updated,
+        manageableConversations: manageable,
       ),
     );
   }
@@ -1433,17 +1450,20 @@ class ConversationMessagesController
 
       if (event.type == 'message_seen' &&
           event.payload['conversationId']?.toString() == conversationId) {
-        final messageIds =
-            (event.payload['messageIds'] as List<dynamic>? ?? const [])
-                .map((entry) => entry.toString())
-                .toSet();
+        final rawIds = event.payload['messageIds'];
+        final messageIds = (rawIds is List ? rawIds : const [])
+            .map((entry) => entry.toString())
+            .toSet();
         final userId = event.payload['userId']?.toString();
         if (userId == null) {
           return;
         }
 
         final updatedMessages = current.messages.map((message) {
-          if (!messageIds.contains(message.id)) {
+          final shouldMark = messageIds.isNotEmpty
+              ? messageIds.contains(message.id)
+              : (message.sender?.id ?? message.senderId) != userId;
+          if (!shouldMark) {
             return message;
           }
           final alreadySeen = message.seenBy.any(
@@ -1467,37 +1487,41 @@ class ConversationMessagesController
       if (event.type == 'message_delivered' &&
           event.payload['conversationId']?.toString() == conversationId) {
         final userId = event.payload['userId']?.toString();
+        final rawIds = event.payload['messageIds'];
         final affectedIds = <String>{
           if (event.payload['messageId'] != null)
             event.payload['messageId'].toString(),
-          ...(event.payload['messageIds'] as List<dynamic>? ?? const []).map(
+          ...(rawIds is List ? rawIds : const []).map(
             (entry) => entry.toString(),
           ),
         };
-        if (affectedIds.isEmpty || userId == null) {
+        if (userId == null) {
           return;
         }
 
-        _setStateAndCache(
-          current.copyWith(
-            messages: current.messages
-                .map(
-                  (message) =>
-                      affectedIds.contains(message.id) &&
-                          !message.deliveredTo.any(
-                            (entry) => entry.userId == userId,
-                          )
-                      ? message.copyWith(
-                          deliveredTo: [
-                            ...message.deliveredTo,
-                            ChatReceipt(userId: userId, at: DateTime.now()),
-                          ],
-                        )
-                      : message,
-                )
-                .toList(),
-          ),
-        );
+        final updatedMessages = current.messages.map((message) {
+          final shouldMark = affectedIds.isNotEmpty
+              ? affectedIds.contains(message.id)
+              : (message.sender?.id ?? message.senderId) != userId;
+          if (!shouldMark) {
+            return message;
+          }
+          final alreadyDelivered = message.deliveredTo.any(
+            (entry) => entry.userId == userId,
+          );
+          if (alreadyDelivered) {
+            return message;
+          }
+          return message.copyWith(
+            deliveredTo: [
+              ...message.deliveredTo,
+              ChatReceipt(userId: userId, at: DateTime.now()),
+            ],
+          );
+        }).toList();
+
+        _setStateAndCache(current.copyWith(messages: updatedMessages));
+        return;
       }
     });
   }

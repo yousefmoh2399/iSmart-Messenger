@@ -5,8 +5,11 @@ const { sendUploadFile } = require("../../utils/send-upload-file");
 const Conversation = require("../models/conversation.model");
 const User = require("../../models/user.model");
 const { listRoles } = require("../services/role.service");
+const { getUnreadCountsForUser } = require("../services/chat-member-state.service");
 const {
   getVisibleUsersForChat,
+  getConversationById,
+  getConversationRoom,
   listConversationsForUser,
   listManageableConversations,
   getConversationDetailsForUser,
@@ -102,6 +105,17 @@ async function resolveConversationAudienceUserIds(conversationId) {
   return [...userIds];
 }
 
+async function emitUnreadCount(io, userId, conversationId) {
+  try {
+    const unreadMap = await getUnreadCountsForUser(userId);
+    io.to(`user:${userId}`).emit("unread_count_updated", {
+      conversationId,
+      unreadCount: unreadMap[conversationId] || 0,
+      unreadMap,
+    });
+  } catch (_) {}
+}
+
 function emitMessageToRecipients(io, message, recipientUserIds = []) {
   const deliveredUsers = new Set(
     (message.deliveredTo || [])
@@ -112,20 +126,23 @@ function emitMessageToRecipients(io, message, recipientUserIds = []) {
     deliveredUsers.add(String(userId));
   }
 
-  if (message.conversationId) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "receive_message",
-      message,
-    );
-  }
-
+  // Deduplicate across rooms using chained .to() so each socket receives receive_message exactly ONCE
+  let messageTarget = io.to(getConversationRoom(message.conversationId));
   if (message.senderId) {
-    io.to(`user:${message.senderId}`).emit("receive_message", message);
+    messageTarget = messageTarget.to(`user:${message.senderId}`);
   }
-
   for (const userId of deliveredUsers) {
-    io.to(`user:${userId}`).emit("receive_message", message);
-    io.to(`user:${userId}`).emit("message_delivered", {
+    messageTarget = messageTarget.to(`user:${userId}`);
+  }
+  messageTarget.emit("receive_message", message);
+
+  // Delivery receipts: sender needs to know when delivered!
+  for (const userId of deliveredUsers) {
+    let deliveryTarget = io.to(getConversationRoom(message.conversationId));
+    if (message.senderId) {
+      deliveryTarget = deliveryTarget.to(`user:${message.senderId}`);
+    }
+    deliveryTarget.emit("message_delivered", {
       conversationId: message.conversationId,
       messageId: message.id,
       userId,
@@ -762,7 +779,16 @@ const markSeen = asyncHandler(async (req, res) => {
   const messageIds = await markConversationSeen(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${req.params.id}`).emit("message_seen", {
+    const conversation = await getConversationById(req.params.id);
+    const memberIds = (conversation?.members || []).map((m) =>
+      m._id ? m._id.toString() : m.toString(),
+    );
+
+    let seenTarget = io.to(getConversationRoom(req.params.id));
+    for (const mId of memberIds) {
+      seenTarget = seenTarget.to(`user:${mId}`);
+    }
+    seenTarget.emit("message_seen", {
       conversationId: req.params.id,
       userId: req.user.id,
       messageIds,
