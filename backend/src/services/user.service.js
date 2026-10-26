@@ -314,19 +314,19 @@ async function getUserById(userId) {
   return user;
 }
 
-async function createUser(
-  {
+async function createUser(payload = {}, actor = null) {
+  const {
     username,
     password,
     fullName,
+    jobTitle,
     role,
     departmentId,
     departmentIds,
     branchId,
     permissions,
-  },
-  actor = null,
-) {
+    maxAttachmentSizeMB,
+  } = payload;
   const normalizedUsername = String(username).trim().toLowerCase();
   const existingUser = await User.findOne({
     username: normalizedUsername,
@@ -348,10 +348,11 @@ async function createUser(
       username: normalizedUsername,
       passwordHash,
       fullName: String(fullName).trim(),
-      jobTitle: payload.jobTitle ? String(payload.jobTitle).trim().slice(0, 150) : "",
+      jobTitle: jobTitle ? String(jobTitle).trim().slice(0, 150) : "",
       role: role || "user",
       permissionOverrides: normalizePermissionOverrides(permissions),
-      maxAttachmentSizeMB: maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
+      maxAttachmentSizeMB:
+        maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
       departmentId: resolvedDepartmentId,
       departmentIds: resolvedDepartmentIds,
       branchId: branchAssignment.branchId,
