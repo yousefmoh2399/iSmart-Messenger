@@ -113,6 +113,7 @@ class DesktopUpdateAgent {
   AppUser? _currentUser;
   String? _deviceUid;
   DeviceHeartbeatResponse? _lastHeartbeatResponse;
+  Future<DeviceHeartbeatResponse?>? _activeHeartbeatFuture;
   int _lastProgressReported = -1;
   String? _lastReportedStatus;
 
@@ -125,6 +126,10 @@ class DesktopUpdateAgent {
   DeviceHeartbeatResponse? get lastHeartbeatResponse => _lastHeartbeatResponse;
   String? get deviceUid => _deviceUid;
   AppUser? get currentUser => _currentUser;
+
+  void attachUser(AppUser user) {
+    _currentUser = user;
+  }
 
   void _addEvent(DesktopUpdateEvent event) {
     if (_disposed || _eventsController.isClosed) {
@@ -149,11 +154,11 @@ class DesktopUpdateAgent {
   }
 
   Future<void> checkNow() async {
-    await _runHeartbeat();
+    await _runHeartbeat(throwOnError: false);
   }
 
   Future<DeviceHeartbeatResponse?> checkNowDetailed() async {
-    return _runHeartbeat();
+    return _runHeartbeat(throwOnError: true);
   }
 
   void setConnectionStatus(String status) {
@@ -175,16 +180,37 @@ class DesktopUpdateAgent {
 
   Future<DesktopUpdateState> loadState() => _stateStore.load();
 
-  Future<DeviceHeartbeatResponse?> _runHeartbeat() async {
-    if (_disposed ||
-        _isHeartbeatRunning ||
-        _currentUser == null ||
-        !web_bridge.isElectron()) {
+  Future<DeviceHeartbeatResponse?> _runHeartbeat({bool throwOnError = false}) async {
+    if (_disposed) {
       return _lastHeartbeatResponse;
     }
+    if (_activeHeartbeatFuture != null) {
+      try {
+        return await _activeHeartbeatFuture!;
+      } catch (error) {
+        if (throwOnError) rethrow;
+        return _lastHeartbeatResponse;
+      }
+    }
+
+    final future = _doRunHeartbeat();
+    _activeHeartbeatFuture = future;
+    try {
+      final response = await future;
+      return response;
+    } catch (error) {
+      if (throwOnError) rethrow;
+      return _lastHeartbeatResponse;
+    } finally {
+      _activeHeartbeatFuture = null;
+    }
+  }
+
+  Future<DeviceHeartbeatResponse> _doRunHeartbeat() async {
     _isHeartbeatRunning = true;
     try {
-      final electronInfo = await web_bridge.getElectronDeviceInfo();
+      final isElectron = web_bridge.isElectron();
+      final electronInfo = isElectron ? await web_bridge.getElectronDeviceInfo() : const <String, dynamic>{};
       final appVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
       _deviceUid ??= await _loadOrCreateDeviceUid();
 
@@ -195,23 +221,25 @@ class DesktopUpdateAgent {
         primaryIp = (electronInfo['localIps'] as List).first?.toString();
       }
 
+      final branchCode = (_currentUser?.branchCode ?? 'main').trim().toLowerCase().isEmpty
+          ? 'main'
+          : (_currentUser?.branchCode ?? 'main').trim().toLowerCase();
+
       final response = await _repository.heartbeatDevice(
         deviceUid: _deviceUid!,
-        deviceName: electronInfo['hostName']?.toString() ?? 'Electron App',
-        hostName: electronInfo['hostName']?.toString() ?? 'electron-host',
+        deviceName: electronInfo['hostName']?.toString() ?? (isElectron ? 'Electron App' : 'Web Client'),
+        hostName: electronInfo['hostName']?.toString() ?? (isElectron ? 'electron-host' : 'web-browser'),
         localIp: primaryIp,
-        branchCode: _currentUser!.branchCode.trim().toLowerCase().isEmpty
-            ? 'main'
-            : _currentUser!.branchCode.trim().toLowerCase(),
+        branchCode: branchCode,
         channel: 'stable',
         platform: 'desktop_windows',
         appVersion: appVersion,
-        osName: 'electron-${electronInfo['osName'] ?? 'windows'}',
+        osName: isElectron ? 'electron-' + (electronInfo['osName'] ?? 'windows') : 'web',
         osVersion: electronInfo['osVersion']?.toString() ?? 'unknown',
-        architecture: electronInfo['architecture']?.toString() ?? 'ia32',
+        architecture: electronInfo['architecture']?.toString() ?? 'x64',
         connectionStatus: _connectionStatus,
-        autoUpdateEnabled: true,
-        silentInstallEnabled: true,
+        autoUpdateEnabled: isElectron,
+        silentInstallEnabled: isElectron,
       );
       _lastHeartbeatResponse = response;
       final hasPending = response.pendingTasks.isNotEmpty;
@@ -238,7 +266,7 @@ class DesktopUpdateAgent {
         );
       }
 
-      if (response.pendingTasks.isNotEmpty && !_isTaskRunning) {
+      if (isElectron && response.pendingTasks.isNotEmpty && !_isTaskRunning) {
         unawaited(_executePendingTask(response.pendingTasks.first));
       }
       return response;
@@ -246,7 +274,7 @@ class DesktopUpdateAgent {
       _eventsController.add(
         DesktopUpdateEvent.heartbeatError(error.toString()),
       );
-      return _lastHeartbeatResponse;
+      rethrow;
     } finally {
       _isHeartbeatRunning = false;
     }

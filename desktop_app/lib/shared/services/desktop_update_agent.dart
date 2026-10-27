@@ -120,6 +120,7 @@ class DesktopUpdateAgent {
   AppUser? _currentUser;
   String? _deviceUid;
   DeviceHeartbeatResponse? _lastHeartbeatResponse;
+  Future<DeviceHeartbeatResponse?>? _activeHeartbeatFuture;
 
   static const int _progressReportStepPercent = 5;
   int _lastProgressReported = -1;
@@ -136,6 +137,10 @@ class DesktopUpdateAgent {
   DeviceHeartbeatResponse? get lastHeartbeatResponse => _lastHeartbeatResponse;
   String? get deviceUid => _deviceUid;
   AppUser? get currentUser => _currentUser;
+
+  void attachUser(AppUser user) {
+    _currentUser = user;
+  }
 
   void _addEvent(DesktopUpdateEvent event) {
     if (_disposed || _eventsController.isClosed) {
@@ -163,11 +168,11 @@ class DesktopUpdateAgent {
   }
 
   Future<void> checkNow() async {
-    await _runHeartbeat();
+    await _runHeartbeat(throwOnError: false);
   }
 
   Future<DeviceHeartbeatResponse?> checkNowDetailed() async {
-    return _runHeartbeat();
+    return _runHeartbeat(throwOnError: true);
   }
 
   void setConnectionStatus(String status) {
@@ -197,16 +202,43 @@ class DesktopUpdateAgent {
     _eventsController.close();
   }
 
-  Future<DeviceHeartbeatResponse?> _runHeartbeat() async {
-    if (_disposed || _isHeartbeatRunning || _currentUser == null) {
+  Future<DeviceHeartbeatResponse?> _runHeartbeat({bool throwOnError = false}) async {
+    if (_disposed) {
       return _lastHeartbeatResponse;
     }
+    if (_activeHeartbeatFuture != null) {
+      try {
+        return await _activeHeartbeatFuture!;
+      } catch (error) {
+        if (throwOnError) rethrow;
+        return _lastHeartbeatResponse;
+      }
+    }
+
+    final future = _doRunHeartbeat();
+    _activeHeartbeatFuture = future;
+    try {
+      final response = await future;
+      return response;
+    } catch (error) {
+      if (throwOnError) rethrow;
+      return _lastHeartbeatResponse;
+    } finally {
+      _activeHeartbeatFuture = null;
+    }
+  }
+
+  Future<DeviceHeartbeatResponse> _doRunHeartbeat() async {
     _isHeartbeatRunning = true;
     try {
+      _deviceUid ??= await _loadOrCreateDeviceUid();
       final appVersion = await _resolveAppVersion();
       final electronInfo = kIsWeb && web_bridge.isElectron()
           ? await web_bridge.getElectronDeviceInfo()
           : const <String, dynamic>{};
+      final branchCode = _currentUser != null
+          ? _resolveBranchCode(_currentUser!)
+          : 'main';
       final response = await _repository.heartbeatDevice(
         deviceUid: _deviceUid!,
         deviceName: await _resolveDeviceName(),
@@ -220,12 +252,12 @@ class DesktopUpdateAgent {
                   ? electronInfo['localIp'].toString().trim()
                   : null)
             : await _resolvePrimaryLocalIpv4(),
-        branchCode: _resolveBranchCode(_currentUser!),
+        branchCode: branchCode,
         channel: 'stable',
         appVersion: appVersion,
         osName: kIsWeb
             ? (electronInfo['osName']?.toString().trim().isNotEmpty == true
-                  ? 'electron-${electronInfo['osName'].toString().trim()}'
+                  ? 'electron-' + electronInfo['osName'].toString().trim()
                   : 'web')
             : Platform.operatingSystem,
         osVersion: kIsWeb
@@ -245,21 +277,22 @@ class DesktopUpdateAgent {
       );
       _lastHeartbeatResponse = response;
       if (!kIsWeb && response.pendingTasks.isNotEmpty && !_isTaskRunning) {
-        await _executePendingTask(response.pendingTasks.first);
+        unawaited(_executePendingTask(response.pendingTasks.first));
       }
       return response;
     } catch (error) {
       _addEvent(DesktopUpdateEvent.heartbeatError(error.toString()));
-      return _lastHeartbeatResponse;
+      rethrow;
     } finally {
       _isHeartbeatRunning = false;
     }
   }
 
   Future<void> _executePendingTask(PendingUpdateTask task) async {
-    if (_isTaskRunning || _currentUser == null) {
+    if (_isTaskRunning) {
       return;
     }
+    _deviceUid ??= await _loadOrCreateDeviceUid();
     _isTaskRunning = true;
 
     _lastProgressReported = -1;
@@ -442,7 +475,12 @@ class DesktopUpdateAgent {
     required int progress,
     required String message,
   }) async {
+    _deviceUid ??= await _loadOrCreateDeviceUid();
     if (_deviceUid == null) {
+      return;
+    }
+    final isServerTask = RegExp(r'^[a-fA-F0-9]{24}$').hasMatch(taskId.trim());
+    if (!isServerTask) {
       return;
     }
     final isTerminalStatus = [
@@ -1228,4 +1266,4 @@ class _DigestSink implements Sink<Digest> {
 
   @override
   void close() {}
-}
+}

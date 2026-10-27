@@ -381,7 +381,8 @@ class UpdateManagementRepository {
         final existingBytes = await _existingFileLength(partialDestination);
         client = HttpClient()
           ..connectionTimeout = const Duration(minutes: 5)
-          ..idleTimeout = const Duration(minutes: 5);
+          ..idleTimeout = const Duration(minutes: 5)
+          ..badCertificateCallback = (cert, host, port) => true;
         final request = await client
             .getUrl(targetUri)
             .timeout(const Duration(minutes: 5));
@@ -473,10 +474,16 @@ class UpdateManagementRepository {
   Uri _resolveDownloadUri(String target) {
     final trimmed = target.trim();
     final asUri = Uri.parse(trimmed);
+    final baseUri = Uri.parse(baseUrl);
     if (asUri.hasScheme) {
+      if (asUri.path.startsWith('/api/')) {
+        return baseUri.replace(
+          path: asUri.path,
+          query: asUri.hasQuery ? asUri.query : null,
+        );
+      }
       return asUri;
     }
-    final baseUri = Uri.parse(baseUrl);
     return baseUri.resolve(trimmed);
   }
 

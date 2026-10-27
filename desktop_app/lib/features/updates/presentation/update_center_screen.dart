@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,6 +32,10 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
     ref.read(chatSectionVisibleProvider.notifier).state = false;
     _loadPackageInfo();
     final agent = ref.read(desktopUpdateAgentProvider);
+    final user = ref.read(authControllerProvider).valueOrNull;
+    if (user != null && agent.currentUser == null) {
+      agent.attachUser(user);
+    }
     _lastResponse = agent.lastHeartbeatResponse;
     _loadLocalState();
 
@@ -41,6 +46,8 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
         if (event.type == 'ready_to_restart') {
           _statusMessage = 'اكتمل تنزيل التحديث وهو جاهز للتثبيت الفوري.';
         } else if (event.type == 'failed') {
+          _statusMessage = event.message;
+        } else if (event.type == 'heartbeat_error' && _lastResponse == null) {
           _statusMessage = event.message;
         }
       });
@@ -67,6 +74,10 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
 
   Future<void> _checkNow() async {
     final agent = ref.read(desktopUpdateAgentProvider);
+    final user = ref.read(authControllerProvider).valueOrNull;
+    if (user != null && agent.currentUser == null) {
+      agent.attachUser(user);
+    }
     setState(() {
       _isChecking = true;
       _statusMessage = null;
@@ -74,6 +85,7 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
     try {
       final response = await agent.checkNowDetailed();
       if (!mounted) return;
+      final currentVersion = _packageInfo?.version ?? '1.1.2';
       setState(() {
         _lastResponse = response;
         if (response == null) {
@@ -81,12 +93,38 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
         } else if (_localState?.status == 'downloaded') {
           _statusMessage = 'التحديث جاهز للتثبيت على هذا الجهاز.';
         } else if (response.pendingTasks.isEmpty && response.latestRelease == null) {
-          _statusMessage = 'أنت تستخدم بالفعل أحدث إصدار معتمد.';
+          _statusMessage = 'أنت تستخدم بالفعل أحدث إصدار معتمد (' + currentVersion + ').';
+        } else if (response.latestRelease != null) {
+          final isNewer = response.latestRelease!.version.trim().toLowerCase() != currentVersion.trim().toLowerCase();
+          if (isNewer) {
+            _statusMessage = 'يوجد إصدار جديد معتمد متاح للتحميل (' + response.latestRelease!.version + ').';
+          } else {
+            _statusMessage = 'أنت تستخدم بالفعل أحدث إصدار معتمد (' + currentVersion + ').';
+          }
         }
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _statusMessage = error.toString());
+      String friendlyError = 'تعذر الاتصال بمركز التحديثات.';
+      if (error is DioException) {
+        if (error.response?.statusCode == 401) {
+          friendlyError = 'انتهت صلاحية الجلسة. برجاء إعادة تسجيل الدخول.';
+        } else if (error.response?.statusCode == 429) {
+          friendlyError = 'طلبات التحديث كثيرة جدًا. برجاء الانتظار قليلاً ثم المحاولة.';
+        } else if (error.type == DioExceptionType.connectionTimeout ||
+            error.type == DioExceptionType.receiveTimeout ||
+            error.type == DioExceptionType.connectionError) {
+          friendlyError = 'تعذر الاتصال بالخادم. يرجى التحقق من اتصال الشبكة.';
+        } else {
+          final serverMsg = error.response?.data is Map
+              ? (error.response?.data['message'] ?? error.response?.data['error'])?.toString()
+              : null;
+          friendlyError = serverMsg ?? 'خطأ في الاتصال بالخادم (' + (error.response?.statusCode?.toString() ?? 'شبكة') + ').';
+        }
+      } else {
+        friendlyError = 'تعذر فحص التحديثات: ' + error.toString();
+      }
+      setState(() => _statusMessage = friendlyError);
     } finally {
       await _loadLocalState();
       if (mounted) setState(() => _isChecking = false);
@@ -542,7 +580,11 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
                 FilledButton.icon(
                   onPressed: () async {
                     try {
-                      await ref.read(desktopUpdateAgentProvider).downloadRelease(latestRelease);
+                      final agent = ref.read(desktopUpdateAgentProvider);
+                      if (user != null && agent.currentUser == null) {
+                        agent.attachUser(user);
+                      }
+                      await agent.downloadRelease(latestRelease);
                     } catch (e) {
                       if (!mounted) return;
                       setState(() => _statusMessage = e.toString());

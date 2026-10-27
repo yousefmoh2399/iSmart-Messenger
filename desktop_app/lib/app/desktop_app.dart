@@ -274,6 +274,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _lastPresenceUserId = user.id;
         unawaited(_syncWindowVisibilityState());
       }
+      ref.read(desktopUpdateAgentProvider).attachUser(user);
       if (_updateAgentUserId != user.id) {
         _updateAgentUserId = user.id;
         if (_hasDesktopCapabilities) {

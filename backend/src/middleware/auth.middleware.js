@@ -9,40 +9,8 @@ function resolveTokenVersion(value) {
   return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
-const requireAuth = asyncHandler(async (req, res, next) => {
-  const authorizationHeader = req.headers.authorization || "";
-  const token = resolveRequestToken(req, authorizationHeader);
-
-  if (!token) {
-    throw new ApiError(401, "Authentication required.");
-  }
-
-  let payload;
-  try {
-    payload = jwt.verify(token, jwtSecret);
-  } catch (error) {
-    throw new ApiError(401, "Invalid or expired token.");
-  }
-
-  const user = await User.findById(payload.sub).select("+tokenVersion").lean();
-  if (!user) {
-    throw new ApiError(401, "User no longer exists.");
-  }
-
-  if (
-    resolveTokenVersion(user.tokenVersion) !==
-    resolveTokenVersion(payload.tokenVersion)
-  ) {
-    throw new ApiError(401, "Token version mismatch. Please login again.");
-  }
-
-  if (user.isActive === false) {
-    throw new ApiError(403, "This account is inactive.");
-  }
-
-  const permissions = await getEffectivePermissionsForUser(user);
-
-  req.user = {
+function buildUserPayload(user, permissions) {
+  return {
     id: user._id.toString(),
     username: user.username,
     role: user.role,
@@ -54,12 +22,12 @@ const requireAuth = asyncHandler(async (req, res, next) => {
         ? [user.departmentId.toString()]
         : [],
     branchId: user.branchId ? user.branchId.toString() : null,
-    branchCode: String(user.branchCode || "main")
+    branchCode: String(user.branchCode || 'main')
       .trim()
       .toUpperCase(),
     isOnline: Boolean(user.isOnline),
     presenceStatus:
-      user.presenceStatus || (user.isOnline ? "online" : "offline"),
+      user.presenceStatus || (user.isOnline ? 'online' : 'offline'),
     isActive: user.isActive !== false,
     avatarUrl: normalizeMediaUrl(user.avatarUrl),
     lastSeen: user.lastSeen,
@@ -68,12 +36,88 @@ const requireAuth = asyncHandler(async (req, res, next) => {
     tokenVersion: resolveTokenVersion(user.tokenVersion),
     permissions,
   };
+}
+
+async function authenticateRequest(req) {
+  const authorizationHeader = req.headers.authorization || '';
+  const token = resolveRequestToken(req, authorizationHeader);
+  if (!token) {
+    return null;
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, jwtSecret);
+  } catch (_) {
+    return null;
+  }
+
+  const user = await User.findById(payload.sub).select('+tokenVersion').lean();
+  if (!user || user.isActive === false) {
+    return null;
+  }
+
+  if (
+    resolveTokenVersion(user.tokenVersion) !==
+    resolveTokenVersion(payload.tokenVersion)
+  ) {
+    return null;
+  }
+
+  const permissions = await getEffectivePermissionsForUser(user);
+  return buildUserPayload(user, permissions);
+}
+
+const optionalAuth = asyncHandler(async (req, res, next) => {
+  try {
+    req.user = await authenticateRequest(req);
+  } catch (_) {
+    req.user = null;
+  }
+  next();
+});
+
+const requireAuth = asyncHandler(async (req, res, next) => {
+  const authorizationHeader = req.headers.authorization || '';
+  const token = resolveRequestToken(req, authorizationHeader);
+
+  if (!token) {
+    throw new ApiError(401, 'Authentication required.');
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, jwtSecret);
+  } catch (error) {
+    throw new ApiError(401, 'Invalid or expired token.');
+  }
+
+  const user = await User.findById(payload.sub).select('+tokenVersion').lean();
+  if (!user) {
+    throw new ApiError(401, 'User no longer exists.');
+  }
+
+  if (
+    resolveTokenVersion(user.tokenVersion) !==
+    resolveTokenVersion(payload.tokenVersion)
+  ) {
+    throw new ApiError(401, 'Token version mismatch. Please login again.');
+  }
+
+  if (user.isActive === false) {
+    throw new ApiError(403, 'This account is inactive.');
+  }
+
+  const permissions = await getEffectivePermissionsForUser(user);
+  req.user = buildUserPayload(user, permissions);
 
   next();
 });
 
 module.exports = {
   requireAuth,
+  optionalAuth,
+  authenticateRequest,
 };
 
 function resolveRequestToken(req, authorizationHeader) {
