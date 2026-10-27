@@ -605,6 +605,64 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     },
                                   ),
                                 ),
+                                const Divider(height: 0.5, indent: 16),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  child: DropdownButtonFormField<String>(
+                                    value: preferences.notificationDisplayModeId,
+                                    isExpanded: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'ظهور الإشعارات على الشاشة',
+                                      prefixIcon: Icon(Icons.visibility_outlined, size: 20),
+                                      border: InputBorder.none,
+                                    ),
+                                    selectedItemBuilder: (context) {
+                                      return NotificationDisplayMode.values
+                                          .map(
+                                            (mode) => Text(
+                                              mode.label,
+                                              style: const TextStyle(fontSize: 14),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          )
+                                          .toList();
+                                    },
+                                    items: NotificationDisplayMode.values
+                                        .map(
+                                          (mode) => DropdownMenuItem(
+                                            value: mode.id,
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  mode.label,
+                                                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                                                ),
+                                                Text(
+                                                  mode.description,
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        ref
+                                            .read(userPreferencesControllerProvider.notifier)
+                                            .setNotificationDisplayMode(value);
+                                      }
+                                    },
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 24),

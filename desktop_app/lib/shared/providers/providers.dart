@@ -295,6 +295,11 @@ class UserPreferencesController extends AsyncNotifier<UserPreferences> {
     final current = state.valueOrNull ?? UserPreferences.defaults();
     await savePreferences(current.copyWith(notificationToneId: value));
   }
+  Future<void> setNotificationDisplayMode(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationDisplayModeId: value));
+  }
+
 }
 
 final apiBaseUrlStoreProvider = Provider<ApiBaseUrlStore>(

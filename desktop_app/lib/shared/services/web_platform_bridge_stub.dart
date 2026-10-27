@@ -160,6 +160,8 @@ bool isPageVisible() => false;
 
 Future<bool> isElectronWindowForegroundVisible() async => false;
 
+void showBrowserAttention(String title) {}
+
 void clearBrowserAttention() {}
 
 Future<void> playBrowserAudioAsset(String assetPath) async {}
