@@ -581,6 +581,7 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
                   onPressed: () async {
                     try {
                       final agent = ref.read(desktopUpdateAgentProvider);
+                      final user = ref.read(authControllerProvider).valueOrNull;
                       if (user != null && agent.currentUser == null) {
                         agent.attachUser(user);
                       }
