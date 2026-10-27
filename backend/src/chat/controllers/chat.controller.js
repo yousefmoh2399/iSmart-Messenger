@@ -150,6 +150,37 @@ function emitMessageToRecipients(io, message, recipientUserIds = []) {
   }
 }
 
+
+async function emitMessageUpdated(io, message) {
+  if (!io || !message?.conversationId) return;
+  const audienceUserIds = await resolveConversationAudienceUserIds(
+    message.conversationId,
+  );
+  let target = io.to(getConversationRoom(message.conversationId));
+  if (message.senderId) {
+    target = target.to(`user:${message.senderId}`);
+  }
+  for (const userId of audienceUserIds) {
+    target = target.to(`user:${userId}`);
+  }
+  target.emit("message_updated", message);
+}
+
+async function emitMessageDeleted(io, conversationId, messageId) {
+  if (!io || !conversationId) return;
+  const audienceUserIds = await resolveConversationAudienceUserIds(
+    conversationId,
+  );
+  let target = io.to(getConversationRoom(conversationId));
+  for (const userId of audienceUserIds) {
+    target = target.to(`user:${userId}`);
+  }
+  target.emit("message_deleted", {
+    messageId,
+    conversationId,
+  });
+}
+
 async function emitConversationToUsers(io, conversationId, userIds = []) {
   const uniqueUserIds = [
     ...new Set((userIds || []).map(String).filter(Boolean)),
@@ -704,10 +735,7 @@ const patchChatMessage = asyncHandler(async (req, res) => {
   const message = await updateMessage(req.user, req.params.id, req.body);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
     emitConversationToMembers(io, message.conversationId);
   }
   sendChatResponse(res, {
@@ -725,10 +753,8 @@ const reactToChatMessage = asyncHandler(async (req, res) => {
   const message = toggleResult.message;
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
+    emitConversationToMembers(io, message.conversationId);
     if (toggleResult.reactionAdded) {
       const senderId = String(message.senderId || "").trim();
       const reactorId = String(req.user.id);
@@ -816,10 +842,7 @@ const removeMessage = asyncHandler(async (req, res) => {
   const message = await deleteMessage(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit("message_deleted", {
-      messageId: message.id,
-      conversationId: message.conversationId,
-    });
+    await emitMessageDeleted(io, message.conversationId, message.id);
     emitConversationToMembers(io, message.conversationId);
   }
   sendChatResponse(res, {
@@ -941,10 +964,7 @@ const restoreAttachment = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
   }
   sendChatResponse(res, {
     data: { message },
@@ -985,10 +1005,7 @@ const votePoll = asyncHandler(async (req, res) => {
 
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${result.message.conversationId}`).emit(
-      "message_updated",
-      result.message,
-    );
+    await emitMessageUpdated(io, result.message);
   }
 
   sendChatResponse(res, {

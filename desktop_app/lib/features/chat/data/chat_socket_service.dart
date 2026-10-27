@@ -51,7 +51,7 @@ class ChatSocketService implements PrintStatusEmitter {
       return;
     }
 
-    disconnect();
+    disconnect(clearJoined: false);
     _connectedBaseUrl = baseUrl;
     _connectedToken = token;
     _presenceStatus = 'online';
@@ -466,14 +466,16 @@ class ChatSocketService implements PrintStatusEmitter {
     }
   }
 
-  void disconnect() {
+  void disconnect({bool clearJoined = true}) {
     _manualDisconnect = true;
     _presenceStatus = 'offline';
     final socket = _socket;
     if (socket == null) {
       _connectedBaseUrl = null;
       _connectedToken = null;
-      _joinedConversationIds.clear();
+      if (clearJoined) {
+        _joinedConversationIds.clear();
+      }
       _exactHandlers.clear();
       return;
     }
@@ -495,7 +497,9 @@ class ChatSocketService implements PrintStatusEmitter {
     _socket = null;
     _connectedBaseUrl = null;
     _connectedToken = null;
-    _joinedConversationIds.clear();
+    if (clearJoined) {
+      _joinedConversationIds.clear();
+    }
   }
 
   void reportClientError({

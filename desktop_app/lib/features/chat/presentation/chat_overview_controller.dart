@@ -2201,11 +2201,27 @@ class ConversationMessagesController
 
 List<ChatMessage> sortAndDedupeChatMessages(Iterable<ChatMessage> source) {
   final byKey = <String, ChatMessage>{};
+  final idToKey = <String, String>{};
+
   for (final message in source) {
     final clientMsgId = message.metadata?['clientMessageId']?.toString();
-    final key = (clientMsgId != null && clientMsgId.isNotEmpty)
-        ? 'client_$clientMsgId'
-        : 'id_${message.id}';
+    final hasRealId = message.id.isNotEmpty && !message.id.startsWith('temp_');
+
+    String? matchedKey;
+    if (hasRealId && idToKey.containsKey(message.id)) {
+      matchedKey = idToKey[message.id];
+    } else if (clientMsgId != null &&
+        clientMsgId.isNotEmpty &&
+        byKey.containsKey('client_${clientMsgId}')) {
+      matchedKey = 'client_${clientMsgId}';
+    } else if (hasRealId && byKey.containsKey('id_${message.id}')) {
+      matchedKey = 'id_${message.id}';
+    }
+
+    final key = matchedKey ??
+        ((clientMsgId != null && clientMsgId.isNotEmpty)
+            ? 'client_${clientMsgId}'
+            : 'id_${message.id}');
 
     final existing = byKey[key];
     if (existing == null) {
@@ -2220,6 +2236,10 @@ List<ChatMessage> sortAndDedupeChatMessages(Iterable<ChatMessage> source) {
       } else {
         byKey[key] = message;
       }
+    }
+
+    if (hasRealId) {
+      idToKey[message.id] = key;
     }
   }
   final items = byKey.values.toList();
