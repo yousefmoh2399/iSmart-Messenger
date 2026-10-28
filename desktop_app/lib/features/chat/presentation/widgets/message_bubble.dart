@@ -137,6 +137,9 @@ class _MessageBubbleState extends State<MessageBubble> {
       case _BubbleMenuAction.favorite:
         widget.onToggleFavorite();
         break;
+      case _BubbleMenuAction.openAttachment:
+        widget.onOpenAttachment();
+        break;
       case _BubbleMenuAction.saveAttachment:
         widget.onSaveAttachment?.call();
         break;
@@ -243,12 +246,21 @@ class _MessageBubbleState extends State<MessageBubble> {
                   color: Color(0xFF708499),
                 ),
               ),
+              if (widget.message.hasAttachment && widget.message.attachmentDownloadAllowed)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.openAttachment,
+                  child: _PopupActionRow(
+                    icon: Icons.open_in_new_rounded,
+                    label: 'فتح الملف',
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
               if (widget.message.hasAttachment && widget.onSaveAttachment != null)
                 const PopupMenuItem(
                   value: _BubbleMenuAction.saveAttachment,
                   child: _PopupActionRow(
-                    icon: Icons.save_alt_rounded,
-                    label: 'حفظ الملف',
+                    icon: Icons.drive_file_move_outlined,
+                    label: 'نقل / حفظ الملف في مجلد...',
                     color: Color(0xFF2E7D32),
                   ),
                 ),
@@ -659,6 +671,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     message: widget.message,
                                     textColor: textColor,
                                     onOpen: widget.onOpenAttachment,
+                                    onSaveAttachment: widget.onSaveAttachment,
                                     onPrint: widget.onPrintAttachment,
                                     onSaveSticker: widget.onSaveSticker,
                                     token: widget.token,
@@ -934,6 +947,7 @@ class _AttachmentPreview extends StatelessWidget {
     required this.onOpen,
     required this.token,
     required this.isMine,
+    this.onSaveAttachment,
     this.onPrint,
     this.onSaveSticker,
   });
@@ -943,6 +957,7 @@ class _AttachmentPreview extends StatelessWidget {
   final VoidCallback onOpen;
   final String? token;
   final bool isMine;
+  final VoidCallback? onSaveAttachment;
   final VoidCallback? onPrint;
   final VoidCallback? onSaveSticker;
 
@@ -1066,54 +1081,439 @@ class _AttachmentPreview extends StatelessWidget {
     }
 
     final isPdf = message.isPdfMessage;
-    return InkWell(
-      onTap: onOpen,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 180, maxWidth: 320),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: isMine
-              ? (isDark ? const Color(0xFF244668) : const Color(0xFFE5F0FA))
-              : (isDark ? const Color(0xFF223446) : const Color(0xFFF7FAFD)),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? const Color(0xFF30485C) : const Color(0xFFDCE6F0),
+    final fileName = message.fileName ?? (isPdf ? 'مستند PDF' : 'ملف مرفق');
+    final ext = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+    final fileStyle = _resolveFileStyle(ext, message.mimeType, isPdf);
+
+    final cardBgColor = isMine
+        ? (isDark ? const Color(0xFF1E354D) : const Color(0xFFF0F7FF))
+        : (isDark ? const Color(0xFF1F2937) : const Color(0xFFF8FAFC));
+    final borderColor = isMine
+        ? (isDark ? const Color(0xFF2C4A6B) : const Color(0xFFD0E3F7))
+        : (isDark ? const Color(0xFF374151) : const Color(0xFFE2E8F0));
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 260, maxWidth: 330),
+      margin: const EdgeInsets.only(top: 4),
+      decoration: BoxDecoration(
+        color: cardBgColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // File Info (tap anywhere to open)
+          InkWell(
+            onTap: message.attachmentDownloadAllowed ? onOpen : null,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+              child: Row(
+                children: [
+                  // File Icon Badge
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isDark ? fileStyle.darkBg : fileStyle.lightBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: fileStyle.primaryColor.withValues(alpha: 0.25),
+                        width: 1,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      fileStyle.icon,
+                      color: fileStyle.primaryColor,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Details
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: fileStyle.primaryColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                fileStyle.typeLabel,
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: fileStyle.primaryColor,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                            if (message.fileSize != null && message.fileSize! > 0) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                formatFileSize(message.fileSize!),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: textColor.withValues(alpha: 0.7),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (message.isPrintableAttachment && onPrint != null) ...[
+                    const SizedBox(width: 4),
+                    Tooltip(
+                      message: 'طباعة المرفق',
+                      child: IconButton(
+                        iconSize: 18,
+                        padding: const EdgeInsets.all(6),
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        style: IconButton.styleFrom(
+                          backgroundColor: isDark
+                              ? const Color(0xFF2A3644)
+                              : const Color(0xFFE8EEF5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        onPressed: onPrint,
+                        icon: Icon(Icons.print_rounded, color: textColor),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isPdf ? Icons.picture_as_pdf_outlined : Icons.attach_file_rounded,
-              color: textColor,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                message.fileName ?? (isPdf ? 'مرفق PDF' : 'مرفق'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: textColor),
+          Divider(
+            height: 1,
+            thickness: 0.8,
+            color: borderColor.withValues(alpha: 0.7),
+          ),
+          if (!message.attachmentDownloadAllowed)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.lock_outline_rounded,
+                    size: 14,
+                    color: textColor.withValues(alpha: 0.6),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'محتوى محمي: العرض فقط داخل التطبيق',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: textColor.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                children: [
+                  // Button 1: Open
+                  Expanded(
+                    child: _AttachmentActionButton(
+                      icon: Icons.open_in_new_rounded,
+                      label: 'فتح',
+                      tooltip: 'فتح الملف مباشرة في التطبيق الخاص به (مثل Excel)',
+                      isPrimary: true,
+                      primaryColor: fileStyle.primaryColor,
+                      isDark: isDark,
+                      textColor: textColor,
+                      onTap: onOpen,
+                    ),
+                  ),
+                  if (onSaveAttachment != null) ...[
+                    const SizedBox(width: 8),
+                    // Button 2: Move / Save to
+                    Expanded(
+                      child: _AttachmentActionButton(
+                        icon: Icons.drive_file_move_outlined,
+                        label: 'نقل',
+                        tooltip: 'تحديد مجلد على جهازك لنقل أو حفظ الملف فيه',
+                        isPrimary: false,
+                        primaryColor: fileStyle.primaryColor,
+                        isDark: isDark,
+                        textColor: textColor,
+                        onTap: onSaveAttachment,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-            if (message.isPrintableAttachment && onPrint != null)
-              IconButton(
-                tooltip: 'طباعة',
-                onPressed: onPrint,
-                icon: const Icon(Icons.print_rounded),
-              ),
-            TextButton(
-              onPressed: message.attachmentDownloadAllowed ? onOpen : null,
-              child: Text(
-                message.attachmentDownloadAllowed ? 'تحميل' : 'عرض فقط',
-              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachmentActionButton extends StatelessWidget {
+  const _AttachmentActionButton({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.isPrimary,
+    required this.primaryColor,
+    required this.isDark,
+    required this.textColor,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final bool isPrimary;
+  final Color primaryColor;
+  final bool isDark;
+  final Color textColor;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = isPrimary
+        ? primaryColor.withValues(alpha: isDark ? 0.22 : 0.12)
+        : (isDark ? const Color(0xFF263342) : const Color(0xFFEFF3F8));
+    final fg = isPrimary ? primaryColor : textColor;
+    final border = isPrimary
+        ? primaryColor.withValues(alpha: 0.35)
+        : (isDark ? const Color(0xFF384758) : const Color(0xFFD6E0EC));
+
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 350),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: border, width: 0.8),
             ),
-          ],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 14.5, color: fg),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: fg,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+class _FileAttachmentStyle {
+  final IconData icon;
+  final Color primaryColor;
+  final Color lightBg;
+  final Color darkBg;
+  final String typeLabel;
+
+  const _FileAttachmentStyle({
+    required this.icon,
+    required this.primaryColor,
+    required this.lightBg,
+    required this.darkBg,
+    required this.typeLabel,
+  });
+}
+
+_FileAttachmentStyle _resolveFileStyle(String ext, String? mimeType, bool isPdf) {
+  final normalizedExt = ext.toLowerCase();
+  final normalizedMime = (mimeType ?? '').toLowerCase();
+
+  // Excel / Spreadsheet
+  if (normalizedExt == 'xlsx' ||
+      normalizedExt == 'xls' ||
+      normalizedExt == 'csv' ||
+      normalizedExt == 'xlsm' ||
+      normalizedExt == 'xlsb' ||
+      normalizedMime.contains('spreadsheet') ||
+      normalizedMime.contains('excel') ||
+      normalizedMime.contains('csv')) {
+    return const _FileAttachmentStyle(
+      icon: Icons.table_chart_rounded,
+      primaryColor: Color(0xFF107C41),
+      lightBg: Color(0xFFE8F5E9),
+      darkBg: Color(0xFF1B382B),
+      typeLabel: 'EXCEL',
+    );
+  }
+
+  // Word / Document
+  if (normalizedExt == 'docx' ||
+      normalizedExt == 'doc' ||
+      normalizedExt == 'dotx' ||
+      normalizedExt == 'rtf' ||
+      normalizedMime.contains('word') ||
+      normalizedMime.contains('wordprocessingml')) {
+    return const _FileAttachmentStyle(
+      icon: Icons.article_rounded,
+      primaryColor: Color(0xFF185ABD),
+      lightBg: Color(0xFFE8F0FE),
+      darkBg: Color(0xFF192F4A),
+      typeLabel: 'WORD',
+    );
+  }
+
+  // PowerPoint / Presentation
+  if (normalizedExt == 'pptx' ||
+      normalizedExt == 'ppt' ||
+      normalizedExt == 'ppsx' ||
+      normalizedExt == 'potx' ||
+      normalizedMime.contains('presentation') ||
+      normalizedMime.contains('powerpoint')) {
+    return const _FileAttachmentStyle(
+      icon: Icons.co_present_rounded,
+      primaryColor: Color(0xFFC43E1C),
+      lightBg: Color(0xFFFCEEE9),
+      darkBg: Color(0xFF3B1E17),
+      typeLabel: 'PPT',
+    );
+  }
+
+  // PDF Document
+  if (isPdf ||
+      normalizedExt == 'pdf' ||
+      normalizedMime == 'application/pdf') {
+    return const _FileAttachmentStyle(
+      icon: Icons.picture_as_pdf_rounded,
+      primaryColor: Color(0xFFDC2626),
+      lightBg: Color(0xFFFEE2E2),
+      darkBg: Color(0xFF381A1A),
+      typeLabel: 'PDF',
+    );
+  }
+
+  // Archives / Compressed
+  if (normalizedExt == 'zip' ||
+      normalizedExt == 'rar' ||
+      normalizedExt == '7z' ||
+      normalizedExt == 'tar' ||
+      normalizedExt == 'gz' ||
+      normalizedExt == 'bz2' ||
+      normalizedExt == 'iso' ||
+      normalizedMime.contains('zip') ||
+      normalizedMime.contains('compressed') ||
+      normalizedMime.contains('archive')) {
+    return const _FileAttachmentStyle(
+      icon: Icons.folder_zip_rounded,
+      primaryColor: Color(0xFFD97706),
+      lightBg: Color(0xFFFEF3C7),
+      darkBg: Color(0xFF36270E),
+      typeLabel: 'ZIP',
+    );
+  }
+
+  // Audio files
+  if (normalizedExt == 'mp3' ||
+      normalizedExt == 'wav' ||
+      normalizedExt == 'm4a' ||
+      normalizedExt == 'aac' ||
+      normalizedExt == 'ogg' ||
+      normalizedExt == 'flac' ||
+      normalizedMime.startsWith('audio/')) {
+    return const _FileAttachmentStyle(
+      icon: Icons.audio_file_rounded,
+      primaryColor: Color(0xFF7C3AED),
+      lightBg: Color(0xFFEDE9FE),
+      darkBg: Color(0xFF2A1B3D),
+      typeLabel: 'AUDIO',
+    );
+  }
+
+  // Video files
+  if (normalizedExt == 'mp4' ||
+      normalizedExt == 'mov' ||
+      normalizedExt == 'avi' ||
+      normalizedExt == 'mkv' ||
+      normalizedExt == 'webm' ||
+      normalizedMime.startsWith('video/')) {
+    return const _FileAttachmentStyle(
+      icon: Icons.video_file_rounded,
+      primaryColor: Color(0xFF0284C7),
+      lightBg: Color(0xFFE0F2FE),
+      darkBg: Color(0xFF122E40),
+      typeLabel: 'VIDEO',
+    );
+  }
+
+  // Code / Text files
+  if (normalizedExt == 'txt' ||
+      normalizedExt == 'json' ||
+      normalizedExt == 'xml' ||
+      normalizedExt == 'html' ||
+      normalizedExt == 'css' ||
+      normalizedExt == 'js' ||
+      normalizedExt == 'dart' ||
+      normalizedExt == 'py' ||
+      normalizedExt == 'sql' ||
+      normalizedExt == 'md' ||
+      normalizedExt == 'log') {
+    return _FileAttachmentStyle(
+      icon: Icons.description_rounded,
+      primaryColor: const Color(0xFF475569),
+      lightBg: const Color(0xFFF1F5F9),
+      darkBg: const Color(0xFF1E293B),
+      typeLabel: normalizedExt.toUpperCase(),
+    );
+  }
+
+  // Default fallback
+  return _FileAttachmentStyle(
+    icon: Icons.insert_drive_file_rounded,
+    primaryColor: const Color(0xFF007AFF),
+    lightBg: const Color(0xFFEBF5FF),
+    darkBg: const Color(0xFF1A2A3D),
+    typeLabel: normalizedExt.isNotEmpty ? normalizedExt.toUpperCase() : 'FILE',
+  );
 }
 
 class _DesktopMediaAlbum extends StatelessWidget {
@@ -1281,6 +1681,7 @@ enum _BubbleMenuAction {
   forward,
   favorite,
   copy,
+  openAttachment,
   saveAttachment,
   saveSticker,
   edit,

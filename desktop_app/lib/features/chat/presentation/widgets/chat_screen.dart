@@ -2893,7 +2893,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       if (forceSaveAs) {
         final suggestedName = p.basename(message.fileName ?? 'attachment');
         final destinationPath = await FilePicker.platform.saveFile(
-          dialogTitle: 'حفظ الملف',
+          dialogTitle: 'نقل أو حفظ الملف',
           fileName: suggestedName,
           lockParentWindow: true,
         );
@@ -2906,11 +2906,45 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('تم حفظ ${message.fileName ?? 'المرفق'} بنجاح'),
+            content: Text('تم حفظ ' + (message.fileName ?? 'المرفق') + ' بنجاح'),
+            action: SnackBarAction(
+              label: 'فتح الملف',
+              onPressed: () {
+                OpenFilex.open(destinationPath);
+              },
+            ),
           ),
         );
       } else if (openAfterDownload) {
-        await OpenFilex.open(localPath);
+        final openResult = await OpenFilex.open(localPath);
+        if (openResult.type != ResultType.done) {
+          bool openedByFallback = false;
+          if (!kIsWeb && Platform.isWindows) {
+            try {
+              final result = await Process.run(
+                'cmd',
+                ['/c', 'start', '', localPath],
+                runInShell: true,
+              );
+              openedByFallback = (result.exitCode == 0);
+            } catch (_) {}
+          }
+          if (!openedByFallback && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  openResult.type == ResultType.noAppToOpen
+                      ? 'لا يوجد برنامج مثبت لفتح هذا الملف (' + p.extension(localPath) + ').'
+                      : 'تعذر فتح الملف: ' + openResult.message,
+                ),
+                action: SnackBarAction(
+                  label: 'نقل / حفظ في...',
+                  onPressed: () => _downloadAttachment(message, forceSaveAs: true),
+                ),
+              ),
+            );
+          }
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
