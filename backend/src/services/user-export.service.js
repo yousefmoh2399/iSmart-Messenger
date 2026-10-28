@@ -2,14 +2,11 @@ const fs = require("fs");
 const path = require("path");
 const ExcelJS = require("exceljs");
 const PDFDocument = require("pdfkit");
-const bidiFactory = require("bidi-js");
-const { ArabicShaper } = require("arabic-persian-reshaper");
 
 const User = require("../models/user.model");
 const Department = require("../chat/models/department.model");
 const Branch = require("../chat/models/branch.model");
 
-const bidi = bidiFactory();
 const ARABIC_REGEX = /[\u0600-\u06FF]/;
 const MOJIBAKE_REGEX = /[ØÙ][^\s]*/;
 
@@ -28,46 +25,44 @@ function hasArabic(text) {
   return ARABIC_REGEX.test(fixText(text));
 }
 
-function shapeArabicLine(text) {
+function processArabicText(text) {
+  if (text == null) return "";
   const input = fixText(text);
-  if (!hasArabic(input)) return input;
-  const shaped = ArabicShaper.convertArabic(input);
-  const embedding = bidi.getEmbeddingLevels(shaped, "rtl");
-  return bidi.getReorderedString(shaped, embedding);
+  if (!/[\u0600-\u06FF]/.test(input)) return input;
+
+  const swapped = input
+    .replace(/\(/g, "\x01")
+    .replace(/\)/g, "(")
+    .replace(/\x01/g, ")");
+
+  return swapped.split(" ").reverse().join("  ");
 }
 
-function formatBidiLine(label, value) {
-  const cleanLabel = fixText(label);
-  const cleanValue = fixText(value);
-  const hasArabicStart = /[\u0600-\u06FF]/.test(cleanValue.trim().charAt(0));
-  if (hasArabicStart) {
-    return `${cleanLabel}: ${cleanValue}`;
-  } else {
-    return `${cleanLabel}: \u200E${cleanValue}`;
-  }
+function resolveFonts() {
+  const candidatesRegular = [
+    path.join(__dirname, "../assets/fonts/Arial.ttf"),
+    path.join(__dirname, "../../assets/fonts/Arial.ttf"),
+    path.join(__dirname, "../assets/fonts/Amiri-Regular.ttf"),
+  ];
+  const candidatesBold = [
+    path.join(__dirname, "../assets/fonts/Arial-Bold.ttf"),
+    path.join(__dirname, "../../assets/fonts/Arial-Bold.ttf"),
+    path.join(__dirname, "../assets/fonts/Amiri-Bold.ttf"),
+  ];
+  const fontRegular = candidatesRegular.find((p) => fs.existsSync(p)) || candidatesRegular[0];
+  const fontBold = candidatesBold.find((p) => fs.existsSync(p)) || candidatesBold[0];
+  return { fontRegular, fontBold };
 }
 
 function configureArabicPdf(doc) {
-  let regularPath = path.join(__dirname, "../assets/fonts/Amiri-Regular.ttf");
-  let boldPath = path.join(__dirname, "../assets/fonts/Amiri-Bold.ttf");
-
-  if (!fs.existsSync(regularPath)) {
-    regularPath = path.join(__dirname, "../assets/fonts/NotoSansArabic-Regular.ttf");
-    boldPath = path.join(__dirname, "../assets/fonts/NotoSansArabic-Bold.ttf");
+  const { fontRegular, fontBold } = resolveFonts();
+  if (fs.existsSync(fontRegular)) {
+    doc.registerFont("Arabic", fontRegular);
   }
-
-  if (!fs.existsSync(regularPath)) {
-    regularPath = path.join(__dirname, "../../assets/fonts/Amiri-Regular.ttf");
-    boldPath = path.join(__dirname, "../../assets/fonts/Amiri-Bold.ttf");
+  if (fs.existsSync(fontBold)) {
+    doc.registerFont("ArabicBold", fontBold);
   }
-
-  if (fs.existsSync(regularPath)) {
-    doc.registerFont("Arabic", regularPath);
-  }
-  if (fs.existsSync(boldPath)) {
-    doc.registerFont("ArabicBold", boldPath);
-  }
-  doc.font(fs.existsSync(regularPath) ? "Arabic" : "Helvetica");
+  doc.font(fs.existsSync(fontRegular) ? "Arabic" : "Helvetica");
 }
 
 function withArabicFont(doc, bold = false) {
@@ -85,17 +80,17 @@ function formatDate(value) {
   if (!value) return "-";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toISOString().replace("T", " ").slice(0, 19);
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function roleLabel(role) {
+function roleLabel(role, forPdf = false) {
   switch (String(role || "").toLowerCase()) {
     case "admin":
-      return "مسؤول نظام (Admin)";
+      return forPdf ? "مسؤول نظام" : "مسؤول نظام (Admin)";
     case "manager":
-      return "مدير قسم (Manager)";
+      return forPdf ? "مدير قسم" : "مدير قسم (Manager)";
     default:
-      return "مستخدم عادي (User)";
+      return forPdf ? "مستخدم عادي" : "مستخدم عادي (User)";
   }
 }
 
@@ -366,7 +361,7 @@ async function buildUsersPdfReport({
   const doc = new PDFDocument({
     margin: 36,
     size: "A4",
-    layout: "landscape", // Landscape allows 7-8 columns to fit perfectly
+    layout: "landscape",
   });
   configureArabicPdf(doc);
 
@@ -374,69 +369,70 @@ async function buildUsersPdfReport({
   doc.on("data", (chunk) => chunks.push(chunk));
   const done = new Promise((resolve) => doc.on("end", resolve));
 
-  const branchText = selectedBranch ? `${selectedBranch.name} (${selectedBranch.code || ""})` : "كافة الفروع";
+  const branchText = selectedBranch ? `${selectedBranch.name}` : "كافة الفروع";
   const deptText = selectedDept ? selectedDept.name : "كافة الأقسام";
   const totalUsers = users.length;
   const activeUsers = users.filter((u) => u.isActive !== false).length;
+  const usableWidth = doc.page.width - 72; // 841.89 - 72 = 769.89
 
   // Header Banner
-  doc.rect(36, 36, doc.page.width - 72, 60).fill("#1E3A8A");
+  doc.rect(36, 36, usableWidth, 58).fill("#1E3A8A");
 
   withArabicFont(doc, true).fontSize(16).fillColor("#FFFFFF");
-  const titleText = shapeArabicLine("منظومة iSmart Messenger - كشف حسابات وبيانات المستخدمين");
-  doc.text(titleText, 46, 48, { align: "right", width: doc.page.width - 92 });
+  const titleText = processArabicText("منظومة iSmart Messenger - كشف حسابات وبيانات المستخدمين");
+  doc.text(titleText, 36, 46, { align: "center", width: usableWidth });
 
-  withArabicFont(doc, false).fontSize(9).fillColor("#DBEAFE");
-  const subTitle = shapeArabicLine(
-    `الفرع: ${branchText}  |  القسم: ${deptText}  |  إجمالي المستخدمين: ${totalUsers} (نشط: ${activeUsers})  |  تاريخ: ${formatDate(generatedAt)}`
+  withArabicFont(doc, false).fontSize(9.5).fillColor("#DBEAFE");
+  const subTitle = processArabicText(
+    `الفرع: ${branchText}   |   القسم: ${deptText}   |   إجمالي المستخدمين: ${totalUsers}   |   النشط: ${activeUsers}   |   تاريخ: ${formatDate(generatedAt)}`
   );
-  doc.text(subTitle, 46, 72, { align: "right", width: doc.page.width - 92 });
-
-  doc.moveDown(2);
-
-  // Table Setup
-  // Page width is ~841.89 pt (A4 Landscape). Margins 36 + 36 = 72 pt. Usable width = 769 pt.
-  const startY = 112;
-  let currentY = startY;
-  const usableWidth = doc.page.width - 72;
+  doc.text(subTitle, 36, 70, { align: "center", width: usableWidth });
 
   // Columns definition (Right to Left):
   // 1: م (35pt)
-  // 2: اسم المستخدم (120pt)
+  // 2: اسم المستخدم (110pt)
   // 3: الاسم الكامل (154pt)
   // 4: الفرع (110pt)
   // 5: القسم (110pt)
   // 6: الدور (110pt)
   // 7: الحالة (60pt)
-  // 8: تاريخ الإنشاء (70pt)
+  // 8: تاريخ الإنشاء (80pt)
+  // Total = 769 pt (matches usableWidth)
   const columns = [
-    { label: "تاريخ الإنشاء", width: 75, align: "center" },
-    { label: "الحالة", width: 55, align: "center" },
-    { label: "الدور", width: 110, align: "right" },
-    { label: "القسم", width: 115, align: "right" },
-    { label: "الفرع", width: 110, align: "right" },
-    { label: "الاسم الكامل", width: 154, align: "right" },
-    { label: "اسم المستخدم", width: 115, align: "right" },
-    { label: "م", width: 35, align: "center" },
+    { label: "م", width: 35 },
+    { label: "اسم المستخدم", width: 110 },
+    { label: "الاسم الكامل", width: 154 },
+    { label: "الفرع", width: 110 },
+    { label: "القسم", width: 110 },
+    { label: "الدور", width: 110 },
+    { label: "الحالة", width: 60 },
+    { label: "تاريخ الإنشاء", width: 80 },
   ];
 
+  const startY = 108;
+  let currentY = startY;
+  const headerHeight = 24;
+  const rowHeight = 22;
+
   function drawTableHeader(y) {
-    doc.rect(36, y, usableWidth, 22).fill("#2563EB");
-    withArabicFont(doc, true).fontSize(9).fillColor("#FFFFFF");
-    let x = 36;
+    withArabicFont(doc, true).fontSize(9.5);
+    let currentX = doc.page.width - 36; // Start from right margin
+
     for (const col of columns) {
-      doc.text(shapeArabicLine(col.label), x + 4, y + 6, {
-        width: col.width - 8,
-        align: col.align,
+      const x = currentX - col.width;
+      doc.rect(x, y, col.width, headerHeight).fill("#2563EB");
+      doc.rect(x, y, col.width, headerHeight).strokeColor("#1D4ED8").stroke();
+      doc.fillColor("#FFFFFF");
+      doc.text(processArabicText(col.label), x + 2, y + 6, {
+        width: col.width - 4,
+        align: "center",
       });
-      x += col.width;
+      currentX = x;
     }
   }
 
   drawTableHeader(currentY);
-  currentY += 22;
-
-  const rowHeight = 20;
+  currentY += headerHeight;
 
   users.forEach((user, idx) => {
     // Check page break
@@ -444,49 +440,54 @@ async function buildUsersPdfReport({
       doc.addPage({ margin: 36, size: "A4", layout: "landscape" });
       currentY = 40;
       drawTableHeader(currentY);
-      currentY += 22;
+      currentY += headerHeight;
     }
 
-    const branchName = user.branchId?.name || (user.branchCode === "MAIN" ? "الرئيسي" : "-");
+    const branchName = user.branchId?.name || (user.branchCode === "MAIN" ? "الفرع الرئيسي" : "-");
     const deptName = user.departmentId?.name ||
       (Array.isArray(user.departmentIds) && user.departmentIds.length > 0
         ? user.departmentIds.map((d) => d?.name || "").filter(Boolean).join("، ")
         : "-");
 
     const isEven = idx % 2 === 0;
-    doc.rect(36, currentY, usableWidth, rowHeight).fill(isEven ? "#F8FAFC" : "#FFFFFF");
-    doc.rect(36, currentY, usableWidth, rowHeight).strokeColor("#E2E8F0").stroke();
+    const rowBg = isEven ? "#F8FAFC" : "#FFFFFF";
 
     const rowData = [
-      formatDate(user.createdAt).slice(0, 10),
-      statusLabel(user.isActive),
-      roleLabel(user.role).replace(/\s*\(.*\)/, ""),
-      deptName,
-      branchName,
-      user.fullName || "-",
-      user.username,
       String(idx + 1),
+      user.username || "-",
+      user.fullName || "-",
+      branchName,
+      deptName,
+      roleLabel(user.role, true),
+      statusLabel(user.isActive),
+      formatDate(user.createdAt),
     ];
 
-    withArabicFont(doc, false).fontSize(8.5).fillColor("#0F172A");
-    let x = 36;
+    withArabicFont(doc, false).fontSize(8.5);
+    let currentX = doc.page.width - 36;
+
     for (let c = 0; c < columns.length; c++) {
       const col = columns[c];
       const val = rowData[c];
-      const shapedVal = shapeArabicLine(val);
+      const x = currentX - col.width;
 
-      if (col.label === "الحالة") {
+      doc.rect(x, currentY, col.width, rowHeight).fill(rowBg);
+      doc.rect(x, currentY, col.width, rowHeight).strokeColor("#E2E8F0").stroke();
+
+      if (c === 6) { // الحالة (Status)
         doc.fillColor(user.isActive !== false ? "#15803D" : "#B91C1C");
       } else {
-        doc.fillColor("#1E293B");
+        doc.fillColor("#0F172A");
       }
 
-      doc.text(shapedVal, x + 4, currentY + 5, {
-        width: col.width - 8,
-        align: col.align,
+      doc.text(processArabicText(val), x + 2, currentY + 6, {
+        width: col.width - 4,
+        align: "center",
         ellipsis: true,
+        lineBreak: false,
       });
-      x += col.width;
+
+      currentX = x;
     }
 
     currentY += rowHeight;
@@ -495,9 +496,9 @@ async function buildUsersPdfReport({
   // Footer on last page
   withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
   doc.text(
-    shapeArabicLine(`تم استخراج هذا التقرير آلياً بواسطة ${actor?.fullName || actor?.username || "Admin"} - منظومة iSmart`),
+    processArabicText(`تم استخراج هذا التقرير آلياً بواسطة ${actor?.fullName || actor?.username || "Admin"} - منظومة iSmart Messenger`),
     36,
-    doc.page.height - 28,
+    doc.page.height - 26,
     { align: "center", width: usableWidth }
   );
 
@@ -508,4 +509,7 @@ async function buildUsersPdfReport({
 
 module.exports = {
   exportUsersReport,
+  buildUsersPdfReport,
+  buildUsersExcelReport,
+  processArabicText,
 };
