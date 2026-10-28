@@ -282,8 +282,7 @@ class BatchJobTitleConfig {
     'title': title,
     'prefix': prefix,
     'count': count,
-    if (departmentId != null && departmentId!.isNotEmpty)
-      'departmentId': departmentId,
+    'departmentId': (departmentId != null && departmentId!.isNotEmpty) ? departmentId : null,
     'allowUnnumberedFirst': allowUnnumberedFirst,
   };
 }

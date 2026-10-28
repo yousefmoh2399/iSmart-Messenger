@@ -12,7 +12,18 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "man",
     defaultCount: 1,
     allowUnnumberedFirst: true,
-    departmentKeywords: ["إدارة", "ادارة", "management", "mgmt"],
+    departmentKeywords: [
+      "branch managers",
+      "branch manager",
+      "managers",
+      "man branches",
+      "مدير فرع",
+      "إدارة الفروع",
+      "إدارة",
+      "ادارة",
+      "management",
+      "mgmt",
+    ],
   },
   {
     key: "vman",
@@ -20,7 +31,15 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "vman",
     defaultCount: 1,
     allowUnnumberedFirst: true,
-    departmentKeywords: ["إدارة", "ادارة", "management", "mgmt"],
+    departmentKeywords: [
+      "branch managers",
+      "branch manager",
+      "vman",
+      "نائب مدير",
+      "إدارة الفروع",
+      "managers",
+      "إدارة",
+    ],
   },
   {
     key: "acc",
@@ -28,7 +47,49 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "acc",
     defaultCount: 2,
     allowUnnumberedFirst: false,
-    departmentKeywords: ["حسابات", "مالية", "accounts", "finance"],
+    departmentKeywords: [
+      "acc branches",
+      "acc",
+      "accounting",
+      "accounts",
+      "حسابات",
+      "مالية",
+      "finance",
+    ],
+  },
+  {
+    key: "cashier",
+    title: "أمين خزنة",
+    prefix: "cash",
+    defaultCount: 0,
+    allowUnnumberedFirst: false,
+    departmentKeywords: [
+      "cashier branches",
+      "cashier",
+      "cash",
+      "خزينة",
+      "خزنة",
+      "صراف",
+      "أمين خزنة",
+      "امين خزنة",
+    ],
+  },
+  {
+    key: "acash",
+    title: "مساعد أمين خزنة",
+    prefix: "acash",
+    defaultCount: 0,
+    allowUnnumberedFirst: false,
+    departmentKeywords: [
+      "cashier branches",
+      "cashier",
+      "cash",
+      "خزينة",
+      "خزنة",
+      "صراف",
+      "مساعد أمين خزنة",
+      "مساعد امين خزنة",
+    ],
   },
   {
     key: "ghead",
@@ -36,7 +97,17 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "ghead",
     defaultCount: 4,
     allowUnnumberedFirst: false,
-    departmentKeywords: ["تمويل", "ائتمان", "مجموعات", "credit"],
+    departmentKeywords: [
+      "ghead branches",
+      "ghead",
+      "group head",
+      "مجموعات",
+      "رئيس مجموعة",
+      "رئيسة مجموعة",
+      "تمويل",
+      "ائتمان",
+      "credit",
+    ],
   },
   {
     key: "csup",
@@ -44,7 +115,16 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "csup",
     defaultCount: 4,
     allowUnnumberedFirst: false,
-    departmentKeywords: ["منسق", "منسقات", "coord"],
+    departmentKeywords: [
+      "csup branches",
+      "csup",
+      "مشرف منسقات",
+      "مشرفة منسقات",
+      "coord sup",
+      "منسق",
+      "منسقات",
+      "coord",
+    ],
   },
   {
     key: "spec",
@@ -52,7 +132,16 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "spec",
     defaultCount: 7,
     allowUnnumberedFirst: false,
-    departmentKeywords: ["أخصائي", "اخصائي", "تمويل", "ائتمان", "credit"],
+    departmentKeywords: [
+      "spec branches",
+      "spec",
+      "specialist",
+      "أخصائي",
+      "اخصائي",
+      "تمويل",
+      "ائتمان",
+      "credit",
+    ],
   },
   {
     key: "coord",
@@ -60,7 +149,14 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "coord",
     defaultCount: 8,
     allowUnnumberedFirst: false,
-    departmentKeywords: ["منسق", "منسقات", "coord"],
+    departmentKeywords: [
+      "coord branches",
+      "coord",
+      "coordinator",
+      "منسقة",
+      "منسق",
+      "منسقات",
+    ],
   },
   {
     key: "collect",
@@ -68,7 +164,14 @@ const DEFAULT_JOB_TEMPLATES = [
     prefix: "collect",
     defaultCount: 1,
     allowUnnumberedFirst: false,
-    departmentKeywords: ["تحصيل", "محصل", "collections"],
+    departmentKeywords: [
+      "collect branches",
+      "collect",
+      "collector",
+      "تحصيل",
+      "محصل",
+      "collections",
+    ],
   },
 ];
 
@@ -128,15 +231,32 @@ function generateUsernames(existingUsernames, prefix, branchCode, count, allowUn
   return results;
 }
 
-function resolveDepartmentForTitle(allDepartments, titleConfig) {
+function resolveDepartmentForTitle(allDepartments, titleConfig = {}) {
   if (titleConfig.departmentId) {
     const found = allDepartments.find((d) => d._id.toString() === String(titleConfig.departmentId));
     if (found) return found._id;
   }
 
+  const branchDepts = allDepartments.filter((d) => {
+    const n = (d.name || "").toLowerCase();
+    const c = (d.code || "").toLowerCase();
+    return n.includes("branch") || n.includes("فرع") || c.includes("branch");
+  });
+
   const keywords = titleConfig.departmentKeywords || [];
   for (const kw of keywords) {
-    const normalizedKw = kw.toLowerCase();
+    const normalizedKw = String(kw).trim().toLowerCase();
+    if (!normalizedKw) continue;
+
+    // Check branch departments first
+    const matchedBranch = branchDepts.find(
+      (d) =>
+        (d.name && d.name.toLowerCase().includes(normalizedKw)) ||
+        (d.code && d.code.toLowerCase().includes(normalizedKw))
+    );
+    if (matchedBranch) return matchedBranch._id;
+
+    // Check all departments
     const matched = allDepartments.find(
       (d) =>
         (d.name && d.name.toLowerCase().includes(normalizedKw)) ||
@@ -159,14 +279,14 @@ async function batchGenerateBranchUsers(actor, {
     throw new ApiError(400, "معرّف الفرع مطلوب.");
   }
 
-  const branch = await Branch.findOne({ _id: branchId, deletedAt: null });
+  const branch = await Branch.findById(branchId);
   if (!branch) {
-    throw new ApiError(404, "الفرع غير موجود أو تم حذفه.");
+    throw new ApiError(404, "الفرع المحدد غير موجود.");
   }
 
   const branchCode = String(branch.code || "").trim();
   if (!branchCode) {
-    throw new ApiError(400, "كود الفرع غير محدد في بيانات الفرع.");
+    throw new ApiError(400, "الفرع المحدد لا يحتوي على كود فرع صالح (كود الفرع مطلوب للتسمية).");
   }
 
   const passwordStr = String(defaultPassword || "123456").trim();
@@ -200,11 +320,21 @@ async function batchGenerateBranchUsers(actor, {
         ? Boolean(item.allowUnnumberedFirst)
         : template?.allowUnnumberedFirst ?? false;
 
-    const departmentKeywords = item.departmentKeywords || template?.departmentKeywords || [];
-    const departmentId = resolveDepartmentForTitle(allDepartments, {
-      departmentId: item.departmentId,
-      departmentKeywords,
-    });
+    const departmentKeywords = item.departmentKeywords || template?.departmentKeywords || [prefix, title];
+
+    let departmentId = null;
+    if (item.departmentId !== undefined) {
+      if (item.departmentId) {
+        const found = allDepartments.find((d) => d._id.toString() === String(item.departmentId));
+        departmentId = found ? found._id : null;
+      } else {
+        departmentId = null;
+      }
+    } else {
+      departmentId = resolveDepartmentForTitle(allDepartments, {
+        departmentKeywords,
+      });
+    }
 
     configsToProcess.push({
       key: item.key,
@@ -259,59 +389,56 @@ async function batchGenerateBranchUsers(actor, {
     }
   }
 
-  if (docsToInsert.length === 0) {
-    throw new ApiError(400, "لم يتم إنشاء أي مستخدمين.");
-  }
+  // Insert generated users in MongoDB
+  const createdUsers = await User.insertMany(docsToInsert);
 
-  const createdUsers = await User.insertMany(docsToInsert, { ordered: true });
-
-  // Increment branch members count
-  await Branch.updateOne(
-    { _id: branch._id },
-    { $inc: { membersCount: docsToInsert.length } }
-  );
-
-  // Increment department members counts
-  for (const [deptId, inc] of Object.entries(deptCountIncrements)) {
-    await Department.updateOne(
-      { _id: deptId },
-      { $inc: { membersCount: inc } }
-    );
-  }
-
-  // Audit Log
-  await logAuditEvent({
-    actorId: actor?.id || actor?._id,
-    action: "user.batch_generated",
-    entityType: "Branch",
-    entityId: branch._id,
-    payload: {
-      branchCode: branch.code,
-      branchName: branch.name,
-      totalCreated: createdUsers.length,
-      items: configsToProcess.map((c) => ({ title: c.title, count: c.count })),
-    },
+  // Increment branch membersCount
+  await Branch.findByIdAndUpdate(branch._id, {
+    $inc: { membersCount: createdUsers.length },
   });
+
+  // Increment department membersCount for each affected department
+  const deptUpdatePromises = Object.entries(deptCountIncrements).map(([deptId, incCount]) =>
+    Department.findByIdAndUpdate(deptId, {
+      $inc: { membersCount: incCount },
+    })
+  );
+  await Promise.all(deptUpdatePromises);
+
+  // Audit log
+  await logAuditEvent(
+    actor,
+    "user_batch_generated",
+    "Branch",
+    branch._id,
+    {
+      branchName: branch.name,
+      branchCode,
+      totalUsersCreated: createdUsers.length,
+      rolesSummary: configsToProcess.map((c) => `${c.title}: ${c.count}`).join(", "),
+    }
+  );
 
   return {
     success: true,
-    branch: {
-      id: branch._id.toString(),
-      name: branch.name,
-      code: branch.code,
-    },
     totalCreated: createdUsers.length,
+    branch: {
+      id: branch._id,
+      name: branch.name,
+      code: branchCode,
+    },
     users: createdUsers.map((u) => ({
       id: u._id.toString(),
       username: u.username,
       fullName: u.fullName,
       jobTitle: u.jobTitle,
       role: u.role,
-      branchId: u.branchId?.toString?.() || null,
+      branchId: u.branchId ? u.branchId.toString() : null,
       branchCode: u.branchCode,
-      departmentId: u.departmentId?.toString?.() || null,
-      isActive: u.isActive !== false,
-      isOnline: false,
+      departmentId: u.departmentId ? u.departmentId.toString() : null,
+      departmentIds: (u.departmentIds || []).map((d) => d.toString()),
+      isActive: u.isActive,
+      avatar: u.avatar || null,
       permissions: {},
       maxAttachmentSizeMB: 20,
       createdAt: u.createdAt ? u.createdAt.toISOString() : new Date().toISOString(),
@@ -324,5 +451,6 @@ module.exports = {
   DEFAULT_JOB_TEMPLATES,
   getNextAvailableIndex,
   generateUsernames,
+  resolveDepartmentForTitle,
   batchGenerateBranchUsers,
 };

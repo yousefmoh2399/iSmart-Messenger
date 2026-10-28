@@ -845,6 +845,7 @@ class _AppleTextField extends StatelessWidget {
     this.maxLines = 1,
     this.minLines,
     this.autofocus = false,
+    this.keyboardType,
   });
 
   final TextEditingController controller;
@@ -857,6 +858,7 @@ class _AppleTextField extends StatelessWidget {
   final int? maxLines;
   final int? minLines;
   final bool autofocus;
+  final TextInputType? keyboardType;
 
   @override
   Widget build(BuildContext context) {
@@ -883,6 +885,7 @@ class _AppleTextField extends StatelessWidget {
           maxLines: maxLines,
           minLines: minLines,
           autofocus: autofocus,
+          keyboardType: keyboardType,
           style: TextStyle(
             fontSize: 13.5,
             color: isDark ? Colors.white : const Color(0xFF0F172A),
@@ -2601,13 +2604,30 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     String? errorText;
 
     String? findDeptForKeywords(List<String> keywords) {
+      final branchDepts = widget.departments.where((d) {
+        final n = d.name.toLowerCase();
+        final c = d.code.toLowerCase();
+        return n.contains('branch') || n.contains('فرع') || c.contains('branch');
+      }).toList();
+
       for (final kw in keywords) {
-        final match = widget.departments
-            .where((d) => d.name.toLowerCase().contains(kw.toLowerCase()))
-            .firstOrNull;
+        final normalizedKw = kw.trim().toLowerCase();
+        if (normalizedKw.isEmpty) continue;
+
+        final matchBranch = branchDepts.where((d) =>
+          d.name.toLowerCase().contains(normalizedKw) ||
+          d.code.toLowerCase().contains(normalizedKw)
+        ).firstOrNull;
+        if (matchBranch != null) return matchBranch.id;
+
+        final match = widget.departments.where((d) =>
+          d.name.toLowerCase().contains(normalizedKw) ||
+          d.code.toLowerCase().contains(normalizedKw)
+        ).firstOrNull;
         if (match != null) return match.id;
       }
-      return widget.departments.isNotEmpty ? widget.departments.first.id : null;
+
+      return null;
     }
 
     final items = <_BatchJobItemDraft>[
@@ -2617,8 +2637,23 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'man',
         defaultCount: 1,
         allowUnnumberedFirst: true,
-        keywords: const ['إدارة', 'ادارة', 'management'],
-        departmentId: findDeptForKeywords(['إدارة', 'ادارة', 'management']),
+        keywords: const [
+          'branch managers',
+          'branch manager',
+          'managers',
+          'man branches',
+          'مدير فرع',
+          'إدارة الفروع',
+          'إدارة',
+        ],
+        departmentId: findDeptForKeywords([
+          'branch managers',
+          'branch manager',
+          'managers',
+          'man branches',
+          'مدير فرع',
+          'إدارة الفروع',
+        ]),
         count: 1,
         isEnabled: true,
       ),
@@ -2628,8 +2663,21 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'vman',
         defaultCount: 1,
         allowUnnumberedFirst: true,
-        keywords: const ['إدارة', 'ادارة', 'management'],
-        departmentId: findDeptForKeywords(['إدارة', 'ادارة', 'management']),
+        keywords: const [
+          'branch managers',
+          'branch manager',
+          'vman',
+          'نائب مدير',
+          'إدارة الفروع',
+          'managers',
+        ],
+        departmentId: findDeptForKeywords([
+          'branch managers',
+          'branch manager',
+          'vman',
+          'نائب مدير',
+          'إدارة الفروع',
+        ]),
         count: 1,
         isEnabled: true,
       ),
@@ -2639,10 +2687,74 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'acc',
         defaultCount: 2,
         allowUnnumberedFirst: false,
-        keywords: const ['حسابات', 'مالية', 'accounts'],
-        departmentId: findDeptForKeywords(['حسابات', 'مالية', 'accounts']),
+        keywords: const [
+          'acc branches',
+          'acc',
+          'accounting',
+          'accounts',
+          'حسابات',
+          'مالية',
+        ],
+        departmentId: findDeptForKeywords([
+          'acc branches',
+          'acc',
+          'accounting',
+          'حسابات',
+        ]),
         count: 2,
         isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'cashier',
+        title: 'أمين خزنة',
+        prefix: 'cash',
+        defaultCount: 0,
+        allowUnnumberedFirst: false,
+        keywords: const [
+          'cashier branches',
+          'cashier',
+          'cash',
+          'خزينة',
+          'خزنة',
+          'صراف',
+          'أمين خزنة',
+        ],
+        departmentId: findDeptForKeywords([
+          'cashier branches',
+          'cashier',
+          'cash',
+          'خزينة',
+          'خزنة',
+          'صراف',
+        ]),
+        count: 0,
+        isEnabled: false,
+      ),
+      _BatchJobItemDraft(
+        key: 'acash',
+        title: 'مساعد أمين خزنة',
+        prefix: 'acash',
+        defaultCount: 0,
+        allowUnnumberedFirst: false,
+        keywords: const [
+          'cashier branches',
+          'cashier',
+          'cash',
+          'خزينة',
+          'خزنة',
+          'صراف',
+          'مساعد أمين خزنة',
+        ],
+        departmentId: findDeptForKeywords([
+          'cashier branches',
+          'cashier',
+          'cash',
+          'خزينة',
+          'خزنة',
+          'صراف',
+        ]),
+        count: 0,
+        isEnabled: false,
       ),
       _BatchJobItemDraft(
         key: 'ghead',
@@ -2650,8 +2762,22 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'ghead',
         defaultCount: 4,
         allowUnnumberedFirst: false,
-        keywords: const ['تمويل', 'ائتمان', 'مجموعات', 'credit'],
-        departmentId: findDeptForKeywords(['تمويل', 'ائتمان', 'مجموعات']),
+        keywords: const [
+          'ghead branches',
+          'ghead',
+          'group head',
+          'مجموعات',
+          'رئيس مجموعة',
+          'تمويل',
+          'ائتمان',
+        ],
+        departmentId: findDeptForKeywords([
+          'ghead branches',
+          'ghead',
+          'group head',
+          'مجموعات',
+          'رئيس مجموعة',
+        ]),
         count: 4,
         isEnabled: true,
       ),
@@ -2661,8 +2787,20 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'csup',
         defaultCount: 4,
         allowUnnumberedFirst: false,
-        keywords: const ['منسق', 'منسقات', 'coord'],
-        departmentId: findDeptForKeywords(['منسق', 'منسقات', 'coord']),
+        keywords: const [
+          'csup branches',
+          'csup',
+          'مشرف منسقات',
+          'مشرفة منسقات',
+          'coord sup',
+          'منسق',
+        ],
+        departmentId: findDeptForKeywords([
+          'csup branches',
+          'csup',
+          'مشرف منسقات',
+          'مشرفة منسقات',
+        ]),
         count: 4,
         isEnabled: true,
       ),
@@ -2672,8 +2810,22 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'spec',
         defaultCount: 7,
         allowUnnumberedFirst: false,
-        keywords: const ['أخصائي', 'اخصائي', 'تمويل', 'ائتمان'],
-        departmentId: findDeptForKeywords(['أخصائي', 'اخصائي', 'تمويل']),
+        keywords: const [
+          'spec branches',
+          'spec',
+          'specialist',
+          'أخصائي',
+          'اخصائي',
+          'تمويل',
+          'ائتمان',
+        ],
+        departmentId: findDeptForKeywords([
+          'spec branches',
+          'spec',
+          'specialist',
+          'أخصائي',
+          'اخصائي',
+        ]),
         count: 7,
         isEnabled: true,
       ),
@@ -2683,8 +2835,21 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'coord',
         defaultCount: 8,
         allowUnnumberedFirst: false,
-        keywords: const ['منسق', 'منسقات', 'coord'],
-        departmentId: findDeptForKeywords(['منسق', 'منسقات', 'coord']),
+        keywords: const [
+          'coord branches',
+          'coord',
+          'coordinator',
+          'منسقة',
+          'منسق',
+          'منسقات',
+        ],
+        departmentId: findDeptForKeywords([
+          'coord branches',
+          'coord',
+          'coordinator',
+          'منسقة',
+          'منسقات',
+        ]),
         count: 8,
         isEnabled: true,
       ),
@@ -2694,12 +2859,160 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
         prefix: 'collect',
         defaultCount: 1,
         allowUnnumberedFirst: false,
-        keywords: const ['تحصيل', 'محصل', 'collections'],
-        departmentId: findDeptForKeywords(['تحصيل', 'محصل', 'collections']),
+        keywords: const [
+          'collect branches',
+          'collect',
+          'collector',
+          'تحصيل',
+          'محصل',
+          'collections',
+        ],
+        departmentId: findDeptForKeywords([
+          'collect branches',
+          'collect',
+          'collector',
+          'تحصيل',
+          'محصل',
+        ]),
         count: 1,
         isEnabled: true,
       ),
     ];
+
+    Future<void> showAddCustomJobDialog(StateSetter setParentState) async {
+      final titleCtrl = TextEditingController();
+      final prefixCtrl = TextEditingController();
+      final countCtrl = TextEditingController(text: '1');
+      String? customDeptId = findDeptForKeywords(['cashier', 'branches']);
+      String? customError;
+
+      await showDialog<void>(
+        context: context,
+        builder: (addCtx) => StatefulBuilder(
+          builder: (addCtx, setAddState) {
+            return _AppleAdminDialog(
+              badgeIcon: Icons.post_add_rounded,
+              badgeColor: const Color(0xFF10B981),
+              title: 'إضافة مسمى وظيفي جديد',
+              subtitle: 'إضافة وظيفة إضافية للتوليد (مثل مساعد أمين خزنة أو مراقب فرع)',
+              maxWidth: 480,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (customError != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        customError!,
+                        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12),
+                      ),
+                    ),
+                  _AppleTextField(
+                    controller: titleCtrl,
+                    label: 'المسمى الوظيفي بالعربي',
+                    hint: 'مثال: مساعد أمين خزنة',
+                    prefixIcon: Icons.badge_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _AppleTextField(
+                    controller: prefixCtrl,
+                    label: 'البادئة بالإنجليزية (Prefix)',
+                    hint: 'مثال: acash أو cash أو audit',
+                    prefixIcon: Icons.short_text_rounded,
+                  ),
+                  const SizedBox(height: 12),
+                  _AppleTextField(
+                    controller: countCtrl,
+                    label: 'العدد المطلوب توليده',
+                    hint: '1',
+                    keyboardType: TextInputType.number,
+                    prefixIcon: Icons.pin_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  _AppleDropdown<String?>(
+                    value: customDeptId,
+                    label: 'القسم التابع له',
+                    prefixIcon: Icons.business_outlined,
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('— بدون قسم —'),
+                      ),
+                      ...widget.departments.map(
+                        (d) => DropdownMenuItem<String?>(
+                          value: d.id,
+                          child: Text(d.name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (val) => setAddState(() => customDeptId = val),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(addCtx),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton.icon(
+                  onPressed: () {
+                    final t = titleCtrl.text.trim();
+                    final p = prefixCtrl.text
+                        .trim()
+                        .toLowerCase()
+                        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                    final c = int.tryParse(countCtrl.text.trim()) ?? 0;
+
+                    if (t.isEmpty) {
+                      setAddState(() => customError = 'يرجى إدخال المسمى الوظيفي.');
+                      return;
+                    }
+                    if (p.isEmpty) {
+                      setAddState(() => customError = 'يرجى إدخال بادئة اسم المستخدم بالإنجليزية.');
+                      return;
+                    }
+                    if (c <= 0) {
+                      setAddState(() => customError = 'العدد يجب أن يكون 1 على الأقل.');
+                      return;
+                    }
+
+                    final newKey = 'custom_${DateTime.now().millisecondsSinceEpoch}';
+                    setParentState(() {
+                      items.add(
+                        _BatchJobItemDraft(
+                          key: newKey,
+                          title: t,
+                          prefix: p,
+                          defaultCount: c,
+                          allowUnnumberedFirst: false,
+                          keywords: [p, t],
+                          departmentId: customDeptId,
+                          count: c,
+                          isEnabled: true,
+                          isCustom: true,
+                        ),
+                      );
+                    });
+                    Navigator.pop(addCtx);
+                  },
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('إضافة للجدول'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
 
     await showDialog<void>(
       context: context,
@@ -2800,6 +3113,18 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                         TextButton.icon(
                           onPressed: isGenerating
                               ? null
+                              : () => showAddCustomJobDialog(setLocalState),
+                          icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                          label: const Text('إضافة مسمى وظيفي', style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFF10B981),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton.icon(
+                          onPressed: isGenerating
+                              ? null
                               : () => setLocalState(() {
                                     for (final item in items) {
                                       item.isEnabled = true;
@@ -2809,7 +3134,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                           icon: const Icon(Icons.playlist_add_check_rounded, size: 16),
                           label: const Text('القالب القياسي', style: TextStyle(fontSize: 12)),
                           style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -2826,7 +3151,7 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                           label: const Text('تفريغ الكل (0)', style: TextStyle(fontSize: 12)),
                           style: TextButton.styleFrom(
                             foregroundColor: theme.colorScheme.error,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           ),
                         ),
                       ],
@@ -2947,9 +3272,9 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                                             color: isDark ? Colors.white : Colors.black87,
                                           ),
                                           items: [
-                                            const DropdownMenuItem<String?>(
+                                             DropdownMenuItem<String?>(
                                               value: null,
-                                              child: Text('بدون قسم'),
+                                               child: Text('— بدون قسم —', style: TextStyle(fontSize: 11.5, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), fontWeight: FontWeight.w600)),
                                             ),
                                             ...widget.departments.map(
                                               (d) => DropdownMenuItem<String?>(
@@ -9211,15 +9536,17 @@ class _BatchJobItemDraft {
     this.departmentId,
     this.count = 0,
     this.isEnabled = false,
+    this.isCustom = false,
   });
 
   final String key;
-  final String title;
-  final String prefix;
+  String title;
+  String prefix;
   final int defaultCount;
   final bool allowUnnumberedFirst;
   final List<String> keywords;
   String? departmentId;
   int count;
   bool isEnabled;
+  final bool isCustom;
 }
