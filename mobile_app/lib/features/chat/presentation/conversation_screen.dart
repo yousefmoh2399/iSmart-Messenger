@@ -2302,6 +2302,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       _checkedAttachmentIds.add(message.id);
       if (!mounted) return;
 
+      // Automatically save to the device public storage (Gallery for photos/videos, Downloads for files)
+      String? savedFolder;
+      try {
+        savedFolder = await _saveAttachmentForMobile(
+          message: message,
+          localPath: localPath,
+        );
+      } catch (e) {
+        debugPrint('[Attachment] Auto-save to device failed: $e');
+      }
+
+      if (!mounted) return;
+
       if (openAfterDownload) {
         final result = await OpenFilex.open(localPath);
         if (!mounted) return;
@@ -2314,17 +2327,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               ),
             ),
           );
+        } else if (savedFolder != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تم حفظ الملف في $savedFolder'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
         }
       } else {
-        final savedFolder = await _saveAttachmentForMobile(
-          message: message,
-          localPath: localPath,
-        );
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تم حفظ ${message.fileName ?? 'المرفق'} بنجاح\nمسار الحفظ: $savedFolder',
+              'تم حفظ ${message.fileName ?? (message.isImageMessage ? 'الصورة' : 'المرفق')} بنجاح في $savedFolder',
             ),
           ),
         );
@@ -2364,43 +2379,88 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           p.extension(message.fileName ?? localPath).toLowerCase(),
         );
 
+    // 1. Photos -> Mobile Gallery / Studio (album: iSmart Messenger)
     if (message.isImageMessage) {
-      await Gal.putImage(localPath, album: 'Workplace Chat');
-      return 'معرض الصور (Workplace Chat)';
+      try {
+        await Gal.putImage(localPath, album: 'iSmart Messenger');
+        return 'معرض الصور (iSmart Messenger)';
+      } catch (e) {
+        debugPrint('[Gal] Save image to gallery error: $e');
+      }
     }
 
+    // 2. Videos -> Mobile Gallery / Studio (album: iSmart Messenger)
     if (isVideo) {
-      await Gal.putVideo(localPath, album: 'Workplace Chat');
-      return 'معرض الفيديوهات (Workplace Chat)';
+      try {
+        await Gal.putVideo(localPath, album: 'iSmart Messenger');
+        return 'معرض الفيديوهات (iSmart Messenger)';
+      } catch (e) {
+        debugPrint('[Gal] Save video to gallery error: $e');
+      }
     }
+
+    // 3. Documents and Files (PDF, Word, Excel, ZIP, etc.) -> Mobile Public Downloads
+    final publicDownloadDir = await _resolvePublicMobileDownloadsDirectory();
+    final fileName = p.basename(message.fileName ?? localPath);
+    final destinationPath = _resolveUniquePath(publicDownloadDir.path, fileName);
+    await sourceFile.copy(destinationPath);
 
     if (Platform.isAndroid) {
-      final bytes = await sourceFile.readAsBytes();
-      final savedPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'اختر مكان حفظ الملف',
-        fileName: p.basename(message.fileName ?? localPath),
-        bytes: Uint8List.fromList(bytes),
-      );
-      if (savedPath == null || savedPath.trim().isEmpty) {
-        throw Exception('تم إلغاء حفظ الملف.');
-      }
-      return 'المكان الذي اخترته';
+      try {
+        await _scanMediaFile(destinationPath);
+      } catch (_) {}
     }
 
-    final selectedDirectory = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'اختر مكان حفظ الملف',
-    );
-    final fallbackDirectory = await _resolveMobileFallbackDirectory();
-    final directoryPath =
-        (selectedDirectory != null && selectedDirectory.isNotEmpty)
-        ? selectedDirectory
-        : fallbackDirectory.path;
-    final destinationPath = _resolveUniquePath(
-      directoryPath,
-      p.basename(message.fileName ?? localPath),
-    );
-    await sourceFile.copy(destinationPath);
-    return p.dirname(destinationPath);
+    return 'مجلد التنزيلات (${p.basename(publicDownloadDir.path)})';
+  }
+
+  Future<void> _scanMediaFile(String filePath) async {
+    if (!Platform.isAndroid) return;
+    try {
+      const channel = MethodChannel('ismart/doc_scanner');
+      await channel.invokeMethod<bool>('scanMediaFile', {'path': filePath});
+    } catch (_) {}
+  }
+
+  Future<Directory> _resolvePublicMobileDownloadsDirectory() async {
+    if (Platform.isAndroid) {
+      // 1. Primary: public Download/iSmart Messenger folder on device storage
+      final primaryDownload = Directory('/storage/emulated/0/Download/iSmart Messenger');
+      try {
+        if (!await primaryDownload.exists()) {
+          await primaryDownload.create(recursive: true);
+        }
+        return primaryDownload;
+      } catch (_) {}
+
+      // 2. Secondary: public Download folder on device storage
+      final stdDownload = Directory('/storage/emulated/0/Download');
+      try {
+        if (await stdDownload.exists()) {
+          return stdDownload;
+        }
+      } catch (_) {}
+
+      // 3. Tertiary: external storage downloads directory from path_provider
+      try {
+        final extDirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+        if (extDirs != null && extDirs.isNotEmpty) {
+          final target = Directory(p.join(extDirs.first.path, 'iSmart Messenger'));
+          if (!await target.exists()) {
+            await target.create(recursive: true);
+          }
+          return target;
+        }
+      } catch (_) {}
+    }
+
+    // 4. Fallback for iOS or restricted devices
+    final appDocs = await getApplicationDocumentsDirectory();
+    final target = Directory(p.join(appDocs.path, 'iSmart Messenger', 'Downloads'));
+    if (!await target.exists()) {
+      await target.create(recursive: true);
+    }
+    return target;
   }
 
   Future<void> _saveReceivedSticker(ChatMessage message) async {

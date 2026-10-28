@@ -143,6 +143,15 @@ class MainActivity : FlutterActivity() {
                             result.error("INSTALL_INTENT_FAILED", e.message, null)
                         }
                     }
+                    "scanMediaFile" -> {
+                        val path = call.argument<String>("path")
+                        if (!path.isNullOrBlank()) {
+                            android.media.MediaScannerConnection.scanFile(this, arrayOf(path), null, null)
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -458,6 +467,15 @@ class MainActivity : FlutterActivity() {
                                     result.error("COMPOSITE_ERROR", e.message, null)
                                 }
                             }
+                        }
+                    }
+                    "scanMediaFile" -> {
+                        val path = call.argument<String>("path")
+                        if (!path.isNullOrBlank()) {
+                            android.media.MediaScannerConnection.scanFile(this, arrayOf(path), null, null)
+                            result.success(true)
+                        } else {
+                            result.success(false)
                         }
                     }
                     else -> result.notImplemented()

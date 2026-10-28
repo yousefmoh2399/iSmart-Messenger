@@ -287,4 +287,54 @@ void main() {
     // Message MUST stay pending in outbox for next reconnection!
     expect(outbox.isPending('c1'), isTrue);
   });
+
+  test('drainQueue sends file messages successfully', () async {
+    var sentFilePath = '';
+    final repo = _FakeChatRepository(
+      sendFileMessageFn: ({
+        required String conversationId,
+        required String filePath,
+        String? content,
+        String? replyToMessageId,
+        String? customFileName,
+        Map<String, dynamic>? metadata,
+        void Function(int sent, int total)? onProgress,
+      }) async {
+        sentFilePath = filePath;
+        return ChatPostResult(
+          message: buildMockMessage(
+            id: 'srv_file',
+            convId: conversationId,
+            content: content ?? '',
+          ),
+          conversation: ChatConversation.fromJson({
+            'id': conversationId,
+            'type': 'direct',
+            'name': 'Test Chat',
+          }),
+        );
+      },
+    );
+
+    await outbox.enqueue(ChatOutboxItem(
+      clientMessageId: 'f1',
+      conversationId: 'conv-1',
+      content: 'file caption',
+      filePath: '/path/to/test.pdf',
+      messageType: 'file',
+      createdAt: DateTime.now(),
+    ));
+
+    var confirmed = false;
+    await outbox.drainQueue(
+      repository: repo,
+      onConfirmed: (item, _) {
+        confirmed = true;
+      },
+    );
+
+    expect(sentFilePath, equals('/path/to/test.pdf'));
+    expect(confirmed, isTrue);
+    expect(outbox.isPending('f1'), isFalse);
+  });
 }
