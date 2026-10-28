@@ -2238,6 +2238,352 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     }
   }
 
+  Future<void> _showExportUsersDialog(BuildContext context) async {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    var selectedFormat = 'xlsx';
+    String? selectedBranchId = _branchFilter;
+    String? selectedDeptId = _departmentFilter;
+    String selectedStatus = _statusFilter;
+    var isExporting = false;
+    String? errorText;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setLocalState) {
+          return _AppleAdminDialog(
+            badgeIcon: Icons.file_download_outlined,
+            badgeColor: const Color(0xFF10B981),
+            title: 'تصدير كشف حسابات المستخدمين',
+            subtitle:
+                'إنشاء ملف Excel أو PDF يحتوي على بيانات المستخدمين لإرسالها للفروع',
+            maxWidth: 520,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'صيغة الملف:',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: isExporting
+                            ? null
+                            : () =>
+                                setLocalState(() => selectedFormat = 'xlsx'),
+                        borderRadius: BorderRadius.circular(12),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: selectedFormat == 'xlsx'
+                                ? (isDark
+                                    ? const Color(
+                                        0xFF10B981,
+                                      ).withValues(alpha: 0.18)
+                                    : const Color(0xFFE8F5E9))
+                                : (isDark
+                                    ? Colors.white.withValues(alpha: 0.04)
+                                    : const Color(0xFFF1F5F9)),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: selectedFormat == 'xlsx'
+                                  ? const Color(0xFF10B981)
+                                  : (isDark
+                                      ? Colors.white12
+                                      : const Color(0xFFE2E8F0)),
+                              width: selectedFormat == 'xlsx' ? 1.8 : 1.0,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFF10B981,
+                                  ).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.table_chart_rounded,
+                                  color: Color(0xFF10B981),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Excel (.xlsx)',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Text(
+                                      'جدول بيانات منسق RTL',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (selectedFormat == 'xlsx')
+                                const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Color(0xFF10B981),
+                                  size: 18,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: InkWell(
+                        onTap: isExporting
+                            ? null
+                            : () =>
+                                setLocalState(() => selectedFormat = 'pdf'),
+                        borderRadius: BorderRadius.circular(12),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: selectedFormat == 'pdf'
+                                ? (isDark
+                                    ? const Color(
+                                        0xFFEF4444,
+                                      ).withValues(alpha: 0.18)
+                                    : const Color(0xFFFEE2E2))
+                                : (isDark
+                                    ? Colors.white.withValues(alpha: 0.04)
+                                    : const Color(0xFFF1F5F9)),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: selectedFormat == 'pdf'
+                                  ? const Color(0xFFEF4444)
+                                  : (isDark
+                                      ? Colors.white12
+                                      : const Color(0xFFE2E8F0)),
+                              width: selectedFormat == 'pdf' ? 1.8 : 1.0,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFFEF4444,
+                                  ).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.picture_as_pdf_rounded,
+                                  color: Color(0xFFEF4444),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'PDF (.pdf)',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Text(
+                                      'مستند جاهز للطباعة',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (selectedFormat == 'pdf')
+                                const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Color(0xFFEF4444),
+                                  size: 18,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _AppleDropdown<String?>(
+                  value: selectedBranchId,
+                  label: 'الفرع المشمول',
+                  prefixIcon: Icons.storefront_outlined,
+                  enabled: !isExporting,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('كافة الفروع والمواقع'),
+                    ),
+                    ...widget.branches.map(
+                      (branch) => DropdownMenuItem<String?>(
+                        value: branch.id,
+                        child: Text(branch.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: (val) =>
+                      setLocalState(() => selectedBranchId = val),
+                ),
+                const SizedBox(height: 12),
+                _AppleDropdown<String?>(
+                  value: selectedDeptId,
+                  label: 'القسم المشمول',
+                  prefixIcon: Icons.business_outlined,
+                  enabled: !isExporting,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('كافة الأقسام والإدارات'),
+                    ),
+                    ...widget.departments.map(
+                      (dept) => DropdownMenuItem<String?>(
+                        value: dept.id,
+                        child: Text(dept.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: (val) =>
+                      setLocalState(() => selectedDeptId = val),
+                ),
+                const SizedBox(height: 12),
+                _AppleDropdown<String>(
+                  value: selectedStatus,
+                  label: 'حالة الحسابات',
+                  prefixIcon: Icons.toggle_on_outlined,
+                  enabled: !isExporting,
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'all',
+                      child: Text('كافة الحسابات (نشط ومعطل)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'active',
+                      child: Text('الحسابات النشطة فقط'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'inactive',
+                      child: Text('الحسابات المعطلة فقط'),
+                    ),
+                  ],
+                  onChanged: (val) =>
+                      setLocalState(() => selectedStatus = val ?? 'all'),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 12),
+                  _AppleErrorBanner(error: errorText!),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isExporting ? null : () => Navigator.pop(dialogCtx),
+                child: const Text('إلغاء'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isExporting
+                    ? null
+                    : () async {
+                        setLocalState(() {
+                          isExporting = true;
+                          errorText = null;
+                        });
+                        try {
+                          final selectedBranchObj = selectedBranchId != null
+                              ? widget.branches
+                                  .where((b) => b.id == selectedBranchId)
+                                  .firstOrNull
+                              : null;
+                          final userRepository =
+                              ref.read(userManagementRepositoryProvider);
+                          await userRepository.exportUsers(
+                            format: selectedFormat,
+                            branchId: selectedBranchId,
+                            departmentId: selectedDeptId,
+                            status: selectedStatus == 'all'
+                                ? null
+                                : selectedStatus,
+                            branchName: selectedBranchObj?.name,
+                          );
+                          if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'تم تصدير كشف المستخدمين بصيغة ${selectedFormat.toUpperCase()} بنجاح.',
+                                ),
+                                backgroundColor: const Color(0xFF10B981),
+                              ),
+                            );
+                          }
+                        } catch (err) {
+                          setLocalState(() {
+                            isExporting = false;
+                            errorText = err.toString();
+                          });
+                        }
+                      },
+                icon: isExporting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : const Icon(Icons.file_download_rounded, size: 18),
+                label: Text(isExporting ? 'جارٍ التصدير...' : 'تصدير وتحميل'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final usersState = ref.watch(usersControllerProvider);
@@ -2249,20 +2595,135 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          Row(
-            children: [
-              FilledButton.icon(
-                onPressed: () => _showUserDialog(context, ref),
-                icon: const Icon(Icons.person_add_alt_1),
-                label: const Text('إضافة مستخدم'),
-              ),
-              const Spacer(),
-              IconButton.filledTonal(
-                onPressed: () =>
-                    ref.read(usersControllerProvider.notifier).refresh(),
-                icon: const Icon(Iconsax.refresh),
-              ),
-            ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 1000;
+              final usersList = usersState.valueOrNull ?? const [];
+              final totalCount = usersList.length;
+              final activeCount = usersList.where((u) => u.isActive).length;
+
+              final titleSection = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.manage_accounts_rounded,
+                      color: Color(0xFF007AFF),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'إدارة المستخدمين وحسابات الموظفين',
+                          style: TextStyle(
+                            fontSize: constraints.maxWidth < 600 ? 17 : 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'إنشاء الحسابات وتخصيص صلاحيات المنظومة وتصدير كشوف المستخدمين لكل فرع',
+                          style: TextStyle(
+                            fontSize: constraints.maxWidth < 600 ? 11.5 : 12.5,
+                            color: Theme.of(context).brightness ==
+                                    Brightness.dark
+                                ? Colors.white60
+                                : const Color(0xFF64748B),
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+
+              final statsAndActions = Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _AdminStatPill(
+                    icon: Iconsax.people,
+                    label: 'إجمالي المستخدمين',
+                    value: '$totalCount',
+                    color: const Color(0xFF007AFF),
+                    isDark: Theme.of(context).brightness == Brightness.dark,
+                  ),
+                  _AdminStatPill(
+                    icon: Icons.check_circle_outline_rounded,
+                    label: 'نشط',
+                    value: '$activeCount',
+                    color: const Color(0xFF34C759),
+                    isDark: Theme.of(context).brightness == Brightness.dark,
+                  ),
+                  IconButton.filledTonal(
+                    tooltip: 'تحديث القائمة',
+                    onPressed: () =>
+                        ref.read(usersControllerProvider.notifier).refresh(),
+                    icon: const Icon(Iconsax.refresh, size: 18),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _showExportUsersDialog(context),
+                    icon: const Icon(Icons.file_download_outlined, size: 18),
+                    label: const Text('تصدير كشف المستخدمين'),
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () => _showUserDialog(context, ref),
+                    icon: const Icon(Icons.person_add_rounded, size: 18),
+                    label: const Text('إضافة مستخدم'),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+
+              if (isCompact) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    titleSection,
+                    const SizedBox(height: 14),
+                    statsAndActions,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: titleSection),
+                  const SizedBox(width: 16),
+                  Flexible(child: statsAndActions),
+                ],
+              );
+            },
           ),
           const SizedBox(height: 12),
           Wrap(

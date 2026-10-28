@@ -3,6 +3,7 @@ const { body, param } = require("express-validator");
 const ApiError = require("../utils/api-error");
 const {
   getUsers,
+  exportUsersHandler,
   createManagedUser,
   updateManagedUser,
   updateManagedUserStatus,
@@ -129,6 +130,7 @@ router.delete(
   unregisterMyPushDevice,
 );
 
+router.get("/export", requireUserManagementRead, exportUsersHandler);
 router.get("/", requireUserManagementRead, getUsers);
 
 router.post(

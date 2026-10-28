@@ -1,4 +1,5 @@
 const asyncHandler = require("../utils/async-handler");
+const { exportUsersReport } = require("../services/user-export.service");
 const { sendChatResponse } = require("../chat/utils/chat-response");
 const { sendUploadFile } = require("../utils/send-upload-file");
 const {
@@ -16,6 +17,27 @@ const {
   registerCurrentPushDevice,
   unregisterCurrentPushDevice,
 } = require("../services/user.service");
+
+
+const exportUsersHandler = asyncHandler(async (req, res) => {
+  const { buffer, fileName, contentType } = await exportUsersReport(req.user, {
+    format: req.query.format === "pdf" ? "pdf" : "xlsx",
+    branchId: req.query.branchId || null,
+    departmentId: req.query.departmentId || null,
+    role: req.query.role || null,
+    status: req.query.status || null,
+    search: req.query.search || null,
+  });
+
+  res.set({
+    "Content-Type": contentType,
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+    "Content-Length": buffer.length,
+    "Access-Control-Expose-Headers": "Content-Disposition",
+  });
+
+  res.status(200).send(buffer);
+});
 
 const getUsers = asyncHandler(async (req, res) => {
   const { users, pagination } = await listUsers(req.user, req.query);
@@ -166,6 +188,7 @@ const deleteUserHandler = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  exportUsersHandler,
   getUsers,
   createManagedUser,
   updateManagedUser,

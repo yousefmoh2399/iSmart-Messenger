@@ -1,5 +1,10 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+
 import '../../../core/network/api_client.dart';
 import '../../../shared/models/managed_user.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../auth/data/auth_repository.dart';
 
 class ManagedUsersPage {
@@ -186,5 +191,50 @@ class UserManagementRepository {
 
   Future<void> forceLogoutAllDevices(String userId) async {
     await _apiClient.dio.post<void>('/api/admin/users/$userId/logout-all');
+  }
+  Future<void> exportUsers({
+    String format = 'xlsx',
+    String? branchId,
+    String? departmentId,
+    String? role,
+    String? status,
+    String? search,
+    String? branchName,
+  }) async {
+    final response = await _apiClient.dio.get<dynamic>(
+      '/api/admin/users/export',
+      queryParameters: {
+        'format': format,
+        if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
+        if (departmentId != null && departmentId.isNotEmpty)
+          'departmentId': departmentId,
+        if (role != null && role.isNotEmpty) 'role': role,
+        if (status != null && status.isNotEmpty) 'status': status,
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      },
+      options: Options(responseType: ResponseType.bytes),
+    );
+
+    final data = response.data;
+    if (data == null) return;
+    final bytes = data is Uint8List
+        ? data
+        : data is List<int>
+            ? Uint8List.fromList(data)
+            : Uint8List.fromList(const <int>[]);
+
+    final branchSuffix = branchName != null && branchName.trim().isNotEmpty
+        ? '-${branchName.trim().replaceAll(' ', '_')}'
+        : '';
+    final fileName =
+        'users-report$branchSuffix-${DateTime.now().millisecondsSinceEpoch}.$format';
+
+    await web_bridge.downloadBytes(
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: format == 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'application/pdf',
+    );
   }
 }
