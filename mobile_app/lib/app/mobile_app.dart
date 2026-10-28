@@ -566,6 +566,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final localNotifications = ref.read(localNotificationServiceProvider);
     final pushNotifications = ref.read(pushNotificationServiceProvider);
 
+    // Initialize local notifications early to catch cold-start launch details
+    unawaited(localNotifications.initialize().then((_) {
+      if (!mounted) return;
+      final pendingLocalPayload = localNotifications.takePendingLaunchPayload();
+      if (pendingLocalPayload != null) {
+        _queueNotificationNavigation(pendingLocalPayload);
+      }
+    }));
+
     _notificationTapSubscription = localNotifications.tapEvents.listen(
       _queueNotificationNavigation,
     );
@@ -600,40 +609,84 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final type = payload['type']?.toString().trim() ?? '';
     final conversationId = payload['conversationId']?.toString().trim() ?? '';
     final ticketId = payload['ticketId']?.toString().trim() ?? '';
-    if ((type == 'chat' || type == 'chat_reaction') && conversationId.isEmpty) {
+    final isChatNotification =
+        type == 'chat' || type == 'chat_reaction' || conversationId.isNotEmpty;
+
+    if (!isChatNotification && type != 'ticket') {
       return;
     }
-    if (type == 'ticket' && ticketId.isEmpty) {
-      return;
-    }
-    if (type != 'chat' && type != 'chat_reaction' && type != 'ticket') {
+
+    // Direct inline reply from notification
+    final replyText = payload['replyText']?.toString().trim();
+    if (replyText != null && replyText.isNotEmpty && conversationId.isNotEmpty) {
+      _pendingNotificationPayload = null;
+      unawaited(_handleDirectNotificationReply(
+        conversationId,
+        replyText,
+        payload['notificationId'],
+      ));
       return;
     }
 
     _pendingNotificationPayload = null;
     _isHandlingNotificationNavigation = true;
     try {
-      if (type == 'ticket') {
+      if (type == 'ticket' && ticketId.isNotEmpty && conversationId.isEmpty) {
         if (!mounted) {
           return;
         }
-        await Navigator.of(context).push(
+        await Navigator.of(context, rootNavigator: true).push(
           MaterialPageRoute(
             builder: (_) => TicketDetailsScreen(ticketId: ticketId),
           ),
         );
         return;
       }
-      final conversation = await ref
+
+      if (conversationId.isEmpty) {
+        return;
+      }
+
+      // If user is already looking at this conversation, just refresh messages
+      final currentActiveId = ref.read(activeConversationIdProvider);
+      if (currentActiveId == conversationId) {
+        try {
+          ref
+              .read(
+                conversationMessagesControllerProvider(
+                  conversationId,
+                ).notifier,
+              )
+              .refresh();
+        } catch (_) {}
+        return;
+      }
+
+      // 1. Instant open: check if conversation is already in memory overview
+      ChatConversation? conversation;
+      final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+      if (overview != null) {
+        for (final item in overview.conversations) {
+          if (item.id == conversationId) {
+            conversation = item;
+            break;
+          }
+        }
+      }
+
+      // 2. If not found in memory overview, fetch via repository
+      conversation ??= await ref
           .read(chatRepositoryProvider)
           .fetchConversation(conversationId);
+
       if (!mounted) {
         return;
       }
+
       ref.read(activeConversationIdProvider.notifier).state = conversation.id;
-      await Navigator.of(context).push(
+      await Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute(
-          builder: (_) => ConversationScreen(conversation: conversation),
+          builder: (_) => ConversationScreen(conversation: conversation!),
         ),
       );
     } catch (error) {
@@ -641,10 +694,46 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر فتح الإشعار: ${error.toString()}')),
+        SnackBar(content: Text('تعذر فتح المحادثة: ${error.toString()}')),
       );
     } finally {
       _isHandlingNotificationNavigation = false;
+    }
+  }
+
+  Future<void> _handleDirectNotificationReply(
+    String conversationId,
+    String replyText,
+    dynamic notificationId,
+  ) async {
+    if (conversationId.isEmpty || replyText.trim().isEmpty) return;
+    try {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              conversationId,
+            ).notifier,
+          )
+          .sendMessage(content: replyText.trim());
+
+      if (notificationId != null) {
+        final id = int.tryParse(notificationId.toString());
+        if (id != null) {
+          ref.read(localNotificationServiceProvider).cancel(id);
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم إرسال الرد: ${replyText.trim()}'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[NotificationReply] Error sending direct reply: $e');
     }
   }
 

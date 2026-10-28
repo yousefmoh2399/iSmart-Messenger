@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
@@ -9,9 +10,59 @@ import '../../core/settings/user_preferences.dart';
 import 'permission_request_coordinator.dart';
 
 @pragma('vm:entry-point')
-void onDidReceiveBackgroundNotificationResponse(
+Future<void> onDidReceiveBackgroundNotificationResponse(
   NotificationResponse response,
-) {}
+) async {
+  final input = response.input?.trim();
+  if (response.actionId != 'reply_action' || input == null || input.isEmpty) {
+    return;
+  }
+  final payloadStr = response.payload;
+  if (payloadStr == null || payloadStr.isEmpty) return;
+  Map<String, dynamic> payload = {};
+  try {
+    final decoded = jsonDecode(payloadStr);
+    if (decoded is Map) {
+      payload = Map<String, dynamic>.from(decoded);
+    }
+  } catch (_) {
+    return;
+  }
+  final conversationId = payload['conversationId']?.toString();
+  if (conversationId == null || conversationId.isEmpty) return;
+
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final sessionStr = prefs.getString('auth_session');
+    if (sessionStr == null || sessionStr.isEmpty) return;
+    final sessionJson = jsonDecode(sessionStr) as Map<String, dynamic>;
+    final token = sessionJson['accessToken']?.toString();
+    if (token == null || token.isEmpty) return;
+
+    var baseUrl = prefs.getString('api_base_url');
+    if (baseUrl == null || baseUrl.isEmpty) {
+      baseUrl = prefs.getString('admin_default_base_url');
+    }
+    if (baseUrl == null || baseUrl.isEmpty) {
+      baseUrl = 'http://192.168.1.100:3000';
+    }
+    baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
+
+    final uri = Uri.parse('$baseUrl/api/chat/messages');
+    final client = HttpClient();
+    final request = await client.postUrl(uri);
+    request.headers.contentType = ContentType.json;
+    request.headers.set('Authorization', 'Bearer $token');
+    request.write(jsonEncode({
+      'conversationId': conversationId,
+      'content': input,
+      'messageType': 'text',
+    }));
+    final res = await request.close();
+    await res.drain();
+    client.close();
+  } catch (_) {}
+}
 
 class LocalNotificationService {
   LocalNotificationService({required this.appName});
@@ -32,8 +83,21 @@ class LocalNotificationService {
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _initialized = false;
   int _nextId = 1;
+  Map<String, dynamic>? _pendingLaunchPayload;
 
   Stream<Map<String, dynamic>> get tapEvents => _tapController.stream;
+
+  Map<String, dynamic>? takePendingLaunchPayload() {
+    final payload = _pendingLaunchPayload;
+    _pendingLaunchPayload = null;
+    return payload;
+  }
+
+  Future<void> cancel(int id) async {
+    try {
+      await _plugin.cancel(id);
+    } catch (_) {}
+  }
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -69,6 +133,14 @@ class LocalNotificationService {
       );
     }
     await _createAndroidNotificationChannels(androidPlugin);
+    try {
+      final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+      if (launchDetails != null &&
+          launchDetails.didNotificationLaunchApp &&
+          launchDetails.notificationResponse != null) {
+        _handleNotificationResponse(launchDetails.notificationResponse!);
+      }
+    } catch (_) {}
     _initialized = true;
   }
 
@@ -80,14 +152,33 @@ class LocalNotificationService {
     await initialize();
     await _playNotificationTone();
 
+    final isChat = payload == null ||
+        payload.isEmpty ||
+        payload['type'] == 'chat' ||
+        payload['conversationId'] != null;
+
     final details = NotificationDetails(
-      android: const AndroidNotificationDetails(
+      android: AndroidNotificationDetails(
         _androidLocalChannelId,
-        'رسائل الشات',
+        'رسائل الشات داخل التطبيق',
         channelDescription: 'إشعارات الرسائل الداخلية',
         importance: Importance.high,
         priority: Priority.high,
         playSound: false,
+        actions: isChat
+            ? const <AndroidNotificationAction>[
+                AndroidNotificationAction(
+                  'reply_action',
+                  'رد',
+                  inputs: <AndroidNotificationActionInput>[
+                    AndroidNotificationActionInput(
+                      label: 'اكتب ردك هنا...',
+                    ),
+                  ],
+                  allowGeneratedReplies: true,
+                ),
+              ]
+            : null,
       ),
       iOS: const DarwinNotificationDetails(presentSound: false),
       windows: WindowsNotificationDetails(
@@ -95,12 +186,18 @@ class LocalNotificationService {
       ),
     );
 
+    final notificationId = _nextId++;
     await _plugin.show(
-      _nextId++,
+      notificationId,
       title.isEmpty ? appName : title,
       body.isEmpty ? 'لديك رسالة جديدة' : body,
       details,
-      payload: payload == null || payload.isEmpty ? null : jsonEncode(payload),
+      payload: payload == null || payload.isEmpty
+          ? null
+          : jsonEncode({
+              ...payload,
+              'notificationId': notificationId,
+            }),
     );
   }
 
@@ -215,8 +312,18 @@ class LocalNotificationService {
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
-    final payload = _decodePayload(response.payload);
+    final payload = Map<String, dynamic>.from(_decodePayload(response.payload));
+    if (response.actionId != null) {
+      payload['actionId'] = response.actionId;
+    }
+    if (response.input != null && response.input!.trim().isNotEmpty) {
+      payload['replyText'] = response.input!.trim();
+    }
+    if (response.id != null) {
+      payload['notificationId'] = response.id;
+    }
     if (payload.isNotEmpty) {
+      _pendingLaunchPayload = payload;
       _tapController.add(payload);
     }
   }
