@@ -70,7 +70,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   @override
   Future<ChatOverviewData> build() async {
-    ref.watch(serverRecoveryRevisionProvider);
     final hasSession = await _waitForAuthenticatedSession();
     if (!hasSession) {
       return const ChatOverviewData(
@@ -82,9 +81,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         roles: [],
       );
     }
-    try {
-      await ref.watch(chatSocketConnectionProvider.future);
-    } catch (_) {}
+    unawaited(ref.read(chatSocketConnectionProvider.future));
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatSocketService = ref.read(chatSocketServiceProvider);
     _currentUserId = ref.read(authControllerProvider).valueOrNull?.id ?? '';
@@ -94,13 +91,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       _disposed = true;
       _eventsSubscription?.cancel();
     });
+
+    final cached = await _repository().cache.loadConversations();
+    if (cached != null && cached.isNotEmpty) {
+      Future.microtask(() => refresh(showLoader: false));
+      return ChatOverviewData(
+        conversations: cached,
+        manageableConversations: const [],
+        users: const [],
+        departments: const [],
+        branches: const [],
+        roles: const [],
+      );
+    }
+
     try {
       return await _loadOverview();
     } catch (_) {
       try {
-        final cached = await _repository().fetchConversations();
+        final fallback = await _repository().fetchConversations();
         return ChatOverviewData(
-          conversations: cached,
+          conversations: fallback,
           manageableConversations: const [],
           users: const [],
           departments: const [],
@@ -122,12 +133,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   Future<ChatOverviewData> _loadOverview() async {
     final repository = _repository();
-    final conversations = await _guardAuth(repository.fetchConversations);
-    final usersPage = await _guardAuth(repository.fetchUsersPage);
-    _usersPage = usersPage.page;
-    _hasMoreUsers = usersPage.hasMore;
-    final departments = await _guardAuth(repository.fetchDepartments);
-    final branches = await _guardAuth(repository.fetchBranches);
 
     Future<List<T>> safeList<T>(Future<List<T>> Function() loader) async {
       try {
@@ -140,9 +145,24 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }
 
-    final rawManageableConversations = await safeList(
-      repository.fetchManageableConversations,
-    );
+    final results = await Future.wait([
+      _guardAuth(repository.fetchConversations),
+      _guardAuth(repository.fetchUsersPage),
+      _guardAuth(repository.fetchDepartments),
+      _guardAuth(repository.fetchBranches),
+      safeList(repository.fetchManageableConversations),
+      safeList(repository.fetchRoles),
+    ]);
+
+    final conversations = results[0] as List<ChatConversation>;
+    final usersPage = results[1] as ChatDirectoryUsersPage;
+    _usersPage = usersPage.page;
+    _hasMoreUsers = usersPage.hasMore;
+    final departments = results[2] as List<DepartmentSummary>;
+    final branches = results[3] as List<BranchSummary>;
+    final rawManageableConversations = results[4] as List<ChatConversation>;
+    final roles = results[5] as List<ChatRole>;
+
     final manageableMap = <String, ChatConversation>{
       for (final conv in conversations)
         if (conv.type != 'direct') conv.id: conv,
@@ -152,7 +172,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final manageableConversations = _sortConversations(
       manageableMap.values.toList(),
     );
-    final roles = await safeList(repository.fetchRoles);
 
     return ChatOverviewData(
       conversations: conversations,
@@ -1338,7 +1357,6 @@ class ConversationMessagesController
 
   @override
   Future<ConversationMessagesState> build(String arg) async {
-    ref.watch(serverRecoveryRevisionProvider);
     final authUser = ref.watch(currentUserProvider);
     if (authUser == null) {
       return const ConversationMessagesState(

@@ -97,6 +97,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   String? _lastServerBannerMessage;
   bool _serverRefreshInFlight = false;
   bool _hasConfirmedServerDisconnect = false;
+  int _serverFailureStreak = 0;
   bool _serverRestoreRefreshInFlight = false;
   StreamSubscription<AndroidSharedContent>? _androidShareSubscription;
   AndroidSharedContent? _pendingAndroidShare;
@@ -250,26 +251,26 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     if (!result.isConnected) {
-      if (quiet || _isEstablishingConnection) {
+      if (quiet ||
+          _isEstablishingConnection ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
         return;
       }
-      _hasConfirmedServerDisconnect = true;
-      _showConnectionSnackBar(
-        _buildServerUnavailableMessage(result.message),
-        isError: true,
-      );
+      _serverFailureStreak++;
+      if (_serverFailureStreak >= 2) {
+        _hasConfirmedServerDisconnect = true;
+      }
       return;
     }
     // Connection confirmed — clear establishing flag immediately.
     _markConnectionEstablished();
+    _serverFailureStreak = 0;
     if (_hasConfirmedServerDisconnect || _lastServerBannerMessage != null) {
-      if (quiet || !refreshAfterRestore) {
-        _hasConfirmedServerDisconnect = false;
-        _lastServerBannerMessage = null;
-        return;
+      _hasConfirmedServerDisconnect = false;
+      _lastServerBannerMessage = null;
+      if (refreshAfterRestore) {
+        unawaited(_refreshDataAfterServerRestored());
       }
-      unawaited(_refreshDataAfterServerRestored());
-      _showConnectionSnackBar('تمت استعادة الاتصال بالخادم.', isError: false);
     }
     _hasConfirmedServerDisconnect = false;
     _lastServerBannerMessage = null;
@@ -281,13 +282,27 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
       if (!mounted) {
         return;
+      }
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref
+              .read(
+                conversationMessagesControllerProvider(
+                  activeConversationId,
+                ).notifier,
+              )
+              .refresh();
+        } catch (_) {}
       }
       ref.read(pushNotificationServiceProvider).registerForAuthenticatedUser();
       unawaited(_syncPendingUploadsInBackground());
@@ -300,23 +315,25 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     if (!mounted) {
       return;
     }
-    if (isError) {
-      if (_isEstablishingConnection) {
-        return;
-      }
-      if (_lastServerBannerMessage == message) {
-        return;
-      }
-      _lastServerBannerMessage = message;
-    } else {
+    // Do not show connection restored or transient connection toasts
+    if (!isError) {
       _lastServerBannerMessage = null;
+      return;
     }
+    if (_isEstablishingConnection ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    if (_lastServerBannerMessage == message) {
+      return;
+    }
+    _lastServerBannerMessage = message;
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          backgroundColor: isError ? const Color(0xFFB42318) : null,
+          backgroundColor: const Color(0xFFB42318),
           content: Text(message),
         ),
       );
@@ -667,11 +684,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.type == 'socket_error' || event.type == 'socket_disconnected') {
-        // Ignore while still establishing — socket will retry on its own.
-        if (_isEstablishingConnection) {
+        // Ignore while still establishing or when app is in background/screen locked.
+        if (_isEstablishingConnection ||
+            WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
           return;
         }
-        unawaited(_refreshServerConnectionState());
+        unawaited(_refreshServerConnectionState(quiet: true));
       }
     });
   }
@@ -1183,6 +1201,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     ref.invalidate(chatSocketConnectionProvider);
+    try {
+      ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+    } catch (_) {}
+    final activeId = ref.read(activeConversationIdProvider);
+    if (activeId != null && activeId.isNotEmpty) {
+      try {
+        ref.read(conversationMessagesControllerProvider(activeId).notifier).refresh();
+      } catch (_) {}
+    }
   }
 
   @override

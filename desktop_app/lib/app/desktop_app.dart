@@ -376,7 +376,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _lastConnectionErrorMessage = null;
       } else {
         unawaited(_refreshDataAfterServerRestored());
-        _showConnectionSnackBar('تمت استعادة الاتصال بالخادم.', isError: false);
       }
     } else if (_lastConnectionErrorMessage != null) {
       // A transient/minimized-window probe failed earlier. Clear the stale
@@ -847,10 +846,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _markConnectionEstablished();
         if (_hasConfirmedServerDisconnect && recoverOnSocketConnected) {
           unawaited(_refreshDataAfterServerRestored());
-          _showConnectionSnackBar(
-            'تمت استعادة الاتصال بالخادم.',
-            isError: false,
-          );
         } else if (_lastConnectionErrorMessage != null) {
           _lastConnectionErrorMessage = null;
         }

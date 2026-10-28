@@ -732,6 +732,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       ),
       body: SafeArea(
         child: overviewState.when(
+          skipLoadingOnReload: true,
+          skipLoadingOnRefresh: true,
           loading: () => ListView(
             padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
             children: const [

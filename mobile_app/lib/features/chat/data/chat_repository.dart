@@ -96,12 +96,24 @@ class ChatRepository {
   }
 
   Future<List<ChatConversation>> fetchConversations() async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations',
-    );
-    return _parseConversationsSafely(
-      _extractList(response.data, 'conversations'),
-    );
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations',
+      );
+      final list = _parseConversationsSafely(
+        _extractList(response.data, 'conversations'),
+      );
+      if (list.isNotEmpty) {
+        await _cache.saveConversations(list);
+      }
+      return list;
+    } catch (e) {
+      final cached = await _cache.loadConversations();
+      if (cached != null && cached.isNotEmpty) {
+        return cached;
+      }
+      rethrow;
+    }
   }
 
   Future<List<ChatConversation>> fetchManageableConversations() async {
