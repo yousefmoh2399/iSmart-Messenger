@@ -126,6 +126,39 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   // Per-message download state: messageId -> {progress: double, fileName: String}
   final Map<String, _MessageDownloadState> _downloadStates = {};
+  final Set<String> _cachedAttachmentIds = <String>{};
+  final Set<String> _checkedAttachmentIds = <String>{};
+
+  void _syncCachedAttachments(List<ChatMessage> messages) {
+    final repository = ref.read(chatRepositoryProvider);
+    for (final message in messages) {
+      if (!message.hasAttachment || _checkedAttachmentIds.contains(message.id)) {
+        continue;
+      }
+      _checkedAttachmentIds.add(message.id);
+      repository.isAttachmentCached(message).then((isCached) {
+        if (isCached && mounted && !_cachedAttachmentIds.contains(message.id)) {
+          setState(() {
+            _cachedAttachmentIds.add(message.id);
+          });
+        }
+      }).catchError((_) {});
+    }
+  }
+
+  void _checkSingleAttachmentCached(ChatMessage message) {
+    if (!message.hasAttachment || _checkedAttachmentIds.contains(message.id)) {
+      return;
+    }
+    _checkedAttachmentIds.add(message.id);
+    ref.read(chatRepositoryProvider).isAttachmentCached(message).then((isCached) {
+      if (isCached && mounted && !_cachedAttachmentIds.contains(message.id)) {
+        setState(() {
+          _cachedAttachmentIds.add(message.id);
+        });
+      }
+    }).catchError((_) {});
+  }
 
   bool get _isDownloadingAttachment => _downloadStates.isNotEmpty;
   double get _downloadProgress =>
@@ -2191,6 +2224,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   Future<void> _downloadAttachment(
     ChatMessage message, {
     bool openAfterDownload = false,
+    bool forceRedownload = false,
   }) async {
     if (!message.attachmentDownloadAllowed) {
       if (!mounted) {
@@ -2204,10 +2238,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
     try {
-      // Check if file is already cached locally — no spinner needed
-      final isCached = await ref
-          .read(chatRepositoryProvider)
-          .isAttachmentCached(message);
+      final repository = ref.read(chatRepositoryProvider);
+      final isCached = !forceRedownload && await repository.isAttachmentCached(message);
 
       // Register download state for this message only if we actually need to download
       if (!isCached && mounted) {
@@ -2218,24 +2250,25 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           );
         });
       }
-      final localPath = await ref
-          .read(chatRepositoryProvider)
-          .downloadAttachment(
-            message,
-            onProgress: (received, total) {
-              if (!mounted) {
-                return;
-              }
-              setState(() {
-                _downloadStates[message.id] = _MessageDownloadState(
-                  fileName: message.fileName ?? 'مرفق',
-                  progress: total <= 0
-                      ? 0
-                      : (received / total).clamp(0, 1).toDouble(),
-                );
-              });
-            },
-          );
+      final localPath = await repository.downloadAttachment(
+        message,
+        forceRefresh: forceRedownload,
+        onProgress: (received, total) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _downloadStates[message.id] = _MessageDownloadState(
+              fileName: message.fileName ?? 'مرفق',
+              progress: total <= 0
+                  ? 0
+                  : (received / total).clamp(0, 1).toDouble(),
+            );
+          });
+        },
+      );
+      _cachedAttachmentIds.add(message.id);
+      _checkedAttachmentIds.add(message.id);
       if (!mounted) return;
 
       if (openAfterDownload) {
@@ -2260,7 +2293,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تم تنزيل ${message.fileName ?? 'المرفق'} بنجاح\nمسار الحفظ: $savedFolder',
+              'تم حفظ ${message.fileName ?? 'المرفق'} بنجاح\nمسار الحفظ: $savedFolder',
             ),
           ),
         );
@@ -2295,9 +2328,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       throw Exception('الملف غير متوفر محليًا');
     }
 
+    final isVideo = (message.mimeType?.startsWith('video/') ?? false) ||
+        ['.mp4', '.mov', '.avi', '.mkv'].contains(
+          p.extension(message.fileName ?? localPath).toLowerCase(),
+        );
+
     if (message.isImageMessage) {
       await Gal.putImage(localPath, album: 'Workplace Chat');
       return 'معرض الصور (Workplace Chat)';
+    }
+
+    if (isVideo) {
+      await Gal.putVideo(localPath, album: 'Workplace Chat');
+      return 'معرض الفيديوهات (Workplace Chat)';
     }
 
     if (Platform.isAndroid) {
@@ -2406,19 +2449,45 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     return candidate;
   }
 
-  Future<void> _openAttachment(ChatMessage message) {
+  Future<void> _openAttachment(ChatMessage message) async {
     if (message.isImageMessage) {
       return _showImagePreview(message);
     }
     if (!message.attachmentDownloadAllowed) {
       if (!mounted) {
-        return Future<void>.value();
+        return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('هذا الملف للعرض فقط داخل الشات.')),
       );
-      return Future<void>.value();
+      return;
     }
+
+    // If already downloaded/cached on the phone, open directly without re-downloading!
+    final repository = ref.read(chatRepositoryProvider);
+    final cachedPath = await repository.getCachedAttachmentPath(message);
+
+    if (cachedPath != null && await File(cachedPath).exists()) {
+      _cachedAttachmentIds.add(message.id);
+      _checkedAttachmentIds.add(message.id);
+      final result = await OpenFilex.open(cachedPath);
+      if (!mounted) return;
+
+      if (result.type != ResultType.done) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.message.isNotEmpty
+                  ? result.message
+                  : 'تعذر فتح الملف باستخدام التطبيقات المتوفرة على الهاتف',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // If not cached yet, download once and open
     return _downloadAttachment(message, openAfterDownload: true);
   }
 
@@ -3412,10 +3481,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     message.attachmentDownloadAllowed) ...[
                                   _buildWhatsAppMenuDivider(isDark),
                                   _buildWhatsAppContextMenuItem(
-                                    title: 'تنزيل من جديد',
+                                    title: _cachedAttachmentIds.contains(message.id)
+                                        ? 'حفظ نسخة في الجهاز'
+                                        : 'حفظ في الجهاز',
                                     icon: CupertinoIcons.arrow_down_to_line,
                                     onTap: () =>
-                                        _downloadAttachment(message),
+                                        _downloadAttachment(
+                                          message,
+                                          openAfterDownload: false,
+                                          forceRedownload: true,
+                                        ),
                                   ),
                                 ],
                                 if ((message.isStickerMessage || message.isImageMessage) &&
@@ -4375,19 +4450,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   ),
                                   trailing: IconButton(
                                     onPressed: message.attachmentDownloadAllowed
-                                        ? () => _startOverlayDownload(
-                                            message,
-                                            overlayContext: context,
-                                          )
+                                        ? () => _openAttachment(message)
                                         : null,
                                     icon: Icon(
-                                      message.attachmentDownloadAllowed
-                                          ? Icons.download_rounded
-                                          : Icons.lock_rounded,
+                                      _cachedAttachmentIds.contains(message.id)
+                                          ? Icons.open_in_new_rounded
+                                          : (message.attachmentDownloadAllowed
+                                              ? Icons.download_rounded
+                                              : Icons.lock_rounded),
                                     ),
-                                    tooltip: message.attachmentDownloadAllowed
-                                        ? 'تنزيل'
-                                        : 'عرض فقط',
+                                    tooltip: _cachedAttachmentIds.contains(message.id)
+                                        ? 'فتح'
+                                        : (message.attachmentDownloadAllowed
+                                            ? 'تنزيل'
+                                            : 'عرض فقط'),
                                   ),
                                   onTap: () => _openAttachment(message),
                                 );
@@ -4522,6 +4598,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
     final loadedMessages =
         messagesState.valueOrNull?.messages ?? const <ChatMessage>[];
+    _syncCachedAttachments(loadedMessages);
 
     final peer = selectedPeerId == null
         ? null
@@ -5846,93 +5923,114 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                         ),
                                                                                       ),
                                                                                     )
-                                                                                  : InkWell(
-                                                                                      onTap: _selectionMode
-                                                                                          ? () => _toggleMessageSelection(message.id)
-                                                                                          : () => _openAttachment(message),
-                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
-                                                                                      onLongPress: () {
-                                                                                        if (_selectionMode) {
-                                                                                          _toggleMessageSelection(message.id);
-                                                                                        } else {
-                                                                                          _showWhatsAppContextMenu(message);
+                                                                                  : Builder(
+                                                                                      builder: (context) {
+                                                                                        final isAttachmentDownloaded =
+                                                                                            _cachedAttachmentIds.contains(message.id) ||
+                                                                                            isMine ||
+                                                                                            (message.metadata?['localPath'] != null &&
+                                                                                                File(message.metadata!['localPath'].toString()).existsSync());
+                                                                                        if (message.hasAttachment && !_checkedAttachmentIds.contains(message.id)) {
+                                                                                          _checkSingleAttachmentCached(message);
                                                                                         }
-                                                                                      },
-                                                                                      borderRadius: BorderRadius.circular(
-                                                                                        14,
-                                                                                      ),
-                                                                                      child: Container(
-                                                                                        width: double.infinity,
-                                                                                        padding: const EdgeInsets.all(
-                                                                                          10,
-                                                                                        ),
-                                                                                        decoration: BoxDecoration(
-                                                                                          color: replyBgColor,
-                                                                                          borderRadius: BorderRadius.circular(
-                                                                                            14,
+                                                                                        return InkWell(
+                                                                                          onTap: _selectionMode
+                                                                                              ? () => _toggleMessageSelection(message.id)
+                                                                                              : () => _openAttachment(message),
+                                                                                          onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                          onLongPress: () {
+                                                                                            if (_selectionMode) {
+                                                                                              _toggleMessageSelection(message.id);
+                                                                                            } else {
+                                                                                              _showWhatsAppContextMenu(message);
+                                                                                            }
+                                                                                          },
+                                                                                          borderRadius: BorderRadius.circular(14),
+                                                                                          child: Container(
+                                                                                            width: double.infinity,
+                                                                                            padding: const EdgeInsets.all(10),
+                                                                                            decoration: BoxDecoration(
+                                                                                              color: replyBgColor,
+                                                                                              borderRadius: BorderRadius.circular(14),
+                                                                                            ),
+                                                                                            child: Row(
+                                                                                              children: [
+                                                                                                Icon(
+                                                                                                  _attachmentIcon(message.messageType),
+                                                                                                  color: isAttachmentDownloaded
+                                                                                                      ? const Color(0xFF10B981)
+                                                                                                      : textColor,
+                                                                                                ),
+                                                                                                const SizedBox(width: 8),
+                                                                                                Flexible(
+                                                                                                  child: Column(
+                                                                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                                                                    mainAxisSize: MainAxisSize.min,
+                                                                                                    children: [
+                                                                                                      Text(
+                                                                                                        message.fileName ?? 'ملف مرفق',
+                                                                                                        maxLines: 1,
+                                                                                                        overflow: TextOverflow.ellipsis,
+                                                                                                        style: TextStyle(
+                                                                                                          color: textColor,
+                                                                                                          fontWeight: FontWeight.w600,
+                                                                                                          fontSize: 13,
+                                                                                                        ),
+                                                                                                      ),
+                                                                                                      const SizedBox(height: 2),
+                                                                                                      Text(
+                                                                                                        message.fileSize != null && message.fileSize! > 0
+                                                                                                            ? '${formatFileSize(message.fileSize!)}${isAttachmentDownloaded ? " • تم التنزيل" : ""}'
+                                                                                                            : (isAttachmentDownloaded ? 'تم التنزيل' : 'انقر للتنزيل'),
+                                                                                                        style: TextStyle(
+                                                                                                          color: subTextColor,
+                                                                                                          fontSize: 11,
+                                                                                                        ),
+                                                                                                      ),
+                                                                                                    ],
+                                                                                                  ),
+                                                                                                ),
+                                                                                                if (message.isPrintableAttachment)
+                                                                                                  IconButton(
+                                                                                                    visualDensity: VisualDensity.compact,
+                                                                                                    onPressed: () => _requestAttachmentPrint(message),
+                                                                                                    icon: Icon(
+                                                                                                      Icons.print_rounded,
+                                                                                                      size: 18,
+                                                                                                      color: subTextColor,
+                                                                                                    ),
+                                                                                                  ),
+                                                                                                if (_downloadStates.containsKey(message.id))
+                                                                                                  SizedBox(
+                                                                                                    width: 20,
+                                                                                                    height: 20,
+                                                                                                    child: CircularProgressIndicator(
+                                                                                                      value: _downloadStates[message.id]!.progress > 0
+                                                                                                          ? _downloadStates[message.id]!.progress
+                                                                                                          : null,
+                                                                                                      strokeWidth: 2,
+                                                                                                      color: subTextColor,
+                                                                                                    ),
+                                                                                                  )
+                                                                                                else if (isAttachmentDownloaded)
+                                                                                                  Icon(
+                                                                                                    Icons.open_in_new_rounded,
+                                                                                                    size: 19,
+                                                                                                    color: subTextColor,
+                                                                                                  )
+                                                                                                else
+                                                                                                  Icon(
+                                                                                                    message.attachmentDownloadAllowed
+                                                                                                        ? Icons.download_rounded
+                                                                                                        : Icons.lock_rounded,
+                                                                                                    size: 19,
+                                                                                                    color: subTextColor,
+                                                                                                  ),
+                                                                                              ],
+                                                                                            ),
                                                                                           ),
-                                                                                        ),
-                                                                                        child: Row(
-                                                                                          children: [
-                                                                                            Icon(
-                                                                                              _attachmentIcon(
-                                                                                                message.messageType,
-                                                                                              ),
-                                                                                              color: textColor,
-                                                                                            ),
-                                                                                            const SizedBox(
-                                                                                              width: 8,
-                                                                                            ),
-                                                                                            Flexible(
-                                                                                              child: Text(
-                                                                                                message.fileName ??
-                                                                                                    'ملف مرفق',
-                                                                                                maxLines: 1,
-                                                                                                overflow: TextOverflow.ellipsis,
-                                                                                                style: TextStyle(
-                                                                                                  color: textColor,
-                                                                                                ),
-                                                                                              ),
-                                                                                            ),
-                                                                                            if (message.isPrintableAttachment)
-                                                                                              IconButton(
-                                                                                                visualDensity: VisualDensity.compact,
-                                                                                                onPressed: () => _requestAttachmentPrint(
-                                                                                                  message,
-                                                                                                ),
-                                                                                                icon: Icon(
-                                                                                                  Icons.print_rounded,
-                                                                                                  size: 18,
-                                                                                                  color: subTextColor,
-                                                                                                ),
-                                                                                              ),
-                                                                                            if (_downloadStates.containsKey(
-                                                                                              message.id,
-                                                                                            ))
-                                                                                              SizedBox(
-                                                                                                width: 18,
-                                                                                                height: 18,
-                                                                                                child: CircularProgressIndicator(
-                                                                                                  value:
-                                                                                                      _downloadStates[message.id]!.progress >
-                                                                                                          0
-                                                                                                      ? _downloadStates[message.id]!.progress
-                                                                                                      : null,
-                                                                                                  strokeWidth: 2,
-                                                                                                  color: subTextColor,
-                                                                                                ),
-                                                                                              )
-                                                                                            else
-                                                                                              Icon(
-                                                                                                message.attachmentDownloadAllowed
-                                                                                                    ? Icons.download_rounded
-                                                                                                    : Icons.lock_rounded,
-                                                                                                size: 18,
-                                                                                                color: subTextColor,
-                                                                                              ),
-                                                                                          ],
-                                                                                        ),
-                                                                                      ),
+                                                                                        );
+                                                                                      },
                                                                                     ),
                                                                             ),
                                                                         ],

@@ -22,8 +22,10 @@ class ChatRepository {
     this._preferences, {
     AuthRepository? authRepository,
     ChatLocalCache? cache,
+    Dio? downloadDio,
   })  : _authRepository = authRepository,
-        _cache = cache ?? ChatLocalCache();
+        _cache = cache ?? ChatLocalCache(),
+        _downloadDio = downloadDio;
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   static const int _maxConcurrentPreviewDownloads = 3;
@@ -682,12 +684,73 @@ class ChatRepository {
     return null;
   }
 
+  Future<String?> getCachedAttachmentPath(ChatMessage message) async {
+    final targetFile = await _fullAttachmentCacheFile(message);
+    if (await targetFile.exists()) {
+      final length = await targetFile.length();
+      if (length > 0) return targetFile.path;
+    }
+
+    final archive = _attachmentArchiveMetadata(message);
+    final sha256Hex = archive?['sha256']?.toString().trim().toLowerCase();
+    if (sha256Hex != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(sha256Hex)) {
+      final sentArchive = await _localStorage.findSentChatArchive(
+        messageId: message.id,
+        sha256Hex: sha256Hex,
+        preferredPath: _preferences.localStorageDirectoryPath,
+      );
+      if (sentArchive != null && await sentArchive.exists()) {
+        final length = await sentArchive.length();
+        if (length > 0) return sentArchive.path;
+      }
+    }
+
+    final localPath = message.metadata?['localPath']?.toString();
+    if (localPath != null && localPath.isNotEmpty) {
+      final localFile = File(localPath);
+      if (await localFile.exists()) {
+        final length = await localFile.length();
+        if (length > 0) return localPath;
+      }
+    }
+
+    return null;
+  }
+
+  Future<bool> isAttachmentCached(ChatMessage message) async {
+    final path = await getCachedAttachmentPath(message);
+    return path != null;
+  }
+
   Future<String> downloadAttachment(
     ChatMessage message, {
+    bool forceRefresh = false,
     void Function(int received, int total)? onProgress,
   }) async {
     final targetFile = await _fullAttachmentCacheFile(message);
-    if (await targetFile.exists()) return targetFile.path;
+    if (!forceRefresh) {
+      final cachedPath = await getCachedAttachmentPath(message);
+      if (cachedPath != null) {
+        if (cachedPath == targetFile.path) {
+          return cachedPath;
+        }
+        try {
+          if (!await targetFile.exists()) {
+            await File(cachedPath).copy(targetFile.path);
+          }
+          return targetFile.path;
+        } catch (_) {
+          return cachedPath;
+        }
+      }
+    }
+
+    if (forceRefresh && await targetFile.exists()) {
+      try {
+        await targetFile.delete();
+      } catch (_) {}
+    }
+
     final downloadUrl = _downloadUrlFor(message.fileUrl!);
     
     await _downloadAttachmentFileWithRestore(
@@ -698,11 +761,6 @@ class ChatRepository {
     );
 
     return targetFile.path;
-  }
-
-  Future<bool> isAttachmentCached(ChatMessage message) async {
-    final targetFile = await _fullAttachmentCacheFile(message);
-    return targetFile.exists();
   }
 
   Future<void> _downloadAttachmentFileWithRestore(
@@ -1081,6 +1139,7 @@ class ChatRepository {
     final cacheDirectory = await _localStorage.chatDirectory(
       preferredPath: _preferences.localStorageDirectoryPath,
     );
+    await cacheDirectory.create(recursive: true);
     return File(
       p.join(
         cacheDirectory.path,
