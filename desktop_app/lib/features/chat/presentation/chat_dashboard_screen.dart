@@ -439,8 +439,9 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
 
   Future<void> _deleteConversation(ChatConversation conversation) async {
     final authUser = ref.read(authControllerProvider).valueOrNull;
-    final canDeleteForEveryone =
-        authUser?.role == 'admin' || conversation.createdBy == authUser?.id;
+    final canDeleteForEveryone = authUser?.role == 'admin' ||
+        conversation.createdBy == authUser?.id ||
+        conversation.type == 'direct';
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -450,9 +451,23 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: Color(0xFFB91C1C),
+              ),
+              title: const Text(
+                'حذف المحادثة من قائمتي',
+                style: TextStyle(color: Color(0xFFB91C1C)),
+              ),
+              subtitle: const Text('إزالة المحادثة ومسح رسائلها من جهازك'),
+              onTap: () => Navigator.of(context).pop('self'),
+            ),
+            ListTile(
               leading: const Icon(Icons.layers_clear_outlined),
-              title: const Text('مسح المحادثة عندي'),
-              subtitle: const Text('يتم حذف الرسائل عندك فقط'),
+              title: const Text('مسح الرسائل فقط'),
+              subtitle: const Text(
+                'تظل المحادثة في القائمة لكن بدون الرسائل القديمة',
+              ),
               onTap: () => Navigator.of(context).pop('clear'),
             ),
             if (conversation.type != 'direct')
@@ -467,9 +482,11 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                   Icons.delete_forever_rounded,
                   color: Color(0xFFB91C1C),
                 ),
-                title: const Text(
-                  'حذف نهائي للجميع',
-                  style: TextStyle(color: Color(0xFFB91C1C)),
+                title: Text(
+                  conversation.type == 'direct'
+                      ? 'حذف نهائي للطرفين'
+                      : 'حذف نهائي للجميع',
+                  style: const TextStyle(color: Color(0xFFB91C1C)),
                 ),
                 subtitle: const Text('يحذف المحادثة بالكامل من كل الأطراف'),
                 onTap: () => Navigator.of(context).pop('global'),
@@ -496,6 +513,53 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
         return;
       }
 
+      if (action == 'clear') {
+        await overviewController.clearConversationMessages(conversation.id);
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('تم مسح الرسائل بنجاح')));
+        }
+        return;
+      }
+
+      if (action == 'self') {
+        if (!mounted) return;
+        final shouldDeleteSelf = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            title: const Text('حذف المحادثة'),
+            content: const Text('هل أنت متأكد من حذف هذه المحادثة من قائمتك؟'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB91C1C),
+                ),
+                child: const Text('حذف'),
+              ),
+            ],
+          ),
+        );
+        if (shouldDeleteSelf != true) return;
+        await overviewController.deleteConversation(conversation.id);
+        if (!mounted) return;
+        if (_selectedConversationId == conversation.id) {
+          _selectConversation(null);
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حذف المحادثة من قائمتك')),
+        );
+        return;
+      }
+
       if (action == 'global') {
         if (!mounted) return;
         final shouldDeleteGlobal = await showDialog<bool>(
@@ -504,8 +568,16 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
-            title: const Text('تأكيد الحذف النهائي'),
-            content: const Text('سيتم حذف المحادثة نهائيًا للجميع.'),
+            title: Text(
+              conversation.type == 'direct'
+                  ? 'تأكيد الحذف النهائي للطرفين'
+                  : 'تأكيد الحذف النهائي للجميع',
+            ),
+            content: Text(
+              conversation.type == 'direct'
+                  ? 'سيتم حذف المحادثة ورسائلها نهائيًا عندك وعند الطرف الآخر.'
+                  : 'سيتم حذف المحادثة ورسائلها نهائيًا للجميع.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
@@ -513,6 +585,9 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB91C1C),
+                ),
                 child: const Text('حذف نهائي'),
               ),
             ],
@@ -525,13 +600,13 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
           conversation.id,
           deleteForEveryone: true,
         );
-      } else {
-        await overviewController.deleteConversation(conversation.id);
-      }
-
-      if (!mounted) return;
-      if (_selectedConversationId == conversation.id) {
-        _selectConversation(null);
+        if (!mounted) return;
+        if (_selectedConversationId == conversation.id) {
+          _selectConversation(null);
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('تم الحذف النهائي بنجاح')));
       }
     } catch (error) {
       if (!mounted) return;

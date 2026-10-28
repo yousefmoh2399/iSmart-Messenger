@@ -27,6 +27,7 @@ const {
   getUnreadCountsForUser,
   getConversationState,
   clearConversationHistoryForUser,
+  deleteConversationForUser,
   updateConversationState,
 } = require("./chat-member-state.service");
 const { classifyAttachment } = require("./chat-attachment.service");
@@ -972,6 +973,21 @@ async function listConversationsForUser(currentUser) {
       if (isDepartmentDefaultConversation(conversation)) {
         continue;
       }
+      const memberState = await getConversationState(
+        currentUser.id,
+        conversation._id,
+      );
+      if (memberState?.isDeleted) {
+        const lastMsgTime = conversation.lastMessage?.createdAt
+          ? new Date(conversation.lastMessage.createdAt).getTime()
+          : 0;
+        const deletedTime = memberState.deletedAt
+          ? new Date(memberState.deletedAt).getTime()
+          : 0;
+        if (lastMsgTime <= deletedTime) {
+          continue;
+        }
+      }
       const serialized = await serializeConversation(
         conversation,
         currentUser.id,
@@ -1120,6 +1136,10 @@ async function createConversation(currentUser, payload) {
       .exec();
 
     if (existing) {
+      await ConversationMemberState.updateOne(
+        { conversationId: existing._id, userId: currentUser.id },
+        { $set: { isDeleted: false, deletedAt: null } }
+      );
       return serializeConversation(existing, currentUser.id);
     }
 
@@ -1381,7 +1401,11 @@ async function deleteConversation(
     deletedAt: null,
   }).lean();
 
-  if (normalizedScope !== "global") {
+  if (!conversation) {
+    throw new ApiError(404, "Conversation not found.");
+  }
+
+  if (normalizedScope === "clear") {
     await assertConversationAccess(currentUser, conversation);
     await clearConversationHistoryForUser(
       conversation._id,
@@ -1402,6 +1426,28 @@ async function deleteConversation(
     return {
       mode: "self_cleared",
       conversation: nextConversation,
+      conversationId: conversation._id.toString(),
+      memberIds: [currentUser.id],
+    };
+  }
+
+  if (normalizedScope !== "global") {
+    await assertConversationAccess(currentUser, conversation);
+    await deleteConversationForUser(
+      conversation._id,
+      currentUser.id,
+      new Date(),
+    );
+    await logAuditEvent({
+      actorId: currentUser.id,
+      action: "conversation.self_deleted",
+      entityType: "Conversation",
+      entityId: conversation._id,
+      payload: { type: conversation.type },
+    });
+    return {
+      mode: "self_deleted",
+      conversation: null,
       conversationId: conversation._id.toString(),
       memberIds: [currentUser.id],
     };
@@ -1441,6 +1487,7 @@ async function deleteConversation(
       $set: {
         deletedAt: new Date(),
         isActive: false,
+        directKey: null,
       },
     },
   );
@@ -1971,6 +2018,11 @@ async function createMessage(currentUser, payload, file) {
       conversation._id,
       targetRecipientIds,
       currentUser.id,
+    );
+
+    await ConversationMemberState.updateMany(
+      { conversationId: conversation._id },
+      { $set: { isDeleted: false, deletedAt: null } },
     );
   }
 

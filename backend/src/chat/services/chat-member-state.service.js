@@ -119,6 +119,26 @@ async function getConversationState(userId, conversationId) {
   return ConversationMemberState.findOne({ userId, conversationId }).lean();
 }
 
+async function deleteConversationForUser(conversationId, userId, deletedAt = new Date()) {
+  await ConversationMemberState.updateOne(
+    { conversationId, userId },
+    {
+      $set: {
+        isDeleted: true,
+        deletedAt: deletedAt,
+        clearHistoryAt: deletedAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
 async function clearConversationHistoryForUser(conversationId, userId, clearAt = new Date()) {
   await ConversationMemberState.updateOne(
     { conversationId, userId },
@@ -156,6 +176,12 @@ async function updateConversationState(userId, conversationId, payload = {}) {
   if (Object.prototype.hasOwnProperty.call(payload, "clearHistoryAt")) {
     update.clearHistoryAt = payload.clearHistoryAt || null;
   }
+  if (Object.prototype.hasOwnProperty.call(payload, "isDeleted")) {
+    update.isDeleted = Boolean(payload.isDeleted);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "deletedAt")) {
+    update.deletedAt = payload.deletedAt || null;
+  }
 
   await ConversationMemberState.updateOne(
     { conversationId, userId },
@@ -183,5 +209,6 @@ module.exports = {
   getUnreadCountsForUser,
   getConversationState,
   clearConversationHistoryForUser,
+  deleteConversationForUser,
   updateConversationState,
 };

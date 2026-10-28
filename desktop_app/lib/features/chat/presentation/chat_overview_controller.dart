@@ -840,6 +840,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
             .toList(),
       ),
     );
+    unawaited(_repository().cache.removeConversation(conversationId));
   }
 
   void _applyConversationStateUpdate({
@@ -989,18 +990,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     String conversationId, {
     bool deleteForEveryone = false,
   }) async {
+    _applyConversationDeleted(conversationId);
     try {
-      final conversation = await _guardAuth(
+      await _guardAuth(
         () => _repository().deleteConversation(
           conversationId,
           deleteForEveryone: deleteForEveryone,
         ),
       );
-      if (conversation != null) {
-        _applyConversationUpdate(conversation);
-        return;
-      }
-      await refresh();
     } catch (error) {
       final text = error.toString().toLowerCase();
       final isNotFound =
@@ -1008,10 +1005,25 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
           (text.contains('conversation not found') ||
               text.contains('404') ||
               text.contains('غير موجود'));
-      if (isNotFound) {
+      if (!isNotFound) {
         await refresh();
-        return;
+        rethrow;
       }
+    }
+  }
+
+  Future<void> clearConversationMessages(String conversationId) async {
+    try {
+      final updated = await _guardAuth(
+        () => _repository().clearConversationMessages(conversationId),
+      );
+      if (updated != null) {
+        _applyConversationUpdate(updated);
+      } else {
+        await refresh();
+      }
+    } catch (_) {
+      await refresh();
       rethrow;
     }
   }

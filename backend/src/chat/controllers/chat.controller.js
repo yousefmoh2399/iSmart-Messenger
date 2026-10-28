@@ -446,6 +446,9 @@ const deleteChatConversation = asyncHandler(async (req, res) => {
       for (const userId of deleted.memberIds || []) {
         io.to(`user:${userId}`).emit("conversation_deleted", payload);
       }
+    } else if (deleted.mode === "self_deleted") {
+      const payload = { conversationId: deleted.conversationId };
+      io.to(`user:${req.user.id}`).emit("conversation_deleted", payload);
     } else if (deleted.mode === "self_cleared" && deleted.conversation) {
       io.to(`user:${req.user.id}`).emit(
         "conversation_updated",
@@ -455,12 +458,12 @@ const deleteChatConversation = asyncHandler(async (req, res) => {
   }
   sendChatResponse(res, {
     data: {
-      deleted: deleted.mode === "global_deleted",
+      deleted: deleted.mode === "global_deleted" || deleted.mode === "self_deleted",
       cleared: deleted.mode === "self_cleared",
       conversation: deleted.conversation || null,
     },
     legacy: {
-      deleted: deleted.mode === "global_deleted",
+      deleted: deleted.mode === "global_deleted" || deleted.mode === "self_deleted",
       cleared: deleted.mode === "self_cleared",
       conversation: deleted.conversation || null,
     },

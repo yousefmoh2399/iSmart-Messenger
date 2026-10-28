@@ -48,6 +48,15 @@ const conversationMemberStateSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
     joinedAt: {
       type: Date,
       default: Date.now,

@@ -3581,8 +3581,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   Future<void> _clearConversationForMe() async {
     final shouldClear = await _confirmAction(
-      title: 'مسح المحادثة عندي',
-      description: 'سيتم مسح الرسائل عندك فقط مع بقاء المحادثة ظاهرة.',
+      title: 'مسح الرسائل فقط',
+      description: 'سيتم مسح الرسائل عندك فقط مع بقاء المحادثة في القائمة.',
       confirmLabel: 'مسح',
     );
     if (!shouldClear || !mounted) {
@@ -3592,7 +3592,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     try {
       await ref
           .read(chatOverviewControllerProvider.notifier)
-          .deleteConversation(widget.conversation.id);
+          .clearConversationMessages(widget.conversation.id);
       await ref
           .read(
             conversationMessagesControllerProvider(
@@ -3606,7 +3606,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         _focusedMessageId = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم مسح المحادثة عندك بنجاح')),
+        const SnackBar(content: Text('تم مسح الرسائل عندك بنجاح')),
       );
     } catch (error) {
       final text = error.toString().toLowerCase();
@@ -3617,9 +3617,33 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (notFound && mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('تم مسح المحادثة بالفعل')));
+        ).showSnackBar(const SnackBar(content: Text('تم مسح الرسائل بالفعل')));
         return;
       }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> _deleteConversationForMe() async {
+    final shouldDelete = await _confirmAction(
+      title: 'حذف المحادثة من قائمتي',
+      description: 'هل تريد حذف هذه المحادثة ومسح رسائلها من جهازك؟',
+      confirmLabel: 'حذف',
+    );
+    if (!shouldDelete || !mounted) {
+      return;
+    }
+
+    try {
+      await ref
+          .read(chatOverviewControllerProvider.notifier)
+          .deleteConversation(widget.conversation.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -4478,8 +4502,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     ? 'قناة بث: لا تملك صلاحية الإرسال'
                     : 'الغرفة معطلة بواسطة المشرف'))
         : statusText;
-    final canDeleteForEveryone =
-        authUser?.role == 'admin' || _data.createdBy == authUser?.id;
+    final canDeleteForEveryone = authUser?.role == 'admin' ||
+        _data.createdBy == authUser?.id ||
+        _data.type == 'direct';
     final canManagePinnedMessage = _canManagePinnedMessage(authUser?.id);
     final typingIndicatorText = _typingUsers.isEmpty
         ? null
@@ -4522,7 +4547,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               : GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: () async {
-                    final updated = await Navigator.of(context).push<ChatConversation>(
+                    final navigator = Navigator.of(context);
+                    final result = await navigator.push(
                       CupertinoPageRoute(
                         builder: (_) => ConversationDetailsScreen(
                           conversation: _data,
@@ -4532,9 +4558,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         ),
                       ),
                     );
-                    if (updated != null && mounted) {
+                    if (result == 'deleted' && mounted) {
+                      navigator.pop();
+                      return;
+                    }
+                    if (result is ChatConversation && mounted) {
                       setState(() {
-                        _conversation = updated;
+                        _conversation = result;
                       });
                     }
                   },
@@ -4643,6 +4673,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   }
                   if (value == 'scheduled') {
                     _showScheduledMessagesSheet();
+                    return;
+                  }
+                  if (value == 'delete_self') {
+                    await _deleteConversationForMe();
                     return;
                   }
                   if (value == 'clear') {
@@ -4772,8 +4806,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     child: Text('مظهر المحادثات'),
                   ),
                   const PopupMenuItem(
+                    value: 'delete_self',
+                    child: Text(
+                      'حذف المحادثة من قائمتي',
+                      style: TextStyle(color: Color(0xFFB91C1C)),
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: 'clear',
-                    child: Text('مسح المحادثة عندي'),
+                    child: Text('مسح الرسائل فقط'),
                   ),
                   if (_data.type != 'direct')
                     const PopupMenuItem(
@@ -4781,9 +4822,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       child: Text('مغادرة المجموعة'),
                     ),
                   if (canDeleteForEveryone)
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'delete_everyone',
-                      child: Text('حذف نهائي للجميع'),
+                      child: Text(
+                        _data.type == 'direct'
+                            ? 'حذف نهائي للطرفين'
+                            : 'حذف نهائي للجميع',
+                        style: const TextStyle(color: Color(0xFFB91C1C)),
+                      ),
                     ),
                 ],
               ),

@@ -99,5 +99,18 @@ class ChatLocalCache {
       limit: (meta['limit'] as num?)?.toInt() ?? 40,
     );
   }
-}
 
+  Future<void> clearConversationMessages(String conversationId) async {
+    await deleteRawJson('messages_$conversationId');
+  }
+
+  Future<void> removeConversation(String conversationId) async {
+    await clearConversationMessages(conversationId);
+    final conversations = await loadConversations();
+    if (conversations != null) {
+      final updated =
+          conversations.where((c) => c.id != conversationId).toList();
+      await saveConversations(updated);
+    }
+  }
+}

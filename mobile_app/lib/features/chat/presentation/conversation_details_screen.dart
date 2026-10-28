@@ -853,7 +853,7 @@ class _ConversationDetailsScreenState
                           if (confirm == true && mounted) {
                             await ref.read(chatOverviewControllerProvider.notifier).leaveConversation(_conversation.id);
                             if (mounted) {
-                              nav.pop();
+                              nav.pop('deleted');
                             }
                           }
                         },
@@ -862,7 +862,7 @@ class _ConversationDetailsScreenState
                       ListTile(
                         leading: const Icon(CupertinoIcons.trash, color: CupertinoColors.systemRed),
                         title: const Text(
-                          'مسح المحادثة',
+                          'حذف المحادثة من قائمتي',
                           style: TextStyle(color: CupertinoColors.systemRed, fontSize: 16, fontWeight: FontWeight.w600),
                         ),
                         onTap: () async {
@@ -870,14 +870,14 @@ class _ConversationDetailsScreenState
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (ctx) => AlertDialog(
-                              title: const Text('مسح المحادثة'),
+                              title: const Text('حذف المحادثة'),
                               content: const Text('هل أنت متأكد من حذف هذه المحادثة من قائمتك؟'),
                               actions: [
                                 TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
                                 FilledButton(
                                   onPressed: () => Navigator.pop(ctx, true),
                                   style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text('مسح'),
+                                  child: const Text('حذف'),
                                 ),
                               ],
                             ),
@@ -885,7 +885,39 @@ class _ConversationDetailsScreenState
                           if (confirm == true && mounted) {
                             await ref.read(chatOverviewControllerProvider.notifier).deleteConversation(_conversation.id);
                             if (mounted) {
-                              nav.pop();
+                              nav.pop('deleted');
+                            }
+                          }
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(CupertinoIcons.delete_solid, color: CupertinoColors.systemRed),
+                        title: const Text(
+                          'حذف نهائي للطرفين',
+                          style: TextStyle(color: CupertinoColors.systemRed, fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: const Text('حذف المحادثة وجميع رسائلها نهائياً لكلا الطرفين'),
+                        onTap: () async {
+                          final nav = Navigator.of(context);
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('حذف نهائي للطرفين'),
+                              content: const Text('هل أنت متأكد من حذف هذه المحادثة نهائيًا لكلا الطرفين؟ لا يمكن التراجع عن هذا الإجراء.'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                  child: const Text('حذف نهائي'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true && mounted) {
+                            await ref.read(chatOverviewControllerProvider.notifier).deleteConversation(_conversation.id, deleteForEveryone: true);
+                            if (mounted) {
+                              nav.pop('deleted');
                             }
                           }
                         },

@@ -660,9 +660,25 @@ class ChatRepository {
     String conversationId, {
     bool deleteForEveryone = false,
   }) async {
+    await cache.removeConversation(conversationId);
     final response = await _apiClient.dio.delete<Map<String, dynamic>>(
       '/api/chat/conversations/$conversationId',
       queryParameters: {'scope': deleteForEveryone ? 'global' : 'self'},
+    );
+    final conversationData = response.data?['conversation'];
+    if (conversationData is Map<String, dynamic>) {
+      return ChatConversation.fromJson(conversationData);
+    }
+    return null;
+  }
+
+  Future<ChatConversation?> clearConversationMessages(
+    String conversationId,
+  ) async {
+    await cache.clearConversationMessages(conversationId);
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId',
+      queryParameters: {'scope': 'clear'},
     );
     final conversationData = response.data?['conversation'];
     if (conversationData is Map<String, dynamic>) {
