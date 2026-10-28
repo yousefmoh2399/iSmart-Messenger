@@ -4954,7 +4954,39 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     skipLoadingOnReload: true,
                     skipLoadingOnRefresh: true,
                     loading: () => const _ChatMessagesLoadingSkeleton(),
-                    error: (error, _) => Center(child: Text(error.toString())),
+                    error: (error, _) => Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.cloud_off_rounded,
+                            size: 48,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.5),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'تعذر تحميل الرسائل',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: () => ref
+                                .read(
+                                  conversationMessagesControllerProvider(
+                                    widget.conversation.id,
+                                  ).notifier,
+                                )
+                                .refresh(),
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('إعادة المحاولة'),
+                          ),
+                        ],
+                      ),
+                    ),
                     data: (messagesData) {
                       final messages = _deduplicateMessagesById(
                         messagesData.messages,

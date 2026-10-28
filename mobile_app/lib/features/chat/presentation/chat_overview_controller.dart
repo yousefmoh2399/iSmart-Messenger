@@ -29,6 +29,15 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   bool _loadingMoreUsers = false;
   Future<void>? _refreshFuture;
   final Set<String> _processedIncomingMessageIds = <String>{};
+  Timer? _conversationsCacheDebounceTimer;
+
+  void _persistConversations(List<ChatConversation> conversations) {
+    _conversationsCacheDebounceTimer?.cancel();
+    _conversationsCacheDebounceTimer = Timer(const Duration(seconds: 2), () {
+      if (_disposed) return;
+      _repository().cache.saveConversations(conversations);
+    });
+  }
 
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
@@ -89,6 +98,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _listenToSocket();
     ref.onDispose(() {
       _disposed = true;
+      _conversationsCacheDebounceTimer?.cancel();
       _eventsSubscription?.cancel();
     });
 
@@ -173,7 +183,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       manageableMap.values.toList(),
     );
 
-    return ChatOverviewData(
+    final overview = ChatOverviewData(
       conversations: conversations,
       manageableConversations: manageableConversations,
       users: usersPage.users,
@@ -181,6 +191,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       branches: branches,
       roles: roles,
     );
+    _persistConversations(conversations);
+    return overview;
   }
 
   Future<void> loadMoreUsers() async {
@@ -306,6 +318,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     List<ChatConversation>? manageableConversations,
     List<ChatDirectoryUser>? users,
   }) {
+    if (conversations != null) {
+      _persistConversations(conversations);
+    }
     return ChatOverviewData(
       conversations: conversations ?? source.conversations,
       manageableConversations:
@@ -1711,7 +1726,10 @@ class ConversationMessagesController
       if (_disposed) {
         return;
       }
-      state = AsyncError(error, stackTrace);
+      final current = state.valueOrNull;
+      if (current == null) {
+        state = AsyncError(error, stackTrace);
+      }
     } finally {
       _isRefreshing = false;
     }
@@ -1741,7 +1759,12 @@ class ConversationMessagesController
         ),
       );
     } catch (error, stackTrace) {
-      state = AsyncError(error, stackTrace);
+      final current = state.valueOrNull;
+      if (current != null) {
+        state = AsyncData(current.copyWith(isLoadingMore: false));
+      } else {
+        state = AsyncError(error, stackTrace);
+      }
     }
   }
 
