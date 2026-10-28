@@ -3189,6 +3189,16 @@ ipcMain.handle("storage:clear-cache", async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle("files:get-chat-attachment-path", async (_event, payload = {}) => {
+  const filePath = chatAttachmentCachePath(
+    payload.messageId,
+    payload.fileName || "attachment",
+    payload.directoryPath,
+  );
+  const exists = fs.existsSync(filePath);
+  return { success: true, exists: exists, path: exists ? filePath : null };
+});
+
 ipcMain.handle("files:cache-chat-attachment", async (_event, payload = {}) => {
   const outputPath = chatAttachmentCachePath(
     payload.messageId,

@@ -671,18 +671,72 @@ class ChatRepository {
     return null;
   }
 
+  Future<String?> getCachedAttachmentPath(ChatMessage message) async {
+    if (message.fileUrl == null || message.fileUrl!.isEmpty) return null;
+    final fileName = p.basename(message.fileName ?? 'attachment');
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        return web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: fileName,
+          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+        );
+      }
+      return null;
+    }
+
+    final cacheDirectory = await _localStorage.chatDirectory(
+      preferredPath: _preferences.localStorageDirectoryPath,
+    );
+    final targetPath = p.join(
+      cacheDirectory.path,
+      '${message.id}_${_localStorage.sanitizeFileName(fileName)}',
+    );
+    if (await File(targetPath).exists()) {
+      return targetPath;
+    }
+    return null;
+  }
+
   Future<String> downloadAttachment(
     ChatMessage message, {
     void Function(int received, int total)? onProgress,
   }) async {
+    final fileName = p.basename(message.fileName ?? 'attachment');
+
     if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final existingPath = await web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: fileName,
+          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+        );
+        if (existingPath != null) {
+          return existingPath;
+        }
+
+        final downloadUrl = _downloadUrlFor(message.fileUrl!);
+        final response = await _downloadAttachmentBytesWithRestore(
+          message,
+          downloadUrl,
+          onProgress: onProgress,
+        );
+
+        final cachedPath = await web_bridge.cacheElectronChatAttachment(
+          messageId: message.id,
+          fileName: fileName,
+          bytes: response,
+          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+        );
+        return cachedPath ?? fileName;
+      }
+
       final downloadUrl = _downloadUrlFor(message.fileUrl!);
       final response = await _apiClient.dio.get<List<int>>(
         downloadUrl,
         options: Options(responseType: ResponseType.bytes),
         onReceiveProgress: onProgress,
       );
-      final fileName = p.basename(message.fileName ?? 'attachment');
       await web_bridge.downloadBytes(
         bytes: Uint8List.fromList(response.data ?? const <int>[]),
         fileName: fileName,
@@ -691,7 +745,6 @@ class ChatRepository {
       return fileName;
     }
 
-    final fileName = p.basename(message.fileName ?? 'attachment');
     final cacheDirectory = await _localStorage.chatDirectory(
       preferredPath: _preferences.localStorageDirectoryPath,
     );
@@ -711,7 +764,6 @@ class ChatRepository {
 
     return targetPath;
   }
-
   Future<Uint8List> fetchAttachmentBytes(ChatMessage message) async {
     return _downloadAttachmentBytesWithRestore(
       message,

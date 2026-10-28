@@ -151,6 +151,7 @@ contextBridge.exposeInMainWorld("electronBridge", {
   initializeStorage: (payload) => ipcRenderer.invoke("files:initialize-storage", payload),
   appendErrorLog: (payload) => ipcRenderer.invoke("files:append-error-log", payload),
   archiveChatAttachment: (payload) => ipcRenderer.invoke("files:archive-chat-attachment", payload),
+  getChatAttachmentPath: (payload) => ipcRenderer.invoke("files:get-chat-attachment-path", payload),
   cacheChatAttachment: (payload) => ipcRenderer.invoke("files:cache-chat-attachment", payload),
   readChatAttachmentCache: (payload) => ipcRenderer.invoke("files:read-chat-attachment-cache", payload),
   readChatArchive: (payload) => ipcRenderer.invoke("files:read-chat-archive", payload),

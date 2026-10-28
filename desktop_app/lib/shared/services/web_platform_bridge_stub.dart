@@ -46,12 +46,18 @@ Future<void> archiveElectronChatAttachment({
   String? preferredDirectoryPath,
 }) async {}
 
-Future<void> cacheElectronChatAttachment({
+Future<String?> getElectronCachedAttachmentPath({
+  required String messageId,
+  required String fileName,
+  String? preferredDirectoryPath,
+}) async => null;
+
+Future<String?> cacheElectronChatAttachment({
   required String messageId,
   required String fileName,
   required Uint8List bytes,
   String? preferredDirectoryPath,
-}) async {}
+}) async => null;
 
 Future<Uint8List?> readElectronCachedChatAttachment({
   required String messageId,

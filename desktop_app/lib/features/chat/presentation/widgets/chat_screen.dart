@@ -2836,11 +2836,172 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  Future<void> _openLocalFilePath(String localPath, ChatMessage message) async {
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final success = await web_bridge.openElectronLocalFile(localPath);
+        if (!success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'تعذر فتح الملف مباشرة. يمكنك نقله أو حفظه في مجلد آخر.',
+              ),
+              action: SnackBarAction(
+                label: 'نقل / حفظ في...',
+                onPressed: () => _saveAttachmentAs(message),
+              ),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    // Native Flutter Desktop
+    final openResult = await OpenFilex.open(localPath);
+    if (openResult.type != ResultType.done) {
+      bool openedByFallback = false;
+      if (!kIsWeb && Platform.isWindows) {
+        try {
+          final result = await Process.run(
+            'cmd',
+            ['/c', 'start', '', localPath],
+            runInShell: true,
+          );
+          openedByFallback = (result.exitCode == 0);
+        } catch (_) {}
+      }
+      if (!openedByFallback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              openResult.type == ResultType.noAppToOpen
+                  ? 'لا يوجد برنامج مثبت لفتح هذا الملف (${p.extension(localPath)}).'
+                  : 'تعذر فتح الملف: ${openResult.message}',
+            ),
+            action: SnackBarAction(
+              label: 'نقل / حفظ في...',
+              onPressed: () => _saveAttachmentAs(message),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveAttachmentAs(ChatMessage message) async {
+    if (!message.attachmentDownloadAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('غير مسموح بحفظ هذا المرفق.')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final suggestedName = p.basename(message.fileName ?? 'attachment');
+
+      if (kIsWeb) {
+        if (web_bridge.isElectron()) {
+          final bytes = await repo.fetchAttachmentBytes(message);
+          final savedPath = await web_bridge.downloadBytes(
+            bytes: bytes,
+            fileName: suggestedName,
+            preferredDirectoryPath: null,
+          );
+          if (savedPath != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('تم حفظ $suggestedName بنجاح'),
+                action: SnackBarAction(
+                  label: 'فتح الملف',
+                  onPressed: () => web_bridge.openElectronLocalFile(savedPath),
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        await repo.downloadAttachment(message);
+        return;
+      }
+
+      var localPath = await repo.getCachedAttachmentPath(message);
+      if (localPath == null) {
+        if (mounted) {
+          setState(() {
+            _isDownloadingAttachment = true;
+            _downloadProgress = 0;
+            _downloadingFileName = message.fileName ?? 'مرفق';
+          });
+        }
+        localPath = await repo.downloadAttachment(
+          message,
+          onProgress: (received, total) {
+            if (!mounted) return;
+            setState(() {
+              _downloadProgress = total <= 0
+                  ? 0
+                  : (received / total).clamp(0, 1).toDouble();
+            });
+          },
+        );
+      }
+
+      final destinationPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'نقل أو حفظ الملف',
+        fileName: suggestedName,
+        lockParentWindow: true,
+      );
+      if (destinationPath == null || destinationPath.trim().isEmpty) {
+        return;
+      }
+      await File(localPath).copy(destinationPath);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم حفظ $suggestedName بنجاح'),
+            action: SnackBarAction(
+              label: 'فتح الملف',
+              onPressed: () => OpenFilex.open(destinationPath),
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.toString().trim().isEmpty
+                ? 'تعذر حفظ الملف حاليًا'
+                : error.toString(),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted && _isDownloadingAttachment) {
+        setState(() {
+          _isDownloadingAttachment = false;
+          _downloadProgress = 0;
+          _downloadingFileName = null;
+        });
+      }
+    }
+  }
+
   Future<void> _downloadAttachment(
     ChatMessage message, {
     bool openAfterDownload = false,
     bool forceSaveAs = false,
   }) async {
+    if (forceSaveAs) {
+      return _saveAttachmentAs(message);
+    }
+
     if (!message.attachmentDownloadAllowed) {
       if (!mounted) {
         return;
@@ -2879,7 +3040,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         return;
       }
 
-      if (kIsWeb) {
+      if (kIsWeb && !web_bridge.isElectron()) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -2890,61 +3051,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         return;
       }
 
-      if (forceSaveAs) {
-        final suggestedName = p.basename(message.fileName ?? 'attachment');
-        final destinationPath = await FilePicker.platform.saveFile(
-          dialogTitle: 'نقل أو حفظ الملف',
-          fileName: suggestedName,
-          lockParentWindow: true,
-        );
-        if (destinationPath == null || destinationPath.trim().isEmpty) {
-          return;
-        }
-        await File(localPath).copy(destinationPath);
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم حفظ ' + (message.fileName ?? 'المرفق') + ' بنجاح'),
-            action: SnackBarAction(
-              label: 'فتح الملف',
-              onPressed: () {
-                OpenFilex.open(destinationPath);
-              },
-            ),
-          ),
-        );
-      } else if (openAfterDownload) {
-        final openResult = await OpenFilex.open(localPath);
-        if (openResult.type != ResultType.done) {
-          bool openedByFallback = false;
-          if (!kIsWeb && Platform.isWindows) {
-            try {
-              final result = await Process.run(
-                'cmd',
-                ['/c', 'start', '', localPath],
-                runInShell: true,
-              );
-              openedByFallback = (result.exitCode == 0);
-            } catch (_) {}
-          }
-          if (!openedByFallback && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  openResult.type == ResultType.noAppToOpen
-                      ? 'لا يوجد برنامج مثبت لفتح هذا الملف (' + p.extension(localPath) + ').'
-                      : 'تعذر فتح الملف: ' + openResult.message,
-                ),
-                action: SnackBarAction(
-                  label: 'نقل / حفظ في...',
-                  onPressed: () => _downloadAttachment(message, forceSaveAs: true),
-                ),
-              ),
-            );
-          }
-        }
+      if (openAfterDownload) {
+        await _openLocalFilePath(localPath, message);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2973,7 +3081,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
   }
-
   Future<void> _saveReceivedSticker(ChatMessage message) async {
     if (!message.attachmentDownloadAllowed) {
       if (mounted) {
@@ -3038,7 +3145,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  Future<void> _openAttachment(ChatMessage message) {
+  Future<void> _openAttachment(ChatMessage message) async {
     if (message.isImageMessage) {
       return _showImagePreview(message);
     }
@@ -3048,11 +3155,16 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           const SnackBar(content: Text('هذا الملف للعرض فقط داخل الشات.')),
         );
       }
-      return Future<void>.value();
+      return;
     }
-    return _downloadAttachment(message, openAfterDownload: true);
+    final repo = ref.read(chatRepositoryProvider);
+    final cachedPath = await repo.getCachedAttachmentPath(message);
+    if (cachedPath != null && cachedPath.isNotEmpty) {
+      await _openLocalFilePath(cachedPath, message);
+      return;
+    }
+    await _downloadAttachment(message, openAfterDownload: true);
   }
-
   Future<void> _printAttachment(ChatMessage message) async {
     if (!message.isPrintableAttachment) {
       if (mounted) {
@@ -3176,7 +3288,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     Navigator.of(overlayContext).pop();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(_downloadAttachment(message, forceSaveAs: true));
+      unawaited(_saveAttachmentAs(message));
     });
   }
 

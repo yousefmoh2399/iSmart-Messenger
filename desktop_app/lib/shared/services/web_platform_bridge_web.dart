@@ -477,21 +477,45 @@ Future<void> archiveElectronChatAttachment({
   });
 }
 
-Future<void> cacheElectronChatAttachment({
+Future<String?> getElectronCachedAttachmentPath({
+  required String messageId,
+  required String fileName,
+  String? preferredDirectoryPath,
+}) async {
+  if (!isElectron()) return null;
+  final result = _asStringMap(
+    await _callElectron('getChatAttachmentPath', {
+      'messageId': messageId,
+      'fileName': fileName,
+      if (preferredDirectoryPath != null &&
+          preferredDirectoryPath.trim().isNotEmpty)
+        'directoryPath': preferredDirectoryPath.trim(),
+    }),
+  );
+  if (result['success'] == true && result['exists'] == true) {
+    final p = result['path']?.toString().trim();
+    return (p != null && p.isNotEmpty) ? p : null;
+  }
+  return null;
+}
+
+Future<String?> cacheElectronChatAttachment({
   required String messageId,
   required String fileName,
   required Uint8List bytes,
   String? preferredDirectoryPath,
 }) async {
-  if (!isElectron()) return;
-  await _callElectron('cacheChatAttachment', {
+  if (!isElectron()) return null;
+  final result = _asStringMap(await _callElectron('cacheChatAttachment', {
     'messageId': messageId,
     'fileName': fileName,
     'base64': base64Encode(bytes),
     if (preferredDirectoryPath != null &&
         preferredDirectoryPath.trim().isNotEmpty)
       'directoryPath': preferredDirectoryPath.trim(),
-  });
+  }));
+  final savedPath = result['path']?.toString().trim();
+  return (savedPath != null && savedPath.isNotEmpty) ? savedPath : null;
 }
 
 Future<Uint8List?> readElectronCachedChatAttachment({
