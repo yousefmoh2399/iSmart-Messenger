@@ -535,8 +535,22 @@ function serializeMessage(message, sender = null) {
     metadata: Object.keys(metadata).length > 0 ? metadata : null,
     createdAt: message.createdAt,
     updatedAt: message.updatedAt,
-    seenBy: (message.seenBy || []).map(serializeReceipt),
-    deliveredTo: (message.deliveredTo || []).map(serializeReceipt),
+    seenBy: (message.seenBy || [])
+      .filter((entry) => {
+        const uid = entry.userId?._id
+          ? entry.userId._id.toString()
+          : (entry.userId?.toString?.() || "");
+        return uid && uid !== senderId;
+      })
+      .map(serializeReceipt),
+    deliveredTo: (message.deliveredTo || [])
+      .filter((entry) => {
+        const uid = entry.userId?._id
+          ? entry.userId._id.toString()
+          : (entry.userId?.toString?.() || "");
+        return uid && uid !== senderId;
+      })
+      .map(serializeReceipt),
   };
 }
 
@@ -576,7 +590,7 @@ async function createSystemConversationMessage(conversation, actor, payload) {
     senderId: actor.id,
     content: sanitizeMessageContent(payload.content),
     messageType: "system",
-    seenBy: [{ userId: actor.id, at: new Date() }],
+    seenBy: [],
     deliveredTo: await buildDeliveryReceipts(recipientIds),
     metadata: {
       ...(payload.metadata || {}),
@@ -1991,7 +2005,7 @@ async function createMessage(currentUser, payload, file) {
     mimeType: attachment.mimeType,
     storedFilePath,
     replyToMessageId: payload.replyToMessageId || null,
-    seenBy: [{ userId: currentUser.id, at: new Date() }],
+    seenBy: [],
     deliveredTo: await buildDeliveryReceipts(targetRecipientIds),
     metadata:
       Object.keys(normalizedMetadata).length > 0 ? normalizedMetadata : null,
@@ -3556,8 +3570,14 @@ async function getMessageReadReceipts(currentUser, messageId) {
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 
+  const senderIdStr = (message.senderId?._id || message.senderId)?.toString();
+
   const mapReceipt = (r) => {
     if (!r.userId) return null;
+    const uid = (r.userId._id || r.userId).toString();
+    // Exclude the sender so sender's authoring time is never mistaken for recipient reading it
+    if (senderIdStr && uid === senderIdStr) return null;
+
     return {
       _id: r.userId._id,
       username: r.userId.username,

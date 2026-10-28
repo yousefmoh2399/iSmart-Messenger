@@ -3850,11 +3850,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       );
                     }
                     final data = snapshot.data ?? {};
-                    final seenBy =
+                    final rawSeenBy =
                         (data['seenBy'] as List<dynamic>? ?? []);
-                    final deliveredTo =
+                    final rawDeliveredTo =
                         (data['deliveredTo'] as List<dynamic>? ?? []);
                     final isDirect = widget.conversation.type == 'direct';
+                    final myId = ref.read(currentUserProvider)?.id ?? message.senderId;
+
+                    // Exclude sender: a sender cannot be a recipient who reads/receives their own message
+                    final seenBy = rawSeenBy.where((entry) {
+                      final uid = (entry['_id'] ?? entry['userId'] ?? '').toString();
+                      return uid.isNotEmpty && uid != myId && uid != message.senderId;
+                    }).toList();
+
+                    final deliveredTo = rawDeliveredTo.where((entry) {
+                      final uid = (entry['_id'] ?? entry['userId'] ?? '').toString();
+                      return uid.isNotEmpty && uid != myId && uid != message.senderId;
+                    }).toList();
 
                     DateTime? directReadTime;
                     if (seenBy.isNotEmpty && seenBy.first['seenAt'] != null) {
@@ -3869,6 +3881,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         deliveredTo.first['deliveredAt'].toString(),
                       );
                     }
+                    if (directReadTime != null && directDeliveredTime == null) {
+                      directDeliveredTime = directReadTime;
+                    }
+
+                    final isRead = isDirect
+                        ? directReadTime != null
+                        : seenBy.isNotEmpty;
+                    final isDelivered = isDirect
+                        ? directDeliveredTime != null
+                        : deliveredTo.isNotEmpty;
 
                     return ListView(
                       controller: scrollController,
@@ -3878,7 +3900,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         _buildReceiptsGroupCard(
                           isDark: isDark,
                           icon: Icons.done_all_rounded,
-                          iconColor: const Color(0xFF34B7F1), // WhatsApp Blue Check
+                          iconColor: isRead
+                              ? const Color(0xFF34B7F1) // WhatsApp Blue Check
+                              : const Color(0xFF8E8E93), // WhatsApp Grey Double Check
                           title: 'قُرِئت',
                           subtitle: isDirect
                               ? (directReadTime != null
@@ -3895,7 +3919,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         _buildReceiptsGroupCard(
                           isDark: isDark,
                           icon: Icons.done_all_rounded,
-                          iconColor: const Color(0xFF8E8E93), // WhatsApp Grey Double Check
+                          iconColor: isDelivered
+                              ? const Color(0xFF8E8E93) // WhatsApp Grey Double Check
+                              : (isDark ? Colors.white24 : Colors.black26),
                           title: 'سُلِّمت',
                           subtitle: isDirect
                               ? (directDeliveredTime != null

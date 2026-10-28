@@ -1443,60 +1443,302 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  String _formatDesktopReceiptDateTime(DateTime? dateTime) {
+    if (dateTime == null) return '—';
+    final local = dateTime.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(local.year, local.month, local.day);
+    final diff = today.difference(target).inDays;
+    final timeStr = DateFormat('hh:mm a', 'ar').format(local);
+
+    if (diff == 0) {
+      return 'اليوم في $timeStr';
+    } else if (diff == 1) {
+      return 'أمس في $timeStr';
+    } else {
+      return '${DateFormat('dd/MM/yyyy').format(local)}، $timeStr';
+    }
+  }
+
+  Widget _buildDesktopReceiptGroupCard({
+    required bool isDark,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required List<dynamic> receipts,
+    required String timeField,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF262628) : const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? Colors.white12 : Colors.black12,
+          width: 0.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, color: iconColor, size: 18),
+                const SizedBox(width: 10),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                const Spacer(),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (receipts.isNotEmpty) ...[
+            Divider(height: 0.5, thickness: 0.5, color: isDark ? Colors.white12 : Colors.black12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 160),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: receipts.length,
+                itemBuilder: (context, index) {
+                  final user = receipts[index] as Map<String, dynamic>;
+                  final rawTime = user[timeField] ?? user['seenAt'] ?? user['deliveredAt'];
+                  final itemTime = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
+                  final displayName = user['displayName']?.toString() ?? user['username']?.toString() ?? 'مستخدم';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    child: Row(
+                      children: [
+                        SafeNetworkAvatar(
+                          imageUrl: user['avatarUrl']?.toString() ?? '',
+                          radius: 14,
+                          fallbackText: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            displayName,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        if (itemTime != null)
+                          Text(
+                            _formatDesktopReceiptDateTime(itemTime),
+                            style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.black38),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   void _showMessageDetails(ChatMessage message) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final isDirect = widget.conversation.type == 'direct';
+    final previewText = message.content.isNotEmpty
+        ? message.content
+        : (message.fileName ??
+            (message.messageType == 'image'
+                ? 'صورة'
+                : message.messageType == 'gif'
+                    ? 'ملصق'
+                    : 'رسالة'));
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text(
-          'من شاهد الرسالة',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+        title: Row(
+          children: [
+            Icon(
+              Icons.info_outline_rounded,
+              color: theme.colorScheme.primary,
+              size: 22,
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'معلومات الرسالة',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+          ],
         ),
         content: SizedBox(
-          width: 400,
-          height: 400,
-          child: FutureBuilder<Map<String, dynamic>>(
-            future: ref
-                .read(chatRepositoryProvider)
-                .getReadReceipts(message.id),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('خطأ: ${snapshot.error}'));
-              }
-              final seenBy = snapshot.data?['seenBy'] as List<dynamic>? ?? [];
-              if (seenBy.isEmpty) {
-                return const Center(child: Text('لم يشاهدها أحد بعد.'));
-              }
-              return ListView.builder(
-                itemCount: seenBy.length,
-                itemBuilder: (context, index) {
-                  final user = seenBy[index] as Map<String, dynamic>;
-                  return ListTile(
-                    leading: SafeNetworkAvatar(
-                      imageUrl: user['avatarUrl']?.toString() ?? '',
-                      radius: 18,
-                      fallbackText:
-                          user['displayName']?.toString().isNotEmpty == true
-                          ? user['displayName'].toString()[0].toUpperCase()
-                          : '?',
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.primaryContainer,
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Message preview
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A2A2E) : const Color(0xFFF2F4F7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      previewText,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                     ),
-                    title: Text(user['displayName']?.toString() ?? 'مستخدم'),
-                    subtitle: user['seenAt'] != null
-                        ? Text(
-                            DateTime.parse(
-                              user['seenAt'].toString(),
-                            ).toLocal().toString(),
-                          )
-                        : null,
-                  );
-                },
-              );
-            },
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: Text(
+                        DateFormat('hh:mm a', 'ar').format(message.createdAt.toLocal()),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white38 : Colors.black38,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Receipts fetch
+              Flexible(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: ref
+                      .read(chatRepositoryProvider)
+                      .getReadReceipts(message.id),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: Text('خطأ: ${snapshot.error}')),
+                      );
+                    }
+
+                    final data = snapshot.data ?? {};
+                    final rawSeenBy = data['seenBy'] as List<dynamic>? ?? [];
+                    final rawDeliveredTo = data['deliveredTo'] as List<dynamic>? ?? [];
+
+                    final myId = message.senderId;
+                    final seenBy = rawSeenBy.where((e) {
+                      final uid = (e['_id'] ?? e['userId'] ?? '').toString();
+                      return uid.isNotEmpty && uid != myId;
+                    }).toList();
+
+                    final deliveredTo = rawDeliveredTo.where((e) {
+                      final uid = (e['_id'] ?? e['userId'] ?? '').toString();
+                      return uid.isNotEmpty && uid != myId;
+                    }).toList();
+
+                    DateTime? directReadTime;
+                    if (seenBy.isNotEmpty && seenBy.first['seenAt'] != null) {
+                      directReadTime = DateTime.tryParse(seenBy.first['seenAt'].toString());
+                    }
+                    DateTime? directDeliveredTime;
+                    if (deliveredTo.isNotEmpty && deliveredTo.first['deliveredAt'] != null) {
+                      directDeliveredTime = DateTime.tryParse(deliveredTo.first['deliveredAt'].toString());
+                    }
+                    if (directReadTime != null && directDeliveredTime == null) {
+                      directDeliveredTime = directReadTime;
+                    }
+
+                    final isRead = isDirect ? directReadTime != null : seenBy.isNotEmpty;
+                    final isDelivered = isDirect ? directDeliveredTime != null : deliveredTo.isNotEmpty;
+
+                    return SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildDesktopReceiptGroupCard(
+                            isDark: isDark,
+                            icon: Icons.done_all_rounded,
+                            iconColor: isRead ? const Color(0xFF34B7F1) : const Color(0xFF8E8E93),
+                            title: 'قُرِئت',
+                            subtitle: isDirect
+                                ? (directReadTime != null
+                                    ? _formatDesktopReceiptDateTime(directReadTime)
+                                    : 'لم تُقرأ بعد')
+                                : (seenBy.isNotEmpty
+                                    ? '${seenBy.length} من الأعضاء'
+                                    : 'لم يشاهدها أحد بعد'),
+                            receipts: isDirect ? [] : seenBy,
+                            timeField: 'seenAt',
+                          ),
+                          const SizedBox(height: 10),
+                          _buildDesktopReceiptGroupCard(
+                            isDark: isDark,
+                            icon: Icons.done_all_rounded,
+                            iconColor: isDelivered ? const Color(0xFF8E8E93) : (isDark ? Colors.white24 : Colors.black26),
+                            title: 'سُلِّمت',
+                            subtitle: isDirect
+                                ? (directDeliveredTime != null
+                                    ? _formatDesktopReceiptDateTime(directDeliveredTime)
+                                    : 'لم تُسلّم بعد')
+                                : (deliveredTo.isNotEmpty
+                                    ? '${deliveredTo.length} من الأعضاء'
+                                    : 'لم تُسلّم لأحد بعد'),
+                            receipts: isDirect ? [] : deliveredTo,
+                            timeField: 'deliveredAt',
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF262628) : const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? Colors.white12 : Colors.black12,
+                                width: 0.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.done_rounded, color: Color(0xFF8E8E93), size: 18),
+                                const SizedBox(width: 10),
+                                const Text('أُرسِلت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                const Spacer(),
+                                Text(
+                                  _formatDesktopReceiptDateTime(message.createdAt),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? Colors.white60 : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -4318,11 +4560,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       isActiveSearchMatch:
                                           activeSearchMessageId == message.id,
                                       chatPreferences: chatPreferences,
-                                      onShowDetails:
-                                          liveConversation.type != 'direct' &&
-                                              isMine
-                                          ? () => _showMessageDetails(message)
-                                          : null,
+                                      onShowDetails: isMine ? () => _showMessageDetails(message) : null,
                                       onTap: _selectionMode
                                           ? () => _toggleMessageSelection(
                                               message.id,

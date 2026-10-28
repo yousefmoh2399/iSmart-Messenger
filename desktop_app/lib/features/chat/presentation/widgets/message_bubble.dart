@@ -158,6 +158,9 @@ class _MessageBubbleState extends State<MessageBubble> {
       case _BubbleMenuAction.retry:
         widget.onRetry?.call();
         break;
+      case _BubbleMenuAction.details:
+        widget.onShowDetails?.call();
+        break;
     }
   }
 
@@ -223,6 +226,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                   child: _PopupActionRow(
                     icon: Icons.shortcut_rounded,
                     label: 'إعادة توجيه',
+                    color: Color(0xFF007AFF),
+                  ),
+                ),
+              if (widget.onShowDetails != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.details,
+                  child: _PopupActionRow(
+                    icon: Icons.info_outline_rounded,
+                    label: 'معلومات الرسالة',
                     color: Color(0xFF007AFF),
                   ),
                 ),
@@ -1688,6 +1700,7 @@ enum _BubbleMenuAction {
   delete,
   pin,
   retry,
+  details,
 }
 
 class _PopupActionRow extends StatelessWidget {

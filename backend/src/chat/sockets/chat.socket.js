@@ -591,10 +591,15 @@ function initializeChatSocketServer(httpServer) {
       });
       const pendingDeliveries = await markPendingDeliveriesForUser(currentUser);
       for (const entry of pendingDeliveries) {
-        io.to(getConversationRoom(entry.conversationId)).emit(
-          "message_delivered",
-          entry,
-        );
+        let deliveryTarget = io.to(getConversationRoom(entry.conversationId));
+        const conv = await getConversationById(entry.conversationId).catch(() => null);
+        if (conv?.members) {
+          for (const m of conv.members) {
+            const mId = m._id ? m._id.toString() : m.toString();
+            deliveryTarget = deliveryTarget.to(`user:${mId}`);
+          }
+        }
+        deliveryTarget.emit("message_delivered", entry);
       }
     } catch (error) {
       socket.emit("socket_error", {
