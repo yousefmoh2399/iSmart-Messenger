@@ -439,44 +439,52 @@ class _UpdateManagementScreenState
   }
 
   Widget _buildHeader(bool isDark) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Icon(
-            Iconsax.refresh_2,
-            color: Theme.of(context).colorScheme.primary,
-            size: 26,
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'إدارة التحديثات ونشر الإصدارات',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 750;
+
+        final titleSection = Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
               ),
-              const SizedBox(height: 2),
-              Text(
-                'رفع وتوزيع حزم التحديثات (.exe) ومراقبة أجهزة المنظومة في الشبكة الداخلية',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isDark ? Colors.white60 : const Color(0xFF64748B),
-                ),
+              child: Icon(
+                Iconsax.refresh_2,
+                color: Theme.of(context).colorScheme.primary,
+                size: 26,
               ),
-            ],
-          ),
-        ),
-        FilledButton.tonalIcon(
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'إدارة التحديثات ونشر الإصدارات',
+                    style: TextStyle(
+                      fontSize: isCompact ? 18 : 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'رفع وتوزيع حزم التحديثات (.exe) ومراقبة أجهزة المنظومة في الشبكة الداخلية',
+                    style: TextStyle(
+                      fontSize: isCompact ? 12 : 13,
+                      height: 1.35,
+                      color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+
+        final actionBtn = FilledButton.tonalIcon(
           onPressed: _busy ? null : _reload,
           style: FilledButton.styleFrom(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -490,11 +498,30 @@ class _UpdateManagementScreenState
                 )
               : const Icon(Iconsax.refresh, size: 18),
           label: const Text('تحديث البيانات'),
-        ),
-      ],
+        );
+
+        return isCompact
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  titleSection,
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: actionBtn,
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: titleSection),
+                  const SizedBox(width: 14),
+                  actionBtn,
+                ],
+              );
+      },
     );
   }
-
   Widget _buildMetricsStrip(bool isDark) {
     return LayoutBuilder(
       builder: (context, constraints) {

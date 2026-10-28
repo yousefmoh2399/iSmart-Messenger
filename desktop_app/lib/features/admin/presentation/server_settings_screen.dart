@@ -195,130 +195,170 @@ class _ServerSettingsScreenState extends ConsumerState<ServerSettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            accentColor.withValues(alpha: 0.2),
-                            accentColor.withValues(alpha: 0.08),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isCompact = constraints.maxWidth < 900;
+
+                    final titleSection = Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                accentColor.withValues(alpha: 0.2),
+                                accentColor.withValues(alpha: 0.08),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(
+                            Iconsax.setting_2,
+                            color: accentColor,
+                            size: 24,
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Icon(
-                        Iconsax.setting_2,
-                        color: accentColor,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'إعدادات الخادم والاتصال المركزي',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 18,
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Text(
+                                    'إعدادات الخادم والاتصال المركزي',
+                                    style: Theme.of(context).textTheme.titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: isCompact ? 16 : 18,
+                                        ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
                                     ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(
+                                        0xFF34C759,
+                                      ).withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.circle,
+                                          size: 7,
+                                          color: Color(0xFF34C759),
+                                        ),
+                                        SizedBox(width: 5),
+                                        Text(
+                                          'مزامنة فورية',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF34C759),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 10),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(
-                                    0xFF34C759,
-                                  ).withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.circle,
-                                      size: 7,
-                                      color: Color(0xFF34C759),
-                                    ),
-                                    SizedBox(width: 5),
-                                    Text(
-                                      'مزامنة فورية',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF34C759),
-                                      ),
-                                    ),
-                                  ],
+                              const SizedBox(height: 4),
+                              Text(
+                                'تحكم في روابط الـ API الافتراضية لنسخ الديسكتوب والموبايل ونظام الأصول وقائمة السيرفرات والبورتات دون الحاجة لإعادة تثبيت التطبيق.',
+                                style: TextStyle(
+                                  fontSize: isCompact ? 11.5 : 12.5,
+                                  height: 1.35,
+                                  color: isDark ? Colors.white60 : Colors.black54,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'تحكم في روابط الـ API الافتراضية لنسخ الديسكتوب والموبايل ونظام الأصول وقائمة السيرفرات والبورتات دون الحاجة لإعادة تثبيت التطبيق.',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ],
+                    );
+
+                    final actionsSection = Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        IconButton.filledTonal(
+                          onPressed: _loading || _saving ? null : _loadDefaults,
+                          tooltip: 'إعادة تحميل الإعدادات',
+                          style: IconButton.styleFrom(
+                            backgroundColor: isDark
+                                ? Colors.white.withValues(alpha: 0.06)
+                                : Colors.black.withValues(alpha: 0.04),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    IconButton.filledTonal(
-                      onPressed: _loading || _saving ? null : _loadDefaults,
-                      tooltip: 'إعادة تحميل الإعدادات',
-                      style: IconButton.styleFrom(
-                        backgroundColor: isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.04),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          icon: const Icon(Iconsax.refresh, size: 18),
                         ),
-                      ),
-                      icon: const Icon(Iconsax.refresh, size: 18),
-                    ),
-                    const SizedBox(width: 10),
-                    FilledButton.icon(
-                      onPressed: _loading || _saving ? null : _saveDefaults,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: accentColor,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 14,
+                        FilledButton.icon(
+                          onPressed: _loading || _saving ? null : _saveDefaults,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accentColor,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 14,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: ButtonLoadingIndicator(),
+                                )
+                              : const Icon(Iconsax.tick_circle, size: 18),
+                          label: Text(
+                            _saving ? 'جارٍ الحفظ...' : 'حفظ الإعدادات',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: ButtonLoadingIndicator(),
-                            )
-                          : const Icon(Iconsax.tick_circle, size: 18),
-                      label: Text(
-                        _saving ? 'جارٍ الحفظ...' : 'حفظ الإعدادات',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
+                      ],
+                    );
+
+                    return isCompact
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              titleSection,
+                              const SizedBox(height: 14),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: actionsSection,
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(child: titleSection),
+                              const SizedBox(width: 14),
+                              Flexible(
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: actionsSection,
+                                ),
+                              ),
+                            ],
+                          );
+                  },
                 ),
                 const SizedBox(height: 16),
                 // Stats strip

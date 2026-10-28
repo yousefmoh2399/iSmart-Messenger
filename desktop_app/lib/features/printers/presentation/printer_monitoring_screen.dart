@@ -899,49 +899,56 @@ class _PrinterContent extends StatelessWidget {
                     ? Border.all(color: Colors.white.withValues(alpha: 0.08))
                     : Border.all(color: Colors.black.withValues(alpha: 0.05)),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF007AFF).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.print_rounded,
-                      color: Color(0xFF007AFF),
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'إدارة ومراقبة الطابعات',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                          ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isCompact = constraints.maxWidth < 1120;
+
+                  final titleSection = Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'مراقبة فورية لأجهزة الطباعة، استهلاك الورق، ومستوى الأحبار عبر بروتوكول SNMP',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: colors.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
-                          ),
+                        child: const Icon(
+                          Icons.print_rounded,
+                          color: Color(0xFF007AFF),
+                          size: 24,
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Wrap(
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'إدارة ومراقبة الطابعات',
+                              style: TextStyle(
+                                fontSize: isCompact ? 18 : 20,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'مراقبة فورية لأجهزة الطباعة، استهلاك الورق، ومستوى الأحبار عبر بروتوكول SNMP',
+                              style: TextStyle(
+                                fontSize: isCompact ? 11.5 : 12,
+                                height: 1.35,
+                                color: colors.onSurfaceVariant,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+
+                  final actionsSection = Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
@@ -986,8 +993,33 @@ class _PrinterContent extends StatelessWidget {
                         onPressed: onAddBranch,
                       ),
                     ],
-                  ),
-                ],
+                  );
+
+                  return isCompact
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            titleSection,
+                            const SizedBox(height: 12),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: actionsSection,
+                            ),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            Expanded(child: titleSection),
+                            const SizedBox(width: 14),
+                            Flexible(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: actionsSection,
+                              ),
+                            ),
+                          ],
+                        );
+                },
               ),
             ),
             const SizedBox(height: 16),

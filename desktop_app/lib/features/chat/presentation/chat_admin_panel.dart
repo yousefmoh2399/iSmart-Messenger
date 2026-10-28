@@ -2936,9 +2936,11 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderCol),
             ),
-            child: Column(
-              children: [
-                Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 920;
+
+                final titleSection = Row(
                   children: [
                     Container(
                       width: 46,
@@ -2958,24 +2960,33 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'إدارة الفروع والمواقع الجغرافية',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
-                              fontSize: 17,
+                              fontSize: isCompact ? 16 : 17,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'تنظيم فروع المؤسسة وأكوادها التعريفية وتوزيع الموظفين والطابعات عليها',
                             style: TextStyle(
-                              fontSize: 12.5,
+                              fontSize: isCompact ? 11.5 : 12.5,
+                              height: 1.35,
                               color: isDark ? Colors.white60 : Colors.black54,
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ],
+                );
+
+                final actionsSection = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
                     _AdminStatPill(
                       icon: Icons.storefront_rounded,
                       label: 'إجمالي الفروع',
@@ -2983,7 +2994,6 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
                       color: accent,
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 10),
                     _AdminStatPill(
                       icon: Iconsax.people,
                       label: 'إجمالي الأعضاء',
@@ -2991,7 +3001,6 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
                       color: const Color(0xFF10B981),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 12),
                     FilledButton.icon(
                       onPressed: () => _showBranchDialog(context, ref),
                       style: FilledButton.styleFrom(
@@ -3012,38 +3021,64 @@ class _BranchesAdminTabState extends ConsumerState<_BranchesAdminTab> {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _searchController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'ابحث باسم الفرع أو الكود أو الوصف...',
-                    prefixIcon: const Icon(Iconsax.search_normal_1, size: 18),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() {});
-                            },
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: isDark
-                        ? Colors.white.withValues(alpha: 0.04)
-                        : const Color(0xFFF2F2F7),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (isCompact) ...[
+                      titleSection,
+                      const SizedBox(height: 14),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: actionsSection,
+                      ),
+                    ] else
+                      Row(
+                        children: [
+                          Expanded(child: titleSection),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: actionsSection,
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _searchController,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'ابحث باسم الفرع أو الكود أو الوصف...',
+                        prefixIcon: const Icon(Iconsax.search_normal_1, size: 18),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                                icon: const Icon(Icons.close_rounded, size: 18),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withValues(alpha: 0.04)
+                            : const Color(0xFFF2F2F7),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
           const SizedBox(height: 16),
@@ -3726,9 +3761,12 @@ class _AnnouncementsAdminTabState
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderCol),
             ),
-            child: Column(
-              children: [
-                Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 960;
+                final isStackedFilters = constraints.maxWidth < 750;
+
+                final titleSection = Row(
                   children: [
                     Container(
                       width: 46,
@@ -3748,24 +3786,33 @@ class _AnnouncementsAdminTabState
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'الإعلانات والتنبيهات العامة',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
-                              fontSize: 17,
+                              fontSize: isCompact ? 16 : 17,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'بث التنبيهات العاجلة والتعاميم الإدارية في أعلى شاشة المحادثات لجميع الموظفين',
                             style: TextStyle(
-                              fontSize: 12.5,
+                              fontSize: isCompact ? 11.5 : 12.5,
+                              height: 1.35,
                               color: isDark ? Colors.white60 : Colors.black54,
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ],
+                );
+
+                final actionsSection = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
                     _AdminStatPill(
                       icon: Icons.campaign_outlined,
                       label: 'الإجمالي',
@@ -3773,7 +3820,6 @@ class _AnnouncementsAdminTabState
                       color: accent,
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 8),
                     _AdminStatPill(
                       icon: Iconsax.tick_circle,
                       label: 'النشطة',
@@ -3781,7 +3827,6 @@ class _AnnouncementsAdminTabState
                       color: const Color(0xFF10B981),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 8),
                     _AdminStatPill(
                       icon: Icons.push_pin_rounded,
                       label: 'المثبتة',
@@ -3789,7 +3834,6 @@ class _AnnouncementsAdminTabState
                       color: const Color(0xFFF59E0B),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 10),
                     IconButton.filledTonal(
                       onPressed: () => ref
                           .read(adminAnnouncementsControllerProvider.notifier)
@@ -3805,7 +3849,6 @@ class _AnnouncementsAdminTabState
                       ),
                       icon: const Icon(Iconsax.refresh, size: 18),
                     ),
-                    const SizedBox(width: 10),
                     FilledButton.icon(
                       onPressed: () => _showAnnouncementDialog(context, ref),
                       style: FilledButton.styleFrom(
@@ -3826,87 +3869,126 @@ class _AnnouncementsAdminTabState
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                Row(
+                );
+
+                final searchField = TextField(
+                  controller: _searchController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'بحث في عنوان أو محتوى الإعلانات...',
+                    prefixIcon: const Icon(
+                      Iconsax.search_normal_1,
+                      size: 18,
+                    ),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {});
+                            },
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                            ),
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: isDark
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : const Color(0xFFF2F2F7),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 11,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                );
+
+                final filterChips = Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          hintText: 'بحث في عنوان أو محتوى الإعلانات...',
-                          prefixIcon: const Icon(
-                            Iconsax.search_normal_1,
-                            size: 18,
-                          ),
-                          suffixIcon: _searchController.text.isNotEmpty
-                              ? IconButton(
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() {});
-                                  },
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 18,
-                                  ),
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: isDark
-                              ? Colors.white.withValues(alpha: 0.04)
-                              : const Color(0xFFF2F2F7),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 11,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
+                    for (final item in const [
+                      ('all', 'الكل'),
+                      ('info', 'معلومة'),
+                      ('success', 'نجاح'),
+                      ('warning', 'تنبيه'),
+                      ('critical', 'عاجل'),
+                    ])
+                      ChoiceChip(
+                        label: Text(item.$2),
+                        selected: _selectedToneFilter == item.$1,
+                        onSelected: (_) =>
+                            setState(() => _selectedToneFilter = item.$1),
+                        selectedColor: accent.withValues(alpha: 0.16),
+                        labelStyle: TextStyle(
+                          fontWeight: _selectedToneFilter == item.$1
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          fontSize: 12,
+                          color: _selectedToneFilter == item.$1
+                              ? accent
+                              : (isDark ? Colors.white70 : Colors.black87),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        side: BorderSide(
+                          color: _selectedToneFilter == item.$1
+                              ? accent
+                              : borderCol,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Wrap(
-                      spacing: 6,
-                      children: [
-                        for (final item in const [
-                          ('all', 'الكل'),
-                          ('info', 'معلومة'),
-                          ('success', 'نجاح'),
-                          ('warning', 'تنبيه'),
-                          ('critical', 'عاجل'),
-                        ])
-                          ChoiceChip(
-                            label: Text(item.$2),
-                            selected: _selectedToneFilter == item.$1,
-                            onSelected: (_) =>
-                                setState(() => _selectedToneFilter = item.$1),
-                            selectedColor: accent.withValues(alpha: 0.16),
-                            labelStyle: TextStyle(
-                              fontWeight: _selectedToneFilter == item.$1
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              fontSize: 12,
-                              color: _selectedToneFilter == item.$1
-                                  ? accent
-                                  : (isDark ? Colors.white70 : Colors.black87),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            side: BorderSide(
-                              color: _selectedToneFilter == item.$1
-                                  ? accent
-                                  : borderCol,
+                  ],
+                );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (isCompact) ...[
+                      titleSection,
+                      const SizedBox(height: 14),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: actionsSection,
+                      ),
+                    ] else
+                      Row(
+                        children: [
+                          Expanded(child: titleSection),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: actionsSection,
                             ),
                           ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    if (isStackedFilters)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          searchField,
+                          const SizedBox(height: 10),
+                          filterChips,
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(child: searchField),
+                          const SizedBox(width: 12),
+                          filterChips,
+                        ],
+                      ),
                   ],
-                ),
-              ],
+                );
+              },
             ),
           ),
           const SizedBox(height: 16),
@@ -4672,9 +4754,11 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderCol),
             ),
-            child: Column(
-              children: [
-                Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 920;
+
+                final titleSection = Row(
                   children: [
                     Container(
                       width: 46,
@@ -4694,24 +4778,33 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'إدارة الأقسام والهيكل الإداري',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
-                              fontSize: 17,
+                              fontSize: isCompact ? 16 : 17,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'إدارة أقسام المؤسسة وتعيين مديري الأقسام ومتابعة توزيع الأعضاء',
                             style: TextStyle(
-                              fontSize: 12.5,
+                              fontSize: isCompact ? 11.5 : 12.5,
+                              height: 1.35,
                               color: isDark ? Colors.white60 : Colors.black54,
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ],
+                );
+
+                final actionsSection = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
                     _AdminStatPill(
                       icon: Icons.domain_rounded,
                       label: 'إجمالي الأقسام',
@@ -4719,7 +4812,6 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
                       color: accent,
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 10),
                     _AdminStatPill(
                       icon: Iconsax.people,
                       label: 'إجمالي الأعضاء',
@@ -4727,7 +4819,6 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
                       color: const Color(0xFF10B981),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 12),
                     FilledButton.icon(
                       onPressed: () => _showDepartmentDialog(context, ref),
                       style: FilledButton.styleFrom(
@@ -4748,38 +4839,64 @@ class _DepartmentsAdminTabState extends ConsumerState<_DepartmentsAdminTab> {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _searchController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'ابحث باسم القسم أو الكود أو الوصف...',
-                    prefixIcon: const Icon(Iconsax.search_normal_1, size: 18),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() {});
-                            },
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: isDark
-                        ? Colors.white.withValues(alpha: 0.04)
-                        : const Color(0xFFF2F2F7),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (isCompact) ...[
+                      titleSection,
+                      const SizedBox(height: 14),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: actionsSection,
+                      ),
+                    ] else
+                      Row(
+                        children: [
+                          Expanded(child: titleSection),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: actionsSection,
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _searchController,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'ابحث باسم القسم أو الكود أو الوصف...',
+                        prefixIcon: const Icon(Iconsax.search_normal_1, size: 18),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() {});
+                                },
+                                icon: const Icon(Icons.close_rounded, size: 18),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withValues(alpha: 0.04)
+                            : const Color(0xFFF2F2F7),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
           ),
           const SizedBox(height: 16),
@@ -6248,9 +6365,12 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderCol),
             ),
-            child: Column(
-              children: [
-                Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 1100;
+                final isStackedFilters = constraints.maxWidth < 750;
+
+                final titleSection = Row(
                   children: [
                     Container(
                       width: 46,
@@ -6270,24 +6390,33 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'إدارة الغرف والقنوات ومجموعات العمل',
                             style: TextStyle(
                               fontWeight: FontWeight.w800,
-                              fontSize: 17,
+                              fontSize: isCompact ? 16 : 17,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             'إنشاء وإدارة المجموعات وغرف الأقسام وقنوات البث وتحديد المشرفين والأعضاء',
                             style: TextStyle(
-                              fontSize: 12.5,
+                              fontSize: isCompact ? 11.5 : 12.5,
+                              height: 1.35,
                               color: isDark ? Colors.white60 : Colors.black54,
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ],
+                );
+
+                final actionsSection = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
                     _AdminStatPill(
                       icon: Iconsax.messages_3,
                       label: 'الإجمالي',
@@ -6295,7 +6424,6 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                       color: const Color(0xFF007AFF),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 8),
                     _AdminStatPill(
                       icon: Iconsax.people,
                       label: 'المجموعات',
@@ -6303,7 +6431,6 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                       color: const Color(0xFF10B981),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 8),
                     _AdminStatPill(
                       icon: Icons.domain_rounded,
                       label: 'غرف الأقسام',
@@ -6311,7 +6438,6 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                       color: const Color(0xFF8B5CF6),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 8),
                     _AdminStatPill(
                       icon: Icons.campaign_rounded,
                       label: 'قنوات البث',
@@ -6319,7 +6445,6 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                       color: const Color(0xFFF59E0B),
                       isDark: isDark,
                     ),
-                    const SizedBox(width: 8),
                     IconButton.filledTonal(
                       tooltip: 'تحديث قائمة الغرف والمجموعات',
                       onPressed: _isLoadingRooms
@@ -6340,8 +6465,7 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                             )
                           : const Icon(Icons.refresh_rounded, size: 18),
                     ),
-                    const SizedBox(width: 10),
-                    if (canCreateRooms) ...[
+                    if (canCreateRooms)
                       FilledButton.icon(
                         onPressed: () => _showCreateRoomDialog(
                           context,
@@ -6365,8 +6489,6 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                    ],
                     if (canSendBroadcast)
                       FilledButton.tonalIcon(
                         onPressed: () => _showCreateRoomDialog(
@@ -6394,89 +6516,128 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
                         ),
                       ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                Row(
+                );
+
+                final searchField = TextField(
+                  controller: _searchController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'ابحث باسم الغرفة أو القناة أو الوصف...',
+                    prefixIcon: const Icon(
+                      Iconsax.search_normal_1,
+                      size: 18,
+                    ),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {});
+                            },
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                            ),
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: isDark
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : const Color(0xFFF2F2F7),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 11,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                );
+
+                final filterChips = Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          hintText: 'ابحث باسم الغرفة أو القناة أو الوصف...',
-                          prefixIcon: const Icon(
-                            Iconsax.search_normal_1,
-                            size: 18,
-                          ),
-                          suffixIcon: _searchController.text.isNotEmpty
-                              ? IconButton(
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() {});
-                                  },
-                                  icon: const Icon(
-                                    Icons.close_rounded,
-                                    size: 18,
-                                  ),
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: isDark
-                              ? Colors.white.withValues(alpha: 0.04)
-                              : const Color(0xFFF2F2F7),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 11,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
+                    for (final item in const [
+                      ('all', 'الكل'),
+                      ('group', 'المجموعات 👥'),
+                      ('department', 'غرف الأقسام 🏢'),
+                      ('broadcast', 'قنوات البث 📢'),
+                      ('archived', 'المؤرشفة 📦'),
+                    ])
+                      ChoiceChip(
+                        label: Text(item.$2),
+                        selected: _typeFilter == item.$1,
+                        onSelected: (_) =>
+                            setState(() => _typeFilter = item.$1),
+                        selectedColor: const Color(
+                          0xFF007AFF,
+                        ).withValues(alpha: 0.16),
+                        labelStyle: TextStyle(
+                          fontWeight: _typeFilter == item.$1
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          fontSize: 12,
+                          color: _typeFilter == item.$1
+                              ? const Color(0xFF007AFF)
+                              : (isDark ? Colors.white70 : Colors.black87),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        side: BorderSide(
+                          color: _typeFilter == item.$1
+                              ? const Color(0xFF007AFF)
+                              : borderCol,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Wrap(
-                      spacing: 6,
-                      children: [
-                        for (final item in const [
-                          ('all', 'الكل'),
-                          ('group', 'المجموعات 👥'),
-                          ('department', 'غرف الأقسام 🏢'),
-                          ('broadcast', 'قنوات البث 📢'),
-                          ('archived', 'المؤرشفة 📦'),
-                        ])
-                          ChoiceChip(
-                            label: Text(item.$2),
-                            selected: _typeFilter == item.$1,
-                            onSelected: (_) =>
-                                setState(() => _typeFilter = item.$1),
-                            selectedColor: const Color(
-                              0xFF007AFF,
-                            ).withValues(alpha: 0.16),
-                            labelStyle: TextStyle(
-                              fontWeight: _typeFilter == item.$1
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              fontSize: 12,
-                              color: _typeFilter == item.$1
-                                  ? const Color(0xFF007AFF)
-                                  : (isDark ? Colors.white70 : Colors.black87),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            side: BorderSide(
-                              color: _typeFilter == item.$1
-                                  ? const Color(0xFF007AFF)
-                                  : borderCol,
+                  ],
+                );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (isCompact) ...[
+                      titleSection,
+                      const SizedBox(height: 14),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: actionsSection,
+                      ),
+                    ] else
+                      Row(
+                        children: [
+                          Expanded(child: titleSection),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: actionsSection,
                             ),
                           ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    if (isStackedFilters)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          searchField,
+                          const SizedBox(height: 10),
+                          filterChips,
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(child: searchField),
+                          const SizedBox(width: 12),
+                          filterChips,
+                        ],
+                      ),
                   ],
-                ),
-              ],
+                );
+              },
             ),
           ),
           const SizedBox(height: 16),
@@ -7289,145 +7450,186 @@ class _RolesAdminTabState extends ConsumerState<_RolesAdminTab> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: borderCol),
             ),
-            child: Row(
-              children: [
-                Icon(
-                  _roleIcon(selectedRole.roleName),
-                  color: roleAccent,
-                  size: 20,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 920;
+
+                final titleSection = Row(
+                  children: [
+                    Icon(
+                      _roleIcon(selectedRole.roleName),
+                      color: roleAccent,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'تخصيص صلاحيات: ${_roleArabicTitle(selectedRole.roleName)}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: isCompact ? 13.5 : 14.5,
+                                ),
+                              ),
+                              if (hasUnsavedChanges)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 9,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFFF59E0B,
+                                    ).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: const Text(
+                                    'تعديلات غير محفوظة',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFFF59E0B),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
                           Text(
-                            'تخصيص صلاحيات: ${_roleArabicTitle(selectedRole.roleName)}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14.5,
+                            _roleArabicSubtitle(selectedRole.roleName),
+                            style: TextStyle(
+                              fontSize: isCompact ? 11.5 : 12,
+                              color: isDark ? Colors.white54 : Colors.black54,
                             ),
                           ),
-                          if (hasUnsavedChanges) ...[
-                            const SizedBox(width: 10),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(
-                                  0xFFF59E0B,
-                                ).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: const Text(
-                                'تعديلات غير محفوظة',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFFF59E0B),
-                                ),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
-                      Text(
-                        _roleArabicSubtitle(selectedRole.roleName),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.white54 : Colors.black54,
+                    ),
+                  ],
+                );
+
+                final actionsSection = Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _savingRole
+                          ? null
+                          : () {
+                              setState(() {
+                                _draftPermissions[selectedRole.id] =
+                                    _setAllPermissions(true);
+                              });
+                            },
+                      icon: const Icon(Icons.done_all_rounded, size: 17),
+                      label: const Text('تفعيل الكل'),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton.icon(
+                      onPressed: _savingRole
+                          ? null
+                          : () {
+                              setState(() {
+                                _draftPermissions[selectedRole.id] =
+                                    _setAllPermissions(false);
+                              });
+                            },
+                      icon: const Icon(Icons.deselect_rounded, size: 17),
+                      label: const Text('إلغاء الكل'),
+                    ),
+                    const SizedBox(width: 6),
+                    FilledButton.icon(
+                      onPressed: _savingRole
+                          ? null
+                          : () async {
+                              setState(() => _savingRole = true);
+                              try {
+                                await ref
+                                    .read(chatOverviewControllerProvider.notifier)
+                                    .updateRole(
+                                      roleId: selectedRole.id,
+                                      permissions:
+                                          _draftPermissions[selectedRole.id] ??
+                                          selectedRole.permissions,
+                                    );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'تم حفظ صلاحيات "${_roleArabicTitle(selectedRole.roleName)}" بنجاح.',
+                                    ),
+                                  ),
+                                );
+                              } catch (error) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(error.toString())),
+                                );
+                              } finally {
+                                if (mounted) {
+                                  setState(() => _savingRole = false);
+                                }
+                              }
+                            },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: roleAccent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 13,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: _savingRole
-                      ? null
-                      : () {
-                          setState(() {
-                            _draftPermissions[selectedRole.id] =
-                                _setAllPermissions(true);
-                          });
-                        },
-                  icon: const Icon(Icons.done_all_rounded, size: 17),
-                  label: const Text('تفعيل الكل'),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: _savingRole
-                      ? null
-                      : () {
-                          setState(() {
-                            _draftPermissions[selectedRole.id] =
-                                _setAllPermissions(false);
-                          });
-                        },
-                  icon: const Icon(Icons.deselect_rounded, size: 17),
-                  label: const Text('إلغاء الكل'),
-                ),
-                const SizedBox(width: 10),
-                FilledButton.icon(
-                  onPressed: _savingRole
-                      ? null
-                      : () async {
-                          setState(() => _savingRole = true);
-                          try {
-                            await ref
-                                .read(chatOverviewControllerProvider.notifier)
-                                .updateRole(
-                                  roleId: selectedRole.id,
-                                  permissions:
-                                      _draftPermissions[selectedRole.id] ??
-                                      selectedRole.permissions,
-                                );
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'تم حفظ صلاحيات "${_roleArabicTitle(selectedRole.roleName)}" بنجاح.',
-                                ),
-                              ),
-                            );
-                          } catch (error) {
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(error.toString())),
-                            );
-                          } finally {
-                            if (mounted) {
-                              setState(() => _savingRole = false);
-                            }
-                          }
-                        },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: roleAccent,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 13,
+                      icon: _savingRole
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: ButtonLoadingIndicator(),
+                            )
+                          : const Icon(Iconsax.tick_circle, size: 18),
+                      label: Text(
+                        _savingRole ? 'جارٍ الحفظ...' : 'حفظ صلاحيات الدور',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  icon: _savingRole
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: ButtonLoadingIndicator(),
-                        )
-                      : const Icon(Iconsax.tick_circle, size: 18),
-                  label: Text(
-                    _savingRole ? 'جارٍ الحفظ...' : 'حفظ صلاحيات الدور',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
+                  ],
+                );
+
+                return isCompact
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          titleSection,
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: actionsSection,
+                          ),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: titleSection),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: actionsSection,
+                            ),
+                          ),
+                        ],
+                      );
+              },
             ),
           ),
           const SizedBox(height: 14),

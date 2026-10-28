@@ -530,47 +530,60 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       color: isDark ? const Color(0xFF1E1E20) : Colors.white,
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.dashboard_customize_rounded,
-              color: Color(0xFF4F46E5),
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 900;
+
+          final titleSection = Row(
             children: [
-              Text(
-                'محرر ومصمم شكل التقارير',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.dashboard_customize_rounded,
+                  color: Color(0xFF4F46E5),
+                  size: 22,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                'تخصيص شكل التقرير، استبدال الشعارات، إضافة نصوص ثابتة، وتحديد العمليات الحسابية',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'محرر ومصمم شكل التقارير',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: isCompact ? 15 : 16,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'تخصيص شكل التقرير، استبدال الشعارات، إضافة نصوص ثابتة، وتحديد العمليات الحسابية',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: isCompact ? 11.5 : 12,
+                        height: 1.35,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
-          const Spacer(),
-          Container(
+          );
+
+          final pillsSection = Container(
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
               borderRadius: BorderRadius.circular(12),
             ),
             padding: const EdgeInsets.all(4),
-            child: Row(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 _TypePill(
                   label: 'استهلاك ورق الطابعات',
@@ -584,7 +597,6 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                     });
                   },
                 ),
-                const SizedBox(width: 6),
                 _TypePill(
                   label: 'تذاكر الدعم والشكاوى',
                   icon: Icons.confirmation_number_outlined,
@@ -599,12 +611,31 @@ class _ReportTemplatesScreenState extends ConsumerState<ReportTemplatesScreen> {
                 ),
               ],
             ),
-          ),
-        ],
+          );
+
+          return isCompact
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleSection,
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: pillsSection,
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: titleSection),
+                    const SizedBox(width: 14),
+                    pillsSection,
+                  ],
+                );
+        },
       ),
     );
   }
-
   Widget _buildTemplatesList(
     List<ReportTemplate> templates,
     ThemeData theme,

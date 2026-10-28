@@ -127,51 +127,59 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.analytics_rounded,
-              color: Color(0xFF3B82F6),
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'مراقبة وتشخيص النظام',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                    letterSpacing: -0.3,
-                  ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 750;
+
+          final titleSection = Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'لوحة القيادة المركزية لمتابعة الاتصالات الحية، استهلاك الذاكرة، وصحة الخادم',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
-                  ),
+                child: const Icon(
+                  Icons.analytics_rounded,
+                  color: Color(0xFF3B82F6),
+                  size: 24,
                 ),
-              ],
-            ),
-          ),
-          FilledButton.tonalIcon(
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'مراقبة وتشخيص النظام',
+                      style: TextStyle(
+                        fontSize: isCompact ? 18 : 20,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'لوحة القيادة المركزية لمتابعة الاتصالات الحية، استهلاك الذاكرة، وصحة الخادم',
+                      style: TextStyle(
+                        fontSize: isCompact ? 11.5 : 12,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                        color: isDark
+                            ? const Color(0xFF94A3B8)
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+
+          final actionBtn = FilledButton.tonalIcon(
             onPressed: isLoading ? null : () => notifier.refreshAll(),
             style: FilledButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -185,14 +193,33 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                     height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.refresh_rounded, size: 18),
+                : const Icon(Icons.refresh_rounded, size: 18), 
             label: Text(isLoading ? 'جاري الفحص...' : 'تحديث البيانات'),
-          ),
-        ],
+          );
+
+          return isCompact
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleSection,
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: actionBtn,
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: titleSection),
+                    const SizedBox(width: 14),
+                    actionBtn,
+                  ],
+                );
+        },
       ),
     );
   }
-
   Widget _buildTelemetryRow(
     SystemMonitorState state,
     bool isDark,
