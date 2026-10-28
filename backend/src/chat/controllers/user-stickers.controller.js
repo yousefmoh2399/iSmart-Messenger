@@ -1,4 +1,4 @@
-const asyncHandler = require("../../middleware/async-handler.middleware");
+const asyncHandler = require("../../utils/async-handler");
 const { sendChatResponse } = require("../utils/chat-response");
 const {
   getUserStickers,
