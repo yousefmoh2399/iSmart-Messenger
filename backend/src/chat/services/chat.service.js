@@ -57,7 +57,10 @@ function getObjectIdString(value) {
 
 function sanitizeMessageContent(value) {
   return String(value || "")
-    .replace(/\s+/g, " ")
+    .replace(/\r\n|\r/g, "\n")
+    .replace(/[^\S\r\n]+/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
     .trim()
     .slice(0, 5000);
 }
@@ -70,7 +73,10 @@ function sanitizeText(value, maxLength = 500) {
 
 function sanitizePinnedMessageContent(value) {
   return String(value || "")
-    .replace(/\s+/g, " ")
+    .replace(/\r\n|\r/g, "\n")
+    .replace(/[^\S\r\n]+/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
     .trim()
     .slice(0, 2000);
 }
@@ -3481,6 +3487,8 @@ module.exports = {
   assertConversationAccess,
   assertConversationManagementAccess,
   getMessageReadReceipts,
+  sanitizeMessageContent,
+  sanitizePinnedMessageContent,
 };
 
 async function getMessageReadReceipts(currentUser, messageId) {

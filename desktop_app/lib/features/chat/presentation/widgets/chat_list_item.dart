@@ -459,9 +459,11 @@ String _previewText(ChatConversation conversation) {
           _ => 'رسالة',
         };
 
+  final cleanBody = body.replaceAll(RegExp(r'[\r\n]+'), ' ');
+
   if (conversation.type == 'direct' || lastMessage.senderName.trim().isEmpty) {
-    return body;
+    return cleanBody;
   }
 
-  return '${lastMessage.senderName}: $body';
+  return '${lastMessage.senderName}: $cleanBody';
 }

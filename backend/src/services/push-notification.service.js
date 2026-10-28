@@ -114,7 +114,7 @@ function getMessaging() {
 }
 
 function buildChatBody(message) {
-  const content = String(message?.content || "").trim();
+  const content = String(message?.content || "").replace(/[\r\n]+/g, " ").trim();
   if (content) {
     return content.slice(0, 160);
   }

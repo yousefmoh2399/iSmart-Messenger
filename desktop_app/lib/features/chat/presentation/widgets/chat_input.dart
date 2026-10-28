@@ -388,14 +388,19 @@ class _ChatInputState extends State<ChatInput> {
                                 event.logicalKey == LogicalKeyboardKey.enter ||
                                 event.logicalKey == LogicalKeyboardKey.numpadEnter;
                             if (isEnter) {
-                              final isShift = HardwareKeyboard.instance.isShiftPressed;
+                              final isShift =
+                                  HardwareKeyboard.instance.isShiftPressed ||
+                                  HardwareKeyboard.instance.isAltPressed;
+                              final isControlOrMeta =
+                                  HardwareKeyboard.instance.isControlPressed ||
+                                  HardwareKeyboard.instance.isMetaPressed;
                               if (isShift) {
                                 final val = widget.controller.value;
                                 widget.controller.value =
                                     ChatInput.insertTextAtSelection(val, '\n');
                                 widget.onChanged(widget.controller.text);
                                 return KeyEventResult.handled;
-                              } else if (widget.enterSendsMessage && widget.enabled) {
+                              } else if ((isControlOrMeta || widget.enterSendsMessage) && widget.enabled) {
                                 _submitMessage();
                                 return KeyEventResult.handled;
                               }
