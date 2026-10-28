@@ -253,6 +253,18 @@ class DepartmentSummary {
           : null,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'description': description,
+      'managers': managers,
+      'membersCount': membersCount,
+      'defaultConversationId': defaultConversationId,
+    };
+  }
 }
 
 class BranchSummary {
@@ -279,6 +291,16 @@ class BranchSummary {
       membersCount: (json['membersCount'] as num?)?.toInt() ?? 0,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'description': description,
+      'membersCount': membersCount,
+    };
+  }
 }
 
 class ChatRole {
@@ -300,6 +322,14 @@ class ChatRole {
         json['permissions'] as Map<String, dynamic>?,
       ),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'roleName': roleName,
+      'permissions': permissions.toJson(),
+    };
   }
 }
 

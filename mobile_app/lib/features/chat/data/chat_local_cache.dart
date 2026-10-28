@@ -76,6 +76,51 @@ class ChatLocalCache {
         .toList();
   }
 
+  Future<void> saveOverviewData(ChatOverviewData data) async {
+    await saveRawJson('overview', {
+      'conversations': data.conversations.map((c) => c.toJson()).toList(),
+      'manageableConversations':
+          data.manageableConversations.map((c) => c.toJson()).toList(),
+      'users': data.users.map((u) => u.toJson()).toList(),
+      'departments': data.departments.map((d) => d.toJson()).toList(),
+      'branches': data.branches.map((b) => b.toJson()).toList(),
+      'roles': data.roles.map((r) => r.toJson()).toList(),
+    });
+  }
+
+  Future<ChatOverviewData?> loadOverviewData() async {
+    final cached = await loadRawJson('overview');
+    if (cached == null) {
+      final convs = await loadConversations();
+      if (convs == null || convs.isEmpty) return null;
+      return ChatOverviewData(
+        conversations: convs,
+        manageableConversations: const [],
+        users: const [],
+        departments: const [],
+        branches: const [],
+        roles: const [],
+      );
+    }
+    List<T> parseList<T>(String key, T Function(Map<String, dynamic>) parser) {
+      final raw = cached[key];
+      if (raw is! List) return <T>[];
+      return raw
+          .whereType<Map>()
+          .map((e) => parser(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    return ChatOverviewData(
+      conversations: parseList('conversations', ChatConversation.fromJson),
+      manageableConversations:
+          parseList('manageableConversations', ChatConversation.fromJson),
+      users: parseList('users', ChatDirectoryUser.fromJson),
+      departments: parseList('departments', DepartmentSummary.fromJson),
+      branches: parseList('branches', BranchSummary.fromJson),
+      roles: parseList('roles', ChatRole.fromJson),
+    );
+  }
+
   Future<void> saveMessages(
     String conversationId,
     ChatMessagesPage page,

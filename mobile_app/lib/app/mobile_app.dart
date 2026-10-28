@@ -276,15 +276,30 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _lastServerBannerMessage = null;
   }
 
+  Future<void> _ensureSocketConnected() async {
+    final socket = ref.read(chatSocketServiceProvider);
+    if (socket.isConnected) return;
+    try {
+      final token = await ref.read(authTokenProvider.future);
+      if (token == null || token.isEmpty) return;
+      final baseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ??
+          AppConfig.defaultApiBaseUrl;
+      await socket.connect(
+        baseUrl: baseUrl,
+        token: token,
+        clientType: 'mobile',
+      );
+    } catch (_) {}
+  }
+
   Future<void> _refreshDataAfterServerRestored() async {
     if (_serverRestoreRefreshInFlight) {
       return;
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      ref.invalidate(chatSocketConnectionProvider);
       try {
-        await ref.read(authControllerProvider.notifier).refreshCurrentUser();
+        await _ensureSocketConnected();
       } catch (_) {}
       if (!mounted) {
         return;
@@ -312,31 +327,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   void _showConnectionSnackBar(String message, {required bool isError}) {
-    if (!mounted) {
-      return;
-    }
-    // Do not show connection restored or transient connection toasts
-    if (!isError) {
-      _lastServerBannerMessage = null;
-      return;
-    }
-    if (_isEstablishingConnection ||
-        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
-      return;
-    }
-    if (_lastServerBannerMessage == message) {
-      return;
-    }
-    _lastServerBannerMessage = message;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFFB42318),
-          content: Text(message),
-        ),
-      );
+    // Suppress intrusive disconnect SnackBars during normal mobile usage (WhatsApp style)
+    return;
   }
 
   String _buildServerUnavailableMessage(String details) {
@@ -824,24 +816,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         (entry) => entry != ConnectivityResult.none,
       );
       if (hasConnection) {
-        ref
-            .read(syncBannerStateProvider.notifier)
-            .state = const SyncBannerState(
-          isOffline: false,
-          isSyncing: false,
-          message: 'تم استعادة الاتصال. سيتم مزامنة أي ملفات معلقة تلقائيًا.',
-        );
-        unawaited(_refreshServerConnectionState());
+        unawaited(_refreshServerConnectionState(quiet: true));
         unawaited(_syncPendingUploadsInBackground());
-      } else {
-        ref
-            .read(syncBannerStateProvider.notifier)
-            .state = const SyncBannerState(
-          isOffline: true,
-          isSyncing: false,
-          message:
-              'أنت الآن بدون إنترنت. سنحفظ العمل محليًا ونزامنه تلقائيًا عند عودة الاتصال.',
-        );
+        try {
+          ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+        } catch (_) {}
       }
     });
   }
@@ -1289,7 +1268,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     if (!mounted) {
       return;
     }
-    ref.invalidate(chatSocketConnectionProvider);
+    try {
+      await _ensureSocketConnected();
+    } catch (_) {}
     try {
       ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
     } catch (_) {}
@@ -1317,52 +1298,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
               const [],
         );
-        ref.watch(chatSocketConnectionProvider);
         ref.watch(chatRealtimeControllerProvider);
-        final serverConnection = serverState.valueOrNull;
-        final serverBannerMessage =
-            !_isEstablishingConnection &&
-                serverConnection != null &&
-                !serverConnection.isConnected
-            ? _buildServerUnavailableMessage(serverConnection.message)
-            : null;
-        final topBanner = syncBanner.isOffline
-            ? const _ConnectionAlertBanner(
-                message:
-                    'أنت الآن بدون إنترنت. سيتم حفظ العمل محليًا حتى عودة الاتصال.',
-                color: Color(0xFFB42318),
-                icon: Icons.wifi_off_rounded,
-              )
-            : serverBannerMessage != null
-            ? _ConnectionAlertBanner(
-                message: serverBannerMessage,
-                color: const Color(0xFFDC6803),
-                icon: Icons.cloud_off_rounded,
-              )
-            : null;
-        return Stack(
+        return const Stack(
           children: [
-            const ChatHomeScreen(),
-            const GlobalAnnouncementOverlay(),
-            if (topBanner != null)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                    child: topBanner,
-                  ),
-                ),
-              ),
-            if (serverBannerMessage != null)
-              _ServerRecoveryBar(
-                message: serverBannerMessage,
-                onRetry: _retryServerConnection,
-                onChangeServer: _changeServerBaseUrl,
-              ),
+            ChatHomeScreen(),
+            GlobalAnnouncementOverlay(),
           ],
         );
     }

@@ -1,3 +1,4 @@
+import 'chat_realtime_controller.dart';
 import '../../workspace/presentation/workspace_home_screen.dart';
 import 'dart:async';
 
@@ -647,13 +648,40 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       appBar: _selectedNavIndex == 2
           ? null
           : AppBar(
-              title: Text(
-                switch (_selectedNavIndex) {
-                  0 => 'iSmart Messenger',
-                  1 => 'دليل الموظفين',
-                  _ => 'المزيد',
+              title: Builder(
+                builder: (context) {
+                  final realtime = ref.watch(chatRealtimeControllerProvider);
+                  final String? statusText = _selectedNavIndex == 0
+                      ? switch (realtime.status) {
+                          ChatConnectionStatus.connecting => 'جارٍ الاتصال...',
+                          ChatConnectionStatus.reconnecting => 'جارٍ الاتصال...',
+                          ChatConnectionStatus.disconnected => 'في انتظار الشبكة...',
+                          _ => null,
+                        }
+                      : null;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        switch (_selectedNavIndex) {
+                          0 => 'iSmart Messenger',
+                          1 => 'دليل الموظفين',
+                          _ => 'المزيد',
+                        },
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                      ),
+                      if (statusText != null)
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.white60 : Colors.black45,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                    ],
+                  );
                 },
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
               ),
               centerTitle: true,
               leading: _selectedNavIndex == 0
@@ -734,6 +762,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         child: overviewState.when(
           skipLoadingOnReload: true,
           skipLoadingOnRefresh: true,
+          skipError: true,
           loading: () => ListView(
             padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
             children: const [

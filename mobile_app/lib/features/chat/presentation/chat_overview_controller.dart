@@ -36,6 +36,10 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _conversationsCacheDebounceTimer = Timer(const Duration(seconds: 2), () {
       if (_disposed) return;
       _repository().cache.saveConversations(conversations);
+      final current = state.valueOrNull;
+      if (current != null) {
+        _repository().cache.saveOverviewData(current);
+      }
     });
   }
 
@@ -67,14 +71,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   Future<bool> _waitForAuthenticatedSession() async {
     ref.watch(authCredentialsRevisionProvider);
     final authUser = ref.watch(currentUserProvider);
-    if (authUser == null) {
-      return false;
-    }
-    final token = await ref.watch(authTokenProvider.future);
-    if (token == null || token.trim().isEmpty) {
-      return false;
-    }
-    return true;
+    return authUser != null;
   }
 
   @override
@@ -101,6 +98,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       _conversationsCacheDebounceTimer?.cancel();
       _eventsSubscription?.cancel();
     });
+
+    final cachedOverview = await _repository().cache.loadOverviewData();
+    if (cachedOverview != null && cachedOverview.conversations.isNotEmpty) {
+      Future.microtask(() => refresh(showLoader: false));
+      return cachedOverview;
+    }
 
     final cached = await _repository().cache.loadConversations();
     if (cached != null && cached.isNotEmpty) {
@@ -191,6 +194,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       branches: branches,
       roles: roles,
     );
+    _repository().cache.saveOverviewData(overview);
     _persistConversations(conversations);
     return overview;
   }
@@ -1036,15 +1040,31 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
     final previous = state.valueOrNull;
-    if (showLoader || previous == null) {
+    if (showLoader && previous == null) {
       state = const AsyncLoading();
     }
     final next = await AsyncValue.guard(() => _guardAuth(_loadOverview));
     if (_disposed) {
       return;
     }
-    if (next.hasError && previous != null) {
-      state = AsyncData(previous);
+    if (next.hasError) {
+      if (previous != null) {
+        state = AsyncData(previous);
+        return;
+      }
+      final cached = await _repository().cache.loadOverviewData();
+      if (cached != null && cached.conversations.isNotEmpty) {
+        state = AsyncData(cached);
+        return;
+      }
+      state = const AsyncData(ChatOverviewData(
+        conversations: [],
+        manageableConversations: [],
+        users: [],
+        departments: [],
+        branches: [],
+        roles: [],
+      ));
       return;
     }
     state = next;
@@ -1488,6 +1508,13 @@ class ConversationMessagesController
     try {
       final page = await _guardAuth(() => _repository().fetchMessages(arg));
       return ConversationMessagesState.initial(_dedupePage(page));
+    } catch (_) {
+      return const ConversationMessagesState(
+        messages: [],
+        nextCursor: null,
+        hasMore: false,
+        isLoadingMore: false,
+      );
     } finally {
       _isInitialBuildFetchingNetwork = false;
     }
@@ -1798,13 +1825,13 @@ class ConversationMessagesController
       } else {
         _setStateAndCache(ConversationMessagesState.initial(_dedupePage(page)));
       }
-    } catch (error, stackTrace) {
+    } catch (_) {
       if (_disposed) {
         return;
       }
       final current = state.valueOrNull;
-      if (current == null) {
-        state = AsyncError(error, stackTrace);
+      if (current != null) {
+        state = AsyncData(current);
       }
     } finally {
       _isRefreshing = false;

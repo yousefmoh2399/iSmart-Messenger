@@ -5003,6 +5003,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   child: messagesState.when(
                     skipLoadingOnReload: true,
                     skipLoadingOnRefresh: true,
+                    skipError: true,
                     loading: () => const _ChatMessagesLoadingSkeleton(),
                     error: (error, _) => Center(
                       child: Column(

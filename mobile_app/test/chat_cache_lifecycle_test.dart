@@ -403,5 +403,110 @@ void main() {
       );
       expect(state.messages.first.metadata?['status'], isNull);
     });
+
+    test('ChatLocalCache saveOverviewData and loadOverviewData round-trip', () async {
+      final cache = ChatLocalCache();
+      final conv = ChatConversation.fromJson({
+        '_id': 'c_test_1',
+        'type': 'direct',
+        'name': 'Direct Chat',
+        'unreadCount': 2,
+        'createdAt': DateTime.now().toIso8601String(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+      final user = ChatDirectoryUser.fromJson({
+        '_id': 'u_test_1',
+        'username': 'user1',
+        'fullName': 'User One',
+        'role': 'user',
+        'departmentId': 'd1',
+        'branchId': 'b1',
+        'branchCode': 'MAIN',
+        'isOnline': true,
+        'presenceStatus': 'online',
+        'isActive': true,
+      });
+      final dept = DepartmentSummary(
+        id: 'd1',
+        name: 'Engineering',
+        code: 'ENG',
+        description: 'Tech team',
+        managers: const ['u_test_1'],
+        membersCount: 5,
+        defaultConversationId: 'c_test_1',
+      );
+      final branch = BranchSummary(
+        id: 'b1',
+        name: 'HQ Branch',
+        code: 'HQ',
+        description: 'Main office',
+        membersCount: 10,
+      );
+
+      final overview = ChatOverviewData(
+        conversations: [conv],
+        manageableConversations: [conv],
+        users: [user],
+        departments: [dept],
+        branches: [branch],
+        roles: const [],
+      );
+
+      await cache.saveOverviewData(overview);
+      final loaded = await cache.loadOverviewData();
+
+      expect(loaded, isNotNull);
+      expect(loaded!.conversations.length, 1);
+      expect(loaded.conversations.first.id, 'c_test_1');
+      expect(loaded.users.length, 1);
+      expect(loaded.users.first.username, 'user1');
+      expect(loaded.departments.length, 1);
+      expect(loaded.departments.first.name, 'Engineering');
+      expect(loaded.branches.length, 1);
+      expect(loaded.branches.first.code, 'HQ');
+    });
+
+    test('ChatOverviewController loads full cached overview offline without requiring network', () async {
+      final cache = ChatLocalCache();
+      final conv = ChatConversation.fromJson({
+        '_id': 'c_offline_1',
+        'type': 'group',
+        'name': 'Offline Group',
+        'unreadCount': 0,
+        'createdAt': DateTime.now().toIso8601String(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+      final overview = ChatOverviewData(
+        conversations: [conv],
+        manageableConversations: const [],
+        users: const [],
+        departments: const [],
+        branches: const [],
+        roles: const [],
+      );
+      await cache.saveOverviewData(overview);
+
+      final fakeRepo = FakeChatRepository(cache: cache);
+      final fakeSocket = FakeChatSocketService();
+      final testUser = _createTestUser();
+
+      final container = ProviderContainer(
+        overrides: [
+          chatLocalCacheProvider.overrideWithValue(cache),
+          chatRepositoryProvider.overrideWithValue(fakeRepo),
+          chatSocketServiceProvider.overrideWithValue(fakeSocket),
+          chatSocketConnectionProvider.overrideWith((ref) => Future<void>.value()),
+          authControllerProvider.overrideWith(FakeAuthController.new),
+          currentUserProvider.overrideWithValue(testUser),
+          // authTokenProvider throws or is offline
+          authTokenProvider.overrideWith((ref) => Future<String?>.error('No internet connection')),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final overviewState = await container.read(chatOverviewControllerProvider.future);
+      expect(overviewState.conversations.length, 1);
+      expect(overviewState.conversations.first.id, 'c_offline_1');
+    });
   });
 }

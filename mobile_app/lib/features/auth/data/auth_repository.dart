@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -173,6 +174,37 @@ class AuthRepository {
     }
     final gen = await getGeneration();
     final cachedUser = await loadCachedUser();
+    if (cachedUser != null) {
+      // Offline-first: return cached user IMMEDIATELY for instant WhatsApp-like launch!
+      unawaited(() async {
+        try {
+          final user = await fetchCurrentUser(token: token, generation: gen);
+          await _saveCachedUser(user);
+        } catch (error) {
+          final mapped = _apiClient.mapError(error);
+          if (mapped.isUnauthorized) {
+            try {
+              final refreshed = await refreshToken();
+              final refreshedToken = refreshed['token'] ?? await getToken();
+              if (refreshedToken != null && refreshedToken.isNotEmpty) {
+                final newGen = await getGeneration();
+                final user = await fetchCurrentUser(
+                  token: refreshedToken,
+                  generation: newGen,
+                );
+                await _saveCachedUser(user);
+              }
+            } catch (refreshError) {
+              final refreshMapped = _apiClient.mapError(refreshError);
+              if (refreshMapped.isUnauthorized) {
+                await _clearSession();
+              }
+            }
+          }
+        }
+      }());
+      return cachedUser;
+    }
     try {
       final user = await fetchCurrentUser(token: token, generation: gen);
       await _saveCachedUser(user);
@@ -333,6 +365,10 @@ class AuthRepository {
       }
       if (!_isTokenFullyExpired(token)) {
         return token;
+      }
+      final fallbackToken = await getToken();
+      if (fallbackToken != null && fallbackToken.isNotEmpty) {
+        return fallbackToken;
       }
       rethrow;
     }
