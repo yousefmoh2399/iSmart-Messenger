@@ -1,5 +1,9 @@
 const asyncHandler = require("../utils/async-handler");
 const { exportUsersReport } = require("../services/user-export.service");
+const {
+  batchGenerateBranchUsers,
+  DEFAULT_JOB_TEMPLATES,
+} = require("../services/user-batch-generator.service");
 const { sendChatResponse } = require("../chat/utils/chat-response");
 const { sendUploadFile } = require("../utils/send-upload-file");
 const {
@@ -59,6 +63,26 @@ const createManagedUser = asyncHandler(async (req, res) => {
     }
   }
   sendChatResponse(res, { status: 201, data: { user }, legacy: { user } });
+});
+
+const batchGenerateBranchUsersHandler = asyncHandler(async (req, res) => {
+  const result = await batchGenerateBranchUsers(req.user, req.body);
+  const io = req.app.get("io");
+  if (io) {
+    io.emit("users_updated", {});
+  }
+  sendChatResponse(res, {
+    status: 201,
+    data: result,
+    legacy: result,
+  });
+});
+
+const getBatchJobTemplatesHandler = asyncHandler(async (req, res) => {
+  sendChatResponse(res, {
+    data: { templates: DEFAULT_JOB_TEMPLATES },
+    legacy: { templates: DEFAULT_JOB_TEMPLATES },
+  });
 });
 
 const updateManagedUser = asyncHandler(async (req, res) => {
@@ -191,6 +215,8 @@ module.exports = {
   exportUsersHandler,
   getUsers,
   createManagedUser,
+  batchGenerateBranchUsersHandler,
+  getBatchJobTemplatesHandler,
   updateManagedUser,
   updateManagedUserStatus,
   resetManagedUserPassword,

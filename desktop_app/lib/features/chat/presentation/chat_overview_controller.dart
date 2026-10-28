@@ -2212,15 +2212,15 @@ List<ChatMessage> sortAndDedupeChatMessages(Iterable<ChatMessage> source) {
       matchedKey = idToKey[message.id];
     } else if (clientMsgId != null &&
         clientMsgId.isNotEmpty &&
-        byKey.containsKey('client_${clientMsgId}')) {
-      matchedKey = 'client_${clientMsgId}';
+        byKey.containsKey('client_$clientMsgId')) {
+      matchedKey = 'client_$clientMsgId';
     } else if (hasRealId && byKey.containsKey('id_${message.id}')) {
       matchedKey = 'id_${message.id}';
     }
 
     final key = matchedKey ??
         ((clientMsgId != null && clientMsgId.isNotEmpty)
-            ? 'client_${clientMsgId}'
+            ? 'client_$clientMsgId'
             : 'id_${message.id}');
 
     final existing = byKey[key];

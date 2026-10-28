@@ -237,4 +237,84 @@ class UserManagementRepository {
           : 'application/pdf',
     );
   }
+
+  Future<BatchGenerateResult> batchGenerateUsers({
+    required String branchId,
+    required String defaultPassword,
+    required List<BatchJobTitleConfig> items,
+  }) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/admin/users/batch-generate',
+      data: {
+        'branchId': branchId,
+        'defaultPassword': defaultPassword,
+        'items': items.map((e) => e.toJson()).toList(),
+      },
+    );
+
+    final body = response.data ?? const <String, dynamic>{};
+    final payload = (body['data'] is Map<String, dynamic>)
+        ? body['data'] as Map<String, dynamic>
+        : body;
+    return BatchGenerateResult.fromJson(payload);
+  }
+}
+
+class BatchJobTitleConfig {
+  const BatchJobTitleConfig({
+    required this.key,
+    required this.title,
+    required this.prefix,
+    required this.count,
+    this.departmentId,
+    this.allowUnnumberedFirst = false,
+  });
+
+  final String key;
+  final String title;
+  final String prefix;
+  final int count;
+  final String? departmentId;
+  final bool allowUnnumberedFirst;
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'title': title,
+    'prefix': prefix,
+    'count': count,
+    if (departmentId != null && departmentId!.isNotEmpty)
+      'departmentId': departmentId,
+    'allowUnnumberedFirst': allowUnnumberedFirst,
+  };
+}
+
+class BatchGenerateResult {
+  const BatchGenerateResult({
+    required this.success,
+    required this.branchName,
+    required this.branchCode,
+    required this.totalCreated,
+    required this.users,
+  });
+
+  final bool success;
+  final String branchName;
+  final String branchCode;
+  final int totalCreated;
+  final List<ManagedUser> users;
+
+  factory BatchGenerateResult.fromJson(Map<String, dynamic> json) {
+    final branchMap = json['branch'] as Map<String, dynamic>? ?? {};
+    final usersList = (json['users'] as List<dynamic>?) ?? [];
+    return BatchGenerateResult(
+      success: json['success'] == true,
+      branchName: branchMap['name']?.toString() ?? '',
+      branchCode: branchMap['code']?.toString() ?? '',
+      totalCreated: json['totalCreated'] as int? ?? usersList.length,
+      users: usersList
+          .whereType<Map<String, dynamic>>()
+          .map(ManagedUser.fromJson)
+          .toList(),
+    );
+  }
 }

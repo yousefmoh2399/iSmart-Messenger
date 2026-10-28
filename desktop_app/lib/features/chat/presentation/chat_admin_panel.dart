@@ -18,6 +18,7 @@ import '../../admin/presentation/backup_screen.dart';
 import '../../admin/presentation/update_management_screen.dart';
 import '../../admin/presentation/server_settings_screen.dart';
 import '../../reports/presentation/report_templates_screen.dart';
+import '../../users/data/user_management_repository.dart';
 import '../models/chat_models.dart';
 
 class ChatAdminPanel extends ConsumerStatefulWidget {
@@ -2584,6 +2585,702 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     );
   }
 
+  static const List<String> _emptyKeywords = <String>[];
+
+  Future<void> _showBatchGenerateUsersDialog(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    String? selectedBranchId = widget.branches.isNotEmpty ? widget.branches.first.id : null;
+    final passwordController = TextEditingController(text: '123456');
+    var isPasswordObscured = true;
+    var isGenerating = false;
+    String? errorText;
+
+    String? findDeptForKeywords(List<String> keywords) {
+      for (final kw in keywords) {
+        final match = widget.departments
+            .where((d) => d.name.toLowerCase().contains(kw.toLowerCase()))
+            .firstOrNull;
+        if (match != null) return match.id;
+      }
+      return widget.departments.isNotEmpty ? widget.departments.first.id : null;
+    }
+
+    final items = <_BatchJobItemDraft>[
+      _BatchJobItemDraft(
+        key: 'man',
+        title: 'مدير فرع',
+        prefix: 'man',
+        defaultCount: 1,
+        allowUnnumberedFirst: true,
+        keywords: const ['إدارة', 'ادارة', 'management'],
+        departmentId: findDeptForKeywords(['إدارة', 'ادارة', 'management']),
+        count: 1,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'vman',
+        title: 'نائب مدير فرع',
+        prefix: 'vman',
+        defaultCount: 1,
+        allowUnnumberedFirst: true,
+        keywords: const ['إدارة', 'ادارة', 'management'],
+        departmentId: findDeptForKeywords(['إدارة', 'ادارة', 'management']),
+        count: 1,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'acc',
+        title: 'محاسب',
+        prefix: 'acc',
+        defaultCount: 2,
+        allowUnnumberedFirst: false,
+        keywords: const ['حسابات', 'مالية', 'accounts'],
+        departmentId: findDeptForKeywords(['حسابات', 'مالية', 'accounts']),
+        count: 2,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'ghead',
+        title: 'رئيس مجموعة',
+        prefix: 'ghead',
+        defaultCount: 4,
+        allowUnnumberedFirst: false,
+        keywords: const ['تمويل', 'ائتمان', 'مجموعات', 'credit'],
+        departmentId: findDeptForKeywords(['تمويل', 'ائتمان', 'مجموعات']),
+        count: 4,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'csup',
+        title: 'مشرف / مشرفة منسقات',
+        prefix: 'csup',
+        defaultCount: 4,
+        allowUnnumberedFirst: false,
+        keywords: const ['منسق', 'منسقات', 'coord'],
+        departmentId: findDeptForKeywords(['منسق', 'منسقات', 'coord']),
+        count: 4,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'spec',
+        title: 'أخصائي',
+        prefix: 'spec',
+        defaultCount: 7,
+        allowUnnumberedFirst: false,
+        keywords: const ['أخصائي', 'اخصائي', 'تمويل', 'ائتمان'],
+        departmentId: findDeptForKeywords(['أخصائي', 'اخصائي', 'تمويل']),
+        count: 7,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'coord',
+        title: 'منسقة',
+        prefix: 'coord',
+        defaultCount: 8,
+        allowUnnumberedFirst: false,
+        keywords: const ['منسق', 'منسقات', 'coord'],
+        departmentId: findDeptForKeywords(['منسق', 'منسقات', 'coord']),
+        count: 8,
+        isEnabled: true,
+      ),
+      _BatchJobItemDraft(
+        key: 'collect',
+        title: 'محصل',
+        prefix: 'collect',
+        defaultCount: 1,
+        allowUnnumberedFirst: false,
+        keywords: const ['تحصيل', 'محصل', 'collections'],
+        departmentId: findDeptForKeywords(['تحصيل', 'محصل', 'collections']),
+        count: 1,
+        isEnabled: true,
+      ),
+    ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setLocalState) {
+          final selectedBranch = widget.branches
+              .where((b) => b.id == selectedBranchId)
+              .firstOrNull;
+          final branchCode = selectedBranch?.code ?? 'كود';
+
+          final totalCount = items
+              .where((i) => i.isEnabled && i.count > 0)
+              .fold(0, (sum, i) => sum + i.count);
+
+          return _AppleAdminDialog(
+            badgeIcon: Icons.bolt_rounded,
+            badgeColor: const Color(0xFF8B5CF6),
+            title: 'توليد حسابات المستخدمين للفرع',
+            subtitle:
+                'إنشاء الحسابات القياسية للفرع آلياً بصيغة موحدة (مثل: coord1-110) بصلاحية مستخدم عادي',
+            maxWidth: 680,
+            content: SizedBox(
+              width: 650,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Branch and Password row
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: _AppleDropdown<String?>(
+                            value: selectedBranchId,
+                            label: 'الفرع المستهدف *',
+                            prefixIcon: Icons.storefront_outlined,
+                            enabled: !isGenerating,
+                            items: widget.branches
+                                .map(
+                                  (b) => DropdownMenuItem<String?>(
+                                    value: b.id,
+                                    child: Text('${b.name} (${b.code})'),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (val) =>
+                                setLocalState(() => selectedBranchId = val),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: TextFormField(
+                            controller: passwordController,
+                            enabled: !isGenerating,
+                            obscureText: isPasswordObscured,
+                            decoration: InputDecoration(
+                              labelText: 'كلمة المرور الافتراضية *',
+                              prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  isPasswordObscured
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
+                                  size: 18,
+                                ),
+                                onPressed: () => setLocalState(
+                                  () => isPasswordObscured = !isPasswordObscured,
+                                ),
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Quick Actions
+                    Row(
+                      children: [
+                        const Text(
+                          'المسميات الوظيفية والأعداد المطلوبة:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: isGenerating
+                              ? null
+                              : () => setLocalState(() {
+                                    for (final item in items) {
+                                      item.isEnabled = true;
+                                      item.count = item.defaultCount;
+                                    }
+                                  }),
+                          icon: const Icon(Icons.playlist_add_check_rounded, size: 16),
+                          label: const Text('القالب القياسي', style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton.icon(
+                          onPressed: isGenerating
+                              ? null
+                              : () => setLocalState(() {
+                                    for (final item in items) {
+                                      item.isEnabled = false;
+                                      item.count = 0;
+                                    }
+                                  }),
+                          icon: const Icon(Icons.clear_all_rounded, size: 16),
+                          label: const Text('تفريغ الكل (0)', style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: theme.colorScheme.error,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Job Titles List
+                    Container(
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+                          ),
+                          itemBuilder: (ctx, idx) {
+                            final item = items[idx];
+                            final formatPreview = item.allowUnnumberedFirst && item.count <= 1
+                                ? '${item.prefix}-$branchCode'
+                                : '${item.prefix}1..N-$branchCode';
+
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Row(
+                                children: [
+                                  // Checkbox
+                                  Checkbox(
+                                    value: item.isEnabled,
+                                    activeColor: const Color(0xFF8B5CF6),
+                                    onChanged: isGenerating
+                                        ? null
+                                        : (checked) => setLocalState(() {
+                                              item.isEnabled = checked == true;
+                                              if (item.isEnabled && item.count == 0) {
+                                                item.count = item.defaultCount;
+                                              } else if (!item.isEnabled) {
+                                                item.count = 0;
+                                              }
+                                            }),
+                                  ),
+                                  // Title and Format Pill
+                                  Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.title,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                            color: item.isEnabled
+                                                ? null
+                                                : theme.disabledColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isDark
+                                                ? Colors.white.withValues(alpha: 0.06)
+                                                : const Color(0xFFE2E8F0),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            formatPreview,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontFamily: 'monospace',
+                                              color: isDark ? Colors.white70 : Colors.black87,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+
+                                  // Department Dropdown
+                                  Expanded(
+                                    flex: 3,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? Colors.black26
+                                            : Colors.white,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+                                        ),
+                                      ),
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<String?>(
+                                          value: item.departmentId,
+                                          isExpanded: true,
+                                          hint: const Text('اختر القسم', style: TextStyle(fontSize: 12)),
+                                          icon: const Icon(Icons.arrow_drop_down, size: 18),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: isDark ? Colors.white : Colors.black87,
+                                          ),
+                                          items: [
+                                            const DropdownMenuItem<String?>(
+                                              value: null,
+                                              child: Text('بدون قسم'),
+                                            ),
+                                            ...widget.departments.map(
+                                              (d) => DropdownMenuItem<String?>(
+                                                value: d.id,
+                                                child: Text(
+                                                  d.name,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          onChanged: isGenerating
+                                              ? null
+                                              : (val) => setLocalState(() => item.departmentId = val),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+
+                                  // Counter [- / +]
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: isGenerating || item.count <= 0
+                                            ? null
+                                            : () => setLocalState(() {
+                                                  item.count = math.max(0, item.count - 1);
+                                                  if (item.count == 0) {
+                                                    item.isEnabled = false;
+                                                  }
+                                                }),
+                                      ),
+                                      Container(
+                                        width: 38,
+                                        alignment: Alignment.center,
+                                        padding: const EdgeInsets.symmetric(vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: item.isEnabled
+                                              ? (isDark
+                                                  ? const Color(0xFF8B5CF6).withValues(alpha: 0.2)
+                                                  : const Color(0xFFEDE9FE))
+                                              : (isDark
+                                                  ? Colors.white.withValues(alpha: 0.04)
+                                                  : const Color(0xFFF1F5F9)),
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(
+                                            color: item.isEnabled
+                                                ? const Color(0xFF8B5CF6)
+                                                : Colors.transparent,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${item.count}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                            color: item.isEnabled
+                                                ? const Color(0xFF8B5CF6)
+                                                : theme.disabledColor,
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: isGenerating
+                                            ? null
+                                            : () => setLocalState(() {
+                                                  item.count++;
+                                                  item.isEnabled = true;
+                                                }),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Summary Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline_rounded, size: 20, color: Color(0xFF8B5CF6)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'إجمالي الحسابات: $totalCount مستخدم  |  الفرع: ${selectedBranch?.name ?? "-"}  |  الصلاحية: مستخدم عادي (User)',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF8B5CF6),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    if (errorText != null) ...[
+                      const SizedBox(height: 12),
+                      _AppleErrorBanner(error: errorText!),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isGenerating ? null : () => Navigator.pop(dialogCtx),
+                child: const Text('إلغاء'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: isGenerating || totalCount == 0 || selectedBranchId == null
+                    ? null
+                    : () async {
+                        setLocalState(() {
+                          isGenerating = true;
+                          errorText = null;
+                        });
+
+                        try {
+                          final configs = items
+                              .where((i) => i.isEnabled && i.count > 0)
+                              .map(
+                                (i) => BatchJobTitleConfig(
+                                  key: i.key,
+                                  title: i.title,
+                                  prefix: i.prefix,
+                                  count: i.count,
+                                  departmentId: i.departmentId,
+                                  allowUnnumberedFirst: i.allowUnnumberedFirst,
+                                ),
+                              )
+                              .toList();
+
+                          final userRepository = ref.read(userManagementRepositoryProvider);
+                          final result = await userRepository.batchGenerateUsers(
+                            branchId: selectedBranchId!,
+                            defaultPassword: passwordController.text.trim(),
+                            items: configs,
+                          );
+
+                          if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                          await ref.read(usersControllerProvider.notifier).refresh();
+
+                          if (context.mounted) {
+                            _showBatchGenerateSuccessDialog(context, ref, result);
+                          }
+                        } catch (err) {
+                          setLocalState(() {
+                            isGenerating = false;
+                            errorText = err.toString();
+                          });
+                        }
+                      },
+                icon: isGenerating
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: ButtonLoadingIndicator(),
+                      )
+                    : const Icon(Icons.bolt_rounded, size: 18),
+                label: Text(
+                  isGenerating ? 'جارٍ التوليد...' : 'توليد $totalCount حساب الآن',
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B5CF6),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showBatchGenerateSuccessDialog(
+    BuildContext context,
+    WidgetRef ref,
+    BatchGenerateResult result,
+  ) async {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => _AppleAdminDialog(
+        badgeIcon: Icons.check_circle_rounded,
+        badgeColor: const Color(0xFF10B981),
+        title: 'تم توليد الحسابات بنجاح! 🚀',
+        subtitle:
+            'تم إنشاء ${result.totalCreated} حساب لـ ${result.branchName} (${result.branchCode}) بصلاحية مستخدم عادي',
+        maxWidth: 500,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF10B981)),
+                      const SizedBox(width: 8),
+                      Text(
+                        'الفرع: ${result.branchName} (${result.branchCode})',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.people_outline_rounded, size: 18, color: Color(0xFF10B981)),
+                      const SizedBox(width: 8),
+                      Text(
+                        'إجمالي الحسابات التي أُنشئت: ${result.totalCreated} مستخدم',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Row(
+                    children: [
+                      Icon(Icons.shield_outlined, size: 18, color: Color(0xFF10B981)),
+                      SizedBox(width: 8),
+                      Text(
+                        'الصلاحية: مستخدم عادي (بدون صلاحيات إدارية)',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'يمكنك الآن تحميل كشف الحسابات لتوزيعه على موظفي الفرع:',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(dialogCtx);
+                      await ref.read(userManagementRepositoryProvider).exportUsers(
+                            format: 'pdf',
+                            branchId: result.users.firstOrNull?.branchId,
+                            branchName: result.branchName,
+                          );
+                    },
+                    icon: const Icon(Icons.picture_as_pdf_rounded, size: 18, color: Color(0xFFEF4444)),
+                    label: const Text('كشف PDF'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(dialogCtx);
+                      await ref.read(userManagementRepositoryProvider).exportUsers(
+                            format: 'xlsx',
+                            branchId: result.users.firstOrNull?.branchId,
+                            branchName: result.branchName,
+                          );
+                    },
+                    icon: const Icon(Icons.table_chart_rounded, size: 18, color: Color(0xFF10B981)),
+                    label: const Text('كشف Excel'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('إغلاق'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final usersState = ref.watch(usersControllerProvider);
@@ -2679,6 +3376,20 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                     icon: const Icon(Icons.file_download_outlined, size: 18),
                     label: const Text('تصدير كشف المستخدمين'),
                     style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _showBatchGenerateUsersDialog(context, ref),
+                    icon: const Icon(Icons.bolt_rounded, size: 18),
+                    label: const Text('توليد حسابات فرع'),
+                    style: FilledButton.styleFrom(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -8487,4 +9198,28 @@ class _AdminTableLoadingShimmer extends StatelessWidget {
       ],
     );
   }
+}
+
+class _BatchJobItemDraft {
+  _BatchJobItemDraft({
+    required this.key,
+    required this.title,
+    required this.prefix,
+    required this.defaultCount,
+    required this.allowUnnumberedFirst,
+    required this.keywords,
+    this.departmentId,
+    this.count = 0,
+    this.isEnabled = false,
+  });
+
+  final String key;
+  final String title;
+  final String prefix;
+  final int defaultCount;
+  final bool allowUnnumberedFirst;
+  final List<String> keywords;
+  String? departmentId;
+  int count;
+  bool isEnabled;
 }

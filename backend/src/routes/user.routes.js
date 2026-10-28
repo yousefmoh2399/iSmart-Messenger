@@ -5,6 +5,8 @@ const {
   getUsers,
   exportUsersHandler,
   createManagedUser,
+  batchGenerateBranchUsersHandler,
+  getBatchJobTemplatesHandler,
   updateManagedUser,
   updateManagedUserStatus,
   resetManagedUserPassword,
@@ -131,7 +133,23 @@ router.delete(
 );
 
 router.get("/export", requireUserManagementRead, exportUsersHandler);
+router.get("/batch-templates", requireUserManagementRead, getBatchJobTemplatesHandler);
 router.get("/", requireUserManagementRead, getUsers);
+
+router.post(
+  "/batch-generate",
+  requirePermission("canCreateUsers"),
+  [
+    body("branchId").isMongoId().withMessage("معرّف الفرع غير صالح."),
+    body("items").isArray().withMessage("قائمة الوظائف والأعداد يجب أن تكون مصفوفة."),
+    body("defaultPassword")
+      .optional()
+      .isLength({ min: 6 })
+      .withMessage("كلمة المرور يجب ألا تقل عن 6 أحرف."),
+  ],
+  validateRequest,
+  batchGenerateBranchUsersHandler,
+);
 
 router.post(
   "/",
