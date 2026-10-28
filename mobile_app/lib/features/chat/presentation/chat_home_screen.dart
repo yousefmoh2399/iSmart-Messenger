@@ -1869,7 +1869,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               ),
               const SizedBox(height: 2),
               Text(
-                'الإصدار 1.2.2',
+                'الإصدار 1.2.3',
                 style: TextStyle(
                   fontSize: 10,
                   color: isDark ? Colors.white24 : const Color(0xFFA1A1A6),
