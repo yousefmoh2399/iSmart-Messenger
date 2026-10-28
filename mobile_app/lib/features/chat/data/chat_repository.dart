@@ -1501,4 +1501,34 @@ Future<ChatConversation> uploadConversationAvatar({
     await file.writeAsBytes(bytes);
     return file;
   }
+
+  Future<Map<String, dynamic>> fetchUserStickers() async {
+    final response =
+        await _apiClient.dio.get<Map<String, dynamic>>("/api/chat/stickers");
+    return response.data ?? const <String, dynamic>{};
+  }
+
+  Future<void> syncUserStickers({
+    required List<Map<String, dynamic>> stickers,
+    required List<Map<String, dynamic>> packs,
+  }) async {
+    await _apiClient.dio.put<void>(
+      "/api/chat/stickers",
+      data: {
+        "stickers": stickers,
+        "packs": packs,
+      },
+    );
+  }
+
+  Future<void> saveUserSticker(Map<String, dynamic> sticker) async {
+    await _apiClient.dio.post<void>(
+      "/api/chat/stickers",
+      data: sticker,
+    );
+  }
+
+  Future<void> deleteUserSticker(String stickerId) async {
+    await _apiClient.dio.delete<void>("/api/chat/stickers/$stickerId");
+  }
 }

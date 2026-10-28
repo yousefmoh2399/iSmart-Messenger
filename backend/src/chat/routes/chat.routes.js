@@ -502,4 +502,16 @@ router.delete(
   removeFolder,
 );
 
+const {
+  getMyStickers,
+  putMyStickers,
+  postMySticker,
+  deleteMySticker,
+} = require("../controllers/user-stickers.controller");
+
+router.get("/stickers", getMyStickers);
+router.put("/stickers", putMyStickers);
+router.post("/stickers", postMySticker);
+router.delete("/stickers/:id", deleteMySticker);
+
 module.exports = router;

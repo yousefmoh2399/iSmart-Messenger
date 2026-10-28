@@ -1,9 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../../shared/providers/providers.dart';
+import '../../data/chat_repository.dart';
+import '../../data/chat_socket_service.dart';
 
 bool _bytesEqual(Uint8List a, Uint8List b) {
   if (a.length != b.length) return false;
@@ -11,6 +18,38 @@ bool _bytesEqual(Uint8List a, Uint8List b) {
     if (a[i] != b[i]) return false;
   }
   return true;
+}
+
+String resolveStickerExtension(Uint8List bytes, [String? currentName]) {
+  if (bytes.length >= 3 &&
+      bytes[0] == 0x47 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46) {
+    return '.gif';
+  }
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46 &&
+      bytes[8] == 0x57 &&
+      bytes[9] == 0x45 &&
+      bytes[10] == 0x42 &&
+      bytes[11] == 0x50) {
+    return '.webp';
+  }
+  if (bytes.length >= 8 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47) {
+    return '.png';
+  }
+  if (currentName != null && currentName.contains('.')) {
+    final ext = p.extension(currentName).toLowerCase();
+    if (ext.isNotEmpty) return ext;
+  }
+  return '.png';
 }
 
 /// The local sticker model representing an offline sticker.
@@ -31,13 +70,13 @@ class LocalSticker {
   final bool favorite;
   final int? lastUsedAt;
 
-  Map<String, String> toJson() => {
+  Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
     'bytes': base64Encode(bytes),
     'category': category,
-    'favorite': favorite.toString(),
-    if (lastUsedAt != null) 'lastUsedAt': lastUsedAt.toString(),
+    'favorite': favorite,
+    if (lastUsedAt != null) 'lastUsedAt': lastUsedAt,
   };
 
   static LocalSticker? fromJson(Object? value) {
@@ -45,7 +84,15 @@ class LocalSticker {
     try {
       final id = value['id']?.toString() ?? '';
       final name = value['name']?.toString() ?? '';
-      final bytes = base64Decode(value['bytes']?.toString() ?? '');
+      final rawBytes = value['bytes'];
+      Uint8List bytes;
+      if (rawBytes is Uint8List) {
+        bytes = rawBytes;
+      } else if (rawBytes is List) {
+        bytes = Uint8List.fromList(rawBytes.cast<int>());
+      } else {
+        bytes = base64Decode(rawBytes?.toString() ?? '');
+      }
       return id.isEmpty || name.isEmpty || bytes.isEmpty
           ? null
           : LocalSticker(
@@ -53,7 +100,8 @@ class LocalSticker {
               name: name,
               bytes: bytes,
               category: value['category']?.toString() ?? 'عام',
-              favorite: value['favorite']?.toString() == 'true',
+              favorite: value['favorite'] == true ||
+                  value['favorite']?.toString() == 'true',
               lastUsedAt: int.tryParse(value['lastUsedAt']?.toString() ?? ''),
             );
     } catch (_) {
@@ -103,7 +151,12 @@ Future<void> saveLocalSticker({
   required Uint8List bytes,
   String category = 'عام',
   bool favorite = false,
+  ChatRepository? repository,
 }) async {
+  final ext = resolveStickerExtension(bytes, name);
+  final base = p.basenameWithoutExtension(name);
+  final resolvedName = '$base$ext';
+
   final prefs = await SharedPreferences.getInstance();
   final raw = prefs.getString('offline_stickers_v1');
   final current = raw == null
@@ -114,26 +167,36 @@ Future<void> saveLocalSticker({
             .toList();
 
   final alreadyExists = current.any((s) {
-    if (s.name == name && s.bytes.length == bytes.length) return true;
+    if (s.name == resolvedName && s.bytes.length == bytes.length) return true;
     if (s.bytes.length == bytes.length && _bytesEqual(s.bytes, bytes)) return true;
     return false;
   });
 
+  LocalSticker? newSticker;
   if (!alreadyExists) {
-    current.add(
-      LocalSticker(
-        id: '${DateTime.now().microsecondsSinceEpoch}_${current.length}',
-        name: name,
-        bytes: bytes,
-        category: category,
-        favorite: favorite,
-        lastUsedAt: DateTime.now().millisecondsSinceEpoch,
-      ),
+    newSticker = LocalSticker(
+      id: '${DateTime.now().microsecondsSinceEpoch}_${current.length}',
+      name: resolvedName,
+      bytes: bytes,
+      category: category,
+      favorite: favorite,
+      lastUsedAt: DateTime.now().millisecondsSinceEpoch,
     );
+    current.add(newSticker);
     await prefs.setString(
       'offline_stickers_v1',
       jsonEncode(current.map((e) => e.toJson()).toList()),
     );
+  }
+
+  if (repository != null) {
+    try {
+      final stickerToSave = newSticker ??
+          current.firstWhere(
+            (s) => s.bytes.length == bytes.length && _bytesEqual(s.bytes, bytes),
+          );
+      await repository.saveUserSticker(stickerToSave.toJson());
+    } catch (_) {}
   }
 }
 
@@ -162,14 +225,14 @@ Future<bool> isLocalStickerSaved({
   }
 }
 
-class GifPickerPanel extends StatefulWidget {
+class GifPickerPanel extends ConsumerStatefulWidget {
   const GifPickerPanel({super.key});
 
   @override
-  State<GifPickerPanel> createState() => _GifPickerPanelState();
+  ConsumerState<GifPickerPanel> createState() => _GifPickerPanelState();
 }
 
-class _GifPickerPanelState extends State<GifPickerPanel> {
+class _GifPickerPanelState extends ConsumerState<GifPickerPanel> {
   static const _prefsKey = 'offline_stickers_v1';
   static const _packsPrefsKey = 'offline_sticker_packs_v1';
   static const _maxStickerBytes = 10 * 1024 * 1024; // 10MB limit
@@ -181,15 +244,21 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
   bool _importing = false;
   String _filter = 'الكل';
   final _searchController = TextEditingController();
+  StreamSubscription<ChatSocketEvent>? _socketSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _listenToSocket();
+      _syncRemote();
+    });
   }
 
   @override
   void dispose() {
+    _socketSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -235,6 +304,122 @@ class _GifPickerPanelState extends State<GifPickerPanel> {
       _packsPrefsKey,
       jsonEncode(_packs.map((e) => e.toJson()).toList()),
     );
+
+    try {
+      ref.read(chatRepositoryProvider).syncUserStickers(
+        stickers: _stickers.map((e) => e.toJson()).toList(),
+        packs: _packs.map((e) => e.toJson()).toList(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _syncRemote() async {
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final remoteData = await repo.fetchUserStickers();
+      final remoteStickersRaw = remoteData['stickers'] as List? ?? const [];
+      final remotePacksRaw = remoteData['packs'] as List? ?? const [];
+
+      final remoteStickers = remoteStickersRaw
+          .map(LocalSticker.fromJson)
+          .whereType<LocalSticker>()
+          .toList();
+      final remotePacks = remotePacksRaw
+          .map(LocalStickerPack.fromJson)
+          .whereType<LocalStickerPack>()
+          .toList();
+
+      if (remoteStickers.isEmpty && _stickers.isNotEmpty) {
+        await repo.syncUserStickers(
+          stickers: _stickers.map((s) => s.toJson()).toList(),
+          packs: _packs.map((p) => p.toJson()).toList(),
+        );
+        return;
+      }
+
+      final merged = List<LocalSticker>.from(_stickers);
+      bool changed = false;
+      for (final r in remoteStickers) {
+        final exists = merged.any((l) =>
+            l.id == r.id ||
+            (l.bytes.length == r.bytes.length && _bytesEqual(l.bytes, r.bytes)));
+        if (!exists) {
+          merged.add(r);
+          changed = true;
+        }
+      }
+
+      final mergedPacks = List<LocalStickerPack>.from(_packs);
+      for (final rp in remotePacks) {
+        if (!mergedPacks.any((p) => p.id == rp.id)) {
+          mergedPacks.add(rp);
+          changed = true;
+        }
+      }
+
+      if (changed && mounted) {
+        setState(() {
+          _stickers = merged;
+          _packs = mergedPacks;
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+          _prefsKey,
+          jsonEncode(_stickers.map((e) => e.toJson()).toList()),
+        );
+        await prefs.setString(
+          _packsPrefsKey,
+          jsonEncode(_packs.map((e) => e.toJson()).toList()),
+        );
+      }
+    } catch (_) {
+      // Offline fallback
+    }
+  }
+
+  void _listenToSocket() {
+    try {
+      final socketService = ref.read(chatSocketServiceProvider);
+      _socketSub = socketService.events
+          .where((e) => e.type == 'stickers_updated')
+          .listen((e) {
+        _handleRemoteStickersUpdated(e.payload);
+      });
+    } catch (_) {}
+  }
+
+  void _handleRemoteStickersUpdated(Map<String, dynamic> payload) {
+    try {
+      final remoteStickersRaw = payload['stickers'] as List? ?? const [];
+      final remotePacksRaw = payload['packs'] as List? ?? const [];
+      final remoteStickers = remoteStickersRaw
+          .map(LocalSticker.fromJson)
+          .whereType<LocalSticker>()
+          .toList();
+      final remotePacks = remotePacksRaw
+          .map(LocalStickerPack.fromJson)
+          .whereType<LocalStickerPack>()
+          .toList();
+
+      if (remoteStickers.isNotEmpty && mounted) {
+        setState(() {
+          _stickers = remoteStickers;
+          if (remotePacks.isNotEmpty) {
+            _packs = remotePacks;
+          }
+        });
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setString(
+            _prefsKey,
+            jsonEncode(_stickers.map((e) => e.toJson()).toList()),
+          );
+          prefs.setString(
+            _packsPrefsKey,
+            jsonEncode(_packs.map((e) => e.toJson()).toList()),
+          );
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _import() async {
@@ -986,6 +1171,7 @@ class _MobileStickerCard extends StatelessWidget {
                   child: Image.memory(
                     sticker.bytes,
                     fit: BoxFit.contain,
+                    gaplessPlayback: true,
                     errorBuilder: (_, __, ___) => const Icon(
                       Icons.broken_image_outlined,
                       color: Colors.grey,

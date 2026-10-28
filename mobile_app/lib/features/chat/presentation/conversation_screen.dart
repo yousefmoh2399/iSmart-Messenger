@@ -1297,13 +1297,28 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
   }
 
+  Future<void> _openEmojiPicker() async {
+    final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
+    if (_isReadOnlyFor(authUserId)) return;
+
+    final emoji = await WhatsAppReactionPickerSheet.show(context);
+    if (emoji != null && emoji.isNotEmpty && mounted) {
+      final text = _messageController.text;
+      final selection = _messageController.selection;
+      final start = selection.start >= 0 ? selection.start : text.length;
+      final end = selection.end >= 0 ? selection.end : text.length;
+      final newText = text.replaceRange(start, end, emoji);
+      _messageController.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: start + emoji.length),
+      );
+    }
+  }
+
   Future<void> _openGifPicker() async {
     final authUserId = ref.read(authControllerProvider).valueOrNull?.id;
     if (_isReadOnlyFor(authUserId)) return;
 
-    // For now we'll just show a simple snackbar or implement tenor API if requested.
-    // Given the prompt "GIFs: دمج أداة بحث سريعة لإرسال الـ GIFs (عبر Giphy)", we should build a simple GifPicker.
-    // Let's call a widget:
     final sticker = await showModalBottomSheet<LocalSticker>(
       context: context,
       isScrollControlled: true,
@@ -1312,16 +1327,19 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
 
     if (sticker != null && mounted) {
+      final ext = resolveStickerExtension(sticker.bytes, sticker.name);
+      final safeBaseName = p.basenameWithoutExtension(sticker.name);
+      final finalName = '$safeBaseName$ext';
       final stickerFile = File(
         p.join(
           Directory.systemTemp.path,
-          'sticker_${sticker.id}_${sticker.name}',
+          'sticker_${sticker.id}_$finalName',
         ),
       );
       await stickerFile.writeAsBytes(sticker.bytes, flush: true);
       await _sendPreparedFile(
         sendPath: stickerFile.path,
-        displayName: sticker.name,
+        displayName: finalName,
         restrictForwardAndDownload: false,
         extraMetadata: const {'sticker': true},
       );
@@ -2340,9 +2358,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         throw Exception('ملف الملصق فارغ');
       }
 
+      final ext = resolveStickerExtension(bytes, message.fileName);
+      final safeName = message.fileName != null
+          ? '${p.basenameWithoutExtension(message.fileName!)}$ext'
+          : 'sticker_${message.id.substring(0, 6)}$ext';
+
       await saveLocalSticker(
-        name: message.fileName ?? 'sticker_${message.id.substring(0, 6)}.png',
+        name: safeName,
         bytes: bytes,
+        repository: ref.read(chatRepositoryProvider),
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5706,13 +5730,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                               maxWidth: 170,
                                                                                               maxHeight: 170,
                                                                                             ),
-                                                                                            child: Hero(
-                                                                                              tag: 'image_$stableItemKey',
-                                                                                              child: _ChatAttachmentImage(
+                                                                                                                                                                                          child: _ChatAttachmentImage(
                                                                                                 message: message,
                                                                                                 fit: BoxFit.contain,
                                                                                               ),
-                                                                                            ),
                                                                                           ),
                                                                                           Positioned(
                                                                                             bottom: 2,
@@ -6361,6 +6382,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     onOpenReactionPicker: _showComposerReactionPicker,
                     onSendPoll: _createPoll,
                     onSendChecklist: _createChecklist,
+                    onOpenEmojiPicker: _openEmojiPicker,
                     onSendGif: _openGifPicker,
                     onPauseVoiceNote: _pauseVoiceRecording,
                     onResumeVoiceNote: _resumeVoiceRecording,
@@ -6578,6 +6600,7 @@ class _ChatAttachmentImageState extends ConsumerState<_ChatAttachmentImage> {
           fit: widget.fit,
           width: widget.width,
           height: widget.height,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => errorWidget(),
         );
       },
@@ -7541,6 +7564,7 @@ class _MessageComposer extends StatefulWidget {
     required this.onOpenReactionPicker,
     required this.onSendPoll,
     required this.onSendChecklist,
+    this.onOpenEmojiPicker,
     required this.onSendGif,
     required this.onPauseVoiceNote,
     required this.onResumeVoiceNote,
@@ -7579,6 +7603,7 @@ class _MessageComposer extends StatefulWidget {
   final VoidCallback onOpenReactionPicker;
   final VoidCallback onSendPoll;
   final VoidCallback onSendChecklist;
+  final VoidCallback? onOpenEmojiPicker;
   final VoidCallback onSendGif;
   final VoidCallback onPauseVoiceNote;
   final VoidCallback onResumeVoiceNote;
@@ -7787,11 +7812,11 @@ class _MessageComposerState extends State<_MessageComposer> {
                           : Row(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                // Left: Emoji & Stickers button
+                                // Left: Emoji button
                                 IconButton(
-                                  tooltip: 'الملصقات والتعبيرات',
+                                  tooltip: 'التعبيرات والرموز',
                                   onPressed: enabled && !isUploading
-                                      ? widget.onSendGif
+                                      ? (widget.onOpenEmojiPicker ?? widget.onSendGif)
                                       : null,
                                   splashRadius: 20,
                                   padding: const EdgeInsets.all(8),

@@ -2082,11 +2082,14 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
 
     if (sticker != null && mounted) {
+      final ext = resolveStickerExtension(sticker.bytes, sticker.name);
+      final safeBaseName = p.basenameWithoutExtension(sticker.name);
+      final finalName = '$safeBaseName$ext';
       await _sendPreparedFile(
         conversation: conversation,
-        sendPath: sticker.name,
-        displayName: sticker.name,
-        sourceFileName: sticker.name,
+        sendPath: finalName,
+        displayName: finalName,
+        sourceFileName: finalName,
         fileBytes: sticker.bytes,
         restrictForwardAndDownload: false,
         isSticker: true,
@@ -3110,9 +3113,15 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         throw Exception('ملف الملصق فارغ');
       }
 
+      final ext = resolveStickerExtension(bytes, message.fileName);
+      final safeName = message.fileName != null
+          ? '${p.basenameWithoutExtension(message.fileName!)}$ext'
+          : 'sticker_${message.id.substring(0, 6)}$ext';
+
       await saveLocalSticker(
-        name: message.fileName ?? 'sticker_${message.id.substring(0, 6)}.png',
+        name: safeName,
         bytes: bytes,
+        repository: ref.read(chatRepositoryProvider),
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

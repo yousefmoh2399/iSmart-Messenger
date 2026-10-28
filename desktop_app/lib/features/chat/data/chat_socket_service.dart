@@ -297,6 +297,7 @@ class ChatSocketService implements PrintStatusEmitter {
     bind('ticket_updated');
     bind('tickets_updated');
     bind('ticket_settings_updated');
+    bind('stickers_updated');
 
     socket.connect();
     _socket = socket;
