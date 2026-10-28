@@ -225,6 +225,23 @@ class AppTheme {
         ),
         dividerThickness: 0.5,
       ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E).withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.15),
+            width: 0.8,
+          ),
+        ),
+        textStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          fontFamily: _fontFamily,
+          fontFamilyFallback: _fontFallbacks,
+        ),
+      ),
     );
   }
 }

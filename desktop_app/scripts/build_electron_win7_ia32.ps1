@@ -42,6 +42,15 @@ if (Test-Path -LiteralPath $emojiFontSource) {
   Copy-Item -LiteralPath $emojiFontSource -Destination (Join-Path $electronBuildRoot "seguiemj.ttf") -Force
 }
 
+$arabicFontRegular = Join-Path $desktopRoot "assets\fonts\NotoSansArabic-Regular.ttf"
+if (Test-Path -LiteralPath $arabicFontRegular) {
+  Copy-Item -LiteralPath $arabicFontRegular -Destination (Join-Path $electronBuildRoot "NotoSansArabic-Regular.ttf") -Force
+}
+$arabicFontBold = Join-Path $desktopRoot "assets\fonts\NotoSansArabic-Bold.ttf"
+if (Test-Path -LiteralPath $arabicFontBold) {
+  Copy-Item -LiteralPath $arabicFontBold -Destination (Join-Path $electronBuildRoot "NotoSansArabic-Bold.ttf") -Force
+}
+
 function New-InstallerBrandingBitmap {
   param(
     [Parameter(Mandatory = $true)]

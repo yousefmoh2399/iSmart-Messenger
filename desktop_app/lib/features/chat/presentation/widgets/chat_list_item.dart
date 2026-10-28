@@ -203,6 +203,16 @@ class _ChatListItemState extends State<ChatListItem> {
                                       color: Colors.white,
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
+                                      fontFamily: 'NotoSans',
+                                      fontFamilyFallback: [
+                                        'NotoSansArabic',
+                                        'Segoe UI Emoji',
+                                        'Segoe UI Symbol',
+                                        'Apple Color Emoji',
+                                        'Segoe UI',
+                                        'Tahoma',
+                                        'Arial',
+                                      ],
                                     ),
                                     child: Text(
                                       title,

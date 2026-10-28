@@ -469,6 +469,7 @@ app.commandLine.appendSwitch("js-flags", "--max-old-space-size=512");
 
 // Limit disk cache to prevent thrashing slow mechanical 5400rpm hard drives
 app.commandLine.appendSwitch("disk-cache-size", "67108864");
+app.commandLine.appendSwitch("font-render-hinting", "medium");
 
 // Graphics Performance Tuning:
 // On Windows 7 (NT 6.1), disabling hardware acceleration forces CPU software emulation (SwiftShader),
@@ -964,6 +965,13 @@ function createWindow(startUrl) {
       backgroundThrottling: true,
       webSecurity: false,
       allowRunningInsecureContent: true,
+      defaultFontFamily: {
+        standard: "NotoSansArabic",
+        serif: "NotoSansArabic",
+        sansSerif: "NotoSansArabic",
+        monospace: "Consolas",
+      },
+      defaultEncoding: "UTF-8",
     },
   });
   applyWindowTheme(currentWindowTheme);
@@ -2046,7 +2054,7 @@ function openPendingLanReceiveDialog(requestId) {
 <head>
 <meta charset="utf-8" />
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;font-family:"NotoSansArabic","NotoSans","Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
 .wrap{height:100vh;padding:22px;background:linear-gradient(135deg,#111b26,#182533)}
 .head{display:flex;gap:14px;align-items:center;margin-bottom:18px}.icon{width:46px;height:46px;border-radius:14px;background:#2f8cff;display:grid;place-items:center;font-size:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{font-size:13px;color:#a8b3c1;line-height:1.5}.file{background:#223142;border:1px solid #37516b;border-radius:10px;padding:12px;margin:14px 0;color:#dce8f5;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2138,7 +2146,7 @@ function showLanReceiveDialog({ fileName, fileSizeBytes, senderName }) {
 <head>
 <meta charset="utf-8" />
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;font-family:"NotoSansArabic","NotoSans","Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
 .wrap{height:100vh;padding:22px;background:linear-gradient(135deg,#111b26,#182533)}
 .head{display:flex;gap:14px;align-items:center;margin-bottom:18px}.icon{width:46px;height:46px;border-radius:14px;background:#2f8cff;display:grid;place-items:center;font-size:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{font-size:13px;color:#a8b3c1;line-height:1.5}.file{background:#223142;border:1px solid #37516b;border-radius:10px;padding:12px;margin:14px 0;color:#dce8f5;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
