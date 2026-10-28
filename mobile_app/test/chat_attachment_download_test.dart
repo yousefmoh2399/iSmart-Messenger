@@ -160,5 +160,38 @@ void main() {
       final cachedPath = await repository.getCachedAttachmentPath(localMessage);
       expect(cachedPath, equals(sampleFile.path));
     });
+
+    test('Concurrent downloads for the same attachment share a single network request', () async {
+      final msg = ChatMessage.fromJson({
+        'id': 'msg_voice_multi_01',
+        'conversationId': 'conv_001',
+        'senderId': 'user_002',
+        'content': '',
+        'messageType': 'audio',
+        'fileUrl': '/uploads/voice_note_01.m4a',
+        'fileName': 'voice_note_01.m4a',
+        'fileSize': 2048,
+        'mimeType': 'audio/mp4',
+        'isDeleted': false,
+        'createdAt': '2026-04-01T12:00:00.000Z',
+        'updatedAt': '2026-04-01T12:00:00.000Z',
+        'seenBy': [],
+        'deliveredTo': [],
+      });
+
+      // Launch 3 simultaneous downloads (simulating multiple players or callbacks)
+      final future1 = repository.downloadAttachment(msg);
+      final future2 = repository.downloadAttachment(msg);
+      final future3 = repository.downloadAttachment(msg);
+
+      final results = await Future.wait([future1, future2, future3]);
+
+      expect(results[0], equals(results[1]));
+      expect(results[1], equals(results[2]));
+      expect(File(results[0]).existsSync(), isTrue);
+      expect(results[0].endsWith('.m4a'), isTrue);
+      // Only 1 network request was made despite 3 concurrent calls
+      expect(networkCallCount, equals(1));
+    });
   });
 }

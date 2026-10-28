@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,22 @@ import 'package:just_audio/just_audio.dart';
 import '../../../../core/network/media_url_resolver.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../models/chat_models.dart';
+
+/// Global coordinator to ensure only one voice note plays at a time (like WhatsApp)
+class ChatAudioPlaybackCoordinator {
+  static final ValueNotifier<String?> activePlayerNotifier =
+      ValueNotifier<String?>(null);
+
+  static void setActive(String messageId) {
+    activePlayerNotifier.value = messageId;
+  }
+
+  static void stopIfActive(String messageId) {
+    if (activePlayerNotifier.value == messageId) {
+      activePlayerNotifier.value = null;
+    }
+  }
+}
 
 /// WhatsApp-style voice note audio player.
 ///
@@ -34,8 +51,8 @@ class ChatAudioAttachmentPlayer extends ConsumerStatefulWidget {
 class _ChatAudioAttachmentPlayerState
     extends ConsumerState<ChatAudioAttachmentPlayer> {
   late final AudioPlayer _player;
-  String? _loadedUrl;
-  String? _loadedToken;
+  String? _loadedFilePath;
+  bool _isLoaded = false;
   bool _loading = false;
   bool _audioPluginUnavailable = false;
   double _playbackSpeed = 1.0;
@@ -59,9 +76,13 @@ class _ChatAudioAttachmentPlayerState
       _knownTotalDuration = Duration(milliseconds: metaMs);
     }
 
+    ChatAudioPlaybackCoordinator.activePlayerNotifier
+        .addListener(_onActivePlayerChanged);
+
     _player.playerStateStream.listen((state) {
       if (!mounted) return;
       if (state.playing) {
+        ChatAudioPlaybackCoordinator.setActive(widget.message.id);
         if (!_hasBeenPlayed) {
           setState(() => _hasBeenPlayed = true);
         }
@@ -69,6 +90,7 @@ class _ChatAudioAttachmentPlayerState
       if (state.processingState == ProcessingState.completed) {
         _player.seek(Duration.zero);
         _player.pause();
+        ChatAudioPlaybackCoordinator.stopIfActive(widget.message.id);
       }
     });
 
@@ -79,28 +101,61 @@ class _ChatAudioAttachmentPlayerState
         });
       }
     });
+
+    // Check if audio file is already cached in local phone storage, or pre-cache
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _checkAndPreloadAudio();
+      }
+    });
+  }
+
+  void _onActivePlayerChanged() {
+    if (ChatAudioPlaybackCoordinator.activePlayerNotifier.value !=
+        widget.message.id) {
+      if (_player.playing) {
+        _player.pause();
+      }
+    }
   }
 
   @override
   void dispose() {
+    ChatAudioPlaybackCoordinator.activePlayerNotifier
+        .removeListener(_onActivePlayerChanged);
+    ChatAudioPlaybackCoordinator.stopIfActive(widget.message.id);
     _player.dispose().catchError((_) {});
     super.dispose();
   }
 
-  Future<void> _ensureLoaded(String token) async {
-    final url = resolveMediaUrl(widget.message.fileUrl) ?? '';
-    if (url.isEmpty || _audioPluginUnavailable) return;
-    if (_loadedUrl == url && _loadedToken == token) return;
-    if (_loading) return;
-
-    _loading = true;
+  Future<void> _checkAndPreloadAudio() async {
+    if (_audioPluginUnavailable || _isLoaded || _loading) return;
     try {
-      final dur = await _player.setUrl(
-        url,
-        headers: {'Authorization': 'Bearer $token'},
-      );
-      _loadedUrl = url;
-      _loadedToken = token;
+      final repository = ref.read(chatRepositoryProvider);
+      final cachedPath =
+          await repository.getCachedAttachmentPath(widget.message);
+      if (cachedPath != null && await File(cachedPath).exists()) {
+        await _loadFromLocalFile(cachedPath);
+      } else {
+        // Pre-cache voice note file into internal storage in background
+        final fileUrl = widget.message.fileUrl;
+        if (fileUrl != null && fileUrl.isNotEmpty) {
+          final path = await repository
+              .downloadAttachment(widget.message)
+              .timeout(const Duration(seconds: 25));
+          if (mounted && path.isNotEmpty && await File(path).exists()) {
+            await _loadFromLocalFile(path);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadFromLocalFile(String path) async {
+    try {
+      final dur = await _player.setFilePath(path);
+      _loadedFilePath = path;
+      _isLoaded = true;
       if (dur != null && dur > Duration.zero && mounted) {
         setState(() {
           _knownTotalDuration = dur;
@@ -108,14 +163,79 @@ class _ChatAudioAttachmentPlayerState
       }
     } on MissingPluginException {
       _audioPluginUnavailable = true;
-      _loadedUrl = null;
-      _loadedToken = null;
+      _isLoaded = false;
     } catch (_) {
-      _loadedUrl = null;
-      _loadedToken = null;
+      _isLoaded = false;
+      _loadedFilePath = null;
+    }
+  }
+
+  Future<void> _handlePlayPause() async {
+    if (_audioPluginUnavailable) return;
+    HapticFeedback.selectionClick();
+
+    if (_player.playing) {
+      await _player.pause();
+      return;
+    }
+
+    // 1. If already loaded into player, play immediately!
+    if (_isLoaded &&
+        _loadedFilePath != null &&
+        File(_loadedFilePath!).existsSync()) {
+      ChatAudioPlaybackCoordinator.setActive(widget.message.id);
+      await _player.play();
+      return;
+    }
+
+    // 2. Not yet loaded: load from internal storage or download
+    if (_loading) return;
+    setState(() => _loading = true);
+
+    try {
+      final repository = ref.read(chatRepositoryProvider);
+      String? localPath =
+          await repository.getCachedAttachmentPath(widget.message);
+
+      if (localPath == null || !File(localPath).existsSync()) {
+        localPath = await repository
+            .downloadAttachment(widget.message)
+            .timeout(const Duration(seconds: 25));
+      }
+
+      if (!mounted) return;
+
+      if (localPath.isNotEmpty && await File(localPath).exists()) {
+        final dur = await _player
+            .setFilePath(localPath)
+            .timeout(const Duration(seconds: 15));
+        _loadedFilePath = localPath;
+        _isLoaded = true;
+        if (dur != null && dur > Duration.zero && mounted) {
+          _knownTotalDuration = dur;
+        }
+        if (mounted) {
+          ChatAudioPlaybackCoordinator.setActive(widget.message.id);
+          await _player.play();
+        }
+      }
+    } on MissingPluginException {
+      if (mounted) {
+        setState(() => _audioPluginUnavailable = true);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تعذر تحميل أو تشغيل التسجيل الصوتي حاليًا'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } finally {
-      _loading = false;
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -194,9 +314,7 @@ class _ChatAudioAttachmentPlayerState
       );
     }
 
-    if (token != null && token.isNotEmpty) {
-      _ensureLoaded(token);
-    }
+// Audio preloading and caching handled locally via internal storage
 
     // Determine colors tailored to outgoing vs incoming bubbles
     final isMine = widget.isMine;
@@ -269,7 +387,6 @@ class _ChatAudioAttachmentPlayerState
                   children: [
                     // 1. Play / Pause circular button
                     _buildPlayButton(
-                      token: token,
                       isPlaying: isPlaying,
                       isBuffering: isBuffering,
                       actionBgColor: actionBgColor,
@@ -361,7 +478,6 @@ class _ChatAudioAttachmentPlayerState
   }
 
   Widget _buildPlayButton({
-    required String? token,
     required bool isPlaying,
     required bool isBuffering,
     required Color actionBgColor,
@@ -370,22 +486,7 @@ class _ChatAudioAttachmentPlayerState
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: (token == null || token.isEmpty)
-            ? null
-            : () async {
-                try {
-                  HapticFeedback.selectionClick();
-                  if (isPlaying) {
-                    await _player.pause();
-                  } else {
-                    await _player.play();
-                  }
-                } on MissingPluginException {
-                  if (mounted) {
-                    setState(() => _audioPluginUnavailable = true);
-                  }
-                } catch (_) {}
-              },
+        onTap: _handlePlayPause,
         borderRadius: BorderRadius.circular(22),
         child: Container(
           width: 42,

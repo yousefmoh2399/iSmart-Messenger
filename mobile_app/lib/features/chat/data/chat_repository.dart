@@ -35,6 +35,8 @@ class ChatRepository {
       <String, Future<Uint8List>>{};
   final Map<String, Future<Uint8List>> _attachmentPreviewInFlight =
       <String, Future<Uint8List>>{};
+  final Map<String, Future<String>> _downloadAttachmentInFlight =
+      <String, Future<String>>{};
 
   final ApiClient _apiClient;
   final LocalMediaStorageService _localStorage;
@@ -745,6 +747,12 @@ class ChatRepository {
       }
     }
 
+    // In-flight deduplication: if already downloading, reuse existing future
+    final inFlight = _downloadAttachmentInFlight[message.id];
+    if (inFlight != null && !forceRefresh) {
+      return inFlight;
+    }
+
     if (forceRefresh && await targetFile.exists()) {
       try {
         await targetFile.delete();
@@ -753,14 +761,22 @@ class ChatRepository {
 
     final downloadUrl = _downloadUrlFor(message.fileUrl!);
     
-    await _downloadAttachmentFileWithRestore(
-      message,
-      downloadUrl,
-      targetFile.path,
-      onProgress: onProgress,
-    );
+    final future = () async {
+      await _downloadAttachmentFileWithRestore(
+        message,
+        downloadUrl,
+        targetFile.path,
+        onProgress: onProgress,
+      );
+      return targetFile.path;
+    }();
 
-    return targetFile.path;
+    _downloadAttachmentInFlight[message.id] = future;
+    try {
+      return await future;
+    } finally {
+      _downloadAttachmentInFlight.remove(message.id);
+    }
   }
 
   Future<void> _downloadAttachmentFileWithRestore(
@@ -815,7 +831,7 @@ class ChatRepository {
         final stream = response.data?.stream;
         if (stream == null) throw Exception('No data stream');
 
-        await for (final chunk in stream) {
+        await for (final chunk in stream.timeout(const Duration(seconds: 20))) {
           fileSink.add(chunk);
           downloadedBytes += chunk.length;
           if (onProgress != null && totalBytes > 0) {
@@ -827,50 +843,46 @@ class ChatRepository {
         await fileSink.close();
         fileSink = null;
         return; // success
-      } on DioException catch (error) {
+      } catch (error) {
         if (fileSink != null) {
-          await fileSink.flush();
-          await fileSink.close();
+          try {
+            await fileSink.flush();
+            await fileSink.close();
+          } catch (_) {}
+          fileSink = null;
         }
         
-        final statusCode = error.response?.statusCode ?? 0;
+        if (error is DioException) {
+          final statusCode = error.response?.statusCode ?? 0;
 
-        // 404 → file not on server, request rehydration then retry
-        if (statusCode == 404) {
-          if (attempt == 0) {
-            await requestAttachmentRehydrate(
-              message,
-              skipErrorLog: skipErrorLog,
-            );
+          // 404 → file not on server, request rehydration then retry
+          if (statusCode == 404) {
+            if (attempt == 0) {
+              await requestAttachmentRehydrate(
+                message,
+                skipErrorLog: skipErrorLog,
+              );
+            }
+            if (attempt < maxAttempts - 1) {
+              await Future<void>.delayed(const Duration(seconds: 3));
+              continue;
+            }
+            rethrow;
           }
-          if (attempt < maxAttempts - 1) {
-            await Future<void>.delayed(const Duration(seconds: 3));
-            continue;
+
+          // 416 → partial file is invalid/larger than server file
+          if (statusCode == 416) {
+            try {
+              if (await File(savePath).exists()) await File(savePath).delete();
+            } catch (_) {}
+            if (attempt < maxAttempts - 1) {
+              continue;
+            }
+            rethrow;
           }
-          rethrow;
         }
 
-        // 416 → partial file is invalid/larger than server file
-        if (statusCode == 416) {
-          try {
-            if (await File(savePath).exists()) await File(savePath).delete();
-          } catch (_) {}
-          if (attempt < maxAttempts - 1) {
-            continue;
-          }
-        }
-
-        // Connection reset / closed mid-download → retry automatically
-        final isConnectionReset =
-            error.type == DioExceptionType.unknown &&
-            (error.error is HttpException ||
-             error.error?.toString().contains('Connection closed') == true ||
-             error.error?.toString().contains('Connection reset') == true ||
-             error.error?.toString().contains('ECONNABORTED') == true ||
-             error.error?.toString().contains('SocketException') == true ||
-             error.error?.toString().contains('Software caused connection abort') == true);
-
-        if (isConnectionReset && attempt < maxAttempts - 1) {
+        if (attempt < maxAttempts - 1) {
           await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
           continue;
         }
@@ -1135,7 +1147,16 @@ class ChatRepository {
   }
 
   Future<File> _fullAttachmentCacheFile(ChatMessage message) async {
-    final fileName = p.basename(message.fileName ?? 'attachment');
+    String fileName = p.basename(message.fileName ?? 'attachment');
+    if (fileName == 'attachment') {
+      if (message.isAudioMessage) {
+        fileName = 'voice_${message.id}.m4a';
+      } else if (message.isImageMessage) {
+        fileName = 'image_${message.id}.jpg';
+      }
+    } else if (message.isAudioMessage && !fileName.contains('.')) {
+      fileName = '$fileName.m4a';
+    }
     final cacheDirectory = await _localStorage.chatDirectory(
       preferredPath: _preferences.localStorageDirectoryPath,
     );
