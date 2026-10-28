@@ -14,6 +14,7 @@ import '../../features/admin/presentation/announcements_controller.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/chat/data/chat_local_cache.dart';
+import '../../features/chat/data/chat_outbox_service.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -393,6 +394,13 @@ final announcementRepositoryProvider = Provider<AnnouncementRepository>((ref) {
 
 final chatLocalCacheProvider = Provider<ChatLocalCache>((ref) {
   return ChatLocalCache();
+});
+
+final chatOutboxServiceProvider = Provider<ChatOutboxService>((ref) {
+  final cache = ref.watch(chatLocalCacheProvider);
+  final service = ChatOutboxService(cache);
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {

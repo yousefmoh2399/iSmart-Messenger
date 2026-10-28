@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart' hide RefreshCallback;
 import 'package:flutter/material.dart';
@@ -1000,7 +1001,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isNetworkError(e)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('فشل الإرسال: لا يوجد اتصال بالسيرفر حالياً.'),
@@ -1010,6 +1011,34 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     } finally {
       _isSendingText = false;
     }
+  }
+
+  bool _isNetworkError(Object error) {
+    if (error is SocketException || error is TimeoutException) return true;
+    if (error is DioException) {
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.connectionError) {
+        return true;
+      }
+      if (error.error is SocketException || error.error is TimeoutException) {
+        return true;
+      }
+    }
+    final str = error.toString().toLowerCase();
+    return str.contains('socketexception') ||
+        str.contains('connection refused') ||
+        str.contains('connection closed') ||
+        str.contains('connection reset') ||
+        str.contains('network is unreachable') ||
+        str.contains('failed host lookup') ||
+        str.contains('connection timeout') ||
+        str.contains('sendtimeout') ||
+        str.contains('receivetimeout') ||
+        str.contains('software caused connection abort') ||
+        str.contains('clientexception') ||
+        str.contains('handshakeexception');
   }
 
   Future<void> _sendFile() async {
@@ -1275,7 +1304,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         setState(() => _replyingTo = null);
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isNetworkError(e)) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to create poll: $e')));
@@ -1322,7 +1351,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         setState(() => _replyingTo = null);
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isNetworkError(e)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to create checklist: $e')),
         );
@@ -1562,9 +1591,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(messageFromChatDioError(e))));
+      if (!_isNetworkError(e)) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(messageFromChatDioError(e))));
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -3489,7 +3520,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                         _downloadAttachment(
                                           message,
                                           openAfterDownload: false,
-                                          forceRedownload: true,
+                                          forceRedownload: false,
                                         ),
                                   ),
                                 ],

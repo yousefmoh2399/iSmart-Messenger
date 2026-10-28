@@ -716,6 +716,23 @@ class ChatRepository {
       }
     }
 
+    try {
+      final cacheDirectory = await _localStorage.chatDirectory(
+        preferredPath: _preferences.localStorageDirectoryPath,
+      );
+      if (await cacheDirectory.exists()) {
+        final prefix = '${message.id}_';
+        await for (final entry in cacheDirectory.list()) {
+          if (entry is File) {
+            final name = p.basename(entry.path);
+            if (name.startsWith(prefix) && await entry.length() > 0) {
+              return entry.path;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
     return null;
   }
 
@@ -786,7 +803,10 @@ class ChatRepository {
     void Function(int received, int total)? onProgress,
     bool skipErrorLog = false,
   }) async {
-    const maxAttempts = 5;
+    final isAudio = message.isAudioMessage ||
+        message.messageType == 'audio' ||
+        message.metadata?['voiceNote'] == true;
+    final maxAttempts = isAudio ? 2 : 5;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       int downloadedBytes = 0;
@@ -831,7 +851,11 @@ class ChatRepository {
         final stream = response.data?.stream;
         if (stream == null) throw Exception('No data stream');
 
-        await for (final chunk in stream.timeout(const Duration(seconds: 20))) {
+        final chunkTimeout = isAudio
+            ? const Duration(seconds: 10)
+            : const Duration(seconds: 20);
+
+        await for (final chunk in stream.timeout(chunkTimeout)) {
           fileSink.add(chunk);
           downloadedBytes += chunk.length;
           if (onProgress != null && totalBytes > 0) {
@@ -864,7 +888,11 @@ class ChatRepository {
               );
             }
             if (attempt < maxAttempts - 1) {
-              await Future<void>.delayed(const Duration(seconds: 3));
+              await Future<void>.delayed(
+                isAudio
+                    ? const Duration(milliseconds: 800)
+                    : const Duration(seconds: 3),
+              );
               continue;
             }
             rethrow;
@@ -883,7 +911,11 @@ class ChatRepository {
         }
 
         if (attempt < maxAttempts - 1) {
-          await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
+          await Future<void>.delayed(
+            isAudio
+                ? const Duration(milliseconds: 800)
+                : Duration(seconds: 2 * (attempt + 1)),
+          );
           continue;
         }
 

@@ -752,6 +752,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         unawaited(
           _refreshServerConnectionState(quiet: true, refreshAfterRestore: true),
         );
+        unawaited(_drainChatOutbox());
         return;
       }
       if (event.type == 'announcements_updated') {
@@ -818,11 +819,53 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (hasConnection) {
         unawaited(_refreshServerConnectionState(quiet: true));
         unawaited(_syncPendingUploadsInBackground());
+        unawaited(_drainChatOutbox());
         try {
           ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
         } catch (_) {}
       }
     });
+  }
+
+  Future<void> _drainChatOutbox() async {
+    try {
+      final outbox = ref.read(chatOutboxServiceProvider);
+      final repo = ref.read(chatRepositoryProvider);
+      await outbox.drainQueue(
+        repository: repo,
+        onConfirmed: (item, confirmed) {
+          if (!mounted) return;
+          try {
+            ref
+                .read(chatOverviewControllerProvider.notifier)
+                .applyConfirmedOutboxMessage(
+                  item.conversationId,
+                  item.tempMessageId,
+                  confirmed,
+                );
+          } catch (_) {}
+          try {
+            final activeId = ref.read(activeConversationIdProvider);
+            if (activeId == item.conversationId) {
+              ref
+                  .read(conversationMessagesControllerProvider(item.conversationId).notifier)
+                  .applyConfirmedOutboxMessage(item.tempMessageId, confirmed);
+            }
+          } catch (_) {}
+        },
+        onFailed: (item, error) {
+          if (!mounted) return;
+          try {
+            final activeId = ref.read(activeConversationIdProvider);
+            if (activeId == item.conversationId) {
+              ref
+                  .read(conversationMessagesControllerProvider(item.conversationId).notifier)
+                  .applyFailedOutboxMessage(item.tempMessageId, error.toString());
+            }
+          } catch (_) {}
+        },
+      );
+    } catch (_) {}
   }
 
   Future<void> _handleIncomingFileRequest(Map<String, dynamic> payload) async {
@@ -1280,6 +1323,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         ref.read(conversationMessagesControllerProvider(activeId).notifier).refresh();
       } catch (_) {}
     }
+    unawaited(_drainChatOutbox());
   }
 
   @override

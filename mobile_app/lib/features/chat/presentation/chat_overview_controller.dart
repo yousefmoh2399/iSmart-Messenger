@@ -1,14 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
+import '../data/chat_outbox_service.dart';
 import '../data/chat_repository.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
@@ -69,7 +72,6 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   }
 
   Future<bool> _waitForAuthenticatedSession() async {
-    ref.watch(authCredentialsRevisionProvider);
     final authUser = ref.watch(currentUserProvider);
     return authUser != null;
   }
@@ -186,16 +188,24 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       manageableMap.values.toList(),
     );
 
+    final existingConversations = state.valueOrNull?.conversations ?? const [];
+    final effectiveConversations =
+        conversations.isEmpty && existingConversations.isNotEmpty
+            ? existingConversations
+            : conversations;
+
     final overview = ChatOverviewData(
-      conversations: conversations,
+      conversations: effectiveConversations,
       manageableConversations: manageableConversations,
       users: usersPage.users,
       departments: departments,
       branches: branches,
       roles: roles,
     );
-    _repository().cache.saveOverviewData(overview);
-    _persistConversations(conversations);
+    if (effectiveConversations.isNotEmpty) {
+      _repository().cache.saveOverviewData(overview);
+      _persistConversations(effectiveConversations);
+    }
     return overview;
   }
 
@@ -815,6 +825,63 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }).toList();
 
     state = AsyncData(_copyOverview(source: current, conversations: updated));
+  }
+
+  void updateLastMessageOptimistically(
+    String conversationId,
+    ChatMessage message,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    final lastMessage = _buildLastMessage(message);
+
+    updated[index] = existing.copyWith(
+      lastMessage: lastMessage,
+      updatedAt: message.createdAt,
+    );
+
+    state = AsyncData(
+      _copyOverview(
+        source: current,
+        conversations: _sortConversations(updated),
+      ),
+    );
+  }
+
+  void applyConfirmedOutboxMessage(
+    String conversationId,
+    String tempId,
+    ChatMessage confirmed,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId ||
+        existing.lastMessage?.id == confirmed.id) {
+      updated[index] = existing.copyWith(
+        lastMessage: _buildLastMessage(confirmed),
+        updatedAt: confirmed.createdAt,
+      );
+      state = AsyncData(
+        _copyOverview(
+          source: current,
+          conversations: _sortConversations(updated),
+        ),
+      );
+    }
   }
 
   void _applySeenUpdate({
@@ -1694,6 +1761,7 @@ class ConversationMessagesController
   /// A pending message in cache means the app was killed before the server
   /// acknowledged it — it will never auto-confirm, so treat it as failed.
   ChatMessagesPage _markPendingAsFailed(ChatMessagesPage page) {
+    final outbox = ref.read(chatOutboxServiceProvider);
     final fixed = page.messages.map((m) {
       if (!m.id.startsWith('temp_')) {
         if (m.metadata != null &&
@@ -1708,6 +1776,11 @@ class ConversationMessagesController
       }
       final msgStatus = m.metadata?['status']?.toString();
       if (msgStatus == 'pending') {
+        final clientMessageId = m.metadata?['clientMessageId']?.toString() ??
+            (m.id.startsWith('temp_') ? m.id.substring(5) : m.id);
+        if (outbox.isPending(clientMessageId)) {
+          return m;
+        }
         final updated = Map<String, dynamic>.from(m.metadata ?? {});
         updated['status'] = 'failed';
         return m.copyWith(metadata: updated);
@@ -2009,6 +2082,27 @@ class ConversationMessagesController
       ),
     );
 
+    // Update conversation item on main screen with clock icon!
+    try {
+      ref
+          .read(chatOverviewControllerProvider.notifier)
+          .updateLastMessageOptimistically(arg, tempMessage);
+    } catch (_) {}
+
+    // Enqueue in Outbox
+    final outboxItem = ChatOutboxItem(
+      clientMessageId: stableClientMessageId,
+      conversationId: arg,
+      content: content,
+      messageType: messageType ?? 'text',
+      replyToMessageId: replyToMessageId,
+      metadata: effectiveMetadata,
+      createdAt: tempCreatedAt,
+    );
+    try {
+      await ref.read(chatOutboxServiceProvider).enqueue(outboxItem);
+    } catch (_) {}
+
     try {
       final result = await _guardAuth(
         () => _repository().sendTextMessage(
@@ -2025,6 +2119,10 @@ class ConversationMessagesController
         ),
       );
 
+      try {
+        await ref.read(chatOutboxServiceProvider).remove(stableClientMessageId);
+      } catch (_) {}
+
       final confirmedMetadata = Map<String, dynamic>.from(
         result.message.metadata ?? const {},
       );
@@ -2037,13 +2135,32 @@ class ConversationMessagesController
       );
 
       final latest = state.valueOrNull ?? current;
+      final withoutTemp =
+          latest.messages.where((m) => m.id != tempMessage.id).toList();
       _setStateAndCache(
         latest.copyWith(
-          messages: _upsertMessage(latest.messages, confirmedMessage),
+          messages: _upsertMessage(withoutTemp, confirmedMessage),
         ),
         immediate: true,
       );
+
+      try {
+        ref
+            .read(chatOverviewControllerProvider.notifier)
+            .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
+      } catch (_) {}
     } catch (error) {
+      if (_isNetworkError(error)) {
+        // Offline / network failure: WhatsApp-style, message stays pending in chat with clock icon!
+        debugPrint(
+            '[Chat] Message queued in outbox while offline: $stableClientMessageId');
+        return;
+      }
+
+      try {
+        await ref.read(chatOutboxServiceProvider).remove(stableClientMessageId);
+      } catch (_) {}
+
       final failedMessage = tempMessage.copyWith(
         metadata: {
           ...effectiveMetadata,
@@ -2099,30 +2216,239 @@ class ConversationMessagesController
     void Function(int sent, int total)? onProgress,
   }) async {
     _socketService?.markActivity();
-    final result = await _guardAuth(
-      () => _repository().sendFileMessage(
-        conversationId: arg,
-        filePath: filePath,
-        content: content,
-        replyToMessageId: replyToMessageId,
-        customFileName: customFileName,
-        metadata: metadata,
-        onProgress: onProgress,
-      ),
+    final stableClientMessageId = const Uuid().v4();
+    final tempCreatedAt = DateTime.now();
+    final fileName = customFileName ?? p.basename(filePath);
+    final ext = p.extension(filePath).toLowerCase();
+    final isAudio = metadata?['voiceNote'] == true ||
+        ext == '.m4a' ||
+        ext == '.aac' ||
+        ext == '.mp3' ||
+        ext == '.wav' ||
+        ext == '.ogg';
+    final isImage = ext == '.jpg' ||
+        ext == '.jpeg' ||
+        ext == '.png' ||
+        ext == '.webp' ||
+        ext == '.gif';
+    final isPdf = ext == '.pdf';
+    final messageType = isAudio
+        ? 'audio'
+        : (isImage ? 'image' : (isPdf ? 'pdf' : 'file'));
+
+    final cleanMetadata = Map<String, dynamic>.from(metadata ?? {});
+    cleanMetadata.remove('status');
+    cleanMetadata.remove('error');
+
+    final effectiveMetadata = <String, dynamic>{
+      ...cleanMetadata,
+      'clientMessageId': stableClientMessageId,
+      'localPath': filePath,
+    };
+
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    final currentUserId = authUser?.id ?? '';
+    final fileObj = File(filePath);
+    final fileSize = fileObj.existsSync() ? fileObj.lengthSync() : null;
+
+    final tempMessage = ChatMessage(
+      id: 'temp_$stableClientMessageId',
+      conversationId: arg,
+      senderId: currentUserId,
+      sender: authUser != null
+          ? ChatDirectoryUser(
+              id: authUser.id,
+              username: authUser.username,
+              fullName: authUser.fullName,
+              role: authUser.role,
+              departmentId: authUser.departmentId,
+              branchId: authUser.branchId,
+              branchCode: authUser.branchCode,
+              isOnline: authUser.isOnline,
+              presenceStatus: authUser.presenceStatus,
+              isActive: authUser.isActive,
+              avatarUrl: authUser.avatarUrl,
+              lastSeen: authUser.lastSeen,
+              lastActiveAt: authUser.lastActiveAt,
+            )
+          : null,
+      content: content ?? '',
+      messageType: messageType,
+      fileUrl: null,
+      fileName: fileName,
+      fileSize: fileSize,
+      mimeType: null,
+      replyToMessageId: replyToMessageId,
+      isDeleted: false,
+      metadata: {
+        ...effectiveMetadata,
+        'status': 'pending',
+      },
+      createdAt: tempCreatedAt,
+      updatedAt: tempCreatedAt,
+      seenBy: const [],
+      deliveredTo: const [],
     );
-    final current =
-        state.valueOrNull ??
+
+    final current = state.valueOrNull ??
         const ConversationMessagesState(
           messages: [],
           nextCursor: null,
           hasMore: false,
           isLoadingMore: false,
         );
+
+    // Optimistic insert: appears immediately in chat with clock icon!
     _setStateAndCache(
       current.copyWith(
-        messages: _upsertMessage(current.messages, result.message),
+        messages: _upsertMessage(current.messages, tempMessage),
       ),
     );
+
+    // Update conversation item on main screen with clock icon!
+    try {
+      ref
+          .read(chatOverviewControllerProvider.notifier)
+          .updateLastMessageOptimistically(arg, tempMessage);
+    } catch (_) {}
+
+    // Enqueue in Outbox
+    final outboxItem = ChatOutboxItem(
+      clientMessageId: stableClientMessageId,
+      conversationId: arg,
+      content: content ?? '',
+      messageType: messageType,
+      filePath: filePath,
+      customFileName: fileName,
+      replyToMessageId: replyToMessageId,
+      metadata: effectiveMetadata,
+      createdAt: tempCreatedAt,
+    );
+    try {
+      await ref.read(chatOutboxServiceProvider).enqueue(outboxItem);
+    } catch (_) {}
+
+    try {
+      final result = await _guardAuth(
+        () => _repository().sendFileMessage(
+          conversationId: arg,
+          filePath: filePath,
+          content: content,
+          replyToMessageId: replyToMessageId,
+          customFileName: customFileName,
+          metadata: effectiveMetadata,
+          onProgress: onProgress,
+        ),
+      );
+
+      try {
+        await ref.read(chatOutboxServiceProvider).remove(stableClientMessageId);
+      } catch (_) {}
+
+      final confirmedMetadata = Map<String, dynamic>.from(
+        result.message.metadata ?? const {},
+      );
+      confirmedMetadata['clientMessageId'] = stableClientMessageId;
+      confirmedMetadata['localPath'] = filePath;
+      confirmedMetadata.remove('status');
+      confirmedMetadata.remove('error');
+
+      final confirmedMessage = result.message.copyWith(
+        metadata: confirmedMetadata.isEmpty ? null : confirmedMetadata,
+      );
+
+      final latest = state.valueOrNull ?? current;
+      final withoutTemp =
+          latest.messages.where((m) => m.id != tempMessage.id).toList();
+      _setStateAndCache(
+        latest.copyWith(
+          messages: _upsertMessage(withoutTemp, confirmedMessage),
+        ),
+        immediate: true,
+      );
+
+      try {
+        ref
+            .read(chatOverviewControllerProvider.notifier)
+            .applyConfirmedOutboxMessage(
+                arg, tempMessage.id, confirmedMessage);
+      } catch (_) {}
+    } catch (error) {
+      if (_isNetworkError(error)) {
+        // Offline / network failure: WhatsApp-style, message stays pending in chat with clock icon!
+        debugPrint(
+            '[Chat] File queued in outbox while offline: $stableClientMessageId');
+        return;
+      }
+
+      try {
+        await ref.read(chatOutboxServiceProvider).remove(stableClientMessageId);
+      } catch (_) {}
+
+      final failedMessage = tempMessage.copyWith(
+        metadata: {
+          ...effectiveMetadata,
+          'status': 'failed',
+          'error': error.toString(),
+        },
+      );
+      final latest = state.valueOrNull ?? current;
+      _setStateAndCache(
+        latest.copyWith(
+          messages: _upsertMessage(latest.messages, failedMessage),
+        ),
+      );
+      rethrow;
+    }
+  }
+
+  void applyConfirmedOutboxMessage(String tempId, ChatMessage confirmed) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final updated = current.messages.where((m) => m.id != tempId).toList();
+    _setStateAndCache(
+      current.copyWith(
+        messages: _upsertMessage(updated, confirmed),
+      ),
+      immediate: true,
+    );
+  }
+
+  void applyFailedOutboxMessage(String tempId, String error) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final updated = current.messages.map((m) {
+      if (m.id == tempId) {
+        return m.copyWith(
+          metadata: {
+            ...?m.metadata,
+            'status': 'failed',
+            'error': error,
+          },
+        );
+      }
+      return m;
+    }).toList();
+    _setStateAndCache(
+      current.copyWith(messages: updated),
+      immediate: true,
+    );
+  }
+
+  bool _isNetworkError(Object error) {
+    if (error is SocketException) return true;
+    if (error is TimeoutException) return true;
+    final str = error.toString().toLowerCase();
+    return str.contains('socketexception') ||
+        str.contains('connection refused') ||
+        str.contains('connection closed') ||
+        str.contains('connection reset') ||
+        str.contains('network is unreachable') ||
+        str.contains('failed host lookup') ||
+        str.contains('connection timeout') ||
+        str.contains('sendtimeout') ||
+        str.contains('receivetimeout') ||
+        str.contains('software caused connection abort');
   }
 
   Future<void> editMessage({

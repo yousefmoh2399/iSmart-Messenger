@@ -2607,29 +2607,17 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
   Widget? _buildStatusIcon() {
     if (widget.typingPreviewText != null) return null;
     final last = widget.conversation.lastMessage;
-    if (last == null ||
-        last.senderId == null ||
-        last.senderId != widget.currentUserId) {
+    if (last == null) return null;
+
+    final myId = widget.currentUserId.trim();
+    final senderId = (last.senderId ?? '').trim();
+    if (myId.isEmpty || senderId.isEmpty || senderId != myId) {
       return null;
     }
 
-    if (last.isSeenByAny(widget.currentUserId)) {
-      return const Icon(
-        Icons.done_all_rounded,
-        size: 15.5,
-        color: Color(0xFF16A34A), // WhatsApp Green / Read
-      );
-    }
-
-    if (last.isDeliveredToAny(widget.currentUserId)) {
-      return const Icon(
-        Icons.done_all_rounded,
-        size: 15.5,
-        color: Color(0xFF94A3B8), // WhatsApp Grey Double Check / Delivered
-      );
-    }
-
-    if (last.status == 'pending' || (last.id != null && last.id!.startsWith('temp_'))) {
+    // 1. Pending (in outbox or waiting for network) -> Clock icon
+    if (last.status == 'pending' ||
+        (last.id != null && last.id!.startsWith('temp_'))) {
       return const Icon(
         Icons.access_time_rounded,
         size: 13.5,
@@ -2637,6 +2625,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
       );
     }
 
+    // 2. Failed -> Error icon
     if (last.status == 'failed') {
       return const Icon(
         Icons.error_outline_rounded,
@@ -2645,6 +2634,25 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
       );
     }
 
+    // 3. Seen / Read -> WhatsApp Green Double Check
+    if (last.isSeenByAny(myId)) {
+      return const Icon(
+        Icons.done_all_rounded,
+        size: 15.5,
+        color: Color(0xFF16A34A), // WhatsApp Green / Read
+      );
+    }
+
+    // 4. Delivered -> WhatsApp Grey Double Check
+    if (last.isDeliveredToAny(myId)) {
+      return const Icon(
+        Icons.done_all_rounded,
+        size: 15.5,
+        color: Color(0xFF94A3B8), // WhatsApp Grey Double Check / Delivered
+      );
+    }
+
+    // 5. Sent -> Single Grey Check
     return const Icon(
       Icons.done_rounded,
       size: 15.5,
