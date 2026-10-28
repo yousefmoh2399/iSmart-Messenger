@@ -230,6 +230,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         return;
       }
 
+      if (event.type == 'message_delivered') {
+        _applyDeliveredUpdate(
+          conversationId: event.payload['conversationId']?.toString(),
+          userId: event.payload['userId']?.toString(),
+        );
+        return;
+      }
+
       if (event.type == 'message_deleted') {
         _applyMessageDeleted(event.payload['conversationId']?.toString());
         return;
@@ -322,11 +330,27 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         _ => 'رسالة',
       };
     }
+    final senderId = message.sender?.id ?? message.senderId;
+    final isSeen = message.seenBy.any((e) => e.userId != senderId);
+    final isDelivered = message.deliveredTo.any((e) => e.userId != senderId);
+    final status = message.isPending
+        ? 'pending'
+        : message.isFailed
+            ? 'failed'
+            : isSeen
+                ? 'read'
+                : isDelivered
+                    ? 'delivered'
+                    : 'sent';
     return ChatLastMessage(
+      id: message.id,
       content: content,
-      senderId: message.sender?.id ?? message.senderId,
+      senderId: senderId,
       senderName: message.sender?.displayName ?? '',
       messageType: message.messageType,
+      seenBy: message.seenBy,
+      deliveredTo: message.deliveredTo,
+      status: status,
       createdAt: message.createdAt,
     );
   }
@@ -739,17 +763,69 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    if (userId != _currentUserId) {
+    final isMe = userId == _currentUserId;
+
+    final updated = current.conversations.map((conversation) {
+      if (conversation.id != conversationId) {
+        return conversation;
+      }
+      var conv = conversation;
+      if (isMe) {
+        conv = conv.copyWith(unreadCount: 0);
+      } else {
+        final last = conv.lastMessage;
+        if (last != null && last.senderId == _currentUserId) {
+          final updatedSeenBy = [
+            ...last.seenBy.where((e) => e.userId != userId),
+            ChatReceipt(userId: userId, at: DateTime.now()),
+          ];
+          conv = conv.copyWith(
+            lastMessage: last.copyWith(
+              seenBy: updatedSeenBy,
+              status: 'read',
+            ),
+          );
+        }
+      }
+      return conv;
+    }).toList();
+
+    _setStateAndCache(_copyOverview(source: current, conversations: updated));
+  }
+
+  void _applyDeliveredUpdate({
+    required String? conversationId,
+    required String? userId,
+  }) {
+    final current = state.valueOrNull;
+    if (current == null || conversationId == null || userId == null) {
+      return;
+    }
+    if (userId == _currentUserId) {
       return;
     }
 
-    final updated = current.conversations
-        .map(
-          (conversation) => conversation.id == conversationId
-              ? conversation.copyWith(unreadCount: 0)
-              : conversation,
-        )
-        .toList();
+    final updated = current.conversations.map((conversation) {
+      if (conversation.id != conversationId) {
+        return conversation;
+      }
+      final last = conversation.lastMessage;
+      if (last != null && last.senderId == _currentUserId) {
+        if (!last.isSeenByAny(_currentUserId)) {
+          final updatedDelivered = [
+            ...last.deliveredTo.where((e) => e.userId != userId),
+            ChatReceipt(userId: userId, at: DateTime.now()),
+          ];
+          return conversation.copyWith(
+            lastMessage: last.copyWith(
+              deliveredTo: updatedDelivered,
+              status: last.status == 'read' ? 'read' : 'delivered',
+            ),
+          );
+        }
+      }
+      return conversation;
+    }).toList();
 
     _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }

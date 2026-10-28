@@ -292,36 +292,98 @@ class ChatRole {
 
 class ChatLastMessage {
   const ChatLastMessage({
+    this.id,
     required this.content,
     required this.senderId,
     required this.senderName,
     required this.messageType,
+    this.seenBy = const <ChatReceipt>[],
+    this.deliveredTo = const <ChatReceipt>[],
+    this.status = 'sent',
     required this.createdAt,
   });
 
+  final String? id;
   final String content;
   final String? senderId;
   final String senderName;
   final String messageType;
+  final List<ChatReceipt> seenBy;
+  final List<ChatReceipt> deliveredTo;
+  final String status;
   final DateTime? createdAt;
+
+  bool isSeenByAny(String currentUserId) {
+    if (status == 'read') return true;
+    return seenBy.any((entry) => entry.userId != currentUserId);
+  }
+
+  bool isDeliveredToAny(String currentUserId) {
+    if (status == 'delivered' || isSeenByAny(currentUserId)) return true;
+    return deliveredTo.any((entry) => entry.userId != currentUserId);
+  }
+
+  ChatLastMessage copyWith({
+    String? id,
+    String? content,
+    String? senderId,
+    String? senderName,
+    String? messageType,
+    List<ChatReceipt>? seenBy,
+    List<ChatReceipt>? deliveredTo,
+    String? status,
+    DateTime? createdAt,
+  }) {
+    return ChatLastMessage(
+      id: id ?? this.id,
+      content: content ?? this.content,
+      senderId: senderId ?? this.senderId,
+      senderName: senderName ?? this.senderName,
+      messageType: messageType ?? this.messageType,
+      seenBy: seenBy ?? this.seenBy,
+      deliveredTo: deliveredTo ?? this.deliveredTo,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
+      if (id != null) 'id': id,
       'content': content,
       'senderId': senderId,
       'senderName': senderName,
       'messageType': messageType,
+      'seenBy': seenBy.map((e) => e.toJson()).toList(),
+      'deliveredTo': deliveredTo.map((e) => e.toJson()).toList(),
+      'status': status,
       'createdAt': createdAt?.toIso8601String(),
     };
   }
 
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
+    final rawSender = map['senderId'];
+    final senderId = rawSender is Map
+        ? (rawSender['_id'] ?? rawSender['id'])?.toString()
+        : rawSender?.toString();
+    final rawSeenBy = map['seenBy'];
+    final rawDeliveredTo = map['deliveredTo'];
     return ChatLastMessage(
+      id: (map['id'] ?? map['_id'])?.toString(),
       content: (map['content'] ?? map['text'] ?? '').toString(),
-      senderId: map['senderId'] is Map ? (map['senderId']['_id'] ?? map['senderId']['id'])?.toString() : map['senderId']?.toString(),
+      senderId: senderId,
       senderName: map['senderName'] as String? ?? '',
       messageType: map['messageType'] as String? ?? 'text',
+      seenBy: (rawSeenBy is List ? rawSeenBy : const [])
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      deliveredTo: (rawDeliveredTo is List ? rawDeliveredTo : const [])
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      status: map['status']?.toString() ?? 'sent',
       createdAt: map['createdAt'] is String
           ? DateTime.tryParse(map['createdAt'] as String)
           : null,

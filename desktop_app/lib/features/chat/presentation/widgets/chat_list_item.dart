@@ -52,7 +52,7 @@ class _ChatListItemState extends State<ChatListItem> {
     final accent = conversationTypeAccent(widget.conversation.type);
     final title = widget.conversation.displayTitle(widget.currentUserId);
     final preview =
-        widget.typingPreviewText ?? _previewText(widget.conversation);
+        widget.typingPreviewText ?? _previewText(widget.conversation, widget.currentUserId);
     final avatarLabel = (peer?.displayName ?? title).trim();
     final String tooltipMessage = (peer?.jobTitle.trim().isNotEmpty == true)
         ? '$title\n💼 ${peer!.jobTitle.trim()}'
@@ -64,6 +64,47 @@ class _ChatListItemState extends State<ChatListItem> {
     final hoverColor = colorScheme.onSurface.withValues(alpha: 0.04);
     final inactiveColor = colorScheme.surfaceContainerHighest;
     final isTypingPreview = widget.typingPreviewText != null;
+
+    final lastMessage = widget.conversation.lastMessage;
+    final isMyLastMessage = !isTypingPreview &&
+        lastMessage != null &&
+        lastMessage.senderId != null &&
+        lastMessage.senderId == widget.currentUserId;
+
+    Widget? statusIcon;
+    if (isMyLastMessage) {
+      if (lastMessage.isSeenByAny(widget.currentUserId)) {
+        statusIcon = const Icon(
+          Icons.done_all_rounded,
+          size: 15,
+          color: Color(0xFF16A34A),
+        );
+      } else if (lastMessage.isDeliveredToAny(widget.currentUserId)) {
+        statusIcon = const Icon(
+          Icons.done_all_rounded,
+          size: 15,
+          color: Color(0xFF94A3B8),
+        );
+      } else if (lastMessage.status == 'pending' || (lastMessage.id != null && lastMessage.id!.startsWith('temp_'))) {
+        statusIcon = const Icon(
+          Icons.access_time_rounded,
+          size: 13,
+          color: Color(0xFF94A3B8),
+        );
+      } else if (lastMessage.status == 'failed') {
+        statusIcon = const Icon(
+          Icons.error_outline_rounded,
+          size: 14,
+          color: Color(0xFFEF4444),
+        );
+      } else {
+        statusIcon = const Icon(
+          Icons.done_rounded,
+          size: 15,
+          color: Color(0xFF94A3B8),
+        );
+      }
+    }
 
     return RepaintBoundary(
       child: LayoutBuilder(
@@ -292,6 +333,10 @@ class _ChatListItemState extends State<ChatListItem> {
                             const SizedBox(height: 4),
                             Row(
                               children: [
+                                if (statusIcon != null) ...[
+                                  statusIcon,
+                                  const SizedBox(width: 4),
+                                ],
                                 Expanded(
                                   child: Text(
                                     preview,
@@ -439,7 +484,7 @@ class _ChatListItemState extends State<ChatListItem> {
   }
 }
 
-String _previewText(ChatConversation conversation) {
+String _previewText(ChatConversation conversation, [String? currentUserId]) {
   final lastMessage = conversation.lastMessage;
   if (lastMessage == null) {
     return 'ابدأ المحادثة الآن';
@@ -461,7 +506,13 @@ String _previewText(ChatConversation conversation) {
 
   final cleanBody = body.replaceAll(RegExp(r'[\r\n]+'), ' ');
 
-  if (conversation.type == 'direct' || lastMessage.senderName.trim().isEmpty) {
+  final isMe = currentUserId != null &&
+      lastMessage.senderId != null &&
+      lastMessage.senderId == currentUserId;
+
+  if (conversation.type == 'direct' ||
+      lastMessage.senderName.trim().isEmpty ||
+      isMe) {
     return cleanBody;
   }
 

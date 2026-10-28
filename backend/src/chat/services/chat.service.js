@@ -303,21 +303,28 @@ function getBroadcastRecipientVisibilityQuery(currentUserId) {
 function buildLastMessagePayload(message) {
   if (!message) {
     return {
+      id: null,
       content: "",
       senderId: null,
       senderName: "",
       messageType: null,
+      seenBy: [],
+      deliveredTo: [],
+      status: "sent",
       createdAt: null,
     };
   }
 
-  const senderId = getObjectIdString(message.senderId);
+  const senderId = getObjectIdString(message.senderId?._id || message.senderId);
   const senderName =
     message.senderId && typeof message.senderId === "object"
       ? message.senderId.fullName || message.senderId.username || ""
-      : "";
+      : message.senderName || "";
 
   let content = message.content || message.fileName || "";
+  if (!content && message.messageType === "system") {
+    content = "رسالة النظام";
+  }
 
   // For poll/checklist messages with empty content, derive preview from question
   if (!content) {
@@ -329,11 +336,36 @@ function buildLastMessagePayload(message) {
     }
   }
 
+  const rawSeenBy = message.seenBy || [];
+  const rawDeliveredTo = message.deliveredTo || [];
+
+  const seenBy = rawSeenBy
+    .filter((entry) => getObjectIdString(entry.userId || entry) !== senderId)
+    .map((entry) => ({
+      userId: getObjectIdString(entry.userId || entry),
+      at: entry.at || entry.seenAt || new Date(),
+    }));
+
+  const deliveredTo = rawDeliveredTo
+    .filter((entry) => getObjectIdString(entry.userId || entry) !== senderId)
+    .map((entry) => ({
+      userId: getObjectIdString(entry.userId || entry),
+      at: entry.at || entry.deliveredAt || new Date(),
+    }));
+
+  const status =
+    message.status ||
+    (seenBy.length > 0 ? "read" : deliveredTo.length > 0 ? "delivered" : "sent");
+
   return {
+    id: message._id ? message._id.toString() : (message.id ? message.id.toString() : null),
     content,
     senderId,
     senderName,
     messageType: message.messageType || null,
+    seenBy,
+    deliveredTo,
+    status,
     createdAt: message.createdAt || null,
   };
 }
@@ -447,13 +479,17 @@ async function serializeConversation(conversation, currentUserId) {
 
   const normalizedLastMessage = shouldHideLastMessage
     ? {
+        id: null,
         content: "",
         senderId: null,
         senderName: "",
         messageType: null,
+        seenBy: [],
+        deliveredTo: [],
+        status: "sent",
         createdAt: null,
       }
-    : conversation.lastMessage || null;
+    : (conversation.lastMessage ? buildLastMessagePayload(conversation.lastMessage) : null);
 
   return {
     id: conversation._id.toString(),
@@ -630,45 +666,7 @@ async function refreshConversationLastMessage(conversationId) {
     )
     .exec();
 
-  let nextLastMessage;
-  if (latestMessage) {
-    let content =
-      latestMessage.content ||
-      latestMessage.fileName ||
-      (latestMessage.messageType === "system" ? "رسالة النظام" : "");
-
-    // For poll/checklist messages with empty content, derive preview from question
-    if (!content) {
-      const meta = latestMessage.metadata || {};
-      if (latestMessage.messageType === "poll") {
-        content = meta.question ? `📊 ${meta.question}` : "📊 استطلاع رأي";
-      } else if (latestMessage.messageType === "checklist") {
-        content = meta.question ? `✅ ${meta.question}` : "✅ قائمة مهام";
-      }
-    }
-
-    nextLastMessage = {
-      content,
-      senderId:
-        latestMessage.senderId?._id?.toString?.() ||
-        latestMessage.senderId?.toString?.() ||
-        null,
-      senderName:
-        latestMessage.senderId?.fullName ||
-        latestMessage.senderId?.username ||
-        "",
-      messageType: latestMessage.messageType,
-      createdAt: latestMessage.createdAt,
-    };
-  } else {
-    nextLastMessage = {
-      content: "",
-      senderId: null,
-      senderName: "",
-      messageType: null,
-      createdAt: null,
-    };
-  }
+  const nextLastMessage = buildLastMessagePayload(latestMessage);
 
   await Conversation.updateOne(
     { _id: conversationId },
@@ -2019,13 +2017,7 @@ async function createMessage(currentUser, payload, file) {
     new Date(message.scheduledFor) > new Date();
 
   if (!isScheduledFuture) {
-    conversation.lastMessage = {
-      content: content || finalFileName || "",
-      senderId: currentUser.id,
-      senderName: currentUser.fullName || currentUser.username,
-      messageType: message.messageType,
-      createdAt: message.createdAt,
-    };
+    conversation.lastMessage = buildLastMessagePayload(message);
     await conversation.save();
 
     await incrementUnreadCounts(
@@ -2099,6 +2091,10 @@ async function markConversationSeen(currentUser, conversationId) {
     lastReadMessageId: lastReadMessage?._id || null,
   });
 
+  if (unseenMessages.length > 0) {
+    await refreshConversationLastMessage(conversationId);
+  }
+
   return unseenMessages.map((message) => message._id.toString());
 }
 
@@ -2136,12 +2132,16 @@ async function markConversationDelivered(currentUser, conversationId) {
     await message.save();
   }
 
+  if (undeliveredMessages.length > 0) {
+    await refreshConversationLastMessage(conversationId);
+  }
+
   return undeliveredMessages.map((message) => message._id.toString());
 }
 
 async function markMessageDeliveredForUser(messageId, userId) {
   const receipt = { userId, at: new Date() };
-  return Message.findOneAndUpdate(
+  const updatedMessage = await Message.findOneAndUpdate(
     {
       _id: messageId,
       senderId: { $ne: userId },
@@ -2150,6 +2150,10 @@ async function markMessageDeliveredForUser(messageId, userId) {
     { $push: { deliveredTo: receipt } },
     { new: true },
   ).lean();
+  if (updatedMessage) {
+    await refreshConversationLastMessage(updatedMessage.conversationId);
+  }
+  return updatedMessage;
 }
 
 async function markPendingDeliveriesForUser(currentUser) {
@@ -2235,6 +2239,7 @@ async function markMessageSeen(currentUser, messageId) {
   if (!seen) {
     message.seenBy.push({ userId: currentUser.id, at: new Date() });
     await message.save();
+    await refreshConversationLastMessage(message.conversationId);
   }
 
   await markConversationRead({
@@ -3511,6 +3516,7 @@ module.exports = {
   serializeUserLite,
   serializeConversation,
   serializeMessage,
+  buildLastMessagePayload,
   getConversationRoom,
   getConversationById,
   getConversationSnapshotForUserId,

@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const lastMessageSchema = new mongoose.Schema(
   {
+    id: { type: mongoose.Schema.Types.ObjectId, ref: "Message", default: null },
     content: { type: String, default: "" },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     senderName: { type: String, default: "" },
@@ -9,6 +10,25 @@ const lastMessageSchema = new mongoose.Schema(
       type: String,
       enum: ["text", "file", "image", "pdf", "audio", "system", "poll", "gif", "checklist"],
       default: "text",
+    },
+    seenBy: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+    deliveredTo: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+    status: {
+      type: String,
+      enum: ["sending", "pending", "sent", "delivered", "read", "failed"],
+      default: "sent",
     },
     createdAt: { type: Date, default: null },
   },

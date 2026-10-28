@@ -2552,14 +2552,75 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
 
   String _conversationPreview(ChatConversation conversation) {
     final last = conversation.lastMessage;
-    if (last == null) return 'لا توجد رسائل';
-    final type = last.messageType;
-    if (type == 'image') return '📷 صورة';
-    if (type == 'file') return '📎 ملف';
-    if (type == 'audio') return '🎤 صوت';
-    if (type == 'video') return '🎥 فيديو';
-    if (type == 'poll') return '📊 استطلاع رأي';
-    return last.content.isEmpty ? '...' : last.content;
+    if (last == null) return 'ابدأ المحادثة الآن';
+    final body = last.content.isNotEmpty
+        ? last.content
+        : switch (last.messageType) {
+            'poll' => '📊 استطلاع رأي',
+            'checklist' => '✅ قائمة مهام',
+            'image' => '📷 صورة',
+            'pdf' => '📄 ملف PDF',
+            'audio' => '🎙 ملاحظة صوتية',
+            'file' => '📎 ملف مرفق',
+            'gif' => '🎞 GIF',
+            'system' => 'رسالة النظام',
+            _ => 'رسالة',
+          };
+    final isMe = last.senderId != null && last.senderId == widget.currentUserId;
+    if (conversation.type == 'direct' ||
+        last.senderName.trim().isEmpty ||
+        isMe) {
+      return body;
+    }
+    return '${last.senderName}: $body';
+  }
+
+  Widget? _buildStatusIcon() {
+    if (widget.typingPreviewText != null) return null;
+    final last = widget.conversation.lastMessage;
+    if (last == null ||
+        last.senderId == null ||
+        last.senderId != widget.currentUserId) {
+      return null;
+    }
+
+    if (last.isSeenByAny(widget.currentUserId)) {
+      return const Icon(
+        Icons.done_all_rounded,
+        size: 15.5,
+        color: Color(0xFF16A34A), // WhatsApp Green / Read
+      );
+    }
+
+    if (last.isDeliveredToAny(widget.currentUserId)) {
+      return const Icon(
+        Icons.done_all_rounded,
+        size: 15.5,
+        color: Color(0xFF94A3B8), // WhatsApp Grey Double Check / Delivered
+      );
+    }
+
+    if (last.status == 'pending' || (last.id != null && last.id!.startsWith('temp_'))) {
+      return const Icon(
+        Icons.access_time_rounded,
+        size: 13.5,
+        color: Color(0xFF94A3B8), // Pending Clock
+      );
+    }
+
+    if (last.status == 'failed') {
+      return const Icon(
+        Icons.error_outline_rounded,
+        size: 14.5,
+        color: Color(0xFFEF4444), // Failed
+      );
+    }
+
+    return const Icon(
+      Icons.done_rounded,
+      size: 15.5,
+      color: Color(0xFF94A3B8), // Single Grey Check / Sent
+    );
   }
 
   Color _conversationAccent(String type) {
@@ -2978,6 +3039,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
     bool isTypingPreview,
     bool hasUnread,
   ) {
+    final statusIcon = _buildStatusIcon();
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3094,6 +3156,10 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
+                        if (statusIcon != null) ...[
+                          statusIcon,
+                          const SizedBox(width: 4),
+                        ],
                         Expanded(
                           child: Text(
                             preview,
