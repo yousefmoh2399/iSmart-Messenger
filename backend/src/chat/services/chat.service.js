@@ -854,14 +854,17 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   if (conversation.type === "direct" && currentUser.role === "user") {
-    const target = (conversation.members || [])
+    const otherMembers = (conversation.members || [])
       .filter(Boolean)
-      .find((entry) => {
+      .filter((entry) => {
         const entryId = entry._id ? entry._id.toString() : entry.toString();
         return entryId !== currentUserId;
       });
-    if (isRestrictedDirectTarget(currentUser, target)) {
-      throw new ApiError(403, "Conversation access denied.");
+    if (otherMembers.length > 0) {
+      const target = otherMembers[0];
+      if (isRestrictedDirectTarget(currentUser, target)) {
+        throw new ApiError(403, "Conversation access denied.");
+      }
     }
   }
 
@@ -1122,16 +1125,23 @@ async function createConversation(currentUser, payload) {
       );
     }
 
-    const targetUser = await User.findById(memberIds[0]).lean();
+    const isSelf = memberIds[0] === currentUser.id;
+    const targetUser = isSelf
+      ? currentUser
+      : await User.findById(memberIds[0]).lean();
     if (!targetUser) {
       throw new ApiError(404, "Target user not found.");
     }
-    if (isRestrictedDirectTarget(currentUser, targetUser)) {
+    if (!isSelf && isRestrictedDirectTarget(currentUser, targetUser)) {
       throw new ApiError(403, "Direct conversation is not allowed.");
     }
 
-    const directMemberIds = [currentUser.id, memberIds[0]].sort();
-    const directKey = directMemberIds.join(":");
+    const directMemberIds = isSelf
+      ? [currentUser.id]
+      : [currentUser.id, memberIds[0]].sort();
+    const directKey = isSelf
+      ? `${currentUser.id}:${currentUser.id}`
+      : directMemberIds.join(":");
     const existing = await Conversation.findOne({
       directKey,
       deletedAt: null,

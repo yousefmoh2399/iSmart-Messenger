@@ -1137,6 +1137,17 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     state = next;
   }
 
+  Future<ChatConversation> openOrCreateSavedMessages(String currentUserId) async {
+    final conversations =
+        state.valueOrNull?.conversations ?? const <ChatConversation>[];
+    final existing =
+        conversations.where((c) => c.isSelfChat(currentUserId)).firstOrNull;
+    if (existing != null) {
+      return existing;
+    }
+    return createDirectConversation(currentUserId);
+  }
+
   Future<ChatConversation> createDirectConversation(String userId) async {
     final repository = _repository();
     final conversation = await repository.createDirectConversation(userId);

@@ -449,6 +449,14 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     if (directConversation != null) {
       await _sendSharedContentToConversation(content, directConversation);
       _shareSheetOpen = false;
+      if (mounted) {
+        Navigator.of(context).push(
+          CupertinoPageRoute(
+            builder: (_) =>
+                ConversationScreen(conversation: directConversation),
+          ),
+        );
+      }
       return;
     }
 
@@ -465,6 +473,14 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         onSelected: (conversation) async {
           Navigator.pop(sheetContext);
           await _sendSharedContentToConversation(content, conversation);
+          if (mounted) {
+            Navigator.of(context).push(
+              CupertinoPageRoute(
+                builder: (_) =>
+                    ConversationScreen(conversation: conversation),
+              ),
+            );
+          }
         },
       ),
     );
@@ -501,7 +517,13 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         : title.trim().characters.first.toUpperCase();
   }
 
-  static String _getConversationSubtitle(ChatConversation conversation) {
+  static String _getConversationSubtitle(
+    ChatConversation conversation, [
+    String? currentUserId,
+  ]) {
+    if (currentUserId != null && conversation.isSelfChat(currentUserId)) {
+      return 'الملاحظات والملفات المحفوظة';
+    }
     final last = conversation.lastMessage;
     if (last == null) return 'لا توجد رسائل';
     final type = last.messageType;
@@ -1837,7 +1859,7 @@ class _GlobalAnnouncementOverlayState
 // Telegram-style share bottom sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ShareBottomSheet extends StatefulWidget {
+class _ShareBottomSheet extends ConsumerStatefulWidget {
   const _ShareBottomSheet({
     required this.content,
     required this.conversations,
@@ -1851,22 +1873,37 @@ class _ShareBottomSheet extends StatefulWidget {
   final Future<void> Function(ChatConversation) onSelected;
 
   @override
-  State<_ShareBottomSheet> createState() => _ShareBottomSheetState();
+  ConsumerState<_ShareBottomSheet> createState() => _ShareBottomSheetState();
 }
 
-class _ShareBottomSheetState extends State<_ShareBottomSheet> {
+class _ShareBottomSheetState extends ConsumerState<_ShareBottomSheet> {
   String _query = '';
 
-  List<ChatConversation> get _filtered {
-    if (_query.trim().isEmpty) return widget.conversations;
-    final q = _query.toLowerCase();
-    return widget.conversations
-        .where(
-          (c) =>
-              c.displayTitle(widget.currentUserId).toLowerCase().contains(q),
-        )
-        .toList();
+  bool _isImage(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].contains(ext);
   }
+
+  List<ChatConversation> get _filtered {
+    List<ChatConversation> base = widget.conversations;
+    if (_query.trim().isNotEmpty) {
+      final q = _query.toLowerCase();
+      base = base
+          .where(
+            (c) =>
+                c.displayTitle(widget.currentUserId).toLowerCase().contains(q),
+          )
+          .toList();
+    }
+    final selfChats =
+        base.where((c) => c.isSelfChat(widget.currentUserId)).toList();
+    final otherChats =
+        base.where((c) => !c.isSelfChat(widget.currentUserId)).toList();
+    return [...selfChats, ...otherChats];
+  }
+
+  bool get _hasSelfChatInList =>
+      widget.conversations.any((c) => c.isSelfChat(widget.currentUserId));
 
   @override
   Widget build(BuildContext context) {
@@ -1877,10 +1914,15 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
         isDark ? Colors.white24 : Colors.black.withOpacity(0.12);
 
     final paths = widget.content.paths;
-    final hasImages = paths.isNotEmpty;
-    final titleText = hasImages
-        ? 'إرسال ${paths.length} ${paths.length == 1 ? 'صورة' : 'صور'}'
-        : 'إرسال نص';
+    final hasPaths = paths.isNotEmpty;
+    final hasText = widget.content.text.trim().isNotEmpty;
+    final allImages = hasPaths && paths.every(_isImage);
+
+    final titleText = hasPaths
+        ? (allImages
+            ? 'مشاركة ${paths.length} ${paths.length == 1 ? 'صورة' : 'صور'}'
+            : 'مشاركة ${paths.length} ${paths.length == 1 ? 'ملف' : 'ملفات'}')
+        : 'مشاركة نص ومحتوى';
 
     return DraggableScrollableSheet(
       initialChildSize: 0.7,
@@ -1922,8 +1964,8 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
                           ?.copyWith(fontWeight: FontWeight.w700, fontSize: 17),
                     ),
 
-                    // ── Image thumbnails ──────────────────────────────────────
-                    if (hasImages) ...[
+                    // ── Preview of shared content ──────────────────────────────
+                    if (allImages) ...[
                       const SizedBox(height: 12),
                       SizedBox(
                         height: 80,
@@ -1932,7 +1974,6 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
                           itemCount: paths.length > 4 ? 5 : paths.length,
                           itemBuilder: (_, i) {
                             if (i == 4 && paths.length > 4) {
-                              // Overflow badge
                               return Padding(
                                 padding:
                                     const EdgeInsetsDirectional.only(end: 8),
@@ -1981,6 +2022,91 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
                           },
                         ),
                       ),
+                    ] else if (hasPaths) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 42,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: paths.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (_, i) {
+                            final p = paths[i];
+                            final fileName = p.split(Platform.pathSeparator).last;
+                            final isImg = _isImage(p);
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.08)
+                                    : Colors.black.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    isImg
+                                        ? Icons.image_rounded
+                                        : Icons.insert_drive_file_rounded,
+                                    size: 18,
+                                    color: const Color(0xFF007AFF),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  ConstrainedBox(
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 140),
+                                    child: Text(
+                                      fileName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+
+                    // ── Text Preview ──────────────────────────────────────────
+                    if (hasText) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withOpacity(0.05)
+                              : Colors.black.withOpacity(0.04),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white10
+                                : Colors.black.withOpacity(0.06),
+                          ),
+                        ),
+                        child: Text(
+                          widget.content.text.trim(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                          ),
+                        ),
+                      ),
                     ],
 
                     // ── Search bar ────────────────────────────────────────────
@@ -2019,9 +2145,62 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
                 child: ListView.builder(
                   controller: scrollController,
                   padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: _filtered.length,
+                  itemCount: (!_hasSelfChatInList && _query.isEmpty)
+                      ? _filtered.length + 1
+                      : _filtered.length,
                   itemBuilder: (_, index) {
-                    final conv = _filtered[index];
+                    // Pinned Saved Messages quick button if not in list yet
+                    if (!_hasSelfChatInList && _query.isEmpty && index == 0) {
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                        leading: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.bookmark_rounded,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                        title: const Text(
+                          'الرسائل المحفوظة (أنت)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                        ),
+                        subtitle: const Text(
+                          'مساحتك السحابية لحفظ الملاحظات والملفات',
+                          style: TextStyle(
+                            color: Color(0xFF5856D6),
+                            fontSize: 13,
+                          ),
+                        ),
+                        onTap: () async {
+                          final conv = await ref
+                              .read(chatOverviewControllerProvider.notifier)
+                              .openOrCreateSavedMessages(widget.currentUserId);
+                          widget.onSelected(conv);
+                        },
+                      );
+                    }
+
+                    final realIndex = (!_hasSelfChatInList && _query.isEmpty)
+                        ? index - 1
+                        : index;
+                    final conv = _filtered[realIndex];
+                    final isSelf = conv.isSelfChat(widget.currentUserId);
                     final avatarUrl = _AuthGateState._getConversationAvatarUrl(
                       conv,
                       widget.currentUserId,
@@ -2034,25 +2213,50 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
                       conv,
                       widget.currentUserId,
                     );
-                    final subtitle =
-                        _AuthGateState._getConversationSubtitle(conv);
+                    final subtitle = _AuthGateState._getConversationSubtitle(
+                      conv,
+                      widget.currentUserId,
+                    );
 
                     return ListTile(
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      leading: ChatAvatar(
-                        radius: 24,
-                        backgroundColor: colorScheme.primaryContainer,
-                        avatarUrl: avatarUrl,
-                        fallback: Text(
-                          letter,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            color: colorScheme.onPrimaryContainer,
-                          ),
-                        ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
                       ),
+                      leading: isSelf
+                          ? Container(
+                              width: 48,
+                              height: 48,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Color(0xFF5856D6),
+                                    Color(0xFF007AFF),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.bookmark_rounded,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            )
+                          : ChatAvatar(
+                              radius: 24,
+                              backgroundColor: colorScheme.primaryContainer,
+                              avatarUrl: avatarUrl,
+                              fallback: Text(
+                                letter,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                  color: colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                            ),
                       title: Text(
                         title,
                         style: const TextStyle(
@@ -2065,7 +2269,9 @@ class _ShareBottomSheetState extends State<_ShareBottomSheet> {
                       subtitle: Text(
                         subtitle,
                         style: TextStyle(
-                          color: Colors.grey.shade600,
+                          color: isSelf
+                              ? const Color(0xFF5856D6)
+                              : Colors.grey.shade600,
                           fontSize: 13,
                         ),
                         maxLines: 1,

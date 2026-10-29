@@ -4710,18 +4710,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 (entry) => entry?.id == selectedPeerId,
                 orElse: () => null,
               ));
+    final isSelfChat = _data.isSelfChat(authUser?.id ?? '');
     final isBlockedFromSending = _isBlockedFromSending(authUser?.id);
     final isBroadcastReadOnly = _data.type == 'broadcast'
         ? !_canPublishInBroadcast(authUser?.id)
         : false;
     final isReadOnly =
         !_data.isActive || isBlockedFromSending || isBroadcastReadOnly;
-    final statusText = peer == null ? 'محادثة داخلية' : _presenceLabel(peer);
-    final statusColor = isReadOnly
-        ? const Color(0xFFF59E0B)
-        : (peer == null
-              ? colorScheme.onSurfaceVariant
-              : _presenceColor(peer.presenceStatus));
+    final statusText = isSelfChat
+        ? 'مساحتك السحابية الخاصة'
+        : (peer == null ? 'محادثة داخلية' : _presenceLabel(peer));
+    final statusColor = isSelfChat
+        ? const Color(0xFF5856D6)
+        : (isReadOnly
+            ? const Color(0xFFF59E0B)
+            : (peer == null
+                ? colorScheme.onSurfaceVariant
+                : _presenceColor(peer.presenceStatus)));
     final effectiveStatusText = isReadOnly
         ? (isBlockedFromSending
               ? 'تم تقييدك: قراءة فقط'
@@ -4797,34 +4802,53 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   },
                   child: Row(
                     children: [
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor: colorScheme.surfaceContainerHighest,
-                        child: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)?.isNotEmpty == true
-                            ? ClipOval(
-                                child: CachedNetworkImage(
-                                  imageUrl: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)!,
-                                  width: 40,
-                                  height: 40,
-                                  fit: BoxFit.cover,
-                                  httpHeaders: token == null || token.isEmpty
-                                      ? null
-                                      : {'Authorization': 'Bearer $token'},
-                                  errorWidget: (_, __, ___) => Icon(
-                                    _data.type == 'group'
-                                        ? Icons.groups_outlined
-                                        : Icons.person_outline,
-                                    color: colorScheme.onSurfaceVariant,
+                      if (isSelfChat)
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.bookmark_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        )
+                      else
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: colorScheme.surfaceContainerHighest,
+                          child: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)?.isNotEmpty == true
+                              ? ClipOval(
+                                  child: CachedNetworkImage(
+                                    imageUrl: ((_data.type == 'direct' ? peer?.avatarUrl : _data.avatarUrl) ?? _data.avatarUrl ?? peer?.avatarUrl)!,
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                    httpHeaders: token == null || token.isEmpty
+                                        ? null
+                                        : {'Authorization': 'Bearer $token'},
+                                    errorWidget: (_, __, ___) => Icon(
+                                      _data.type == 'group'
+                                          ? Icons.groups_outlined
+                                          : Icons.person_outline,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
                                   ),
+                                )
+                              : Icon(
+                                  _data.type == 'group'
+                                      ? Icons.groups_outlined
+                                      : Icons.person_outline,
+                                  color: colorScheme.onSurfaceVariant,
                                 ),
-                              )
-                            : Icon(
-                                _data.type == 'group'
-                                    ? Icons.groups_outlined
-                                    : Icons.person_outline,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                      ),
+                        ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(

@@ -65,8 +65,23 @@ class MainActivity : FlutterActivity() {
         }
         streams.forEachIndexed { index, uri ->
             try {
-                val extension = contentResolver.getType(uri)?.substringAfterLast('/') ?: "jpg"
-                val target = File(cacheDir, "shared_${System.currentTimeMillis()}_${index}.$extension")
+                var fileName: String? = null
+                contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val colIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (colIdx >= 0) fileName = cursor.getString(colIdx)
+                    }
+                }
+                val safeName = fileName?.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                val target = if (!safeName.isNullOrBlank()) {
+                    File(cacheDir, "shared_${System.currentTimeMillis()}_$safeName")
+                } else {
+                    val mime = contentResolver.getType(uri)
+                    val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
+                        ?: mime?.substringAfterLast('/')?.takeIf { it.length in 2..5 }
+                        ?: "bin"
+                    File(cacheDir, "shared_${System.currentTimeMillis()}_${index}.$ext")
+                }
                 contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
                 if (target.exists()) paths.add(target.absolutePath)
             } catch (_: Exception) { }

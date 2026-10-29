@@ -472,8 +472,30 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     }
   }
 
+  Future<void> _openSavedMessagesDirect() async {
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    if (authUser == null) return;
+    try {
+      final conv = await ref
+          .read(chatOverviewControllerProvider.notifier)
+          .openOrCreateSavedMessages(authUser.id);
+      if (mounted) {
+        _openConversation(conv);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر فتح الرسائل المحفوظة: $e')),
+        );
+      }
+    }
+  }
+
   void _handleWorkspaceAction(String value) {
     switch (value) {
+      case 'savedMessages':
+        _openSavedMessagesDirect();
+        break;
       case 'chat':
         Navigator.of(context).popUntil((route) => route.isFirst);
         break;
@@ -1731,6 +1753,13 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           dividerColor: dividerColor,
           children: [
             _AppleMenuTile(
+              icon: CupertinoIcons.bookmark_fill,
+              label: 'الرسائل المحفوظة (الملاحظات الذاتية)',
+              subtitle: 'مساحتك السحابية لحفظ الملاحظات، الروابط، والمستندات',
+              iconColor: const Color(0xFF5856D6),
+              onTap: () => _handleWorkspaceAction('savedMessages'),
+            ),
+            _AppleMenuTile(
               icon: CupertinoIcons.star_fill,
               label: 'الرسائل المفضلة',
               subtitle: 'الرسائل المحفوظة للرجوع السريع إليها',
@@ -2645,7 +2674,12 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
 
   String _conversationPreview(ChatConversation conversation) {
     final last = conversation.lastMessage;
-    if (last == null) return 'ابدأ المحادثة الآن';
+    if (last == null) {
+      if (conversation.isSelfChat(widget.currentUserId)) {
+        return 'الملاحظات، الروابط، والمستندات المحفوظة';
+      }
+      return 'ابدأ المحادثة الآن';
+    }
     final body = last.content.isNotEmpty
         ? last.content
         : switch (last.messageType) {
@@ -2725,6 +2759,9 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
   }
 
   Color _conversationAccent(String type) {
+    if (widget.conversation.isSelfChat(widget.currentUserId)) {
+      return const Color(0xFF5856D6);
+    }
     switch (type) {
       case 'direct':
         return const Color(0xFF3B82F6);
@@ -3041,21 +3078,40 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
           ),
           child: Row(
             children: [
-              ChatAvatar(
-                radius: 22,
-                backgroundColor: accent.withValues(alpha: 0.14),
-                avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
-                fallback: Text(
-                  peer != null
-                      ? _avatarLabel(peer.displayName)
-                      : _avatarLabel(title),
-                  style: TextStyle(
-                    color: accent,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
+              if (widget.conversation.isSelfChat(widget.currentUserId))
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.bookmark_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                )
+              else
+                ChatAvatar(
+                  radius: 22,
+                  backgroundColor: accent.withValues(alpha: 0.14),
+                  avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
+                  fallback: Text(
+                    peer != null
+                        ? _avatarLabel(peer.displayName)
+                        : _avatarLabel(title),
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
-              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -3144,22 +3200,41 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  ChatAvatar(
-                    radius: 26,
-                    backgroundColor: accent.withValues(alpha: 0.14),
-                    avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
-                    fallback: Text(
-                      peer != null
-                          ? _avatarLabel(peer.displayName)
-                          : _avatarLabel(title),
-                      style: TextStyle(
-                        color: accent,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
+                  if (widget.conversation.isSelfChat(widget.currentUserId))
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.bookmark_rounded,
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                    )
+                  else
+                    ChatAvatar(
+                      radius: 26,
+                      backgroundColor: accent.withValues(alpha: 0.14),
+                      avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
+                      fallback: Text(
+                        peer != null
+                            ? _avatarLabel(peer.displayName)
+                            : _avatarLabel(title),
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                        ),
                       ),
                     ),
-                  ),
-                  if (peer != null)
+                  if (peer != null && !widget.conversation.isSelfChat(widget.currentUserId))
                     PositionedDirectional(
                       end: 0,
                       bottom: 0,
@@ -3591,6 +3666,12 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                     cardColor: cardColor,
                     dividerColor: dividerColor,
                     items: [
+                      _MenuItem(
+                        icon: Icons.bookmark_rounded,
+                        label: 'الرسائل المحفوظة',
+                        onTap: () => onSelected('savedMessages'),
+                        iconColor: const Color(0xFF5856D6), // Purple-blue
+                      ),
                       _MenuItem(
                         icon: Icons.person_outline_rounded,
                         label: 'الملف الشخصي',

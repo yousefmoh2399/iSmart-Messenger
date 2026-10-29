@@ -532,6 +532,12 @@ class ChatConversation {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  bool isSelfChat(String currentUserId) {
+    if (type != 'direct') return false;
+    if (members.isEmpty) return true;
+    return members.every((entry) => entry.id == currentUserId);
+  }
+
   String displayTitle(String currentUserId) {
     if (name.trim().isNotEmpty) {
       return name.trim();
@@ -541,6 +547,9 @@ class ChatConversation {
       final otherUsers = members.where((entry) => entry.id != currentUserId);
       if (otherUsers.isNotEmpty) {
         return otherUsers.first.displayName;
+      }
+      if (isSelfChat(currentUserId)) {
+        return 'الرسائل المحفوظة';
       }
     }
 

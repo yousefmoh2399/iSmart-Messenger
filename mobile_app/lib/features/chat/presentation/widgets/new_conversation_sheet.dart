@@ -170,6 +170,29 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
     }
   }
 
+  Future<void> _openSavedMessages() async {
+    if (_isCreating) return;
+    setState(() => _isCreating = true);
+    try {
+      final conv = await ref
+          .read(chatOverviewControllerProvider.notifier)
+          .openOrCreateSavedMessages(widget.currentUser.id);
+      if (mounted) {
+        Navigator.of(context).pop(conv);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isCreating = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشل فتح الرسائل المحفوظة: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _createGroup() async {
     final name = _groupNameController.text.trim();
     if (name.isEmpty) {
@@ -699,6 +722,17 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
   ) {
     return Column(
       children: [
+        _ActionTile(
+          icon: Icons.bookmark_rounded,
+          iconBg: const Color(0xFF5856D6),
+          title: 'الرسائل المحفوظة (أنت)',
+          subtitle: 'أرسل لنفسك لمزامنة الملاحظات والروابط والملفات',
+          isDark: isDark,
+          onTap: () async {
+            HapticFeedback.lightImpact();
+            await _openSavedMessages();
+          },
+        ),
         _ActionTile(
           icon: Icons.group_add_rounded,
           iconBg: const Color(0xFF00A884),
