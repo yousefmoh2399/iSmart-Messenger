@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 
-import '../../../../core/network/media_url_resolver.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../models/chat_models.dart';
 
@@ -28,7 +27,7 @@ class ChatAudioPlaybackCoordinator {
 /// WhatsApp-style voice note audio player.
 ///
 /// Features:
-/// - Distinctive WhatsApp voice bubble layout (Play button, custom waveform with scrubber thumb, duration & speed pill, sender avatar with mic status badge).
+/// - Distinctive WhatsApp voice bubble layout (Play button, custom waveform with scrubber thumb, duration & speed pill, and mic status badge).
 /// - Instant duration preview from metadata so the duration is visible before streaming starts.
 /// - Interactive touch scrubbing: drag or tap along the waveform to seek.
 /// - Speed toggle pill (1x, 1.5x, 2x).
@@ -460,8 +459,8 @@ class _ChatAudioAttachmentPlayerState
                     ),
                     const SizedBox(width: 10),
 
-                    // 3. Sender Avatar with Mic Status Badge
-                    _buildAvatarWithMicBadge(
+                    // 3. WhatsApp Mic Status Badge (Unplayed: Green, Played: Blue)
+                    _buildMicStatusBadge(
                       isPlayed: _hasBeenPlayed ||
                           position > Duration.zero ||
                           widget.message.seenBy.isNotEmpty,
@@ -552,110 +551,30 @@ class _ChatAudioAttachmentPlayerState
     );
   }
 
-  Widget _buildAvatarWithMicBadge({
+  Widget _buildMicStatusBadge({
     required bool isPlayed,
     required bool isDark,
   }) {
-    final sender = widget.message.sender;
-    final currentAuthUser = ref.watch(authControllerProvider).valueOrNull;
-
-    final avatarUrl = widget.isMine
-        ? (currentAuthUser?.avatarUrl ?? sender?.avatarUrl)
-        : sender?.avatarUrl;
-    final displayName = widget.isMine
-        ? (currentAuthUser?.fullName ?? 'أنا')
-        : (sender?.displayName ?? 'مستخدم');
-
-    final resolvedAvatar = resolveMediaUrl(avatarUrl);
-    final initial = displayName.trim().isNotEmpty
-        ? displayName.trim().characters.first.toUpperCase()
-        : '؟';
-
     // WhatsApp mic badge colors:
     // Green (0xFF00A884) if unplayed, Cyan Blue (0xFF34B7F1) if played/heard
-    final micBadgeColor = isPlayed
+    final micColor = isPlayed
         ? const Color(0xFF34B7F1)
         : const Color(0xFF00A884);
 
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        // Circular profile picture or initials avatar
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF334155), const Color(0xFF1E293B)]
-                  : [const Color(0xFFCBD5E1), const Color(0xFF94A3B8)],
-            ),
-          ),
-          child: ClipOval(
-            child: resolvedAvatar != null && resolvedAvatar.isNotEmpty
-                ? Image.network(
-                    resolvedAvatar,
-                    width: 44,
-                    height: 44,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Center(
-                      child: Text(
-                        initial,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  )
-                : Center(
-                    child: Text(
-                      initial,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-          ),
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: micColor.withValues(alpha: isDark ? 0.22 : 0.14),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Icon(
+          Icons.mic_rounded,
+          size: 18,
+          color: micColor,
         ),
-        // WhatsApp Mic badge at bottom corner
-        PositionedDirectional(
-          bottom: -1,
-          end: -1,
-          child: Container(
-            width: 17,
-            height: 17,
-            decoration: BoxDecoration(
-              color: micBadgeColor,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: isDark ? const Color(0xFF1F2937) : Colors.white,
-                width: 1.6,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  blurRadius: 3,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-            ),
-            child: const Center(
-              child: Icon(
-                Icons.mic_rounded,
-                size: 10,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
