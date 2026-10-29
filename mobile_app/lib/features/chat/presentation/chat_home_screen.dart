@@ -2,7 +2,6 @@ import 'chat_realtime_controller.dart';
 import '../../workspace/presentation/workspace_home_screen.dart';
 import 'dart:async';
 
-import 'package:animations/animations.dart';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -160,7 +159,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
 
     if (created != null && mounted) {
       Navigator.of(context).push(
-        MaterialPageRoute(
+        CupertinoPageRoute(
           builder: (_) => ConversationScreen(conversation: created),
         ),
       );
@@ -418,7 +417,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       return;
     }
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      CupertinoPageRoute(
         builder: (_) => ConversationScreen(conversation: conversation),
       ),
     );
@@ -664,19 +663,33 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                     children: [
                       Text(
                         switch (_selectedNavIndex) {
-                          0 => 'iSmart Messenger',
+                          0 => 'المحادثات',
                           1 => 'دليل الموظفين',
                           _ => 'المزيد',
                         },
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                        ),
                       ),
                       if (statusText != null)
-                        Text(
-                          statusText,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDark ? Colors.white60 : Colors.black45,
-                            fontWeight: FontWeight.w500,
+                        Container(
+                          margin: const EdgeInsets.only(top: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: appearance.accent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: appearance.accent,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                     ],
@@ -684,52 +697,106 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                 },
               ),
               centerTitle: true,
-              leading: _selectedNavIndex == 0
-                  ? Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: _HeaderIconButton(
-                        tooltip: _isSearchExpanded ? 'إغلاق البحث' : 'بحث',
-                        icon: _isSearchExpanded
-                            ? Icons.close_rounded
-                            : Icons.search_rounded,
-                        appearance: appearance,
-                        isDark: isDark,
-                        onPressed: _toggleSearch,
+              leading: _selectedNavIndex == 0 && authUser != null
+                  ? Builder(
+                      builder: (context) => Padding(
+                        padding: const EdgeInsetsDirectional.only(start: 12),
+                        child: GestureDetector(
+                          onTap: () => Scaffold.of(context).openEndDrawer(),
+                          child: Center(
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                ChatAvatar(
+                                  radius: 17,
+                                  backgroundColor: appearance.accent.withValues(
+                                    alpha: isDark ? 0.22 : 0.14,
+                                  ),
+                                  avatarUrl: authUser.avatarUrl,
+                                  fallback: Text(
+                                    _avatarLabel(
+                                      authUser.fullName.trim().isNotEmpty
+                                          ? authUser.fullName.trim()
+                                          : authUser.username,
+                                    ),
+                                    style: TextStyle(
+                                      color: appearance.accent,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                PositionedDirectional(
+                                  end: -1,
+                                  bottom: -1,
+                                  child: Container(
+                                    width: 9,
+                                    height: 9,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF22C55E),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: isDark
+                                            ? const Color(0xFF1C1C1E)
+                                            : Colors.white,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     )
                   : null,
               actions: [
-                if (_selectedNavIndex == 0 && authUser != null) ...[
+                if (_selectedNavIndex == 0) ...[
                   Padding(
                     padding: const EdgeInsetsDirectional.only(end: 4),
                     child: _HeaderIconButton(
-                      tooltip: 'مساحة العمل والملاحظات',
-                      icon: Icons.edit_note_rounded,
+                      tooltip: _isSearchExpanded ? 'إغلاق البحث' : 'بحث',
+                      icon: _isSearchExpanded
+                          ? Icons.close_rounded
+                          : Icons.search_rounded,
                       appearance: appearance,
                       isDark: isDark,
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const WorkspaceHomeScreen(),
-                          ),
-                        );
-                      },
+                      onPressed: _toggleSearch,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsetsDirectional.only(end: 4),
-                    child: _HeaderIconButton(
-                      tooltip: 'محادثة جديدة',
-                      icon: Icons.edit_square,
-                      appearance: appearance,
-                      isDark: isDark,
-                      onPressed: () => _showCreateDialog(authUser),
+                  if (authUser != null) ...[
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(end: 4),
+                      child: _HeaderIconButton(
+                        tooltip: 'محادثة جديدة',
+                        icon: Icons.edit_square,
+                        appearance: appearance,
+                        isDark: isDark,
+                        onPressed: () => _showCreateDialog(authUser),
+                      ),
                     ),
-                  ),
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(end: 4),
+                      child: _HeaderIconButton(
+                        tooltip: 'مساحة العمل والملاحظات',
+                        icon: Icons.edit_note_rounded,
+                        appearance: appearance,
+                        isDark: isDark,
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            CupertinoPageRoute(
+                              builder: (_) => const WorkspaceHomeScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ],
                 Builder(
                   builder: (context) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: _HeaderIconButton(
                       tooltip: 'القائمة',
                       icon: Icons.menu_rounded,
@@ -1049,144 +1116,59 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               length: 5,
               child: Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: appearance.accent.withValues(alpha: 0.4),
-                                width: 2,
-                              ),
-                            ),
-                            padding: const EdgeInsets.all(2),
-                            child: ChatAvatar(
-                              radius: 20,
-                              backgroundColor: appearance.accent.withValues(
-                                alpha: isDark ? 0.18 : 0.14,
-                              ),
-                              avatarUrl: authUser?.avatarUrl,
-                              fallback: Text(
-                                _avatarLabel(displayName),
-                                style: TextStyle(
-                                  color: appearance.accent,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      displayName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w900,
-                                            color: isDark
-                                                ? Colors.white
-                                                : const Color(0xFF0F172A),
-                                            fontSize: 16,
-                                          ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF22C55E),
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  totalUnread > 0
-                                      ? '${overview.conversations.length} محادثة • $totalUnread غير مقروءة'
-                                      : '${overview.conversations.length} محادثة',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: isDark
-                                            ? Colors.white60
-                                            : const Color(0xFF64748B),
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                   AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
+                    duration: const Duration(milliseconds: 200),
                     curve: Curves.easeOutCubic,
                     child: _isSearchExpanded
                         ? Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
+                              height: 40,
                               decoration: BoxDecoration(
                                 color: isDark
                                     ? const Color(0xFF1C1C1E)
-                                    : Colors.white,
-                                borderRadius: BorderRadius.circular(12),
+                                    : const Color(0xFFE5E5EA).withValues(alpha: 0.65),
+                                borderRadius: BorderRadius.circular(10),
                               ),
                               child: TextField(
                                 controller: _searchController,
                                 focusNode: _searchFocusNode,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                ),
                                 onChanged: (_) => setState(() {}),
                                 decoration: InputDecoration(
                                   hintText: 'ابحث في المحادثات...',
                                   hintStyle: TextStyle(
+                                    fontSize: 14,
                                     color: isDark
-                                        ? Colors.white54
+                                        ? Colors.white38
                                         : colorScheme.onSurfaceVariant,
                                   ),
-                                  prefixIcon: Icon(
+                                  prefixIcon: const Icon(
                                     Icons.search_rounded,
-                                    color: appearance.accent,
+                                    size: 20,
+                                    color: Color(0xFF8E8E93),
                                   ),
                                   suffixIcon:
                                       _searchController.text.trim().isEmpty
                                       ? null
                                       : IconButton(
                                           tooltip: 'مسح البحث',
+                                          icon: const Icon(
+                                            Icons.cancel_rounded,
+                                            size: 18,
+                                            color: Color(0xFF8E8E93),
+                                          ),
                                           onPressed: () {
                                             _searchController.clear();
                                             setState(() {});
                                           },
-                                          icon: Icon(
-                                            Icons.close_rounded,
-                                            color: colorScheme.onSurfaceVariant,
-                                          ),
                                         ),
                                   border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                                  isDense: true,
                                 ),
                               ),
                             ),
@@ -1207,7 +1189,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 .refresh();
                           },
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
                               if (folders.isNotEmpty)
                                 ...folders.map(
@@ -1286,14 +1268,6 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 ),
                               const ChatFolderDropZone(),
                               if (ungroupedConversations.isNotEmpty) ...[
-                                _HomeSectionHeader(
-                                  title: 'كل المحادثات',
-                                  subtitle:
-                                      'جميع المحادثات المباشرة ومجموعات العمل النشطة.',
-                                  appearance: appearance,
-                                  isDark: isDark,
-                                ),
-                                const SizedBox(height: 8),
                                 ...ungroupedConversations
                                     .map(
                                       (conversation) => Padding(
@@ -1353,16 +1327,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 .refresh();
                           },
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
-                              _HomeSectionHeader(
-                                title: 'المحادثات المباشرة',
-                                subtitle:
-                                    'جميع المحادثات الفردية المباشرة مع الموظفين.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
                               if (directConversations.isEmpty)
                                 _InlineEmptyState(
                                   label:
@@ -1421,16 +1387,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                               .read(chatOverviewControllerProvider.notifier)
                               .refresh(),
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
-                              _HomeSectionHeader(
-                                title: 'المحادثات المفضلة',
-                                subtitle:
-                                    'كل المحادثات التي قمت بتعليمها كمفضلة.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
                               if (favoriteConversations.isEmpty)
                                 _InlineEmptyState(
                                   label:
@@ -1481,16 +1439,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                               .read(chatOverviewControllerProvider.notifier)
                               .refresh(),
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
-                              _HomeSectionHeader(
-                                title: 'المحادثات المؤرشفة',
-                                subtitle:
-                                    'كل المحادثات التي أخفيتها من القائمة الرئيسية.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
                               if (archivedConversations.isEmpty)
                                 _InlineEmptyState(
                                   label: 'لا توجد محادثات مؤرشفة حاليًا.',
@@ -2389,28 +2339,12 @@ class _DirectoryUserTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final hasConversation = existingConversation != null;
 
-    return OpenContainer(
-      transitionType: ContainerTransitionType.fade,
-      transitionDuration: const Duration(milliseconds: 280),
-      closedColor: Colors.transparent,
-      openColor: colorScheme.surface,
-      closedElevation: 0,
-      openElevation: 0,
-      openBuilder: (context, _) {
-        // If there's an existing conversation, open it directly.
-        // Otherwise, open an empty one (requires backend creation, so let the caller handle it).
-        // Wait, OpenBuilder requires returning a widget synchronously!
-        // We can't await. So if existingConversation == null, we CANNOT use OpenContainer easily!
-        return hasConversation
-            ? ConversationScreen(conversation: existingConversation!)
-            : const SizedBox();
-      },
-      closedBuilder: (context, openContainer) => Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(22),
-          onTap: hasConversation ? openContainer : onTap,
-          child: Ink(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Ink(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: isDark ? colorScheme.surfaceContainer : Colors.white,
@@ -2512,8 +2446,7 @@ class _DirectoryUserTile extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
@@ -3037,29 +2970,21 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
           hasUnread,
         ),
       ),
-      child: OpenContainer(
-        transitionType: ContainerTransitionType.fade,
-        transitionDuration: const Duration(milliseconds: 280),
-        closedColor: Colors.transparent,
-        openColor: colorScheme.surface,
-        closedElevation: 0,
-        openElevation: 0,
-        openBuilder: (context, _) =>
-            ConversationScreen(conversation: widget.conversation),
-        closedBuilder: (context, openContainer) => Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: openContainer,
-            child: _buildItem(
-              context,
-              peer,
-              title,
-              preview,
-              accent,
-              colorScheme,
-              isTypingPreview,
-              hasUnread,
-            ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.onTap,
+          splashColor: widget.appearance.accent.withValues(alpha: 0.08),
+          highlightColor: widget.appearance.accent.withValues(alpha: 0.04),
+          child: _buildItem(
+            context,
+            peer,
+            title,
+            preview,
+            accent,
+            colorScheme,
+            isTypingPreview,
+            hasUnread,
           ),
         ),
       ),

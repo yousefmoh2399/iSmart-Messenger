@@ -22,7 +22,6 @@ import 'package:record/record.dart';
 import 'package:swipe_to/swipe_to.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../../core/network/media_url_resolver.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
@@ -5337,8 +5336,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                           final screenW = MediaQuery.sizeOf(context).width;
                           final maxBubbleWidth = math.min(
-                            480.0,
-                            screenW * (message.hasAttachment ? 0.82 : 0.78),
+                            520.0,
+                            screenW * (message.hasAttachment ? 0.88 : 0.84),
                           );
 
                           /// رسايلي يمين - رسايل الطرف التاني شمال
@@ -5460,24 +5459,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                           _showWhatsAppContextMenu(message);
                                         }
                                       },
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        mainAxisAlignment: isMine
-                                            ? MainAxisAlignment.end
-                                            : MainAxisAlignment.start,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          Flexible(
-                                            child: ConstrainedBox(
-                                              key: messageGlobalKey,
-                                              constraints: BoxConstraints(
-                                                maxWidth: maxBubbleWidth
-                                                    .clamp(200.0, 480.0)
-                                                    .toDouble(),
-                                              ),
-                                              child: Stack(
-                                                clipBehavior: Clip.none,
+                                      child: ConstrainedBox(
+                                        key: messageGlobalKey,
+                                        constraints: BoxConstraints(
+                                          maxWidth: maxBubbleWidth
+                                              .clamp(180.0, 520.0)
+                                              .toDouble(),
+                                        ),
+                                        child: Stack(
+                                          clipBehavior: Clip.none,
                                                 children: [
                                                   Column(
                                                     crossAxisAlignment: isMine
@@ -5493,11 +5483,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                 milliseconds: 180,
                                                               ),
                                                           margin: EdgeInsets.only(
-                                                            bottom: 6,
-                                                            left: isMine ? 34 : 0,
-                                                            right: isMine
-                                                                ? 0
-                                                                : 34,
+                                                            bottom: isLastInGroup ? 6 : 2,
                                                           ),
                                                           padding:
                                                               const EdgeInsets.symmetric(
@@ -6248,15 +6234,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                           ),
                                                           child: Padding(
                                                             padding:
-                                                                EdgeInsets.only(
-                                                                  left: isMine
-                                                                      ? 34
-                                                                      : 0,
-                                                                  right: isMine
-                                                                      ? 0
-                                                                      : 34,
-                                                                  bottom: 2,
-                                                                ),
+                                                                const EdgeInsets.only(
+                                                              bottom: 2,
+                                                            ),
                                                             child: _ReactionWrap(
                                                               message: message,
                                                               currentUserId:
@@ -6351,111 +6331,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                               ),
                                             ),
                                           ),
-                                          if (!isMine && isLastInGroup)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 8,
-                                                bottom: 2,
-                                              ),
-                                              child: Container(
-                                                width: 28,
-                                                height: 28,
-                                                decoration: BoxDecoration(
-                                                  color: resolved.accent
-                                                      .withValues(alpha: 0.18),
-                                                  shape: BoxShape.circle,
-                                                ),
-                                                clipBehavior: Clip.antiAlias,
-                                                child:
-                                                    message
-                                                            .sender
-                                                            ?.avatarUrl
-                                                            ?.isNotEmpty ==
-                                                        true
-                                                    ? CachedNetworkImage(
-                                                        imageUrl:
-                                                            resolveMediaUrl(
-                                                              message
-                                                                  .sender!
-                                                                  .avatarUrl!,
-                                                            )!,
-                                                        httpHeaders:
-                                                            token != null &&
-                                                                token.isNotEmpty
-                                                            ? {
-                                                                'Authorization':
-                                                                    'Bearer $token',
-                                                              }
-                                                            : null,
-                                                        fit: BoxFit.cover,
-                                                        placeholder:
-                                                            (
-                                                              context,
-                                                              url,
-                                                            ) => Center(
-                                                              child: Text(
-                                                                senderName
-                                                                        .isEmpty
-                                                                    ? '?'
-                                                                    : senderName[0]
-                                                                          .toUpperCase(),
-                                                                style: TextStyle(
-                                                                  fontSize: 11,
-                                                                  color: resolved
-                                                                      .accent,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w700,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                        errorWidget:
-                                                            (
-                                                              context,
-                                                              url,
-                                                              error,
-                                                            ) => Center(
-                                                              child: Text(
-                                                                senderName
-                                                                        .isEmpty
-                                                                    ? '?'
-                                                                    : senderName[0]
-                                                                          .toUpperCase(),
-                                                                style: TextStyle(
-                                                                  fontSize: 11,
-                                                                  color: resolved
-                                                                      .accent,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w700,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                      )
-                                                    : Center(
-                                                        child: Text(
-                                                          senderName.isEmpty
-                                                              ? '?'
-                                                              : senderName[0]
-                                                                    .toUpperCase(),
-                                                          style: TextStyle(
-                                                            fontSize: 11,
-                                                            color:
-                                                                resolved.accent,
-                                                            fontWeight:
-                                                                FontWeight.w700,
-                                                          ),
-                                                        ),
-                                                      ),
-                                              ),
-                                            )
-                                          else if (!isMine && !isLastInGroup)
-                                            const SizedBox(width: 36),
-                                        ],
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                ),
                               ],
                             ),
                           );
