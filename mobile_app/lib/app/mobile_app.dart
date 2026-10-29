@@ -55,6 +55,8 @@ class WorkplaceMobileApp extends ConsumerWidget {
       themeAnimationDuration: const Duration(milliseconds: 300),
       themeAnimationCurve: Curves.easeInOutCubic,
       home: bootstrap.when(
+        skipLoadingOnReload: true,
+        skipLoadingOnRefresh: true,
         loading: () => const LoadingView(message: 'جارٍ تجهيز التطبيق...'),
         error: (error, stackTrace) =>
             LoadingView(message: error.toString(), isError: true),
@@ -1333,6 +1335,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final serverState = ref.watch(serverConnectionControllerProvider);
     switch (authState.status) {
       case AuthStatus.initializing:
+        if (_lastPresenceUserId != null) {
+          ref.watch(chatRealtimeControllerProvider);
+          return const Stack(
+            children: [
+              ChatHomeScreen(),
+              GlobalAnnouncementOverlay(),
+            ],
+          );
+        }
         return const LoadingView(message: 'جارٍ التحقق من الجلسة...');
       case AuthStatus.unauthenticated:
         return const LoginScreen();
