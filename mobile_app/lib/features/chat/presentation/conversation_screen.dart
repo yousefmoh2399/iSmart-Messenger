@@ -378,6 +378,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
     _scrollController.addListener(_onScroll);
     _messageController.addListener(_onMessageDraftChanged);
+    _messageController.addListener(_onMessageTextChanged);
     unawaited(_restoreDraft());
 
     _subscription = ref.read(chatSocketServiceProvider).events.listen((event) {
@@ -5272,6 +5273,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
                       return ListView.builder(
                         controller: _scrollController,
+                        physics: const BouncingScrollPhysics(
+                          parent: AlwaysScrollableScrollPhysics(),
+                        ),
+                        cacheExtent: 600,
                         reverse: true,
                         padding: EdgeInsets.fromLTRB(
                           16,

@@ -1193,6 +1193,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 .refresh();
                           },
                           child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
                             padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
                               if (folders.isNotEmpty)
@@ -1331,6 +1334,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 .refresh();
                           },
                           child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
                             padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
                               if (directConversations.isEmpty)
@@ -1391,6 +1397,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                               .read(chatOverviewControllerProvider.notifier)
                               .refresh(),
                           child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
                             padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
                               if (favoriteConversations.isEmpty)
@@ -1443,6 +1452,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                               .read(chatOverviewControllerProvider.notifier)
                               .refresh(),
                           child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
                             padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
                               if (archivedConversations.isEmpty)

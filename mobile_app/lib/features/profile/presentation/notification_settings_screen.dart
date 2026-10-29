@@ -916,8 +916,8 @@ class _AppleNavTile extends StatelessWidget {
                 ),
               ),
               Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 14,
+                Icons.chevron_left_rounded,
+                size: 20,
                 color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
               ),
             ],
