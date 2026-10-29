@@ -19,7 +19,9 @@ import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/my_files_screen.dart';
 import '../../home/presentation/home_screen.dart';
 import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
+import '../../profile/presentation/notification_settings_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
+import '../../profile/presentation/storage_management_screen.dart';
 import '../../tickets/presentation/tickets_screen.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
@@ -509,7 +511,17 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       case 'profile':
         Navigator.of(
           context,
-        ).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
+        ).push(CupertinoPageRoute(builder: (_) => const ProfileScreen()));
+        break;
+      case 'notifications':
+        Navigator.of(context).push(
+          CupertinoPageRoute(builder: (_) => const NotificationSettingsScreen()),
+        );
+        break;
+      case 'storage':
+        Navigator.of(context).push(
+          CupertinoPageRoute(builder: (_) => const StorageManagementScreen()),
+        );
         break;
       case 'favoriteMessages':
         Navigator.of(context).push(
@@ -665,7 +677,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                         switch (_selectedNavIndex) {
                           0 => 'المحادثات',
                           1 => 'دليل الموظفين',
-                          _ => 'المزيد',
+                          _ => 'الإعدادات والمزيد',
                         },
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
@@ -1012,16 +1024,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 .read(chatOverviewControllerProvider.notifier)
                                 .refresh(),
                             child: ListView(
-                              padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                              padding: const EdgeInsets.fromLTRB(0, 8, 0, 100),
                               children: [
-                                _HomeSectionHeader(
-                                  title: 'الدليل حسب الفروع',
-                                  subtitle:
-                                      'كل الموظفين ظاهرون هنا حسب الفروع التي ينشئها الأدمن.',
-                                  appearance: appearance,
-                                  isDark: isDark,
-                                ),
-                                const SizedBox(height: 8),
                                 if (orderedBranchEntries.isEmpty)
                                   _InlineEmptyState(
                                     label:
@@ -1307,11 +1311,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 const SizedBox(height: 14),
                               ],
                               if (ungroupedConversations.isEmpty && folders.isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 24),
-                                  child: Center(
-                                    child: Text('لا توجد محادثات نشطة بعد.'),
-                                  ),
+                                _InlineEmptyState(
+                                  label: 'لا توجد محادثات نشطة بعد.\nيمكنك بدء محادثة جديدة عبر زر الإنشاء بالأعلى.',
+                                  appearance: appearance,
+                                  isDark: isDark,
+                                  icon: Icons.chat_bubble_outline_rounded,
                                 ),
                             ],
                           ),
@@ -1505,43 +1509,45 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Container(
-        height: 38,
-        padding: const EdgeInsets.all(3),
+        height: 40,
+        padding: const EdgeInsets.all(3.5),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE5E5EA),
-          borderRadius: BorderRadius.circular(19),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: TabBar(
           isScrollable: tabTitles.length > 4,
           tabAlignment: tabTitles.length > 4 ? TabAlignment.start : null,
           labelPadding: tabTitles.length > 4
-              ? const EdgeInsets.symmetric(horizontal: 14)
+              ? const EdgeInsets.symmetric(horizontal: 16)
               : null,
           indicatorAnimation: TabIndicatorAnimation.linear,
           indicatorSize: TabBarIndicatorSize.tab,
           splashFactory: NoSplash.splashFactory,
-          labelColor: isDark ? Colors.white : Colors.black,
+          labelColor: isDark ? Colors.white : const Color(0xFF0F172A),
           unselectedLabelColor:
-              isDark ? Colors.white60 : const Color(0xFF64748B),
+              isDark ? const Color(0xFF98989F) : const Color(0xFF64748B),
           indicator: BoxDecoration(
             color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(17),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.2 : 0.06),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.07),
+                blurRadius: 5,
+                offset: const Offset(0, 1.5),
               ),
             ],
           ),
           dividerColor: Colors.transparent,
           labelStyle: const TextStyle(
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
             fontSize: 13,
+            letterSpacing: -0.1,
           ),
           unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w500,
             fontSize: 13,
+            letterSpacing: -0.1,
           ),
           tabs: [
             for (final title in tabTitles) Tab(text: title),
@@ -1769,6 +1775,20 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               subtitle: 'تخصيص ثيمات الشات وفقاعات الرسائل',
               iconColor: const Color(0xFFAF52DE),
               onTap: () => _handleWorkspaceAction('appearance'),
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.bell_fill,
+              label: 'إعدادات الإشعارات والتنبيهات',
+              subtitle: 'نغمات الرسائل، الاهتزاز، وإشعارات الشات',
+              iconColor: const Color(0xFFFF3B30),
+              onTap: () => _handleWorkspaceAction('notifications'),
+            ),
+            _AppleMenuTile(
+              icon: CupertinoIcons.circle_grid_hex_fill,
+              label: 'بيانات التخزين والذاكرة',
+              subtitle: 'تنظيف الملفات المؤقتة وإدارة الذاكرة المخبأة',
+              iconColor: const Color(0xFF34C759),
+              onTap: () => _handleWorkspaceAction('storage'),
             ),
           ],
         ),
@@ -2026,35 +2046,35 @@ class _AppleBottomNavigationBar extends StatelessWidget {
     final items = [
       _NavTabItem(
         label: 'المحادثات',
-        icon: CupertinoIcons.chat_bubble_2,
-        activeIcon: CupertinoIcons.chat_bubble_2_fill,
+        icon: Icons.chat_bubble_outline_rounded,
+        activeIcon: Icons.chat_bubble_rounded,
         badgeCount: totalUnread,
       ),
       const _NavTabItem(
         label: 'الدليل',
-        icon: CupertinoIcons.person_2,
-        activeIcon: CupertinoIcons.person_2_fill,
+        icon: Icons.people_alt_outlined,
+        activeIcon: Icons.people_alt_rounded,
       ),
       const _NavTabItem(
         label: 'المستندات',
-        icon: CupertinoIcons.doc_text,
-        activeIcon: CupertinoIcons.doc_text_fill,
+        icon: Icons.folder_copy_outlined,
+        activeIcon: Icons.folder_copy_rounded,
       ),
       const _NavTabItem(
-        label: 'المزيد',
-        icon: CupertinoIcons.ellipsis_circle,
-        activeIcon: CupertinoIcons.ellipsis_circle_fill,
+        label: 'الإعدادات',
+        icon: Icons.settings_outlined,
+        activeIcon: Icons.settings_rounded,
       ),
     ];
 
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
         child: Container(
           decoration: BoxDecoration(
             color: isDark
-                ? const Color(0xFF161618).withValues(alpha: 0.88)
-                : Colors.white.withValues(alpha: 0.90),
+                ? const Color(0xFF141416).withValues(alpha: 0.88)
+                : Colors.white.withValues(alpha: 0.92),
             border: Border(
               top: BorderSide(
                 color: isDark
@@ -2063,60 +2083,138 @@ class _AppleBottomNavigationBar extends StatelessWidget {
                 width: 0.5,
               ),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+                blurRadius: 16,
+                offset: const Offset(0, -3),
+              ),
+            ],
           ),
-          padding: EdgeInsets.only(bottom: bottomPadding > 0 ? bottomPadding : 6, top: 8),
+          padding: EdgeInsets.only(
+            bottom: bottomPadding > 0 ? bottomPadding : 8,
+            top: 7,
+          ),
           child: Row(
             children: List.generate(items.length, (index) {
               final item = items[index];
               final isSelected = currentIndex == index;
-              final color = isSelected
-                  ? accentColor
-                  : (isDark ? Colors.white38 : const Color(0xFF8E8E93));
+              final activeColor = accentColor;
+              final inactiveColor =
+                  isDark ? const Color(0xFF98989F) : const Color(0xFF64748B);
 
               return Expanded(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    if (!isSelected) {
-                      HapticFeedback.selectionClick();
-                      onTap(index);
-                    }
-                  },
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Badge(
-                        isLabelVisible: item.badgeCount > 0,
-                        backgroundColor: const Color(0xFFFF3B30),
-                        label: Text(
-                          '${item.badgeCount}',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      if (!isSelected) {
+                        HapticFeedback.lightImpact();
+                        onTap(index);
+                      }
+                    },
+                    splashColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Stack(
+                            clipBehavior: Clip.none,
+                            alignment: Alignment.center,
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 240),
+                                curve: Curves.easeOutCubic,
+                                height: 32,
+                                padding: const EdgeInsets.symmetric(horizontal: 18),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? activeColor.withValues(
+                                          alpha: isDark ? 0.22 : 0.13,
+                                        )
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: AnimatedScale(
+                                  duration: const Duration(milliseconds: 200),
+                                  scale: isSelected ? 1.06 : 1.0,
+                                  curve: Curves.easeOutBack,
+                                  child: Icon(
+                                    isSelected ? item.activeIcon : item.icon,
+                                    size: 23,
+                                    color: isSelected ? activeColor : inactiveColor,
+                                  ),
+                                ),
+                              ),
+                              if (item.badgeCount > 0)
+                                PositionedDirectional(
+                                  top: -3,
+                                  end: 6,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                      vertical: 1.5,
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 18,
+                                      minHeight: 18,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF3B30),
+                                      borderRadius: BorderRadius.circular(9),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? const Color(0xFF141416)
+                                            : Colors.white,
+                                        width: 1.8,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFFFF3B30).withValues(
+                                            alpha: 0.35,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      item.badgeCount > 99
+                                          ? '99+'
+                                          : '${item.badgeCount}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.05,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                        ),
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 180),
-                          child: Icon(
-                            isSelected ? item.activeIcon : item.icon,
-                            key: ValueKey('${item.label}_$isSelected'),
-                            size: 24,
-                            color: color,
+                          const SizedBox(height: 3),
+                          AnimatedDefaultTextStyle(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutCubic,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  isSelected ? FontWeight.w700 : FontWeight.w500,
+                              color: isSelected ? activeColor : inactiveColor,
+                              letterSpacing: -0.15,
+                              height: 1.2,
+                            ),
+                            child: Text(item.label),
                           ),
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        item.label,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                          color: color,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               );
@@ -2200,27 +2298,48 @@ class _InlineEmptyState extends StatelessWidget {
     required this.label,
     required this.appearance,
     required this.isDark,
+    this.icon,
   });
 
   final String label;
   final ChatResolvedAppearance appearance;
   final bool isDark;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: appearance.accent.withValues(alpha: 0.14),
-            child: Icon(Icons.info_outline_rounded, color: appearance.accent),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label)),
-        ],
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: appearance.accent.withValues(alpha: isDark ? 0.16 : 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon ?? Icons.chat_bubble_outline_rounded,
+                size: 26,
+                color: appearance.accent,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
