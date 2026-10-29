@@ -3582,14 +3582,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   _buildWhatsAppMenuDivider(isDark),
                                   _buildWhatsAppContextMenuItem(
                                     title: _cachedAttachmentIds.contains(message.id)
-                                        ? 'حفظ نسخة في الجهاز'
+                                        ? 'تنزيل نسخة من جديد'
                                         : 'حفظ في الجهاز',
                                     icon: CupertinoIcons.arrow_down_to_line,
                                     onTap: () =>
                                         _downloadAttachment(
                                           message,
                                           openAfterDownload: false,
-                                          forceRedownload: false,
+                                          forceRedownload: _cachedAttachmentIds.contains(message.id),
                                         ),
                                   ),
                                 ],
