@@ -14,6 +14,7 @@ import '../../../shared/widgets/button_loading_indicator.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import 'storage_management_screen.dart';
+import 'notification_settings_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -418,49 +419,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           .setAutoSaveAfterScan(val),
                     ),
                     const _AppleDivider(),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFF9500).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(Icons.notifications_active_rounded, color: Color(0xFFFF9500), size: 18),
+                    _AppleSettingsNavTile(
+                      icon: Icons.notifications_active_rounded,
+                      iconColor: const Color(0xFFFF9500),
+                      title: 'إعدادات الإشعارات والتنبيهات',
+                      subtitle: 'تخصيص النغمات، تجميع المحادثات كواتساب، والاهتزاز',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const NotificationSettingsScreen(),
                           ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'نغمة الإشعارات',
-                              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          DropdownButton<String>(
-                            value: preferences.notificationToneId,
-                            underline: const SizedBox(),
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
-                            borderRadius: BorderRadius.circular(12),
-                            items: NotificationTone.values
-                                .map(
-                                  (tone) => DropdownMenuItem(
-                                    value: tone.id,
-                                    child: Text(tone.label, style: const TextStyle(fontSize: 13.5)),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                ref.read(userPreferencesControllerProvider.notifier).setNotificationTone(value);
-                                ref.read(localNotificationServiceProvider).previewNotificationTone(value);
-                                ref.read(pushNotificationServiceProvider).registerForAuthenticatedUser();
-                              }
-                            },
-                          ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
                   ],
                 ),

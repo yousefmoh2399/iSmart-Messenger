@@ -273,6 +273,88 @@ class UserPreferencesController extends AsyncNotifier<UserPreferences> {
     await savePreferences(current.copyWith(notificationDisplayModeId: value));
   }
 
+  Future<void> setNotificationsEnabled(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationsEnabled: value));
+  }
+
+  Future<void> setMessageNotificationsEnabled(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(messageNotificationsEnabled: value));
+  }
+
+  Future<void> setMessageVibrate(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(messageVibrate: value));
+  }
+
+  Future<void> setMessagePreview(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(messagePreview: value));
+  }
+
+  Future<void> setGroupNotificationsEnabled(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupNotificationsEnabled: value));
+  }
+
+  Future<void> setGroupTone(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupToneId: value));
+  }
+
+  Future<void> setGroupVibrate(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupVibrate: value));
+  }
+
+  Future<void> setGroupPreview(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupPreview: value));
+  }
+
+  Future<void> setGroupNotificationsByChat(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupNotificationsByChat: value));
+  }
+
+  Future<void> setInAppBanners(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(inAppBanners: value));
+  }
+
+  Future<void> setReactionNotifications(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(reactionNotifications: value));
+  }
+
+  Future<void> setAutoClearOnOpen(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(autoClearOnOpen: value));
+  }
+
+  Future<void> resetNotificationPreferences() async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    final defaults = UserPreferences.defaults();
+    await savePreferences(
+      current.copyWith(
+        notificationsEnabled: defaults.notificationsEnabled,
+        notificationToneId: defaults.notificationToneId,
+        messageNotificationsEnabled: defaults.messageNotificationsEnabled,
+        messageVibrate: defaults.messageVibrate,
+        messagePreview: defaults.messagePreview,
+        groupNotificationsEnabled: defaults.groupNotificationsEnabled,
+        groupToneId: defaults.groupToneId,
+        groupVibrate: defaults.groupVibrate,
+        groupPreview: defaults.groupPreview,
+        groupNotificationsByChat: defaults.groupNotificationsByChat,
+        inAppBanners: defaults.inAppBanners,
+        reactionNotifications: defaults.reactionNotifications,
+        autoClearOnOpen: defaults.autoClearOnOpen,
+      ),
+    );
+  }
+
 }
 
 final apiBaseUrlStoreProvider = Provider<ApiBaseUrlStore>(

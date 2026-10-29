@@ -11,6 +11,20 @@ class UserPreferencesStore {
   static const _notificationToneIdKey = 'prefs_notification_tone_id';
   static const _notificationDisplayModeKey = 'prefs_notification_display_mode';
 
+  // Advanced & WhatsApp Grouping Notification Keys
+  static const _notificationsEnabledKey = 'prefs_notifications_enabled';
+  static const _messageNotificationsEnabledKey = 'prefs_msg_notifications_enabled';
+  static const _messageVibrateKey = 'prefs_msg_vibrate';
+  static const _messagePreviewKey = 'prefs_msg_preview';
+  static const _groupNotificationsEnabledKey = 'prefs_group_notifications_enabled';
+  static const _groupToneIdKey = 'prefs_group_tone_id';
+  static const _groupVibrateKey = 'prefs_group_vibrate';
+  static const _groupPreviewKey = 'prefs_group_preview';
+  static const _groupNotificationsByChatKey = 'prefs_group_notifications_by_chat';
+  static const _inAppBannersKey = 'prefs_in_app_banners';
+  static const _reactionNotificationsKey = 'prefs_reaction_notifications';
+  static const _autoClearOnOpenKey = 'prefs_auto_clear_on_open';
+
   Future<UserPreferences> load() async {
     final preferences = await SharedPreferences.getInstance();
     return UserPreferences(
@@ -31,6 +45,24 @@ class UserPreferencesStore {
       notificationDisplayModeId:
           preferences.getString(_notificationDisplayModeKey) ??
           NotificationDisplayMode.defaultMode.id,
+      notificationsEnabled: preferences.getBool(_notificationsEnabledKey) ?? true,
+      messageNotificationsEnabled:
+          preferences.getBool(_messageNotificationsEnabledKey) ?? true,
+      messageVibrate: preferences.getBool(_messageVibrateKey) ?? true,
+      messagePreview: preferences.getBool(_messagePreviewKey) ?? true,
+      groupNotificationsEnabled:
+          preferences.getBool(_groupNotificationsEnabledKey) ?? true,
+      groupToneId:
+          preferences.getString(_groupToneIdKey) ??
+          NotificationTone.defaultTone.id,
+      groupVibrate: preferences.getBool(_groupVibrateKey) ?? true,
+      groupPreview: preferences.getBool(_groupPreviewKey) ?? true,
+      groupNotificationsByChat:
+          preferences.getBool(_groupNotificationsByChatKey) ?? true,
+      inAppBanners: preferences.getBool(_inAppBannersKey) ?? true,
+      reactionNotifications:
+          preferences.getBool(_reactionNotificationsKey) ?? true,
+      autoClearOnOpen: preferences.getBool(_autoClearOnOpenKey) ?? true,
     );
   }
 
@@ -72,6 +104,32 @@ class UserPreferencesStore {
       _notificationDisplayModeKey,
       value.notificationDisplayModeId,
     );
+
+    // Save notification preferences
+    await preferences.setBool(_notificationsEnabledKey, value.notificationsEnabled);
+    await preferences.setBool(
+      _messageNotificationsEnabledKey,
+      value.messageNotificationsEnabled,
+    );
+    await preferences.setBool(_messageVibrateKey, value.messageVibrate);
+    await preferences.setBool(_messagePreviewKey, value.messagePreview);
+    await preferences.setBool(
+      _groupNotificationsEnabledKey,
+      value.groupNotificationsEnabled,
+    );
+    await preferences.setString(_groupToneIdKey, value.groupToneId);
+    await preferences.setBool(_groupVibrateKey, value.groupVibrate);
+    await preferences.setBool(_groupPreviewKey, value.groupPreview);
+    await preferences.setBool(
+      _groupNotificationsByChatKey,
+      value.groupNotificationsByChat,
+    );
+    await preferences.setBool(_inAppBannersKey, value.inAppBanners);
+    await preferences.setBool(
+      _reactionNotificationsKey,
+      value.reactionNotifications,
+    );
+    await preferences.setBool(_autoClearOnOpenKey, value.autoClearOnOpen);
   }
 
   String? _normalizeOptionalString(String? value) {

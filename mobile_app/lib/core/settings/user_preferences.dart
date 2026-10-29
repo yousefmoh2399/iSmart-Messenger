@@ -45,7 +45,6 @@ class NotificationTone {
   }
 }
 
-
 enum NotificationDisplayMode {
   all(
     id: 'all',
@@ -92,6 +91,18 @@ class UserPreferences {
     required this.preferredPrinterName,
     required this.notificationToneId,
     this.notificationDisplayModeId = 'all',
+    this.notificationsEnabled = true,
+    this.messageNotificationsEnabled = true,
+    this.messageVibrate = true,
+    this.messagePreview = true,
+    this.groupNotificationsEnabled = true,
+    this.groupToneId = 'default',
+    this.groupVibrate = true,
+    this.groupPreview = true,
+    this.groupNotificationsByChat = true,
+    this.inAppBanners = true,
+    this.reactionNotifications = true,
+    this.autoClearOnOpen = true,
   });
 
   factory UserPreferences.defaults() {
@@ -103,6 +114,18 @@ class UserPreferences {
       preferredPrinterName: null,
       notificationToneId: 'default',
       notificationDisplayModeId: 'all',
+      notificationsEnabled: true,
+      messageNotificationsEnabled: true,
+      messageVibrate: true,
+      messagePreview: true,
+      groupNotificationsEnabled: true,
+      groupToneId: 'default',
+      groupVibrate: true,
+      groupPreview: true,
+      groupNotificationsByChat: true,
+      inAppBanners: true,
+      reactionNotifications: true,
+      autoClearOnOpen: true,
     );
   }
 
@@ -113,12 +136,32 @@ class UserPreferences {
   final String? preferredPrinterName;
   final String notificationToneId;
   final String notificationDisplayModeId;
+  final bool notificationsEnabled;
+  final bool messageNotificationsEnabled;
+  final bool messageVibrate;
+  final bool messagePreview;
+  final bool groupNotificationsEnabled;
+  final String groupToneId;
+  final bool groupVibrate;
+  final bool groupPreview;
+  final bool groupNotificationsByChat;
+  final bool inAppBanners;
+  final bool reactionNotifications;
+  final bool autoClearOnOpen;
+
+  String get messageToneId => notificationToneId;
 
   NotificationDisplayMode get notificationDisplayMode =>
       NotificationDisplayMode.fromId(notificationDisplayModeId);
 
   NotificationTone get notificationTone =>
       NotificationTone.fromId(notificationToneId);
+
+  NotificationTone get messageTone =>
+      NotificationTone.fromId(notificationToneId);
+
+  NotificationTone get groupTone =>
+      NotificationTone.fromId(groupToneId);
 
   UserPreferences copyWith({
     bool? enterSendsMessage,
@@ -131,6 +174,18 @@ class UserPreferences {
     bool clearPreferredPrinterName = false,
     String? notificationToneId,
     String? notificationDisplayModeId,
+    bool? notificationsEnabled,
+    bool? messageNotificationsEnabled,
+    bool? messageVibrate,
+    bool? messagePreview,
+    bool? groupNotificationsEnabled,
+    String? groupToneId,
+    bool? groupVibrate,
+    bool? groupPreview,
+    bool? groupNotificationsByChat,
+    bool? inAppBanners,
+    bool? reactionNotifications,
+    bool? autoClearOnOpen,
   }) {
     return UserPreferences(
       enterSendsMessage: enterSendsMessage ?? this.enterSendsMessage,
@@ -147,6 +202,22 @@ class UserPreferences {
       notificationToneId: notificationToneId ?? this.notificationToneId,
       notificationDisplayModeId:
           notificationDisplayModeId ?? this.notificationDisplayModeId,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      messageNotificationsEnabled:
+          messageNotificationsEnabled ?? this.messageNotificationsEnabled,
+      messageVibrate: messageVibrate ?? this.messageVibrate,
+      messagePreview: messagePreview ?? this.messagePreview,
+      groupNotificationsEnabled:
+          groupNotificationsEnabled ?? this.groupNotificationsEnabled,
+      groupToneId: groupToneId ?? this.groupToneId,
+      groupVibrate: groupVibrate ?? this.groupVibrate,
+      groupPreview: groupPreview ?? this.groupPreview,
+      groupNotificationsByChat:
+          groupNotificationsByChat ?? this.groupNotificationsByChat,
+      inAppBanners: inAppBanners ?? this.inAppBanners,
+      reactionNotifications:
+          reactionNotifications ?? this.reactionNotifications,
+      autoClearOnOpen: autoClearOnOpen ?? this.autoClearOnOpen,
     );
   }
 }

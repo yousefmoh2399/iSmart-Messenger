@@ -345,6 +345,7 @@ async function sendChatPushNotifications({
           notification: {
             channelId: androidChannelId || "chat_messages_default_v1",
             priority: "high",
+            tag: `chat_${String(message?.conversationId || conversation?.id || "").trim()}`,
           },
         },
         apns: {
@@ -470,6 +471,7 @@ async function sendChatReactionPushNotifications({
           notification: {
             channelId: androidChannelId || "chat_messages_default_v1",
             priority: "high",
+            tag: `chat_${String(conversationId || "").trim()}`,
           },
         },
         apns: {
@@ -584,6 +586,7 @@ async function sendTicketPushNotifications({
           notification: {
             channelId: androidChannelId || "chat_messages_default_v1",
             priority: "high",
+            tag: `ticket_${ticketId}`,
           },
         },
         apns: {

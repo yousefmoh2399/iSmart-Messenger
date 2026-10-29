@@ -340,6 +340,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       controller.markSeen();
       controller.refresh();
 
+      try {
+        final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
+        if (prefs == null || prefs.autoClearOnOpen) {
+          ref
+              .read(localNotificationServiceProvider)
+              .cancelConversationNotifications(widget.conversation.id);
+        }
+      } catch (_) {}
+
       final target = widget.initialTargetMessage;
       final targetId = target?.id ?? widget.initialMessageId;
       if (targetId != null) {
