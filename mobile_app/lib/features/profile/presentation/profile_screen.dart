@@ -216,6 +216,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         },
       ),
     );
+    nameCtrl.dispose();
+    jobCtrl.dispose();
   }
 
   Future<void> _showChangePasswordModal(BuildContext context, AppUser user) async {
@@ -398,6 +400,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         },
       ),
     );
+    pwdCtrl.dispose();
+    confirmCtrl.dispose();
   }
 
   Future<void> _showStorageDirectoriesSheet(
@@ -629,6 +633,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         );
       },
     );
+    controller.dispose();
 
     if (newUrl == '__reset__') {
       await ref.read(apiBaseUrlControllerProvider.notifier).reset();
@@ -880,6 +885,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           .setEnterSendsMessage(val);
                     },
                   ),
+                  onTap: () {
+                    ref
+                        .read(userPreferencesControllerProvider.notifier)
+                        .setEnterSendsMessage(!preferences.enterSendsMessage);
+                  },
                 ),
                 _AppleTile(
                   icon: CupertinoIcons.bookmark_fill,
@@ -980,6 +990,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           .setAutoSaveAfterScan(val);
                     },
                   ),
+                  onTap: () {
+                    ref
+                        .read(userPreferencesControllerProvider.notifier)
+                        .setAutoSaveAfterScan(!preferences.autoSaveAfterScan);
+                  },
                 ),
                 _AppleTile(
                   icon: CupertinoIcons.folder_fill,
@@ -1093,13 +1108,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         );
                       },
                     ),
-                  _AppleTile(
-                    icon: CupertinoIcons.link,
-                    iconColor: const Color(0xFF5856D6),
-                    label: 'إعدادات الاتصال بالخادم',
-                    subtitle: 'تعديل عنوان ورابط API الرئيسي',
-                    onTap: () => _showChangeServerUrlDialog(context),
-                  ),
                 ],
               ),
               const SizedBox(height: 18),
@@ -1111,6 +1119,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               cardColor: cardColor,
               dividerColor: dividerColor,
               children: [
+                _AppleTile(
+                  icon: CupertinoIcons.link,
+                  iconColor: const Color(0xFF5856D6),
+                  label: 'إعدادات الاتصال بالخادم',
+                  subtitle: 'تعديل عنوان ورابط API الرئيسي',
+                  onTap: () => _showChangeServerUrlDialog(context),
+                ),
                 _AppleTile(
                   icon: CupertinoIcons.lock_shield_fill,
                   iconColor: const Color(0xFF007AFF),

@@ -513,12 +513,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final mediaGroupId = content.paths.length > 1
         ? 'album_${DateTime.now().microsecondsSinceEpoch}'
         : null;
-    if (content.text.trim().isNotEmpty) {
-      await controller.sendMessage(content: content.text.trim());
+    final caption = content.text.trim();
+    if (content.paths.isEmpty) {
+      if (caption.isNotEmpty) {
+        await controller.sendMessage(content: caption);
+      }
+      return;
     }
-    for (final path in content.paths) {
+    for (var i = 0; i < content.paths.length; i++) {
+      final path = content.paths[i];
       await controller.sendFile(
         path,
+        content: (i == 0 && caption.isNotEmpty) ? caption : null,
         metadata: mediaGroupId == null
             ? null
             : {

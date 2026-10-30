@@ -957,8 +957,10 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                       .cycleThemeMode(),
                   onTogglePin: (c) =>
                       _updateConversationPreferences(c, isPinned: !c.isPinned),
-                  onToggleMute: (c) =>
-                      _updateConversationPreferences(c, isMuted: !c.isMuted),
+                  onToggleMute: (c) => _updateConversationPreferences(
+                    c,
+                    isMuted: !c.isCurrentlyMuted,
+                  ),
                   onToggleArchive: (c) => _updateConversationPreferences(
                     c,
                     isArchived: !c.isArchived,
@@ -1173,7 +1175,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                               onToggleMuted: () =>
                                   _updateConversationPreferences(
                                     selectedConversation,
-                                    isMuted: !selectedConversation.isMuted,
+                                    isMuted:
+                                        !selectedConversation.isCurrentlyMuted,
                                   ),
                               onToggleArchived: () =>
                                   _updateConversationPreferences(

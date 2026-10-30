@@ -299,10 +299,10 @@ class RightPanel extends ConsumerWidget {
                     onTap: onTogglePinned,
                   ),
                   _ActionTile(
-                    icon: conversation.isMuted
+                    icon: conversation.isCurrentlyMuted
                         ? Icons.volume_up_outlined
                         : Icons.volume_off_outlined,
-                    label: conversation.isMuted
+                    label: conversation.isCurrentlyMuted
                         ? 'تفعيل الإشعارات'
                         : 'كتم الإشعارات',
                     isDark: isDark,

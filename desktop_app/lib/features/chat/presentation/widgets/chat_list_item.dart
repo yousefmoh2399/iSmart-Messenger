@@ -310,7 +310,7 @@ class _ChatListItemState extends State<ChatListItem> {
                                       color: Color(0xFFFFC107),
                                     ),
                                   ),
-                                if (widget.conversation.isMuted)
+                                if (widget.conversation.isCurrentlyMuted)
                                   const Padding(
                                     padding: EdgeInsets.only(left: 4),
                                     child: Icon(
@@ -459,7 +459,7 @@ class _ChatListItemState extends State<ChatListItem> {
                           PopupMenuItem(
                             value: 'mute',
                             child: Text(
-                              widget.conversation.isMuted
+                              widget.conversation.isCurrentlyMuted
                                   ? 'إلغاء الكتم'
                                   : 'كتم المحادثة',
                             ),

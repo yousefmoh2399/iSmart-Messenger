@@ -3,11 +3,93 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+
+class _IsolateBlurJob {
+  const _IsolateBlurJob({
+    required this.fileBytes,
+    required this.quarterTurns,
+    required this.canvasWidth,
+    required this.canvasHeight,
+    required this.regions,
+  });
+
+  final Uint8List fileBytes;
+  final int quarterTurns;
+  final double canvasWidth;
+  final double canvasHeight;
+  final List<_MarkupBlurRegion> regions;
+}
+
+Uint8List? _processRedactedImageInIsolate(_IsolateBlurJob job) {
+  img.Image? decoded = img.decodeImage(job.fileBytes);
+  if (decoded == null) return null;
+
+  final turns = job.quarterTurns % 4;
+  if (turns != 0) {
+    decoded = img.copyRotate(decoded, angle: turns * 90);
+  }
+
+  const maxDimension = 2048;
+  if (decoded.width > maxDimension || decoded.height > maxDimension) {
+    if (decoded.width >= decoded.height) {
+      decoded = img.copyResize(decoded, width: maxDimension);
+    } else {
+      decoded = img.copyResize(decoded, height: maxDimension);
+    }
+  }
+
+  if (job.regions.isNotEmpty &&
+      job.canvasWidth > 0 &&
+      job.canvasHeight > 0) {
+    final scaleX = decoded.width / job.canvasWidth;
+    final scaleY = decoded.height / job.canvasHeight;
+
+    for (final region in job.regions) {
+      final rect = region.rect;
+      final x1 = (rect.left * scaleX).round().clamp(0, decoded.width - 1);
+      final y1 = (rect.top * scaleY).round().clamp(0, decoded.height - 1);
+      final x2 = (rect.right * scaleX).round().clamp(0, decoded.width);
+      final y2 = (rect.bottom * scaleY).round().clamp(0, decoded.height);
+
+      final w = x2 - x1;
+      final h = y2 - y1;
+      if (w <= 0 || h <= 0) continue;
+
+      if (region.style == _BlurStyle.blackout) {
+        img.fillRect(
+          decoded,
+          x1: x1,
+          y1: y1,
+          x2: x2,
+          y2: y2,
+          color: img.ColorRgba8(0, 0, 0, 255),
+        );
+      } else if (region.style == _BlurStyle.mosaic) {
+        final crop = img.copyCrop(decoded, x: x1, y: y1, width: w, height: h);
+        final pixelSize = math.max(6, (math.min(w, h) / 7).round());
+        final pixelated = img.pixelate(
+          crop,
+          size: pixelSize,
+          mode: img.PixelateMode.average,
+        );
+        img.compositeImage(decoded, pixelated, dstX: x1, dstY: y1);
+      } else {
+        final crop = img.copyCrop(decoded, x: x1, y: y1, width: w, height: h);
+        final blurRadius = math.max(8, (math.min(w, h) / 6).round());
+        final blurred = img.gaussianBlur(crop, radius: blurRadius);
+        img.compositeImage(decoded, blurred, dstX: x1, dstY: y1);
+      }
+    }
+  }
+
+  return img.encodePng(decoded);
+}
 
 class AttachmentSendDraft {
   const AttachmentSendDraft({
@@ -239,6 +321,7 @@ class _WhatsAppMediaEditorDialogState
 
   @override
   void dispose() {
+    _image?.dispose();
     _captionController.dispose();
     super.dispose();
   }
@@ -249,7 +332,10 @@ class _WhatsAppMediaEditorDialogState
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       codec.dispose();
-      if (!mounted) return;
+      if (!mounted) {
+        frame.image.dispose();
+        return;
+      }
       setState(() {
         _image = frame.image;
       });
@@ -358,81 +444,89 @@ class _WhatsAppMediaEditorDialogState
       return widget.imagePath;
     }
 
+    ui.Image? uiBaseImage;
+    bool disposeBaseImage = false;
     try {
-      final fileBytes = await File(widget.imagePath).readAsBytes();
-      img.Image? decoded = img.decodeImage(fileBytes);
-      if (decoded == null) {
-        return widget.imagePath;
-      }
+      double targetW;
+      double targetH;
+      final turns = _quarterTurns % 4;
 
-      // 1. Rotation
-      if ((_quarterTurns % 4) != 0) {
-        decoded = img.copyRotate(decoded, angle: (_quarterTurns % 4) * 90);
-      }
-
-      final targetW = decoded.width.toDouble();
-      final targetH = decoded.height.toDouble();
-
-      // 2. Apply permanent Blur & Redact directly on image pixels
-      if (_blurRegions.isNotEmpty &&
-          _canvasSize.width > 0 &&
-          _canvasSize.height > 0) {
-        final scaleX = targetW / _canvasSize.width;
-        final scaleY = targetH / _canvasSize.height;
-
-        for (final region in _blurRegions) {
-          final rect = region.rect;
-          final x1 = (rect.left * scaleX).round().clamp(0, decoded.width - 1);
-          final y1 = (rect.top * scaleY).round().clamp(0, decoded.height - 1);
-          final x2 = (rect.right * scaleX).round().clamp(0, decoded.width);
-          final y2 = (rect.bottom * scaleY).round().clamp(0, decoded.height);
-
-          final w = x2 - x1;
-          final h = y2 - y1;
-          if (w <= 0 || h <= 0) continue;
-
-          if (region.style == _BlurStyle.blackout) {
-            img.fillRect(
-              decoded,
-              x1: x1,
-              y1: y1,
-              x2: x2,
-              y2: y2,
-              color: img.ColorRgba8(0, 0, 0, 255),
-            );
-          } else if (region.style == _BlurStyle.mosaic) {
-            final crop = img.copyCrop(decoded, x: x1, y: y1, width: w, height: h);
-            final pixelSize = math.max(6, (math.min(w, h) / 7).round());
-            final pixelated = img.pixelate(
-              crop,
-              size: pixelSize,
-              mode: img.PixelateMode.average,
-            );
-            img.compositeImage(decoded, pixelated, dstX: x1, dstY: y1);
-          } else {
-            final crop = img.copyCrop(decoded, x: x1, y: y1, width: w, height: h);
-            final blurRadius = math.max(8, (math.min(w, h) / 6).round());
-            final blurred = img.gaussianBlur(crop, radius: blurRadius);
-            img.compositeImage(decoded, blurred, dstX: x1, dstY: y1);
-          }
+      if (_blurRegions.isNotEmpty) {
+        // Offload pixel redaction (Gaussian Blur / Pixelate / Blackout) to a background isolate
+        // so the main UI thread stays 60fps responsive!
+        final fileBytes = await File(widget.imagePath).readAsBytes();
+        final processedBytes = await compute(
+          _processRedactedImageInIsolate,
+          _IsolateBlurJob(
+            fileBytes: fileBytes,
+            quarterTurns: turns,
+            canvasWidth: _canvasSize.width,
+            canvasHeight: _canvasSize.height,
+            regions: List<_MarkupBlurRegion>.from(_blurRegions),
+          ),
+        );
+        if (processedBytes == null) {
+          return widget.imagePath;
         }
+        final codec = await ui.instantiateImageCodec(processedBytes);
+        final frame = await codec.getNextFrame();
+        uiBaseImage = frame.image;
+        disposeBaseImage = true;
+        codec.dispose();
+        targetW = uiBaseImage.width.toDouble();
+        targetH = uiBaseImage.height.toDouble();
+      } else {
+        // Fast-path: No pixel redaction needed! Render directly from hardware-decoded _image on GPU Canvas!
+        uiBaseImage = image;
+        disposeBaseImage = false;
+        final isRotatedQuarter = (turns % 2) != 0;
+        final rawW = (isRotatedQuarter ? image.height : image.width).toDouble();
+        final rawH = (isRotatedQuarter ? image.width : image.height).toDouble();
+        const maxDimension = 2048.0;
+        final longest = math.max(rawW, rawH);
+        final exportScale =
+            longest > maxDimension ? (maxDimension / longest) : 1.0;
+        targetW = math.max(1.0, (rawW * exportScale).roundToDouble());
+        targetH = math.max(1.0, (rawH * exportScale).roundToDouble());
       }
 
-      // 3. Prepare base ui.Image from the redacted image
-      final processedBytes = img.encodePng(decoded);
-      final codec = await ui.instantiateImageCodec(processedBytes);
-      final frame = await codec.getNextFrame();
-      final uiBaseImage = frame.image;
-      codec.dispose();
-
-      // 4. Draw vector annotations (strokes, highlighters, shapes, arrows, texts) on Canvas
+      // Draw base image + vector annotations (strokes, highlighters, shapes, arrows, texts) on GPU Canvas
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(
         recorder,
         Rect.fromLTWH(0, 0, targetW, targetH),
       );
 
-      canvas.drawImage(uiBaseImage, Offset.zero, Paint());
+      if (_blurRegions.isNotEmpty) {
+        canvas.drawImage(uiBaseImage, Offset.zero, Paint());
+      } else {
+        canvas.save();
+        final isRotatedQuarter = (turns % 2) != 0;
+        final dstImageW = isRotatedQuarter ? targetH : targetW;
+        final dstImageH = isRotatedQuarter ? targetW : targetH;
+        if (turns == 1) {
+          canvas.translate(targetW, 0);
+          canvas.rotate(math.pi / 2);
+        } else if (turns == 2) {
+          canvas.translate(targetW, targetH);
+          canvas.rotate(math.pi);
+        } else if (turns == 3) {
+          canvas.translate(0, targetH);
+          canvas.rotate(3 * math.pi / 2);
+        }
+        canvas.drawImageRect(
+          uiBaseImage,
+          Rect.fromLTWH(
+            0,
+            0,
+            uiBaseImage.width.toDouble(),
+            uiBaseImage.height.toDouble(),
+          ),
+          Rect.fromLTWH(0, 0, dstImageW, dstImageH),
+          Paint()..filterQuality = FilterQuality.medium,
+        );
+        canvas.restore();
+      }
 
       final scaleX = _canvasSize.width > 0 ? targetW / _canvasSize.width : 1.0;
       final scaleY = _canvasSize.height > 0 ? targetH / _canvasSize.height : 1.0;
@@ -580,8 +674,10 @@ class _WhatsAppMediaEditorDialogState
         targetW.toInt(),
         targetH.toInt(),
       );
+      picture.dispose();
       final finalByteData =
           await finalImage.toByteData(format: ui.ImageByteFormat.png);
+      finalImage.dispose();
       if (finalByteData == null) {
         return widget.imagePath;
       }
@@ -596,6 +692,10 @@ class _WhatsAppMediaEditorDialogState
       return outputPath;
     } catch (_) {
       return widget.imagePath;
+    } finally {
+      if (disposeBaseImage) {
+        uiBaseImage?.dispose();
+      }
     }
   }
 
@@ -751,14 +851,16 @@ class _WhatsAppMediaEditorDialogState
         );
       },
     );
+    final enteredText = controller.text.trim();
+    controller.dispose();
 
-    if (res == true && controller.text.trim().isNotEmpty) {
+    if (res == true && enteredText.isNotEmpty) {
       setState(() {
         _activeTextColor = textColor;
         _activeTextHasBackground = hasBg;
 
         if (existing != null) {
-          existing.text = controller.text.trim();
+          existing.text = enteredText;
           existing.color = textColor;
           existing.hasBackground = hasBg;
         } else {
@@ -770,7 +872,7 @@ class _WhatsAppMediaEditorDialogState
               );
           final ann = _MarkupTextAnnotation(
             id: newId,
-            text: controller.text.trim(),
+            text: enteredText,
             position: defaultPos,
             color: textColor,
             hasBackground: hasBg,

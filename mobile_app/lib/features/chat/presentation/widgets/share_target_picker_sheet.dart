@@ -155,6 +155,7 @@ class _ShareTargetPickerSheetState
 
     final caption = _captionController.text.trim();
     final resolvedConversations = <ChatConversation>[];
+    final sentConversationIds = <String>{};
     final total = _selectedTargets.length;
     var currentIdx = 0;
 
@@ -192,7 +193,7 @@ class _ShareTargetPickerSheetState
           }
         }
 
-        if (targetConv != null) {
+        if (targetConv != null && sentConversationIds.add(targetConv.id)) {
           resolvedConversations.add(targetConv);
           await _sendContentToConversation(targetConv, caption);
         }
@@ -229,13 +230,18 @@ class _ShareTargetPickerSheetState
         ? 'album_${DateTime.now().microsecondsSinceEpoch}'
         : null;
 
-    if (caption.isNotEmpty) {
-      await controller.sendMessage(content: caption);
+    if (paths.isEmpty) {
+      if (caption.isNotEmpty) {
+        await controller.sendMessage(content: caption);
+      }
+      return;
     }
 
-    for (final path in paths) {
+    for (var i = 0; i < paths.length; i++) {
+      final path = paths[i];
       await controller.sendFile(
         path,
+        content: (i == 0 && caption.isNotEmpty) ? caption : null,
         metadata: mediaGroupId == null
             ? null
             : {
@@ -296,12 +302,13 @@ class _ShareTargetPickerSheetState
         .where((c) => !c.isSelfChat(widget.currentUserId))
         .map((conv) {
           final isGroup = conv.type == 'group' || conv.type == 'broadcast';
+          ChatDirectoryUser? directPeer;
           String? avatarUrl;
           if (conv.type == 'direct') {
-            final other = conv.members
+            directPeer = conv.members
                 .where((m) => m.id != widget.currentUserId)
                 .firstOrNull;
-            avatarUrl = other?.avatarUrl;
+            avatarUrl = directPeer?.avatarUrl;
           } else {
             avatarUrl = conv.avatarUrl;
           }
@@ -326,13 +333,15 @@ class _ShareTargetPickerSheetState
           }
 
           return ShareTarget(
-            id: 'conv_${conv.id}',
+            id: directPeer != null ? 'user_${directPeer.id}' : 'conv_${conv.id}',
             kind: ShareTargetKind.conversation,
             title: conv.displayTitle(widget.currentUserId),
             subtitle: subtitle,
             avatarUrl: avatarUrl,
+            isOnline: directPeer?.isOnline ?? false,
             isGroup: isGroup,
             conversation: conv,
+            user: directPeer,
           );
         })
         .toList();

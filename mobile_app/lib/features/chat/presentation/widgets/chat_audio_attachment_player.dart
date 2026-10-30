@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -81,6 +82,8 @@ class ChatAudioAttachmentPlayer extends ConsumerStatefulWidget {
 class _ChatAudioAttachmentPlayerState
     extends ConsumerState<ChatAudioAttachmentPlayer> {
   late final AudioPlayer _player;
+  StreamSubscription<PlayerState>? _playerStateSub;
+  StreamSubscription<Duration?>? _durationSub;
   String? _loadedFilePath;
   bool _isLoaded = false;
   bool _loading = false;
@@ -89,6 +92,7 @@ class _ChatAudioAttachmentPlayerState
 
   bool _isScrubbing = false;
   double _scrubPercent = 0.0;
+  Duration? _pendingSeekDuration;
   Duration? _knownTotalDuration;
   bool _hasBeenPlayed = false;
 
@@ -129,7 +133,7 @@ class _ChatAudioAttachmentPlayerState
       }
     });
 
-    _player.playerStateStream.listen((state) {
+    _playerStateSub = _player.playerStateStream.listen((state) {
       if (!mounted) return;
       if (state.playing) {
         ChatAudioPlaybackCoordinator.setActive(widget.message.id);
@@ -140,11 +144,16 @@ class _ChatAudioAttachmentPlayerState
       if (state.processingState == ProcessingState.completed) {
         _player.seek(Duration.zero);
         _player.pause();
+        if (mounted) {
+          setState(() {
+            _pendingSeekDuration = null;
+          });
+        }
         ChatAudioPlaybackCoordinator.stopIfActive(widget.message.id);
       }
     });
 
-    _player.durationStream.listen((duration) {
+    _durationSub = _player.durationStream.listen((duration) {
       if (duration != null && duration > Duration.zero && mounted) {
         setState(() {
           _knownTotalDuration = duration;
@@ -185,6 +194,8 @@ class _ChatAudioAttachmentPlayerState
 
   @override
   void dispose() {
+    _playerStateSub?.cancel();
+    _durationSub?.cancel();
     ChatAudioPlaybackCoordinator.activePlayerNotifier
         .removeListener(_onActivePlayerChanged);
     ChatAudioPlaybackCoordinator.playbackSpeedNotifier
@@ -201,7 +212,10 @@ class _ChatAudioAttachmentPlayerState
       final cachedPath =
           await repository.getCachedAttachmentPath(widget.message);
       if (cachedPath != null && await File(cachedPath).exists()) {
-        await _loadFromLocalFile(cachedPath);
+        _loadedFilePath = cachedPath;
+        if (_knownTotalDuration == null) {
+          await _loadFromLocalFile(cachedPath);
+        }
       } else {
         // Pre-cache voice note file into internal storage in background
         final fileUrl = widget.message.fileUrl;
@@ -210,7 +224,10 @@ class _ChatAudioAttachmentPlayerState
               .downloadAttachment(widget.message)
               .timeout(const Duration(seconds: 25));
           if (mounted && path.isNotEmpty && await File(path).exists()) {
-            await _loadFromLocalFile(path);
+            _loadedFilePath = path;
+            if (_knownTotalDuration == null) {
+              await _loadFromLocalFile(path);
+            }
           }
         }
       }
@@ -251,6 +268,11 @@ class _ChatAudioAttachmentPlayerState
         _loadedFilePath != null &&
         File(_loadedFilePath!).existsSync()) {
       ChatAudioPlaybackCoordinator.setActive(widget.message.id);
+      if (_pendingSeekDuration != null) {
+        final seekTarget = _pendingSeekDuration!;
+        _pendingSeekDuration = null;
+        await _player.seek(seekTarget);
+      }
       await _player.play();
       return;
     }
@@ -261,8 +283,10 @@ class _ChatAudioAttachmentPlayerState
 
     try {
       final repository = ref.read(chatRepositoryProvider);
-      String? localPath =
-          await repository.getCachedAttachmentPath(widget.message);
+      String? localPath = _loadedFilePath;
+      if (localPath == null || !File(localPath).existsSync()) {
+        localPath = await repository.getCachedAttachmentPath(widget.message);
+      }
 
       if (localPath == null || !File(localPath).existsSync()) {
         localPath = await repository
@@ -284,6 +308,11 @@ class _ChatAudioAttachmentPlayerState
         }
         if (mounted) {
           ChatAudioPlaybackCoordinator.setActive(widget.message.id);
+          if (_pendingSeekDuration != null) {
+            final seekTarget = _pendingSeekDuration!;
+            _pendingSeekDuration = null;
+            await _player.seek(seekTarget);
+          }
           await _player.play();
         }
       }
@@ -330,8 +359,15 @@ class _ChatAudioAttachmentPlayerState
   void _onWaveformTap(TapDownDetails details, double width, Duration total) {
     if (width <= 0 || total.inMilliseconds <= 0) return;
     final percent = (details.localPosition.dx / width).clamp(0.0, 1.0);
-    final targetMs = (percent * total.inMilliseconds).round();
-    _player.seek(Duration(milliseconds: targetMs));
+    final targetDuration =
+        Duration(milliseconds: (percent * total.inMilliseconds).round());
+    if (_isLoaded) {
+      _player.seek(targetDuration);
+    } else {
+      setState(() {
+        _pendingSeekDuration = targetDuration;
+      });
+    }
     HapticFeedback.selectionClick();
   }
 
@@ -353,8 +389,13 @@ class _ChatAudioAttachmentPlayerState
 
   void _onWaveformDragEnd(DragEndDetails details, Duration total) {
     if (total.inMilliseconds > 0) {
-      final targetMs = (_scrubPercent * total.inMilliseconds).round();
-      _player.seek(Duration(milliseconds: targetMs));
+      final targetDuration =
+          Duration(milliseconds: (_scrubPercent * total.inMilliseconds).round());
+      if (_isLoaded) {
+        _player.seek(targetDuration);
+      } else {
+        _pendingSeekDuration = targetDuration;
+      }
     }
     setState(() {
       _isScrubbing = false;
@@ -366,7 +407,6 @@ class _ChatAudioAttachmentPlayerState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final token = ref.watch(authTokenProvider).valueOrNull;
 
     if (_audioPluginUnavailable) {
       return Container(
@@ -434,7 +474,10 @@ class _ChatAudioAttachmentPlayerState
             return StreamBuilder<Duration>(
               stream: _player.positionStream,
               builder: (context, posSnapshot) {
-                final position = posSnapshot.data ?? Duration.zero;
+                final rawPos = posSnapshot.data ?? Duration.zero;
+                final position = (rawPos == Duration.zero && _pendingSeekDuration != null)
+                    ? _pendingSeekDuration!
+                    : rawPos;
                 final total = _knownTotalDuration ?? Duration.zero;
                 final safeMaxMs = total.inMilliseconds <= 0
                     ? 1.0

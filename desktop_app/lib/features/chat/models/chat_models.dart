@@ -502,6 +502,8 @@ class ChatConversation {
     return mutedUntil!.isAfter(DateTime.now());
   }
 
+  bool get isCurrentlyMuted => isEffectivelyMuted;
+
   bool isSelfChat(String currentUserId) {
     if (type != 'direct') return false;
     if (members.isEmpty) return true;

@@ -115,7 +115,7 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
             break;
           }
 
-          if (targetConversation?.isMuted == true && !isMentioned) {
+          if (targetConversation?.isCurrentlyMuted == true && !isMentioned) {
             break;
           }
 
@@ -154,7 +154,7 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               }
             }
           }
-          if (targetConversation?.isMuted == true) {
+          if (targetConversation?.isCurrentlyMuted == true) {
             break;
           }
           final isChatVisible = ref.read(chatSectionVisibleProvider);

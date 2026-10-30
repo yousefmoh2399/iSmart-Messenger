@@ -835,7 +835,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                     )
                   : null,
               actions: [
-                if (_selectedNavIndex == 0) ...[
+                if (_selectedNavIndex == 0 || _selectedNavIndex == 1)
                   Padding(
                     padding: const EdgeInsetsDirectional.only(end: 4),
                     child: _HeaderIconButton(
@@ -848,34 +848,33 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                       onPressed: _toggleSearch,
                     ),
                   ),
-                  if (authUser != null) ...[
-                    Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 4),
-                      child: _HeaderIconButton(
-                        tooltip: 'محادثة جديدة',
-                        icon: Icons.edit_square,
-                        appearance: appearance,
-                        isDark: isDark,
-                        onPressed: () => _showCreateDialog(authUser),
-                      ),
+                if (_selectedNavIndex == 0 && authUser != null) ...[
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 4),
+                    child: _HeaderIconButton(
+                      tooltip: 'محادثة جديدة',
+                      icon: Icons.edit_square,
+                      appearance: appearance,
+                      isDark: isDark,
+                      onPressed: () => _showCreateDialog(authUser),
                     ),
-                    Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 4),
-                      child: _HeaderIconButton(
-                        tooltip: 'مساحة العمل والملاحظات',
-                        icon: Icons.edit_note_rounded,
-                        appearance: appearance,
-                        isDark: isDark,
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            CupertinoPageRoute(
-                              builder: (_) => const WorkspaceHomeScreen(),
-                            ),
-                          );
-                        },
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 4),
+                    child: _HeaderIconButton(
+                      tooltip: 'مساحة العمل والملاحظات',
+                      icon: Icons.edit_note_rounded,
+                      appearance: appearance,
+                      isDark: isDark,
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          CupertinoPageRoute(
+                            builder: (_) => const WorkspaceHomeScreen(),
+                          ),
+                        );
+                      },
                     ),
-                  ],
+                  ),
                 ],
                 Builder(
                   builder: (context) => Padding(
@@ -909,7 +908,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         isDark: isDark,
       ),
       body: SafeArea(
-        child: overviewState.when(
+        child: _selectedNavIndex == 2
+            ? const HomeScreen()
+            : _selectedNavIndex == 3
+                ? const ProfileScreen(isEmbeddedInTab: true)
+                : overviewState.when(
           skipLoadingOnReload: true,
           skipLoadingOnRefresh: true,
           skipError: true,
@@ -1072,6 +1075,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                 length: 3,
                 child: Column(
                   children: [
+                    _buildExpandableSearchBar(
+                      isDark: isDark,
+                      colorScheme: colorScheme,
+                      hintText: 'ابحث في الأقسام والفروع والأفراد...',
+                    ),
                     _buildPillTabBar(['الأقسام', 'الفروع', 'الأفراد'], appearance, isDark),
                     Expanded(
                       child: TabBarView(
@@ -1175,80 +1183,16 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               );
             }
 
-            if (_selectedNavIndex == 2) {
-              // ── Tab 2: Scan & Documents ──
-              return const HomeScreen();
-            }
-
-            if (_selectedNavIndex == 3) {
-              // ── Tab 3: More / Settings ──
-              return const ProfileScreen(isEmbeddedInTab: true);
-            }
-
             // ── Tab 0: Chats ──
             return DefaultTabController(
               key: const ValueKey('chat_home_chats_tab_controller'),
               length: 5,
               child: Column(
                 children: [
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOutCubic,
-                    child: _isSearchExpanded
-                        ? Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-                            child: Container(
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? const Color(0xFF1C1C1E)
-                                    : const Color(0xFFE5E5EA).withValues(alpha: 0.65),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: TextField(
-                                controller: _searchController,
-                                focusNode: _searchFocusNode,
-                                style: TextStyle(
-                                  fontSize: 14.5,
-                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                ),
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText: 'ابحث في المحادثات...',
-                                  hintStyle: TextStyle(
-                                    fontSize: 14,
-                                    color: isDark
-                                        ? Colors.white38
-                                        : colorScheme.onSurfaceVariant,
-                                  ),
-                                  prefixIcon: const Icon(
-                                    Icons.search_rounded,
-                                    size: 20,
-                                    color: Color(0xFF8E8E93),
-                                  ),
-                                  suffixIcon:
-                                      _searchController.text.trim().isEmpty
-                                      ? null
-                                      : IconButton(
-                                          tooltip: 'مسح البحث',
-                                          icon: const Icon(
-                                            Icons.cancel_rounded,
-                                            size: 18,
-                                            color: Color(0xFF8E8E93),
-                                          ),
-                                          onPressed: () {
-                                            _searchController.clear();
-                                            setState(() {});
-                                          },
-                                        ),
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink(),
+                  _buildExpandableSearchBar(
+                    isDark: isDark,
+                    colorScheme: colorScheme,
+                    hintText: 'ابحث في المحادثات...',
                   ),
                   _buildPillTabBar(['الكل', 'مباشر', 'المجموعات', 'المفضلة', 'المؤرشفة'], appearance, isDark),
                   Expanded(
@@ -1624,388 +1568,68 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     );
   }
 
-  Widget _buildMoreSettingsView(
-    AppUser? user,
-    ChatResolvedAppearance appearance,
-    bool isDark,
-    ThemeMode themeMode,
-  ) {
-    final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    final dividerColor =
-        isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
-    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final subtitleColor = isDark ? Colors.white54 : const Color(0xFF8E8E93);
-    final displayName = (user?.fullName.trim().isNotEmpty ?? false)
-        ? user!.fullName.trim()
-        : (user?.username ?? 'المستخدم');
-
-    final canAdmin = user?.can('canCreateUsers') == true ||
-        user?.can('canCreateDepartments') == true ||
-        user?.role == 'admin';
-    final canPrinters = user?.canViewPrinterModule == true || user?.role == 'admin';
-    final canItAssets = user?.canScanItAssets == true ||
-        user?.canScanItSpareParts == true ||
-        user?.canScanItInventory == true ||
-        user?.role == 'admin';
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
-      children: [
-        // ── 1. Apple ID-Style Profile Card ──
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => _handleWorkspaceAction('profile'),
-            borderRadius: BorderRadius.circular(18),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
-                  width: 0.5,
-                ),
-              ),
-              child: Row(
-                children: [
-                  ChatAvatar(
-                    radius: 28,
-                    backgroundColor: appearance.accent.withValues(alpha: 0.15),
-                    avatarUrl: user?.avatarUrl,
-                    fallback: Text(
-                      _avatarLabel(displayName),
-                      style: TextStyle(
-                        color: appearance.accent,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          displayName,
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          user?.role == 'admin'
-                              ? 'مسؤول النظام (Admin)'
-                              : (user?.jobTitle.isNotEmpty == true
-                                  ? user!.jobTitle
-                                  : 'حساب موظف'),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: subtitleColor,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        if (user?.username.isNotEmpty == true) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            '@${user!.username}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: subtitleColor.withValues(alpha: 0.8),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.chevron_left_rounded,
-                      size: 18,
-                      color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 18),
-
-        // ── 2. Files & Productivity Group ──
-        _buildSectionHeader('الملفات والإنتاجية', isDark),
-        _buildAppleMenuGroup(
-          cardColor: cardColor,
-          dividerColor: dividerColor,
-          children: [
-            _AppleMenuTile(
-              icon: CupertinoIcons.folder_fill,
-              label: 'ملفاتي ومستنداتي السحابية',
-              subtitle: 'استعراض وإدارة كافة الملفات المرفوعة',
-              iconColor: const Color(0xFF007AFF),
-              onTap: () => _handleWorkspaceAction('files'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.archivebox_fill,
-              label: 'الملفات المحلية',
-              subtitle: 'المستندات المحفوظة على ذاكرة الهاتف',
-              iconColor: const Color(0xFFFF9500),
-              onTap: () => _handleWorkspaceAction('localFiles'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.device_laptop,
-              label: 'إرسال ملف إلى الكمبيوتر',
-              subtitle: 'نقل سريع ومباشر للكمبيوتر عبر الشبكة',
-              iconColor: const Color(0xFF5856D6),
-              onTap: () => _handleWorkspaceAction('sendDesktop'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.viewfinder,
-              label: 'الماسح الضوئي للمستندات',
-              subtitle: 'التقاط صور وإنشاء PDF ممسوح بالكاميرا',
-              iconColor: const Color(0xFF30B0C7),
-              onTap: () => _handleWorkspaceAction('scanner'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-
-        // ── 3. Chat & Communication Group ──
-        _buildSectionHeader('التواصل والمحادثات', isDark),
-        _buildAppleMenuGroup(
-          cardColor: cardColor,
-          dividerColor: dividerColor,
-          children: [
-            _AppleMenuTile(
-              icon: CupertinoIcons.bookmark_fill,
-              label: 'الرسائل المحفوظة (الملاحظات الذاتية)',
-              subtitle: 'مساحتك السحابية لحفظ الملاحظات، الروابط، والمستندات',
-              iconColor: const Color(0xFF5856D6),
-              onTap: () => _handleWorkspaceAction('savedMessages'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.star_fill,
-              label: 'الرسائل المفضلة',
-              subtitle: 'الرسائل المحفوظة للرجوع السريع إليها',
-              iconColor: const Color(0xFFFFCC00),
-              onTap: () => _handleWorkspaceAction('favoriteMessages'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.folder_badge_plus,
-              label: 'مجلدات وتصنيفات الشات',
-              subtitle: 'إنشاء مجلدات مخصصة لتنظيم المحادثات',
-              iconColor: const Color(0xFF34C759),
-              onTap: () => _handleWorkspaceAction('chatFolders'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.headphones,
-              label: 'تذاكر الدعم والشكاوى',
-              subtitle: 'إرسال ومتابعة بلاغات IT والمقترحات',
-              iconColor: const Color(0xFFFF2D55),
-              onTap: () => _handleWorkspaceAction('tickets'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-
-        // ── 4. Appearance & System Group ──
-        _buildSectionHeader('المظهر والنظام', isDark),
-        _buildAppleMenuGroup(
-          cardColor: cardColor,
-          dividerColor: dividerColor,
-          children: [
-            _AppleMenuTile(
-              icon: isDark ? CupertinoIcons.moon_fill : CupertinoIcons.sun_max_fill,
-              label: 'الوضع الداكن (Dark Mode)',
-              subtitle: isDark ? 'الوضع الليلي مفعل حاليًا' : 'الوضع النهاري مفعل حاليًا',
-              iconColor: const Color(0xFFFF9500),
-              trailing: CupertinoSwitch(
-                value: isDark,
-                activeColor: const Color(0xFF007AFF),
-                onChanged: (val) {
-                  ref.read(themeModeControllerProvider.notifier).setThemeMode(
-                    val ? ThemeMode.dark : ThemeMode.light,
-                  );
-                },
-              ),
-              onTap: () {
-                ref.read(themeModeControllerProvider.notifier).setThemeMode(
-                  isDark ? ThemeMode.light : ThemeMode.dark,
-                );
-              },
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.paintbrush_fill,
-              label: 'مظهر وخلفيات المحادثات',
-              subtitle: 'تخصيص ثيمات الشات وفقاعات الرسائل',
-              iconColor: const Color(0xFFAF52DE),
-              onTap: () => _handleWorkspaceAction('appearance'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.bell_fill,
-              label: 'إعدادات الإشعارات والتنبيهات',
-              subtitle: 'نغمات الرسائل، الاهتزاز، وإشعارات الشات',
-              iconColor: const Color(0xFFFF3B30),
-              onTap: () => _handleWorkspaceAction('notifications'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.circle_grid_hex_fill,
-              label: 'بيانات التخزين والذاكرة',
-              subtitle: 'تنظيف الملفات المؤقتة وإدارة الذاكرة المخبأة',
-              iconColor: const Color(0xFF34C759),
-              onTap: () => _handleWorkspaceAction('storage'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-
-        // ── 5. Admin & Hardware Tools (if permitted) ──
-        if (canAdmin || canPrinters || canItAssets) ...[
-          _buildSectionHeader('الأدوات الإدارية والشبكة', isDark),
-          _buildAppleMenuGroup(
-            cardColor: cardColor,
-            dividerColor: dividerColor,
-            children: [
-              if (canAdmin)
-                _AppleMenuTile(
-                  icon: CupertinoIcons.shield_fill,
-                  label: 'لوحة إدارة الشات والمستخدمين',
-                  subtitle: 'إدارة المستخدمين والأقسام وسجلات التدقيق',
-                  iconColor: const Color(0xFF34C759),
-                  onTap: () => _handleWorkspaceAction('admin'),
-                ),
-              if (canPrinters)
-                _AppleMenuTile(
-                  icon: CupertinoIcons.printer_fill,
-                  label: 'مراقبة أسطول الطابعات',
-                  subtitle: 'فحص الطابعات والعدادات ومستويات الأحبار',
-                  iconColor: const Color(0xFF007AFF),
-                  onTap: () => _handleWorkspaceAction('printers'),
-                ),
-              if (canItAssets)
-                _AppleMenuTile(
-                  icon: CupertinoIcons.barcode_viewfinder,
-                  label: 'ماسح أصول IT والمخزون',
-                  subtitle: 'جرد العتاد وقطع الغيار بالكاميرا والباركود',
-                  iconColor: const Color(0xFF00C7BE),
-                  onTap: () => _handleWorkspaceAction('itAssetsScanner'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 18),
-        ],
-
-        // ── 6. Account & Session ──
-        _buildSectionHeader('الحساب والأمان', isDark),
-        _buildAppleMenuGroup(
-          cardColor: cardColor,
-          dividerColor: dividerColor,
-          children: [
-            _AppleMenuTile(
-              icon: CupertinoIcons.person_crop_circle_fill,
-              label: 'إعدادات الملف الشخصي',
-              subtitle: 'تعديل البيانات، الصورة الشخصية، وكلمة المرور',
-              iconColor: const Color(0xFF007AFF),
-              onTap: () => _handleWorkspaceAction('profile'),
-            ),
-            _AppleMenuTile(
-              icon: CupertinoIcons.square_arrow_right,
-              label: 'تسجيل الخروج',
-              subtitle: 'إنهاء الجلسة والخروج من الحساب الحالي',
-              iconColor: const Color(0xFFFF3B30),
-              onTap: () => _handleWorkspaceAction('logout'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-
-        // ── 7. App Info Footer ──
-        Center(
-          child: Column(
-            children: [
-              Text(
-                'iSmart Messenger',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white38 : const Color(0xFF8E8E93),
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'الإصدار 1.2.4',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: isDark ? Colors.white24 : const Color(0xFFA1A1A6),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSectionHeader(String title, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 12, left: 12, bottom: 6),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: isDark ? Colors.white54 : const Color(0xFF6E6E73),
-          letterSpacing: -0.2,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAppleMenuGroup({
-    required Color cardColor,
-    required Color dividerColor,
-    required List<Widget> children,
+  Widget _buildExpandableSearchBar({
+    required bool isDark,
+    required ColorScheme colorScheme,
+    required String hintText,
   }) {
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: dividerColor,
-          width: 0.5,
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: List.generate(children.length, (index) {
-          final isLast = index == children.length - 1;
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              children[index],
-              if (!isLast)
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(start: 56.0),
-                  child: Divider(
-                    height: 0.5,
-                    thickness: 0.5,
-                    color: dividerColor,
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      child: _isSearchExpanded
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF1C1C1E)
+                      : const Color(0xFFE5E5EA).withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: hintText,
+                    hintStyle: TextStyle(
+                      fontSize: 14,
+                      color: isDark
+                          ? Colors.white38
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      size: 20,
+                      color: Color(0xFF8E8E93),
+                    ),
+                    suffixIcon: _searchController.text.trim().isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'مسح البحث',
+                            icon: const Icon(
+                              Icons.cancel_rounded,
+                              size: 18,
+                              color: Color(0xFF8E8E93),
+                            ),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {});
+                            },
+                          ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    isDense: true,
                   ),
                 ),
-            ],
-          );
-        }),
-      ),
+              ),
+            )
+          : const SizedBox.shrink(),
     );
   }
 }
@@ -2013,91 +1637,6 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Apple Minimalist Navigation & Menu Components
 // ─────────────────────────────────────────────────────────────────────────────
-
-class _AppleMenuTile extends StatelessWidget {
-  const _AppleMenuTile({
-    required this.icon,
-    required this.label,
-    required this.iconColor,
-    this.subtitle,
-    this.trailing,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color iconColor;
-  final String? subtitle;
-  final Widget? trailing;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final subtitleColor = isDark ? Colors.white54 : const Color(0xFF8E8E93);
-
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: iconColor,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: Icon(icon, color: Colors.white, size: 18),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle!,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: subtitleColor,
-                        fontWeight: FontWeight.w400,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (trailing != null)
-              trailing!
-            else
-              Icon(
-                Icons.chevron_left_rounded,
-                size: 20,
-                color: isDark ? Colors.white24 : const Color(0xFFC7C7CC),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _AppleBottomNavigationBar extends StatelessWidget {
   const _AppleBottomNavigationBar({
