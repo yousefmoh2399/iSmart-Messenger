@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -22,32 +23,90 @@ class AttachmentSendDraft {
   final String? caption;
 }
 
-enum _MarkupTool { pen, circle }
+enum _MarkupTool {
+  pen,
+  highlighter,
+  blur,
+  arrow,
+  circle,
+  rectangle,
+  text,
+}
+
+enum _BlurStyle {
+  blur,
+  mosaic,
+  blackout,
+}
 
 class _MarkupStroke {
   const _MarkupStroke({
     required this.points,
     required this.color,
     required this.width,
+    this.isHighlighter = false,
   });
 
   final List<Offset> points;
   final Color color;
   final double width;
+  final bool isHighlighter;
 }
 
-class _MarkupCircle {
-  const _MarkupCircle({
+class _MarkupShape {
+  const _MarkupShape({
     required this.start,
     required this.end,
     required this.color,
     required this.width,
+    required this.tool,
   });
 
   final Offset start;
   final Offset end;
   final Color color;
   final double width;
+  final _MarkupTool tool;
+}
+
+class _MarkupBlurRegion {
+  const _MarkupBlurRegion({
+    required this.rect,
+    required this.style,
+  });
+
+  final Rect rect;
+  final _BlurStyle style;
+}
+
+class _MarkupTextAnnotation {
+  _MarkupTextAnnotation({
+    required this.id,
+    required this.text,
+    required this.position,
+    required this.color,
+    this.hasBackground = true,
+  });
+
+  final String id;
+  String text;
+  Offset position;
+  Color color;
+  bool hasBackground;
+  double fontSize = 16.0;
+}
+
+enum _MarkupActionType {
+  stroke,
+  shape,
+  blur,
+  text,
+}
+
+class _MarkupAction {
+  const _MarkupAction(this.type, this.data);
+  final _MarkupActionType type;
+  final dynamic data;
 }
 
 const Set<String> _imageExtensions = <String>{
@@ -85,20 +144,7 @@ String _formatFileSize(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
-/// Displays the WhatsApp-style attachment send flow.
-///
-/// For images: Opens a full WhatsApp-style media editor with:
-/// - 90° rotation
-/// - Markup drawing (pen & circle with color palette & undo)
-/// - Per-message forward protection pill ("لهذه الرسالة فقط")
-/// - Caption input ("إضافة شرح...")
-/// - Quick Send button ("إرسال سريع") & WhatsApp Green Send button
-///
-/// For documents/videos: Opens a modern WhatsApp/Apple card dialog with:
-/// - File metadata & icon
-/// - Per-message forward protection pill ("لهذه الرسالة فقط")
-/// - Caption input
-/// - Quick Send & Send buttons
+/// Displays the WhatsApp/iOS-style attachment send flow with Quick Photo Markup & Blur Tool.
 Future<AttachmentSendDraft?> showAttachmentSendDialog(
   BuildContext context,
   String originalPath,
@@ -120,7 +166,7 @@ Future<AttachmentSendDraft?> showAttachmentSendDialog(
 }
 
 // =============================================================================
-// WHATSAPP-STYLE MEDIA EDITOR (FOR IMAGES)
+// WHATSAPP & APPLE STYLE PHOTO / DOCUMENT MARKUP & BLUR EDITOR
 // =============================================================================
 
 class _WhatsAppMediaEditorDialog extends StatefulWidget {
@@ -139,8 +185,15 @@ class _WhatsAppMediaEditorDialogState
   int _quarterTurns = 0;
   bool _isMarkupActive = false;
   _MarkupTool _tool = _MarkupTool.pen;
+  _BlurStyle _activeBlurStyle = _BlurStyle.blur;
+
   Color _activeColor = const Color(0xFF25D366); // WhatsApp Green
-  final double _activeWidth = 5.0;
+  Color _activeHighlighterColor = const Color(0xFFFFEB3B); // Neon Yellow
+  Color _activeTextColor = const Color(0xFFFFFFFF);
+  bool _activeTextHasBackground = true;
+
+  double _activeWidth = 5.0;
+  double _activeHighlighterWidth = 24.0;
   bool _saving = false;
   bool _restrictForwardAndDownload = false;
   Size _canvasSize = Size.zero;
@@ -148,12 +201,16 @@ class _WhatsAppMediaEditorDialogState
   final TextEditingController _captionController = TextEditingController();
 
   final List<_MarkupStroke> _strokes = <_MarkupStroke>[];
-  final List<_MarkupCircle> _circles = <_MarkupCircle>[];
-  final List<_MarkupTool> _actionHistory = <_MarkupTool>[];
+  final List<_MarkupShape> _shapes = <_MarkupShape>[];
+  final List<_MarkupBlurRegion> _blurRegions = <_MarkupBlurRegion>[];
+  final List<_MarkupTextAnnotation> _textAnnotations = <_MarkupTextAnnotation>[];
+  final List<_MarkupAction> _actionHistory = <_MarkupAction>[];
 
   List<Offset>? _activeStroke;
-  Offset? _circleStart;
-  Offset? _circleEnd;
+  Offset? _shapeStart;
+  Offset? _shapeEnd;
+  Offset? _blurStart;
+  Offset? _blurEnd;
 
   static const List<Color> _palette = <Color>[
     Color(0xFF25D366), // WhatsApp Emerald
@@ -161,8 +218,17 @@ class _WhatsAppMediaEditorDialogState
     Color(0xFFFF3B30), // Red
     Color(0xFFFFD200), // Yellow
     Color(0xFFAF52DE), // Purple
+    Color(0xFFFF9500), // Orange
     Color(0xFFFFFFFF), // White
-    Color(0xFF111827), // Black
+    Color(0xFF1E293B), // Dark Slate
+  ];
+
+  static const List<Color> _highlighterPalette = <Color>[
+    Color(0xFFFFEB3B), // Fluorescent Yellow
+    Color(0xFF00E676), // Neon Green
+    Color(0xFF00E5FF), // Sky Cyan
+    Color(0xFFFF4081), // Hot Pink
+    Color(0xFFFF9100), // Vivid Orange
   ];
 
   @override
@@ -187,7 +253,7 @@ class _WhatsAppMediaEditorDialogState
       setState(() {
         _image = frame.image;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       Navigator.of(context).pop();
     }
@@ -195,24 +261,46 @@ class _WhatsAppMediaEditorDialogState
 
   void _undo() {
     if (_actionHistory.isEmpty) return;
+    HapticFeedback.selectionClick();
     final lastAction = _actionHistory.removeLast();
     setState(() {
-      if (lastAction == _MarkupTool.pen && _strokes.isNotEmpty) {
-        _strokes.removeLast();
-      } else if (lastAction == _MarkupTool.circle && _circles.isNotEmpty) {
-        _circles.removeLast();
+      switch (lastAction.type) {
+        case _MarkupActionType.stroke:
+          if (_strokes.isNotEmpty) _strokes.removeLast();
+          break;
+        case _MarkupActionType.shape:
+          if (_shapes.isNotEmpty) _shapes.removeLast();
+          break;
+        case _MarkupActionType.blur:
+          if (_blurRegions.isNotEmpty) _blurRegions.removeLast();
+          break;
+        case _MarkupActionType.text:
+          if (_textAnnotations.isNotEmpty) {
+            final id = lastAction.data as String?;
+            if (id != null) {
+              _textAnnotations.removeWhere((t) => t.id == id);
+            } else {
+              _textAnnotations.removeLast();
+            }
+          }
+          break;
       }
     });
   }
 
   void _clearAll() {
+    HapticFeedback.mediumImpact();
     setState(() {
       _strokes.clear();
-      _circles.clear();
+      _shapes.clear();
+      _blurRegions.clear();
+      _textAnnotations.clear();
       _actionHistory.clear();
       _activeStroke = null;
-      _circleStart = null;
-      _circleEnd = null;
+      _shapeStart = null;
+      _shapeEnd = null;
+      _blurStart = null;
+      _blurEnd = null;
     });
   }
 
@@ -262,56 +350,122 @@ class _WhatsAppMediaEditorDialogState
     final image = _image;
     final hasEdits = _quarterTurns != 0 ||
         _strokes.isNotEmpty ||
-        _circles.isNotEmpty;
+        _shapes.isNotEmpty ||
+        _blurRegions.isNotEmpty ||
+        _textAnnotations.isNotEmpty;
 
     if (image == null || !hasEdits) {
       return widget.imagePath;
     }
 
-    final origW = image.width.toDouble();
-    final origH = image.height.toDouble();
-    final isRotatedQuarter = (_quarterTurns % 2) != 0;
-    final targetW = isRotatedQuarter ? origH : origW;
-    final targetH = isRotatedQuarter ? origW : origH;
+    try {
+      final fileBytes = await File(widget.imagePath).readAsBytes();
+      img.Image? decoded = img.decodeImage(fileBytes);
+      if (decoded == null) {
+        return widget.imagePath;
+      }
 
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(
-      recorder,
-      Rect.fromLTWH(0, 0, targetW, targetH),
-    );
+      // 1. Rotation
+      if ((_quarterTurns % 4) != 0) {
+        decoded = img.copyRotate(decoded, angle: (_quarterTurns % 4) * 90);
+      }
 
-    // Apply 90° rotation transforms
-    canvas.save();
-    switch (_quarterTurns % 4) {
-      case 1:
-        canvas.translate(origH, 0);
-        canvas.rotate(math.pi / 2);
-        break;
-      case 2:
-        canvas.translate(origW, origH);
-        canvas.rotate(math.pi);
-        break;
-      case 3:
-        canvas.translate(0, origW);
-        canvas.rotate(3 * math.pi / 2);
-        break;
-      case 0:
-      default:
-        break;
-    }
-    canvas.drawImage(image, Offset.zero, Paint());
-    canvas.restore();
+      final targetW = decoded.width.toDouble();
+      final targetH = decoded.height.toDouble();
 
-    // Render drawings on top of rotated image
-    if (_strokes.isNotEmpty || _circles.isNotEmpty) {
+      // 2. Apply permanent Blur & Redact directly on image pixels
+      if (_blurRegions.isNotEmpty &&
+          _canvasSize.width > 0 &&
+          _canvasSize.height > 0) {
+        final scaleX = targetW / _canvasSize.width;
+        final scaleY = targetH / _canvasSize.height;
+
+        for (final region in _blurRegions) {
+          final rect = region.rect;
+          final x1 = (rect.left * scaleX).round().clamp(0, decoded.width - 1);
+          final y1 = (rect.top * scaleY).round().clamp(0, decoded.height - 1);
+          final x2 = (rect.right * scaleX).round().clamp(0, decoded.width);
+          final y2 = (rect.bottom * scaleY).round().clamp(0, decoded.height);
+
+          final w = x2 - x1;
+          final h = y2 - y1;
+          if (w <= 0 || h <= 0) continue;
+
+          if (region.style == _BlurStyle.blackout) {
+            img.fillRect(
+              decoded,
+              x1: x1,
+              y1: y1,
+              x2: x2,
+              y2: y2,
+              color: img.ColorRgba8(0, 0, 0, 255),
+            );
+          } else if (region.style == _BlurStyle.mosaic) {
+            final crop = img.copyCrop(decoded, x: x1, y: y1, width: w, height: h);
+            final pixelSize = math.max(6, (math.min(w, h) / 7).round());
+            final pixelated = img.pixelate(
+              crop,
+              size: pixelSize,
+              mode: img.PixelateMode.average,
+            );
+            img.compositeImage(decoded, pixelated, dstX: x1, dstY: y1);
+          } else {
+            final crop = img.copyCrop(decoded, x: x1, y: y1, width: w, height: h);
+            final blurRadius = math.max(8, (math.min(w, h) / 6).round());
+            final blurred = img.gaussianBlur(crop, radius: blurRadius);
+            img.compositeImage(decoded, blurred, dstX: x1, dstY: y1);
+          }
+        }
+      }
+
+      // 3. Prepare base ui.Image from the redacted image
+      final processedBytes = img.encodePng(decoded);
+      final codec = await ui.instantiateImageCodec(processedBytes);
+      final frame = await codec.getNextFrame();
+      final uiBaseImage = frame.image;
+      codec.dispose();
+
+      // 4. Draw vector annotations (strokes, highlighters, shapes, arrows, texts) on Canvas
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(
+        recorder,
+        Rect.fromLTWH(0, 0, targetW, targetH),
+      );
+
+      canvas.drawImage(uiBaseImage, Offset.zero, Paint());
+
       final scaleX = _canvasSize.width > 0 ? targetW / _canvasSize.width : 1.0;
       final scaleY = _canvasSize.height > 0 ? targetH / _canvasSize.height : 1.0;
       final avgScale = (scaleX + scaleY) / 2;
 
-      for (final stroke in _strokes) {
+      // Highlighters
+      for (final stroke in _strokes.where((s) => s.isHighlighter)) {
         if (stroke.points.length < 2) continue;
         final path = Path()
-          ..moveTo(stroke.points.first.dx * scaleX, stroke.points.first.dy * scaleY);
+          ..moveTo(
+            stroke.points.first.dx * scaleX,
+            stroke.points.first.dy * scaleY,
+          );
+        for (final pt in stroke.points.skip(1)) {
+          path.lineTo(pt.dx * scaleX, pt.dy * scaleY);
+        }
+        final paint = Paint()
+          ..color = stroke.color.withValues(alpha: 0.42)
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = stroke.width * avgScale * 3.4;
+        canvas.drawPath(path, paint);
+      }
+
+      // Normal Pen Strokes
+      for (final stroke in _strokes.where((s) => !s.isHighlighter)) {
+        if (stroke.points.length < 2) continue;
+        final path = Path()
+          ..moveTo(
+            stroke.points.first.dx * scaleX,
+            stroke.points.first.dy * scaleY,
+          );
         for (final pt in stroke.points.skip(1)) {
           path.lineTo(pt.dx * scaleX, pt.dy * scaleY);
         }
@@ -324,36 +478,125 @@ class _WhatsAppMediaEditorDialogState
         canvas.drawPath(path, paint);
       }
 
-      for (final circle in _circles) {
+      // Shapes (Circles, Rectangles, Arrows)
+      for (final shape in _shapes) {
+        final start = Offset(shape.start.dx * scaleX, shape.start.dy * scaleY);
+        final end = Offset(shape.end.dx * scaleX, shape.end.dy * scaleY);
         final paint = Paint()
-          ..color = circle.color
+          ..color = shape.color
           ..style = PaintingStyle.stroke
-          ..strokeWidth = circle.width * avgScale;
-        canvas.drawOval(
-          Rect.fromPoints(
-            Offset(circle.start.dx * scaleX, circle.start.dy * scaleY),
-            Offset(circle.end.dx * scaleX, circle.end.dy * scaleY),
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = shape.width * avgScale;
+
+        if (shape.tool == _MarkupTool.circle) {
+          canvas.drawOval(Rect.fromPoints(start, end), paint);
+        } else if (shape.tool == _MarkupTool.rectangle) {
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromPoints(start, end),
+              Radius.circular(8 * avgScale),
+            ),
+            paint,
+          );
+        } else if (shape.tool == _MarkupTool.arrow) {
+          canvas.drawLine(start, end, paint);
+          final dist = (end - start).distance;
+          if (dist >= 10) {
+            final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
+            final arrowHeadSize = math.min(24.0 * avgScale, dist * 0.4);
+            const arrowAngle = math.pi / 6;
+
+            final p1 = Offset(
+              end.dx - arrowHeadSize * math.cos(angle - arrowAngle),
+              end.dy - arrowHeadSize * math.sin(angle - arrowAngle),
+            );
+            final p2 = Offset(
+              end.dx - arrowHeadSize * math.cos(angle + arrowAngle),
+              end.dy - arrowHeadSize * math.sin(angle + arrowAngle),
+            );
+
+            final headPath = Path()
+              ..moveTo(p1.dx, p1.dy)
+              ..lineTo(end.dx, end.dy)
+              ..lineTo(p2.dx, p2.dy);
+            canvas.drawPath(headPath, paint);
+          }
+        }
+      }
+
+      // Text Annotations
+      for (final textAnn in _textAnnotations) {
+        final scaledPos = Offset(
+          textAnn.position.dx * scaleX,
+          textAnn.position.dy * scaleY,
+        );
+        final fontSize = textAnn.fontSize * avgScale;
+
+        final textSpan = TextSpan(
+          text: textAnn.text,
+          style: TextStyle(
+            color: textAnn.color,
+            fontSize: fontSize,
+            fontWeight: FontWeight.w700,
           ),
-          paint,
+        );
+        final textPainter = TextPainter(
+          text: textSpan,
+          textDirection: TextDirection.rtl,
+        )..layout();
+
+        final paddingH = 10.0 * avgScale;
+        final paddingV = 5.0 * avgScale;
+        final badgeRect = Rect.fromLTWH(
+          scaledPos.dx,
+          scaledPos.dy,
+          textPainter.width + paddingH * 2,
+          textPainter.height + paddingV * 2,
+        );
+
+        if (textAnn.hasBackground) {
+          final bgPaint = Paint()..color = const Color(0xCC000000);
+          final borderPaint = Paint()
+            ..color = const Color(0x40FFFFFF)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0 * avgScale;
+          final rrect = RRect.fromRectAndRadius(
+            badgeRect,
+            Radius.circular(8 * avgScale),
+          );
+          canvas.drawRRect(rrect, bgPaint);
+          canvas.drawRRect(rrect, borderPaint);
+        }
+
+        textPainter.paint(
+          canvas,
+          Offset(scaledPos.dx + paddingH, scaledPos.dy + paddingV),
         );
       }
-    }
 
-    final picture = recorder.endRecording();
-    final rendered = await picture.toImage(targetW.toInt(), targetH.toInt());
-    final byteData = await rendered.toByteData(format: ui.ImageByteFormat.png);
-    if (byteData == null) {
+      final picture = recorder.endRecording();
+      final finalImage = await picture.toImage(
+        targetW.toInt(),
+        targetH.toInt(),
+      );
+      final finalByteData =
+          await finalImage.toByteData(format: ui.ImageByteFormat.png);
+      if (finalByteData == null) {
+        return widget.imagePath;
+      }
+
+      final outBytes = finalByteData.buffer.asUint8List();
+      final tempDir = await getTemporaryDirectory();
+      final outputPath = p.join(
+        tempDir.path,
+        'ismart_markup_${DateTime.now().microsecondsSinceEpoch}.png',
+      );
+      await File(outputPath).writeAsBytes(outBytes, flush: true);
+      return outputPath;
+    } catch (_) {
       return widget.imagePath;
     }
-
-    final outBytes = byteData.buffer.asUint8List();
-    final tempDir = await getTemporaryDirectory();
-    final outputPath = p.join(
-      tempDir.path,
-      'ismart_media_${DateTime.now().microsecondsSinceEpoch}.png',
-    );
-    await File(outputPath).writeAsBytes(outBytes, flush: true);
-    return outputPath;
   }
 
   Offset _clampPoint(Offset local) {
@@ -361,6 +604,182 @@ class _WhatsAppMediaEditorDialogState
       local.dx.clamp(0, _canvasSize.width).toDouble(),
       local.dy.clamp(0, _canvasSize.height).toDouble(),
     );
+  }
+
+  Future<void> _showAddTextDialog({
+    Offset? position,
+    _MarkupTextAnnotation? existing,
+  }) async {
+    HapticFeedback.selectionClick();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final controller = TextEditingController(text: existing?.text ?? '');
+    Color textColor = existing?.color ?? _activeTextColor;
+    bool hasBg = existing?.hasBackground ?? _activeTextHasBackground;
+
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlgState) {
+            return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: Row(
+                children: [
+                  const Icon(
+                    Icons.text_fields_rounded,
+                    color: Color(0xFF007AFF),
+                    size: 24,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    existing == null ? 'إضافة نص توضيحي' : 'تعديل النص',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      maxLines: 3,
+                      minLines: 1,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'اكتب ملاحظتك التوضيحية هنا...',
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.white38 : Colors.black38,
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withValues(alpha: 0.06)
+                            : const Color(0xFFF1F5F9),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'لون النص:',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: _palette.map((c) {
+                          final isSel = textColor == c;
+                          return GestureDetector(
+                            onTap: () => setDlgState(() => textColor = c),
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: c,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isSel
+                                      ? const Color(0xFF007AFF)
+                                      : Colors.black26,
+                                  width: isSel ? 3 : 1,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text(
+                          'خلفية داكنة لسهولة القراءة:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const Spacer(),
+                        CupertinoSwitch(
+                          value: hasBg,
+                          onChanged: (val) => setDlgState(() => hasBg = val),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (controller.text.trim().isNotEmpty) {
+                      Navigator.pop(ctx, true);
+                    }
+                  },
+                  child: const Text('حفظ'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (res == true && controller.text.trim().isNotEmpty) {
+      setState(() {
+        _activeTextColor = textColor;
+        _activeTextHasBackground = hasBg;
+
+        if (existing != null) {
+          existing.text = controller.text.trim();
+          existing.color = textColor;
+          existing.hasBackground = hasBg;
+        } else {
+          final newId = DateTime.now().microsecondsSinceEpoch.toString();
+          final defaultPos = position ??
+              Offset(
+                math.max(16, (_canvasSize.width - 160) / 2),
+                math.max(16, (_canvasSize.height - 40) / 2),
+              );
+          final ann = _MarkupTextAnnotation(
+            id: newId,
+            text: controller.text.trim(),
+            position: defaultPos,
+            color: textColor,
+            hasBackground: hasBg,
+          );
+          _textAnnotations.add(ann);
+          _actionHistory.add(_MarkupAction(_MarkupActionType.text, newId));
+        }
+      });
+    }
   }
 
   @override
@@ -392,33 +811,44 @@ class _WhatsAppMediaEditorDialogState
             // -------------------------------------------------------------
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              color: const Color(0xFF0B141B).withOpacity(0.9),
+              color: const Color(0xFF0B141B).withValues(alpha: 0.9),
               child: Row(
                 children: [
                   IconButton(
                     onPressed: _saving ? null : () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white, size: 26),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
                     tooltip: 'إلغاء',
                   ),
                   const Spacer(),
-                  // Quick Send Button ("إرسال سريع")
+                  // Quick Send Button
                   InkWell(
                     onTap: _saving ? null : _quickSend,
                     borderRadius: BorderRadius.circular(20),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.12),
+                        color: Colors.white.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: const Color(0xFFF59E0B).withOpacity(0.6),
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.6),
                           width: 1.2,
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: const [
-                          Icon(Icons.bolt_rounded, color: Color(0xFFF59E0B), size: 18),
+                          Icon(
+                            Icons.bolt_rounded,
+                            color: Color(0xFFF59E0B),
+                            size: 18,
+                          ),
                           SizedBox(width: 4),
                           Text(
                             'إرسال سريع',
@@ -433,7 +863,7 @@ class _WhatsAppMediaEditorDialogState
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Rotate 90° Button
+                  // Rotate 90°
                   IconButton(
                     onPressed: _saving
                         ? null
@@ -462,7 +892,9 @@ class _WhatsAppMediaEditorDialogState
                           },
                     icon: Icon(
                       Icons.edit_rounded,
-                      color: _isMarkupActive ? const Color(0xFF25D366) : Colors.white,
+                      color: _isMarkupActive
+                          ? const Color(0xFF25D366)
+                          : Colors.white,
                       size: 24,
                     ),
                     tooltip: 'رسم وتوضيح',
@@ -470,12 +902,20 @@ class _WhatsAppMediaEditorDialogState
                   if (_isMarkupActive && _actionHistory.isNotEmpty) ...[
                     IconButton(
                       onPressed: _saving ? null : _undo,
-                      icon: const Icon(Icons.undo_rounded, color: Colors.white, size: 24),
+                      icon: const Icon(
+                        Icons.undo_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
                       tooltip: 'تراجع',
                     ),
                     IconButton(
                       onPressed: _saving ? null : _clearAll,
-                      icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
+                      icon: const Icon(
+                        Icons.delete_sweep_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
                       tooltip: 'مسح الكل',
                     ),
                   ],
@@ -484,73 +924,70 @@ class _WhatsAppMediaEditorDialogState
             ),
 
             // -------------------------------------------------------------
-            // MARKUP TOOLBAR (WHEN ACTIVE)
+            // MARKUP TOOLBAR & SUB-BAR (WHEN ACTIVE)
             // -------------------------------------------------------------
-            if (_isMarkupActive)
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            if (_isMarkupActive) ...[
+              Container(
                 color: const Color(0xFF1F2C34),
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    ChoiceChip(
-                      label: const Text('قلم', style: TextStyle(fontSize: 12)),
-                      selected: _tool == _MarkupTool.pen,
-                      selectedColor: const Color(0xFF25D366),
-                      onSelected: (_) => setState(() => _tool = _MarkupTool.pen),
-                    ),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      label: const Text('دائرة', style: TextStyle(fontSize: 12)),
-                      selected: _tool == _MarkupTool.circle,
-                      selectedColor: const Color(0xFF25D366),
-                      onSelected: (_) => setState(() => _tool = _MarkupTool.circle),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: _palette.map((color) {
-                            final isSelected = _activeColor == color;
-                            return GestureDetector(
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                setState(() => _activeColor = color);
-                              },
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 4),
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: isSelected ? Colors.white : Colors.transparent,
-                                    width: 2.2,
-                                  ),
-                                  boxShadow: isSelected
-                                      ? [
-                                          BoxShadow(
-                                            color: color.withOpacity(0.6),
-                                            blurRadius: 6,
-                                            spreadRadius: 1,
-                                          )
-                                        ]
-                                      : null,
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
+                    // Row 1: Tool Selector
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          _buildToolChip(
+                            tool: _MarkupTool.pen,
+                            label: 'قلم',
+                            icon: Icons.edit_outlined,
+                          ),
+                          _buildToolChip(
+                            tool: _MarkupTool.highlighter,
+                            label: 'تظليل نصوص',
+                            icon: Icons.highlight_rounded,
+                          ),
+                          _buildToolChip(
+                            tool: _MarkupTool.blur,
+                            label: 'تمويه وحجب',
+                            icon: Icons.blur_on_rounded,
+                          ),
+                          _buildToolChip(
+                            tool: _MarkupTool.arrow,
+                            label: 'سهم',
+                            icon: Icons.arrow_right_alt_rounded,
+                          ),
+                          _buildToolChip(
+                            tool: _MarkupTool.circle,
+                            label: 'دائرة',
+                            icon: Icons.circle_outlined,
+                          ),
+                          _buildToolChip(
+                            tool: _MarkupTool.rectangle,
+                            label: 'مستطيل',
+                            icon: Icons.crop_square_rounded,
+                          ),
+                          _buildToolChip(
+                            tool: _MarkupTool.text,
+                            label: 'نص توضيحي',
+                            icon: Icons.text_fields_rounded,
+                          ),
+                        ],
                       ),
                     ),
+                    // Row 2: Sub-options
+                    _buildSubToolBar(),
                   ],
                 ),
               ),
+            ],
 
             // -------------------------------------------------------------
-            // MAIN VIEW: Image + RotatedBox + Markup Canvas
+            // MAIN VIEW: Image + Blurs + CustomPaint + Text Annotations
             // -------------------------------------------------------------
             Expanded(
               child: LayoutBuilder(
@@ -571,15 +1008,26 @@ class _WhatsAppMediaEditorDialogState
                         behavior: _isMarkupActive
                             ? HitTestBehavior.opaque
                             : HitTestBehavior.deferToChild,
+                        onTapUp: _isMarkupActive && _tool == _MarkupTool.text
+                            ? (details) => _showAddTextDialog(
+                                  position: _clampPoint(details.localPosition),
+                                )
+                            : null,
                         onPanStart: _isMarkupActive
                             ? (details) {
                                 final point = _clampPoint(details.localPosition);
                                 setState(() {
-                                  if (_tool == _MarkupTool.pen) {
+                                  if (_tool == _MarkupTool.pen ||
+                                      _tool == _MarkupTool.highlighter) {
                                     _activeStroke = <Offset>[point];
-                                  } else {
-                                    _circleStart = point;
-                                    _circleEnd = point;
+                                  } else if (_tool == _MarkupTool.blur) {
+                                    _blurStart = point;
+                                    _blurEnd = point;
+                                  } else if (_tool == _MarkupTool.arrow ||
+                                      _tool == _MarkupTool.circle ||
+                                      _tool == _MarkupTool.rectangle) {
+                                    _shapeStart = point;
+                                    _shapeEnd = point;
                                   }
                                 });
                               }
@@ -588,10 +1036,15 @@ class _WhatsAppMediaEditorDialogState
                             ? (details) {
                                 final point = _clampPoint(details.localPosition);
                                 setState(() {
-                                  if (_tool == _MarkupTool.pen) {
+                                  if (_tool == _MarkupTool.pen ||
+                                      _tool == _MarkupTool.highlighter) {
                                     _activeStroke?.add(point);
-                                  } else {
-                                    _circleEnd = point;
+                                  } else if (_tool == _MarkupTool.blur) {
+                                    _blurEnd = point;
+                                  } else if (_tool == _MarkupTool.arrow ||
+                                      _tool == _MarkupTool.circle ||
+                                      _tool == _MarkupTool.rectangle) {
+                                    _shapeEnd = point;
                                   }
                                 });
                               }
@@ -599,37 +1052,80 @@ class _WhatsAppMediaEditorDialogState
                         onPanEnd: _isMarkupActive
                             ? (_) {
                                 setState(() {
-                                  if (_tool == _MarkupTool.pen) {
+                                  if (_tool == _MarkupTool.pen ||
+                                      _tool == _MarkupTool.highlighter) {
                                     final points = _activeStroke;
                                     if (points != null && points.length > 1) {
+                                      final isHigh =
+                                          _tool == _MarkupTool.highlighter;
                                       _strokes.add(
                                         _MarkupStroke(
                                           points: List<Offset>.from(points),
-                                          color: _activeColor,
-                                          width: _activeWidth,
+                                          color: isHigh
+                                              ? _activeHighlighterColor
+                                              : _activeColor,
+                                          width: isHigh
+                                              ? _activeHighlighterWidth
+                                              : _activeWidth,
+                                          isHighlighter: isHigh,
                                         ),
                                       );
-                                      _actionHistory.add(_MarkupTool.pen);
+                                      _actionHistory.add(
+                                        const _MarkupAction(
+                                          _MarkupActionType.stroke,
+                                          null,
+                                        ),
+                                      );
                                     }
                                     _activeStroke = null;
-                                  } else {
-                                    final start = _circleStart;
-                                    final end = _circleEnd;
+                                  } else if (_tool == _MarkupTool.blur) {
+                                    final start = _blurStart;
+                                    final end = _blurEnd;
                                     if (start != null &&
                                         end != null &&
-                                        (start - end).distance >= 10) {
-                                      _circles.add(
-                                        _MarkupCircle(
+                                        (start - end).distance >= 8) {
+                                      final rect = Rect.fromPoints(start, end);
+                                      _blurRegions.add(
+                                        _MarkupBlurRegion(
+                                          rect: rect,
+                                          style: _activeBlurStyle,
+                                        ),
+                                      );
+                                      _actionHistory.add(
+                                        const _MarkupAction(
+                                          _MarkupActionType.blur,
+                                          null,
+                                        ),
+                                      );
+                                    }
+                                    _blurStart = null;
+                                    _blurEnd = null;
+                                  } else if (_tool == _MarkupTool.arrow ||
+                                      _tool == _MarkupTool.circle ||
+                                      _tool == _MarkupTool.rectangle) {
+                                    final start = _shapeStart;
+                                    final end = _shapeEnd;
+                                    if (start != null &&
+                                        end != null &&
+                                        (start - end).distance >= 8) {
+                                      _shapes.add(
+                                        _MarkupShape(
                                           start: start,
                                           end: end,
                                           color: _activeColor,
                                           width: _activeWidth,
+                                          tool: _tool,
                                         ),
                                       );
-                                      _actionHistory.add(_MarkupTool.circle);
+                                      _actionHistory.add(
+                                        const _MarkupAction(
+                                          _MarkupActionType.shape,
+                                          null,
+                                        ),
+                                      );
                                     }
-                                    _circleStart = null;
-                                    _circleEnd = null;
+                                    _shapeStart = null;
+                                    _shapeEnd = null;
                                   }
                                 });
                               }
@@ -637,7 +1133,7 @@ class _WhatsAppMediaEditorDialogState
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            // The rotated image
+                            // 1. The rotated base image
                             Center(
                               child: RotatedBox(
                                 quarterTurns: _quarterTurns,
@@ -647,18 +1143,223 @@ class _WhatsAppMediaEditorDialogState
                                 ),
                               ),
                             ),
-                            // Drawing markup canvas
+
+                            // 2. Live Frosted Blurs overlay
+                            for (final blur in _blurRegions)
+                              Positioned.fromRect(
+                                rect: blur.rect,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: blur.style == _BlurStyle.blackout
+                                      ? Container(
+                                          color: Colors.black,
+                                          child: const Center(
+                                            child: Icon(
+                                              Icons.lock_rounded,
+                                              color: Colors.white54,
+                                              size: 14,
+                                            ),
+                                          ),
+                                        )
+                                      : BackdropFilter(
+                                          filter: ui.ImageFilter.blur(
+                                            sigmaX:
+                                                blur.style == _BlurStyle.mosaic
+                                                    ? 18
+                                                    : 12,
+                                            sigmaY:
+                                                blur.style == _BlurStyle.mosaic
+                                                    ? 18
+                                                    : 12,
+                                          ),
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: blur.style ==
+                                                      _BlurStyle.mosaic
+                                                  ? Colors.black
+                                                      .withValues(alpha: 0.35)
+                                                  : Colors.white
+                                                      .withValues(alpha: 0.12),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.35),
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Center(
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 5,
+                                                  vertical: 2,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.45),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      blur.style ==
+                                                              _BlurStyle.mosaic
+                                                          ? Icons
+                                                              .grid_view_rounded
+                                                          : Icons
+                                                              .blur_on_rounded,
+                                                      color: Colors.white,
+                                                      size: 11,
+                                                    ),
+                                                    const SizedBox(width: 3),
+                                                    Text(
+                                                      blur.style ==
+                                                              _BlurStyle.mosaic
+                                                          ? 'بيكسل'
+                                                          : 'تمويه',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 9.5,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                              ),
+
+                            // 3. Custom Canvas for drawing & vectors
                             CustomPaint(
                               painter: _MarkupCanvasPainter(
                                 strokes: _strokes,
-                                circles: _circles,
+                                shapes: _shapes,
                                 activeStroke: _activeStroke,
-                                activeCircleStart: _circleStart,
-                                activeCircleEnd: _circleEnd,
-                                activeColor: _activeColor,
-                                activeWidth: _activeWidth,
+                                activeShapeStart: _shapeStart,
+                                activeShapeEnd: _shapeEnd,
+                                activeShapeTool: _tool,
+                                activeBlurStart: _blurStart,
+                                activeBlurEnd: _blurEnd,
+                                activeColor: _tool == _MarkupTool.highlighter
+                                    ? _activeHighlighterColor
+                                    : _activeColor,
+                                activeWidth: _tool == _MarkupTool.highlighter
+                                    ? _activeHighlighterWidth
+                                    : _activeWidth,
+                                isHighlighter:
+                                    _tool == _MarkupTool.highlighter,
                               ),
                             ),
+
+                            // 4. Interactive draggable Text Annotations
+                            for (final ann in _textAnnotations)
+                              Positioned(
+                                left: ann.position.dx,
+                                top: ann.position.dy,
+                                child: GestureDetector(
+                                  onPanUpdate: (details) {
+                                    setState(() {
+                                      ann.position = Offset(
+                                        (ann.position.dx + details.delta.dx)
+                                            .clamp(
+                                          0,
+                                          math.max(
+                                            0,
+                                            _canvasSize.width - 60,
+                                          ),
+                                        ),
+                                        (ann.position.dy + details.delta.dy)
+                                            .clamp(
+                                          0,
+                                          math.max(
+                                            0,
+                                            _canvasSize.height - 30,
+                                          ),
+                                        ),
+                                      );
+                                    });
+                                  },
+                                  onTap: () =>
+                                      _showAddTextDialog(existing: ann),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: ann.hasBackground
+                                          ? Colors.black
+                                              .withValues(alpha: 0.72)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: ann.hasBackground
+                                            ? Colors.white
+                                                .withValues(alpha: 0.25)
+                                            : Colors.transparent,
+                                        width: 0.8,
+                                      ),
+                                      boxShadow: ann.hasBackground
+                                          ? [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.3),
+                                                blurRadius: 6,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          ann.text,
+                                          style: TextStyle(
+                                            color: ann.color,
+                                            fontSize: ann.fontSize,
+                                            fontWeight: FontWeight.w700,
+                                            shadows: ann.hasBackground
+                                                ? null
+                                                : const [
+                                                    Shadow(
+                                                      color: Colors.black87,
+                                                      blurRadius: 4,
+                                                      offset: Offset(1, 1),
+                                                    ),
+                                                  ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        GestureDetector(
+                                          onTap: () {
+                                            HapticFeedback.selectionClick();
+                                            setState(() {
+                                              _textAnnotations.removeWhere(
+                                                (t) => t.id == ann.id,
+                                              );
+                                              _actionHistory.removeWhere(
+                                                (a) => a.data == ann.id,
+                                              );
+                                            });
+                                          },
+                                          child: const Icon(
+                                            Icons.cancel_rounded,
+                                            color: Colors.white70,
+                                            size: 15,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -669,36 +1370,40 @@ class _WhatsAppMediaEditorDialogState
             ),
 
             // -------------------------------------------------------------
-            // BOTTOM BAR: Per-Message Security Pill + WhatsApp Caption & Send
+            // BOTTOM BAR: Per-Message Security Pill + Caption & Send
             // -------------------------------------------------------------
             Container(
               padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
               decoration: BoxDecoration(
-                color: const Color(0xFF0B141B).withOpacity(0.95),
+                color: const Color(0xFF0B141B).withValues(alpha: 0.95),
                 border: Border(
                   top: BorderSide(
-                    color: Colors.white.withOpacity(0.08),
+                    color: Colors.white.withValues(alpha: 0.08),
                   ),
                 ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 1. Per-Message Forward Protection Capsule
+                  // 1. Forward Protection Capsule
                   GestureDetector(
                     onTap: () {
                       HapticFeedback.lightImpact();
                       setState(() {
-                        _restrictForwardAndDownload = !_restrictForwardAndDownload;
+                        _restrictForwardAndDownload =
+                            !_restrictForwardAndDownload;
                       });
                     },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
                       decoration: BoxDecoration(
                         color: _restrictForwardAndDownload
-                            ? const Color(0xFF059669).withOpacity(0.25)
-                            : Colors.white.withOpacity(0.08),
+                            ? const Color(0xFF059669).withValues(alpha: 0.25)
+                            : Colors.white.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                           color: _restrictForwardAndDownload
@@ -738,7 +1443,7 @@ class _WhatsAppMediaEditorDialogState
                   ),
                   const SizedBox(height: 10),
 
-                  // 2. WhatsApp Caption Input & Circular Green Send Button
+                  // 2. Caption Input & Circular Green Send Button
                   Row(
                     children: [
                       Expanded(
@@ -750,7 +1455,10 @@ class _WhatsAppMediaEditorDialogState
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: TextField(
                             controller: _captionController,
-                            style: const TextStyle(color: Colors.white, fontSize: 15),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                            ),
                             maxLines: 4,
                             minLines: 1,
                             textInputAction: TextInputAction.send,
@@ -763,13 +1471,13 @@ class _WhatsAppMediaEditorDialogState
                               ),
                               border: InputBorder.none,
                               isDense: true,
-                              contentPadding: EdgeInsets.symmetric(vertical: 12),
+                              contentPadding:
+                                  EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 10),
-                      // Circular WhatsApp Send Button
                       InkWell(
                         onTap: _saving ? null : _submitSend,
                         borderRadius: BorderRadius.circular(25),
@@ -804,6 +1512,308 @@ class _WhatsAppMediaEditorDialogState
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolChip({
+    required _MarkupTool tool,
+    required String label,
+    required IconData icon,
+  }) {
+    final isSelected = _tool == tool;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _tool = tool);
+          if (tool == _MarkupTool.text && _textAnnotations.isEmpty) {
+            _showAddTextDialog();
+          }
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF25D366)
+                : Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: isSelected ? Colors.white : Colors.white70,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? Colors.white : Colors.white70,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubToolBar() {
+    if (_tool == _MarkupTool.blur) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _buildBlurStyleChip(
+                  style: _BlurStyle.blur,
+                  label: '🌫️ تمويه بلوري',
+                ),
+                const SizedBox(width: 8),
+                _buildBlurStyleChip(
+                  style: _BlurStyle.mosaic,
+                  label: '🔲 فسيفساء بيكسل',
+                ),
+                const SizedBox(width: 8),
+                _buildBlurStyleChip(
+                  style: _BlurStyle.blackout,
+                  label: '⬛ حجب كامل',
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'اسحب إصبعك فوق الأرقام أو البيانات الحساسة لطمسها',
+              style: TextStyle(color: Colors.white60, fontSize: 11),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_tool == _MarkupTool.highlighter) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+        child: Row(
+          children: [
+            const Text(
+              'تظليل:',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _highlighterPalette.map((color) {
+                    final isSel = _activeHighlighterColor == color;
+                    return GestureDetector(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _activeHighlighterColor = color);
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSel ? Colors.white : Colors.transparent,
+                            width: 2.2,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Width selector for highlighter
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _activeHighlighterWidth =
+                      _activeHighlighterWidth == 24.0 ? 34.0 : 24.0;
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _activeHighlighterWidth == 24.0 ? 'عرض متوسط' : 'عرض عريض',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_tool == _MarkupTool.text) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+        child: Row(
+          children: [
+            InkWell(
+              onTap: () => _showAddTextDialog(),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF007AFF),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Icon(Icons.add, color: Colors.white, size: 16),
+                    SizedBox(width: 4),
+                    Text(
+                      'إضافة نص جديد',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'اضغط على أي نص لتحريكه أو تعديله',
+                style: TextStyle(color: Colors.white54, fontSize: 11.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Default palette for Pen, Arrow, Shapes
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _palette.map((color) {
+                  final isSelected = _activeColor == color;
+                  return GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _activeColor = color);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected ? Colors.white : Colors.transparent,
+                          width: 2.2,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: color.withValues(alpha: 0.6),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : null,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Stroke width toggle
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                if (_activeWidth == 3.0) {
+                  _activeWidth = 5.0;
+                } else if (_activeWidth == 5.0) {
+                  _activeWidth = 8.0;
+                } else {
+                  _activeWidth = 3.0;
+                }
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                _activeWidth == 3.0
+                    ? 'خط رفيع'
+                    : _activeWidth == 5.0
+                        ? 'خط متوسط'
+                        : 'خط عريض',
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBlurStyleChip({
+    required _BlurStyle style,
+    required String label,
+  }) {
+    final isSel = _activeBlurStyle == style;
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _activeBlurStyle = style);
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSel
+              ? const Color(0xFF007AFF)
+              : Colors.white.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+            color: Colors.white,
+          ),
         ),
       ),
     );
@@ -890,7 +1900,9 @@ class _DocumentAttachmentSendDialogState
     if (ext == '.pdf') return Icons.picture_as_pdf_rounded;
     if (ext == '.doc' || ext == '.docx') return Icons.description_rounded;
     if (ext == '.xls' || ext == '.xlsx') return Icons.table_chart_rounded;
-    if (ext == '.zip' || ext == '.rar' || ext == '.7z') return Icons.folder_zip_rounded;
+    if (ext == '.zip' || ext == '.rar' || ext == '.7z') {
+      return Icons.folder_zip_rounded;
+    }
     return Icons.insert_drive_file_rounded;
   }
 
@@ -908,6 +1920,7 @@ class _DocumentAttachmentSendDialogState
   Widget build(BuildContext context) {
     final fileColor = _getFileColor();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isImageDoc = _isImagePath(widget.filePath);
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -920,7 +1933,7 @@ class _DocumentAttachmentSendDialogState
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: fileColor.withOpacity(0.12),
+              color: fileColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(_getFileIcon(), color: fileColor, size: 28),
@@ -954,6 +1967,79 @@ class _DocumentAttachmentSendDialogState
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Markup & Blur option button if file is editable as image
+              if (isImageDoc) ...[
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () async {
+                    final navigator = Navigator.of(context);
+                    final edited = await showDialog<AttachmentSendDraft>(
+                      context: context,
+                      barrierDismissible: false,
+                      useSafeArea: false,
+                      builder: (_) =>
+                          _WhatsAppMediaEditorDialog(imagePath: widget.filePath),
+                    );
+                    if (edited != null && mounted) {
+                      navigator.pop(edited);
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF007AFF)
+                          .withValues(alpha: isDark ? 0.2 : 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color:
+                            const Color(0xFF007AFF).withValues(alpha: 0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(
+                          Icons.edit_note_rounded,
+                          color: Color(0xFF007AFF),
+                          size: 22,
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'تعديل وتمويه المستند (تظليل، حجب، أسهم)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: Color(0xFF007AFF),
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'فتح أداة التحرير السريعة للتظليل أو طمس الأرقام السرية',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_left_rounded,
+                          color: Color(0xFF007AFF),
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               const SizedBox(height: 8),
               // File name editor
               TextFormField(
@@ -961,9 +2047,14 @@ class _DocumentAttachmentSendDialogState
                 maxLines: 1,
                 decoration: InputDecoration(
                   labelText: 'اسم الملف',
-                  prefixIcon: const Icon(Icons.drive_file_rename_outline_rounded, size: 20),
+                  prefixIcon: const Icon(
+                    Icons.drive_file_rename_outline_rounded,
+                    size: 20,
+                  ),
                   filled: true,
-                  fillColor: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF8FAFC),
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : const Color(0xFFF8FAFC),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(
@@ -979,9 +2070,14 @@ class _DocumentAttachmentSendDialogState
                 maxLines: 2,
                 decoration: InputDecoration(
                   labelText: 'إضافة شرح أو ملاحظة (اختياري)',
-                  prefixIcon: const Icon(Icons.chat_bubble_outline_rounded, size: 20),
+                  prefixIcon: const Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 20,
+                  ),
                   filled: true,
-                  fillColor: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF8FAFC),
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : const Color(0xFFF8FAFC),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(
@@ -996,21 +2092,30 @@ class _DocumentAttachmentSendDialogState
                 onTap: () {
                   HapticFeedback.lightImpact();
                   setState(() {
-                    _restrictForwardAndDownload = !_restrictForwardAndDownload;
+                    _restrictForwardAndDownload =
+                        !_restrictForwardAndDownload;
                   });
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: _restrictForwardAndDownload
-                        ? const Color(0xFF059669).withOpacity(isDark ? 0.25 : 0.12)
-                        : (isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9)),
+                        ? const Color(0xFF059669)
+                            .withValues(alpha: isDark ? 0.25 : 0.12)
+                        : (isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : const Color(0xFFF1F5F9)),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: _restrictForwardAndDownload
                           ? const Color(0xFF10B981)
-                          : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+                          : (isDark
+                              ? Colors.white12
+                              : const Color(0xFFE2E8F0)),
                       width: 1.2,
                     ),
                   ),
@@ -1039,7 +2144,9 @@ class _DocumentAttachmentSendDialogState
                                 fontSize: 13,
                                 color: _restrictForwardAndDownload
                                     ? const Color(0xFF10B981)
-                                    : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                                    : (isDark
+                                        ? Colors.white
+                                        : const Color(0xFF0F172A)),
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -1049,7 +2156,8 @@ class _DocumentAttachmentSendDialogState
                                   : 'اضغط للقفل ومنع التحميل أو إعادة التوجيه',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: isDark ? Colors.white54 : Colors.black45,
+                                color:
+                                    isDark ? Colors.white54 : Colors.black45,
                               ),
                             ),
                           ],
@@ -1090,47 +2198,139 @@ class _DocumentAttachmentSendDialogState
 class _MarkupCanvasPainter extends CustomPainter {
   const _MarkupCanvasPainter({
     required this.strokes,
-    required this.circles,
+    required this.shapes,
     required this.activeStroke,
-    required this.activeCircleStart,
-    required this.activeCircleEnd,
+    required this.activeShapeStart,
+    required this.activeShapeEnd,
+    required this.activeShapeTool,
+    required this.activeBlurStart,
+    required this.activeBlurEnd,
     required this.activeColor,
     required this.activeWidth,
+    required this.isHighlighter,
   });
 
   final List<_MarkupStroke> strokes;
-  final List<_MarkupCircle> circles;
+  final List<_MarkupShape> shapes;
   final List<Offset>? activeStroke;
-  final Offset? activeCircleStart;
-  final Offset? activeCircleEnd;
+  final Offset? activeShapeStart;
+  final Offset? activeShapeEnd;
+  final _MarkupTool? activeShapeTool;
+  final Offset? activeBlurStart;
+  final Offset? activeBlurEnd;
   final Color activeColor;
   final double activeWidth;
+  final bool isHighlighter;
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final stroke in strokes) {
-      _paintStroke(canvas, stroke.points, stroke.color, stroke.width);
-    }
-    for (final circle in circles) {
-      _paintCircle(canvas, circle.start, circle.end, circle.color, circle.width);
+    // 1. Highlighters (bottom layer)
+    for (final stroke in strokes.where((s) => s.isHighlighter)) {
+      _paintHighlighter(
+        canvas,
+        stroke.points,
+        stroke.color,
+        stroke.width,
+      );
     }
 
+    // 2. Normal Pen Strokes
+    for (final stroke in strokes.where((s) => !s.isHighlighter)) {
+      _paintStroke(canvas, stroke.points, stroke.color, stroke.width);
+    }
+
+    // 3. Shapes
+    for (final shape in shapes) {
+      if (shape.tool == _MarkupTool.circle) {
+        _paintCircle(
+          canvas,
+          shape.start,
+          shape.end,
+          shape.color,
+          shape.width,
+        );
+      } else if (shape.tool == _MarkupTool.rectangle) {
+        _paintRectangle(
+          canvas,
+          shape.start,
+          shape.end,
+          shape.color,
+          shape.width,
+        );
+      } else if (shape.tool == _MarkupTool.arrow) {
+        _paintArrow(
+          canvas,
+          shape.start,
+          shape.end,
+          shape.color,
+          shape.width,
+        );
+      }
+    }
+
+    // 4. Live Active Stroke
     final liveStroke = activeStroke;
     if (liveStroke != null && liveStroke.length > 1) {
-      _paintStroke(canvas, liveStroke, activeColor, activeWidth);
+      if (isHighlighter) {
+        _paintHighlighter(canvas, liveStroke, activeColor, activeWidth);
+      } else {
+        _paintStroke(canvas, liveStroke, activeColor, activeWidth);
+      }
     }
-    if (activeCircleStart != null && activeCircleEnd != null) {
-      _paintCircle(
-        canvas,
-        activeCircleStart!,
-        activeCircleEnd!,
-        activeColor,
-        activeWidth,
-      );
+
+    // 5. Live Active Shape
+    if (activeShapeStart != null &&
+        activeShapeEnd != null &&
+        activeShapeTool != null) {
+      if (activeShapeTool == _MarkupTool.circle) {
+        _paintCircle(
+          canvas,
+          activeShapeStart!,
+          activeShapeEnd!,
+          activeColor,
+          activeWidth,
+        );
+      } else if (activeShapeTool == _MarkupTool.rectangle) {
+        _paintRectangle(
+          canvas,
+          activeShapeStart!,
+          activeShapeEnd!,
+          activeColor,
+          activeWidth,
+        );
+      } else if (activeShapeTool == _MarkupTool.arrow) {
+        _paintArrow(
+          canvas,
+          activeShapeStart!,
+          activeShapeEnd!,
+          activeColor,
+          activeWidth,
+        );
+      }
+    }
+
+    // 6. Live Active Blur Drag Box
+    if (activeBlurStart != null && activeBlurEnd != null) {
+      final rect = Rect.fromPoints(activeBlurStart!, activeBlurEnd!);
+      final previewPaint = Paint()
+        ..color = const Color(0x66007AFF)
+        ..style = PaintingStyle.fill;
+      final borderPaint = Paint()
+        ..color = const Color(0xFF007AFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5;
+      final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
+      canvas.drawRRect(rrect, previewPaint);
+      canvas.drawRRect(rrect, borderPaint);
     }
   }
 
-  void _paintStroke(Canvas canvas, List<Offset> points, Color color, double width) {
+  void _paintStroke(
+    Canvas canvas,
+    List<Offset> points,
+    Color color,
+    double width,
+  ) {
     if (points.length < 2) return;
     final path = Path()..moveTo(points.first.dx, points.first.dy);
     for (final pt in points.skip(1)) {
@@ -1145,7 +2345,33 @@ class _MarkupCanvasPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
-  void _paintCircle(Canvas canvas, Offset start, Offset end, Color color, double width) {
+  void _paintHighlighter(
+    Canvas canvas,
+    List<Offset> points,
+    Color color,
+    double width,
+  ) {
+    if (points.length < 2) return;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final pt in points.skip(1)) {
+      path.lineTo(pt.dx, pt.dy);
+    }
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.42)
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = width * 1.35;
+    canvas.drawPath(path, paint);
+  }
+
+  void _paintCircle(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Color color,
+    double width,
+  ) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -1153,14 +2379,79 @@ class _MarkupCanvasPainter extends CustomPainter {
     canvas.drawOval(Rect.fromPoints(start, end), paint);
   }
 
+  void _paintRectangle(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Color color,
+    double width,
+  ) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = width;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromPoints(start, end),
+        const Radius.circular(8),
+      ),
+      paint,
+    );
+  }
+
+  void _paintArrow(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Color color,
+    double width,
+  ) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = width;
+
+    canvas.drawLine(start, end, paint);
+
+    final distance = (end - start).distance;
+    if (distance < 8) return;
+
+    final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
+    final arrowHeadSize = math.min(20.0, distance * 0.4);
+    const arrowAngle = math.pi / 6;
+
+    final p1 = Offset(
+      end.dx - arrowHeadSize * math.cos(angle - arrowAngle),
+      end.dy - arrowHeadSize * math.sin(angle - arrowAngle),
+    );
+    final p2 = Offset(
+      end.dx - arrowHeadSize * math.cos(angle + arrowAngle),
+      end.dy - arrowHeadSize * math.sin(angle + arrowAngle),
+    );
+
+    final headPath = Path()
+      ..moveTo(p1.dx, p1.dy)
+      ..lineTo(end.dx, end.dy)
+      ..lineTo(p2.dx, p2.dy);
+    canvas.drawPath(headPath, paint);
+  }
+
   @override
   bool shouldRepaint(covariant _MarkupCanvasPainter oldDelegate) {
     return oldDelegate.strokes != strokes ||
-        oldDelegate.circles != circles ||
+        oldDelegate.shapes != shapes ||
         oldDelegate.activeStroke != activeStroke ||
-        oldDelegate.activeCircleStart != activeCircleStart ||
-        oldDelegate.activeCircleEnd != activeCircleEnd ||
+        oldDelegate.activeShapeStart != activeShapeStart ||
+        oldDelegate.activeShapeEnd != activeShapeEnd ||
+        oldDelegate.activeShapeTool != activeShapeTool ||
+        oldDelegate.activeBlurStart != activeBlurStart ||
+        oldDelegate.activeBlurEnd != activeBlurEnd ||
         oldDelegate.activeColor != activeColor ||
-        oldDelegate.activeWidth != activeWidth;
+        oldDelegate.activeWidth != activeWidth ||
+        oldDelegate.isHighlighter != isHighlighter;
   }
 }
