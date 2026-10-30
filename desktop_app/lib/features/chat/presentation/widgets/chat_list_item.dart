@@ -66,42 +66,66 @@ class _ChatListItemState extends State<ChatListItem> {
     final isTypingPreview = widget.typingPreviewText != null;
 
     final lastMessage = widget.conversation.lastMessage;
-    final isMyLastMessage = !isTypingPreview &&
-        lastMessage != null &&
-        lastMessage.senderId != null &&
-        lastMessage.senderId == widget.currentUserId;
+    final myId = widget.currentUserId.trim();
+    bool isMyLastMessage = false;
+
+    if (!isTypingPreview && lastMessage != null) {
+      if (widget.conversation.isSelfChat(myId)) {
+        isMyLastMessage = true;
+      } else if (lastMessage.status == 'pending' ||
+          (lastMessage.id != null && lastMessage.id!.startsWith('temp_'))) {
+        isMyLastMessage = true;
+      } else {
+        final senderId = (lastMessage.senderId ?? '').trim();
+        if (myId.isNotEmpty && senderId.isNotEmpty && senderId == myId) {
+          isMyLastMessage = true;
+        } else if (widget.conversation.type == 'direct') {
+          final others = widget.conversation.members
+              .where((m) => m.id.trim() != myId)
+              .toList();
+          if (others.length == 1) {
+            final peerId = others.first.id.trim();
+            if (peerId.isNotEmpty && senderId.isNotEmpty) {
+              isMyLastMessage = senderId != peerId;
+            }
+          }
+        }
+      }
+    }
 
     Widget? statusIcon;
-    if (isMyLastMessage) {
-      if (lastMessage.isSeenByAny(widget.currentUserId)) {
-        statusIcon = const Icon(
-          Icons.done_all_rounded,
-          size: 15,
-          color: Color(0xFF16A34A),
-        );
-      } else if (lastMessage.isDeliveredToAny(widget.currentUserId)) {
-        statusIcon = const Icon(
-          Icons.done_all_rounded,
-          size: 15,
-          color: Color(0xFF94A3B8),
-        );
-      } else if (lastMessage.status == 'pending' || (lastMessage.id != null && lastMessage.id!.startsWith('temp_'))) {
+    if (isMyLastMessage && lastMessage != null) {
+      if (lastMessage.status == 'pending' ||
+          (lastMessage.id != null && lastMessage.id!.startsWith('temp_'))) {
         statusIcon = const Icon(
           Icons.access_time_rounded,
-          size: 13,
-          color: Color(0xFF94A3B8),
+          size: 13.5,
+          color: Color(0xFF8696A0),
         );
       } else if (lastMessage.status == 'failed') {
         statusIcon = const Icon(
           Icons.error_outline_rounded,
-          size: 14,
+          size: 14.5,
           color: Color(0xFFEF4444),
+        );
+      } else if (lastMessage.isSeenByAny(myId) ||
+          widget.conversation.isSelfChat(myId)) {
+        statusIcon = const Icon(
+          Icons.done_all_rounded,
+          size: 15.5,
+          color: Color(0xFF53BDEB),
+        );
+      } else if (lastMessage.isDeliveredToAny(myId)) {
+        statusIcon = const Icon(
+          Icons.done_all_rounded,
+          size: 15.5,
+          color: Color(0xFF8696A0),
         );
       } else {
         statusIcon = const Icon(
           Icons.done_rounded,
-          size: 15,
-          color: Color(0xFF94A3B8),
+          size: 15.5,
+          color: Color(0xFF8696A0),
         );
       }
     }

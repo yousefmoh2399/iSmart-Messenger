@@ -304,6 +304,43 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
+  String get _effectiveCurrentUserId {
+    final authId = ref.read(authControllerProvider).valueOrNull?.id.trim();
+    if (authId != null && authId.isNotEmpty) {
+      _currentUserId = authId;
+      return authId;
+    }
+    final currentId = ref.read(currentUserProvider)?.id.trim();
+    if (currentId != null && currentId.isNotEmpty) {
+      _currentUserId = currentId;
+      return currentId;
+    }
+    return _currentUserId.trim();
+  }
+
+  bool _isMessageFromMe(ChatLastMessage? last, ChatConversation conversation) {
+    if (last == null) return false;
+    final myId = _effectiveCurrentUserId;
+    if (conversation.isSelfChat(myId)) return true;
+    if (last.status == 'pending' || (last.id != null && last.id!.startsWith('temp_'))) {
+      return true;
+    }
+    final sId = (last.senderId ?? '').trim();
+    if (myId.isNotEmpty && sId.isNotEmpty && sId == myId) {
+      return true;
+    }
+    if (conversation.type == 'direct') {
+      final others = conversation.members.where((m) => m.id.trim() != myId).toList();
+      if (others.length == 1) {
+        final peerId = others.first.id.trim();
+        if (peerId.isNotEmpty && sId.isNotEmpty) {
+          return sId != peerId;
+        }
+      }
+    }
+    return false;
+  }
+
   ChatLastMessage _buildLastMessage(ChatMessage message) {
     String content;
     if (message.content.isNotEmpty) {
@@ -621,7 +658,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
     final effectiveSenderId = message.sender?.id ?? message.senderId;
     final isFromCurrentUser =
-        effectiveSenderId.isNotEmpty && effectiveSenderId == _currentUserId;
+        effectiveSenderId.isNotEmpty && effectiveSenderId == _effectiveCurrentUserId;
 
     final index = current.conversations.indexWhere(
       (conversation) => conversation.id == message.conversationId,
@@ -754,6 +791,92 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     _setStateAndCache(_copyOverview(source: current, conversations: updated));
   }
 
+  void updateLastMessageOptimistically(
+    String conversationId,
+    ChatMessage message,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    final lastMessage = _buildLastMessage(message);
+
+    updated[index] = existing.copyWith(
+      lastMessage: lastMessage,
+      updatedAt: message.createdAt,
+    );
+
+    _setStateAndCache(
+      _copyOverview(
+        source: current,
+        conversations: _sortConversations(updated),
+      ),
+    );
+  }
+
+  void applyConfirmedOutboxMessage(
+    String conversationId,
+    String tempId,
+    ChatMessage confirmed,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId ||
+        existing.lastMessage?.id == confirmed.id) {
+      updated[index] = existing.copyWith(
+        lastMessage: _buildLastMessage(confirmed),
+        updatedAt: confirmed.createdAt,
+      );
+      _setStateAndCache(
+        _copyOverview(
+          source: current,
+          conversations: _sortConversations(updated),
+        ),
+      );
+    }
+  }
+
+  void applyFailedOutboxMessage(
+    String conversationId,
+    String tempId,
+    String error,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId) {
+      updated[index] = existing.copyWith(
+        lastMessage: existing.lastMessage?.copyWith(
+          status: 'failed',
+        ),
+      );
+      _setStateAndCache(
+        _copyOverview(
+          source: current,
+          conversations: _sortConversations(updated),
+        ),
+      );
+    }
+  }
+
   void _applySeenUpdate({
     required String? conversationId,
     required String? userId,
@@ -763,7 +886,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    final isMe = userId == _currentUserId;
+    final myId = _effectiveCurrentUserId;
+    final isMe = myId.isNotEmpty && userId.trim() == myId;
 
     final updated = current.conversations.map((conversation) {
       if (conversation.id != conversationId) {
@@ -772,20 +896,19 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       var conv = conversation;
       if (isMe) {
         conv = conv.copyWith(unreadCount: 0);
-      } else {
-        final last = conv.lastMessage;
-        if (last != null && last.senderId == _currentUserId) {
-          final updatedSeenBy = [
-            ...last.seenBy.where((e) => e.userId != userId),
-            ChatReceipt(userId: userId, at: DateTime.now()),
-          ];
-          conv = conv.copyWith(
-            lastMessage: last.copyWith(
-              seenBy: updatedSeenBy,
-              status: 'read',
-            ),
-          );
-        }
+      }
+      final last = conv.lastMessage;
+      if (last != null && _isMessageFromMe(last, conv)) {
+        final updatedSeenBy = [
+          ...last.seenBy.where((e) => e.userId != userId),
+          ChatReceipt(userId: userId, at: DateTime.now()),
+        ];
+        conv = conv.copyWith(
+          lastMessage: last.copyWith(
+            seenBy: updatedSeenBy,
+            status: 'read',
+          ),
+        );
       }
       return conv;
     }).toList();
@@ -801,7 +924,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     if (current == null || conversationId == null || userId == null) {
       return;
     }
-    if (userId == _currentUserId) {
+    final myId = _effectiveCurrentUserId;
+    if (myId.isNotEmpty && userId.trim() == myId) {
       return;
     }
 
@@ -810,8 +934,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         return conversation;
       }
       final last = conversation.lastMessage;
-      if (last != null && last.senderId == _currentUserId) {
-        if (!last.isSeenByAny(_currentUserId)) {
+      if (last != null && _isMessageFromMe(last, conversation)) {
+        if (!last.isSeenByAny(myId)) {
           final updatedDelivered = [
             ...last.deliveredTo.where((e) => e.userId != userId),
             ChatReceipt(userId: userId, at: DateTime.now()),
@@ -1947,6 +2071,12 @@ class ConversationMessagesController
     );
 
     try {
+      ref
+          .read(chatOverviewControllerProvider.notifier)
+          .updateLastMessageOptimistically(arg, tempMessage);
+    } catch (_) {}
+
+    try {
       final result = await _guardAuth(
         () => _repository().sendTextMessage(
           conversationId: arg,
@@ -1980,6 +2110,12 @@ class ConversationMessagesController
         ),
         immediate: true,
       );
+
+      try {
+        ref
+            .read(chatOverviewControllerProvider.notifier)
+            .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
+      } catch (_) {}
     } catch (error) {
       final failedMessage = tempMessage.copyWith(
         metadata: {
@@ -1994,6 +2130,11 @@ class ConversationMessagesController
           messages: _upsertMessage(latest.messages, failedMessage),
         ),
       );
+      try {
+        ref
+            .read(chatOverviewControllerProvider.notifier)
+            .applyFailedOutboxMessage(arg, tempMessage.id, error.toString());
+      } catch (_) {}
       rethrow;
     }
   }
@@ -2064,6 +2205,11 @@ class ConversationMessagesController
         messages: _upsertMessage(current.messages, result.message),
       ),
     );
+    try {
+      ref
+          .read(chatOverviewControllerProvider.notifier)
+          .applyConfirmedOutboxMessage(arg, result.message.id, result.message);
+    } catch (_) {}
   }
 
   Future<void> editMessage({

@@ -2740,9 +2740,36 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
     final last = widget.conversation.lastMessage;
     if (last == null) return null;
 
-    final myId = widget.currentUserId.trim();
-    final senderId = (last.senderId ?? '').trim();
-    if (myId.isEmpty || senderId.isEmpty || senderId != myId) {
+    final myId = widget.currentUserId.trim().isNotEmpty
+        ? widget.currentUserId.trim()
+        : (ref.read(authControllerProvider).valueOrNull?.id.trim() ??
+            ref.read(currentUserProvider)?.id.trim() ??
+            '');
+
+    bool isMine = false;
+    if (widget.conversation.isSelfChat(myId)) {
+      isMine = true;
+    } else if (last.status == 'pending' ||
+        (last.id != null && last.id!.startsWith('temp_'))) {
+      isMine = true;
+    } else {
+      final senderId = (last.senderId ?? '').trim();
+      if (myId.isNotEmpty && senderId.isNotEmpty && senderId == myId) {
+        isMine = true;
+      } else if (widget.conversation.type == 'direct') {
+        final others = widget.conversation.members
+            .where((m) => m.id.trim() != myId)
+            .toList();
+        if (others.length == 1) {
+          final peerId = others.first.id.trim();
+          if (peerId.isNotEmpty && senderId.isNotEmpty) {
+            isMine = senderId != peerId;
+          }
+        }
+      }
+    }
+
+    if (!isMine) {
       return null;
     }
 
@@ -2752,7 +2779,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
       return const Icon(
         Icons.access_time_rounded,
         size: 13.5,
-        color: Color(0xFF94A3B8), // Pending Clock
+        color: Color(0xFF8696A0), // Pending Clock (WhatsApp slate grey)
       );
     }
 
@@ -2761,16 +2788,16 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
       return const Icon(
         Icons.error_outline_rounded,
         size: 14.5,
-        color: Color(0xFFEF4444), // Failed
+        color: Color(0xFFEF4444), // Failed Vivid Red
       );
     }
 
-    // 3. Seen / Read -> WhatsApp Green Double Check
-    if (last.isSeenByAny(myId)) {
+    // 3. Seen / Read -> WhatsApp / Telegram Iconic Sky Blue Double Check
+    if (last.isSeenByAny(myId) || widget.conversation.isSelfChat(myId)) {
       return const Icon(
         Icons.done_all_rounded,
-        size: 15.5,
-        color: Color(0xFF16A34A), // WhatsApp Green / Read
+        size: 16.0,
+        color: Color(0xFF53BDEB), // WhatsApp Sky Blue Double Check
       );
     }
 
@@ -2778,16 +2805,16 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
     if (last.isDeliveredToAny(myId)) {
       return const Icon(
         Icons.done_all_rounded,
-        size: 15.5,
-        color: Color(0xFF94A3B8), // WhatsApp Grey Double Check / Delivered
+        size: 16.0,
+        color: Color(0xFF8696A0), // Delivered Grey Double Check
       );
     }
 
     // 5. Sent -> Single Grey Check
     return const Icon(
       Icons.done_rounded,
-      size: 15.5,
-      color: Color(0xFF94A3B8), // Single Grey Check / Sent
+      size: 16.0,
+      color: Color(0xFF8696A0), // Single Grey Check
     );
   }
 

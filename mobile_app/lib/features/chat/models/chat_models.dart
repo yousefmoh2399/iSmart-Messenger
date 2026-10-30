@@ -357,13 +357,21 @@ class ChatLastMessage {
   final DateTime? createdAt;
 
   bool isSeenByAny(String currentUserId) {
-    if (status == 'read') return true;
-    return seenBy.any((entry) => entry.userId != currentUserId);
+    if (status == 'read' || status == 'seen') return true;
+    final trimmedMe = currentUserId.trim();
+    if (trimmedMe.isEmpty) {
+      return seenBy.isNotEmpty;
+    }
+    return seenBy.any((entry) => entry.userId.trim().isNotEmpty && entry.userId.trim() != trimmedMe);
   }
 
   bool isDeliveredToAny(String currentUserId) {
     if (status == 'delivered' || isSeenByAny(currentUserId)) return true;
-    return deliveredTo.any((entry) => entry.userId != currentUserId);
+    final trimmedMe = currentUserId.trim();
+    if (trimmedMe.isEmpty) {
+      return deliveredTo.isNotEmpty;
+    }
+    return deliveredTo.any((entry) => entry.userId.trim().isNotEmpty && entry.userId.trim() != trimmedMe);
   }
 
   ChatLastMessage copyWith({
@@ -392,7 +400,7 @@ class ChatLastMessage {
 
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
-    final rawSender = map['senderId'];
+    final rawSender = map['senderId'] ?? map['sender'];
     final senderId = rawSender is Map
         ? (rawSender['_id'] ?? rawSender['id'])?.toString()
         : rawSender?.toString();
@@ -402,7 +410,8 @@ class ChatLastMessage {
       id: (map['id'] ?? map['_id'])?.toString(),
       content: (map['content'] ?? map['text'] ?? '').toString(),
       senderId: senderId,
-      senderName: map['senderName']?.toString() ?? '',
+      senderName: map['senderName']?.toString() ??
+          (rawSender is Map ? (rawSender['fullName'] ?? rawSender['username'])?.toString() ?? '' : ''),
       messageType: map['messageType']?.toString() ?? 'text',
       seenBy: (rawSeenBy is List ? rawSeenBy : const [])
           .whereType<Map>()

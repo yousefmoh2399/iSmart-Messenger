@@ -880,6 +880,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         onFailed: (item, error) {
           if (!mounted) return;
           try {
+            ref
+                .read(chatOverviewControllerProvider.notifier)
+                .applyFailedOutboxMessage(
+                  item.conversationId,
+                  item.tempMessageId,
+                  error.toString(),
+                );
+          } catch (_) {}
+          try {
             final activeId = ref.read(activeConversationIdProvider);
             if (activeId == item.conversationId) {
               ref

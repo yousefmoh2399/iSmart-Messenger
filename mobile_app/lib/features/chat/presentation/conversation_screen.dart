@@ -8550,7 +8550,7 @@ _MessageStatus _status(ChatMessage message, String currentUserId) {
   }
 
   if (message.seenBy.any((entry) => entry.userId != currentUserId)) {
-    return const _MessageStatus(Icons.done_all_rounded, Color(0xFF16A34A));
+    return const _MessageStatus(Icons.done_all_rounded, Color(0xFF53BDEB));
   }
 
   if (message.deliveredTo.any((entry) => entry.userId != currentUserId)) {
