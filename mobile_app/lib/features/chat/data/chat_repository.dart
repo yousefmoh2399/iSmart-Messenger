@@ -108,7 +108,7 @@ class ChatRepository {
         _extractList(response.data, 'conversations'),
       );
       if (list.isNotEmpty) {
-        await _cache.saveConversations(list);
+        unawaited(_cache.saveConversations(list));
       }
       return list;
     } catch (e) {
@@ -312,7 +312,7 @@ class ChatRepository {
       );
       final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
       if (cursor == null && !isScheduled && response.data != null) {
-        await _cache.saveRawJson('messages_$conversationId', response.data!);
+        unawaited(_cache.saveRawJson('messages_$conversationId', response.data!));
       }
       return ChatMessagesPage(
         messages: _extractList(

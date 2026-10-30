@@ -301,9 +301,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      try {
-        await _ensureSocketConnected();
-      } catch (_) {}
+      // Connect socket in background without delaying HTTP data refresh
+      unawaited(_ensureSocketConnected());
       if (!mounted) {
         return;
       }
@@ -1330,15 +1329,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _refreshSessionAndSocketAfterResume() async {
-    try {
-      await ref.read(authRepositoryProvider).getValidToken();
-    } catch (_) {}
-    if (!mounted) {
-      return;
-    }
-    try {
-      await _ensureSocketConnected();
-    } catch (_) {}
+    // 1. Instantly trigger fresh message retrieval over HTTP without blocking on WebSocket or token
     try {
       ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
     } catch (_) {}
@@ -1348,7 +1339,20 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         ref.read(conversationMessagesControllerProvider(activeId).notifier).refresh();
       } catch (_) {}
     }
-    unawaited(_drainChatOutbox());
+
+    // 2. Refresh token, reconnect socket, and drain outbox concurrently in the background
+    unawaited(() async {
+      try {
+        await ref.read(authRepositoryProvider).getValidToken();
+      } catch (_) {}
+      if (!mounted) {
+        return;
+      }
+      try {
+        await _ensureSocketConnected();
+      } catch (_) {}
+      unawaited(_drainChatOutbox());
+    }());
   }
 
   @override

@@ -160,8 +160,39 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }
 
+    // Fast-path: Launch fetchConversations and deliver new messages immediately upon arrival!
+    final conversationsFuture = _guardAuth(repository.fetchConversations);
+    unawaited(conversationsFuture.then((conversations) {
+      if (_disposed) return;
+      final current = state.valueOrNull;
+      if (current != null) {
+        final existingConversations = current.conversations;
+        final effectiveConversations =
+            conversations.isEmpty && existingConversations.isNotEmpty
+                ? existingConversations
+                : conversations;
+        state = AsyncData(
+          _copyOverview(
+            source: current,
+            conversations: effectiveConversations,
+          ),
+        );
+      } else if (conversations.isNotEmpty) {
+        state = AsyncData(
+          ChatOverviewData(
+            conversations: conversations,
+            manageableConversations: const [],
+            users: const [],
+            departments: const [],
+            branches: const [],
+            roles: const [],
+          ),
+        );
+      }
+    }).catchError((_) {}));
+
     final results = await Future.wait([
-      _guardAuth(repository.fetchConversations),
+      conversationsFuture,
       _guardAuth(repository.fetchUsersPage),
       _guardAuth(repository.fetchDepartments),
       _guardAuth(repository.fetchBranches),
