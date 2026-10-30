@@ -4,14 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../shared/providers/providers.dart';
 import '../../models/chat_models.dart';
 
 /// Global coordinator to ensure only one voice note plays at a time (like WhatsApp)
+/// and to coordinate persistent voice note playback speed across all audio players.
 class ChatAudioPlaybackCoordinator {
+  static const String _voiceSpeedPrefKey = 'preferred_voice_speed';
+
   static final ValueNotifier<String?> activePlayerNotifier =
       ValueNotifier<String?>(null);
+
+  static final ValueNotifier<double> playbackSpeedNotifier =
+      ValueNotifier<double>(1.0);
+
+  static bool _isSpeedInitialized = false;
 
   static void setActive(String messageId) {
     activePlayerNotifier.value = messageId;
@@ -21,6 +30,28 @@ class ChatAudioPlaybackCoordinator {
     if (activePlayerNotifier.value == messageId) {
       activePlayerNotifier.value = null;
     }
+  }
+
+  /// Initialize preferred voice playback speed from persistent storage.
+  static Future<void> ensureSpeedInitialized() async {
+    if (_isSpeedInitialized) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getDouble(_voiceSpeedPrefKey);
+      if (saved != null && (saved == 1.0 || saved == 1.5 || saved == 2.0)) {
+        playbackSpeedNotifier.value = saved;
+      }
+    } catch (_) {}
+    _isSpeedInitialized = true;
+  }
+
+  /// Update preferred voice playback speed and persist to SharedPreferences.
+  static Future<void> setPlaybackSpeed(double speed) async {
+    playbackSpeedNotifier.value = speed;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_voiceSpeedPrefKey, speed);
+    } catch (_) {}
   }
 }
 
@@ -66,8 +97,12 @@ class _ChatAudioAttachmentPlayerState
   @override
   void initState() {
     super.initState();
+    _playbackSpeed = ChatAudioPlaybackCoordinator.playbackSpeedNotifier.value;
     _player = AudioPlayer(useProxyForRequestHeaders: false);
     _waveformAmplitudes = _generateVoiceAmplitudes(widget.message.id);
+
+    // Apply currently active playback speed
+    _player.setSpeed(_playbackSpeed).catchError((_) {});
 
     // Seed duration from message metadata if available so it displays instantly
     final metaMs = (widget.message.metadata?['durationMs'] as num?)?.toInt();
@@ -77,6 +112,22 @@ class _ChatAudioAttachmentPlayerState
 
     ChatAudioPlaybackCoordinator.activePlayerNotifier
         .addListener(_onActivePlayerChanged);
+    ChatAudioPlaybackCoordinator.playbackSpeedNotifier
+        .addListener(_onPlaybackSpeedChanged);
+
+    // Ensure preferred speed is loaded from persistent storage
+    ChatAudioPlaybackCoordinator.ensureSpeedInitialized().then((_) {
+      if (mounted) {
+        final currentGlobal =
+            ChatAudioPlaybackCoordinator.playbackSpeedNotifier.value;
+        if (_playbackSpeed != currentGlobal) {
+          setState(() {
+            _playbackSpeed = currentGlobal;
+          });
+          _player.setSpeed(currentGlobal).catchError((_) {});
+        }
+      }
+    });
 
     _player.playerStateStream.listen((state) {
       if (!mounted) return;
@@ -118,10 +169,26 @@ class _ChatAudioAttachmentPlayerState
     }
   }
 
+  void _onPlaybackSpeedChanged() {
+    final newSpeed = ChatAudioPlaybackCoordinator.playbackSpeedNotifier.value;
+    if (_playbackSpeed != newSpeed) {
+      if (mounted) {
+        setState(() {
+          _playbackSpeed = newSpeed;
+        });
+      } else {
+        _playbackSpeed = newSpeed;
+      }
+      _player.setSpeed(newSpeed).catchError((_) {});
+    }
+  }
+
   @override
   void dispose() {
     ChatAudioPlaybackCoordinator.activePlayerNotifier
         .removeListener(_onActivePlayerChanged);
+    ChatAudioPlaybackCoordinator.playbackSpeedNotifier
+        .removeListener(_onPlaybackSpeedChanged);
     ChatAudioPlaybackCoordinator.stopIfActive(widget.message.id);
     _player.dispose().catchError((_) {});
     super.dispose();
@@ -153,6 +220,7 @@ class _ChatAudioAttachmentPlayerState
   Future<void> _loadFromLocalFile(String path) async {
     try {
       final dur = await _player.setFilePath(path);
+      await _player.setSpeed(_playbackSpeed);
       _loadedFilePath = path;
       _isLoaded = true;
       if (dur != null && dur > Duration.zero && mounted) {
@@ -208,6 +276,7 @@ class _ChatAudioAttachmentPlayerState
         final dur = await _player
             .setFilePath(localPath)
             .timeout(const Duration(seconds: 15));
+        await _player.setSpeed(_playbackSpeed);
         _loadedFilePath = localPath;
         _isLoaded = true;
         if (dur != null && dur > Duration.zero && mounted) {
@@ -246,16 +315,16 @@ class _ChatAudioAttachmentPlayerState
 
   void _cyclePlaybackSpeed() {
     HapticFeedback.selectionClick();
-    setState(() {
-      if (_playbackSpeed == 1.0) {
-        _playbackSpeed = 1.5;
-      } else if (_playbackSpeed == 1.5) {
-        _playbackSpeed = 2.0;
-      } else {
-        _playbackSpeed = 1.0;
-      }
-      _player.setSpeed(_playbackSpeed);
-    });
+    final current = ChatAudioPlaybackCoordinator.playbackSpeedNotifier.value;
+    double nextSpeed = 1.0;
+    if (current == 1.0) {
+      nextSpeed = 1.5;
+    } else if (current == 1.5) {
+      nextSpeed = 2.0;
+    } else {
+      nextSpeed = 1.0;
+    }
+    ChatAudioPlaybackCoordinator.setPlaybackSpeed(nextSpeed);
   }
 
   void _onWaveformTap(TapDownDetails details, double width, Duration total) {

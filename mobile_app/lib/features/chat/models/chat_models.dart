@@ -502,6 +502,7 @@ class ChatConversation {
     required this.unreadCount,
     required this.isArchived,
     required this.isMuted,
+    this.mutedUntil,
     required this.isPinned,
     required this.isFavorite,
     required this.isActive,
@@ -526,11 +527,18 @@ class ChatConversation {
   final int unreadCount;
   final bool isArchived;
   final bool isMuted;
+  final DateTime? mutedUntil;
   final bool isPinned;
   final bool isFavorite;
   final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  bool get isEffectivelyMuted {
+    if (!isMuted) return false;
+    if (mutedUntil == null) return true;
+    return mutedUntil!.isAfter(DateTime.now());
+  }
 
   bool isSelfChat(String currentUserId) {
     if (type != 'direct') return false;
@@ -570,6 +578,8 @@ class ChatConversation {
     int? unreadCount,
     bool? isArchived,
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isPinned,
     bool? isFavorite,
     bool? isActive,
@@ -598,6 +608,7 @@ class ChatConversation {
       unreadCount: unreadCount ?? this.unreadCount,
       isArchived: isArchived ?? this.isArchived,
       isMuted: isMuted ?? this.isMuted,
+      mutedUntil: clearMutedUntil ? null : (mutedUntil ?? this.mutedUntil),
       isPinned: isPinned ?? this.isPinned,
       isFavorite: isFavorite ?? this.isFavorite,
       isActive: isActive ?? this.isActive,
@@ -672,6 +683,9 @@ class ChatConversation {
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       isArchived: json['isArchived'] == true,
       isMuted: json['isMuted'] == true,
+      mutedUntil: json['mutedUntil'] != null
+          ? DateTime.tryParse(json['mutedUntil'].toString())
+          : null,
       isPinned: json['isPinned'] == true,
       isFavorite: json['isFavorite'] == true,
       isActive: json['isActive'] != false,
@@ -703,6 +717,7 @@ class ChatConversation {
       'unreadCount': unreadCount,
       'isArchived': isArchived,
       'isMuted': isMuted,
+      'mutedUntil': mutedUntil?.toIso8601String(),
       'isPinned': isPinned,
       'isFavorite': isFavorite,
       'isActive': isActive,

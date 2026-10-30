@@ -115,7 +115,7 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
             break;
           }
 
-          if (targetConversation?.isMuted == true && !isMentioned) {
+          if (targetConversation?.isEffectivelyMuted == true && !isMentioned) {
             break;
           }
 
@@ -156,7 +156,7 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               }
             }
           }
-          if (targetConversation?.isMuted == true) {
+          if (targetConversation?.isEffectivelyMuted == true) {
             break;
           }
           if (conversationId.isNotEmpty &&

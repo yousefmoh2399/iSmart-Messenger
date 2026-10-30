@@ -146,6 +146,7 @@ router.patch(
   [
     param("id").isMongoId().withMessage("معرّف المحادثة غير صالح."),
     body("isMuted").optional().isBoolean(),
+    body("mutedUntil").optional({ nullable: true }).isISO8601().toDate(),
     body("isArchived").optional().isBoolean(),
     body("isPinned").optional().isBoolean(),
     body("isFavorite").optional().isBoolean(),

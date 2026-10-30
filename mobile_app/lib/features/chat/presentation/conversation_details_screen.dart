@@ -13,6 +13,7 @@ import 'chat_appearance_screen.dart';
 import 'favorite_messages_screen.dart';
 import 'group_management_screen.dart';
 import 'widgets/chat_avatar.dart';
+import 'widgets/chat_mute_duration_sheet.dart';
 
 /// WhatsApp iOS-style Conversation & Contact Details Screen
 class ConversationDetailsScreen extends ConsumerStatefulWidget {
@@ -74,18 +75,69 @@ class _ConversationDetailsScreenState
 
   Future<void> _toggleMute() async {
     HapticFeedback.selectionClick();
-    final newMute = !_conversation.isMuted;
-    setState(() {
-      _conversation = _conversation.copyWith(isMuted: newMute);
-    });
-    try {
-      await ref
-          .read(chatOverviewControllerProvider.notifier)
-          .updateConversationPreferences(
-            conversationId: _conversation.id,
-            isMuted: newMute,
+    if (_conversation.isEffectivelyMuted) {
+      setState(() {
+        _conversation =
+            _conversation.copyWith(isMuted: false, clearMutedUntil: true);
+      });
+      try {
+        final updated = await ref
+            .read(chatOverviewControllerProvider.notifier)
+            .updateConversationPreferences(
+              conversationId: _conversation.id,
+              isMuted: false,
+              clearMutedUntil: true,
+            );
+        if (mounted) {
+          setState(() => _conversation = updated);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم إلغاء كتم الإشعارات'),
+              duration: Duration(seconds: 2),
+            ),
           );
-    } catch (_) {}
+        }
+      } catch (_) {}
+      return;
+    }
+
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    final currentUserId = authUser?.id ?? '';
+    final result = await showSmartMuteDurationSheet(
+      context: context,
+      conversation: _conversation,
+      currentUserId: currentUserId,
+    );
+
+    if (result != null && mounted) {
+      final mutedUntil = result.toMutedUntil();
+      setState(() {
+        _conversation = _conversation.copyWith(
+          isMuted: true,
+          mutedUntil: mutedUntil,
+          clearMutedUntil: result.isAlways,
+        );
+      });
+      try {
+        final updated = await ref
+            .read(chatOverviewControllerProvider.notifier)
+            .updateConversationPreferences(
+              conversationId: _conversation.id,
+              isMuted: true,
+              mutedUntil: mutedUntil,
+              clearMutedUntil: result.isAlways,
+            );
+        if (mounted) {
+          setState(() => _conversation = updated);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم كتم إشعارات المحادثة'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (_) {}
+    }
   }
 
   void _showMediaGallery() {
@@ -417,11 +469,11 @@ class _ConversationDetailsScreenState
                   ),
                   _buildQuickActionBtn(
                     isDark: isDark,
-                    icon: _conversation.isMuted
+                    icon: _conversation.isEffectivelyMuted
                         ? CupertinoIcons.bell_slash_fill
                         : CupertinoIcons.bell,
-                    label: _conversation.isMuted ? 'مكتوم' : 'كتم',
-                    active: _conversation.isMuted,
+                    label: _conversation.isEffectivelyMuted ? 'مكتوم' : 'كتم',
+                    active: _conversation.isEffectivelyMuted,
                     onTap: _toggleMute,
                   ),
                 ],
@@ -622,10 +674,10 @@ class _ConversationDetailsScreenState
                       child: Row(
                         children: [
                           Icon(
-                            _conversation.isMuted
+                            _conversation.isEffectivelyMuted
                                 ? CupertinoIcons.bell_slash_fill
                                 : CupertinoIcons.bell_fill,
-                            color: _conversation.isMuted
+                            color: _conversation.isEffectivelyMuted
                                 ? const Color(0xFFFF9500)
                                 : const Color(0xFF007AFF),
                             size: 22,
@@ -638,7 +690,7 @@ class _ConversationDetailsScreenState
                             ),
                           ),
                           CupertinoSwitch(
-                            value: _conversation.isMuted,
+                            value: _conversation.isEffectivelyMuted,
                             activeTrackColor: const Color(0xFF34C759),
                             onChanged: (_) => _toggleMute(),
                           ),

@@ -38,6 +38,7 @@ import 'widgets/chat_avatar.dart';
 import 'widgets/new_conversation_sheet.dart';
 import 'widgets/chat_folder_inline_item.dart';
 import 'widgets/create_chat_folder_dialog.dart';
+import 'widgets/chat_mute_duration_sheet.dart';
 
 class ChatHomeScreen extends ConsumerStatefulWidget {
   const ChatHomeScreen({super.key});
@@ -205,6 +206,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   Future<void> _updateConversationPreferences(
     ChatConversation conversation, {
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isArchived,
     bool? isPinned,
     bool? isFavorite,
@@ -215,6 +218,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           .updateConversationPreferences(
             conversationId: conversation.id,
             isMuted: isMuted,
+            mutedUntil: mutedUntil,
+            clearMutedUntil: clearMutedUntil,
             isArchived: isArchived,
             isPinned: isPinned,
             isFavorite: isFavorite,
@@ -237,6 +242,50 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> _handleMuteToggle(ChatConversation conversation) async {
+    if (conversation.isEffectivelyMuted) {
+      await _updateConversationPreferences(
+        conversation,
+        isMuted: false,
+        clearMutedUntil: true,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم إلغاء كتم الإشعارات'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    final currentUserId = authUser?.id ?? '';
+    final result = await showSmartMuteDurationSheet(
+      context: context,
+      conversation: conversation,
+      currentUserId: currentUserId,
+    );
+
+    if (result != null && mounted) {
+      await _updateConversationPreferences(
+        conversation,
+        isMuted: true,
+        mutedUntil: result.toMutedUntil(),
+        clearMutedUntil: result.isAlways,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم كتم إشعارات المحادثة'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -1278,11 +1327,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                                 c,
                                                 isPinned: !c.isPinned,
                                               ),
-                                          onToggleMute: () =>
-                                              _updateConversationPreferences(
-                                                c,
-                                                isMuted: !c.isMuted,
-                                              ),
+                                          onToggleMute: () => _handleMuteToggle(c),
                                           onToggleFavorite: () =>
                                               _updateConversationPreferences(
                                                 c,
@@ -1318,10 +1363,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                                     !conversation.isPinned,
                                               ),
                                           onToggleMute: () =>
-                                              _updateConversationPreferences(
-                                                conversation,
-                                                isMuted: !conversation.isMuted,
-                                              ),
+                                              _handleMuteToggle(conversation),
                                           onToggleFavorite: () =>
                                               _updateConversationPreferences(
                                                 conversation,
@@ -1389,10 +1431,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                                 !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
-                                          _updateConversationPreferences(
-                                            conversation,
-                                            isMuted: !conversation.isMuted,
-                                          ),
+                                          _handleMuteToggle(conversation),
                                       onToggleFavorite: () =>
                                           _updateConversationPreferences(
                                             conversation,
@@ -1451,10 +1490,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                             isPinned: !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
-                                          _updateConversationPreferences(
-                                            conversation,
-                                            isMuted: !conversation.isMuted,
-                                          ),
+                                          _handleMuteToggle(conversation),
                                       onToggleFavorite: () =>
                                           _updateConversationPreferences(
                                             conversation,
@@ -1505,10 +1541,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                             isPinned: !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
-                                          _updateConversationPreferences(
-                                            conversation,
-                                            isMuted: !conversation.isMuted,
-                                          ),
+                                          _handleMuteToggle(conversation),
                                       onToggleFavorite: () =>
                                           _updateConversationPreferences(
                                             conversation,
@@ -2822,12 +2855,14 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
             ),
             ListTile(
               leading: Icon(
-                widget.conversation.isMuted
+                widget.conversation.isEffectivelyMuted
                     ? Icons.volume_off_rounded
                     : Icons.volume_up_outlined,
               ),
               title: Text(
-                widget.conversation.isMuted ? 'إلغاء كتم الصوت' : 'كتم المحادثة',
+                widget.conversation.isEffectivelyMuted
+                    ? 'إلغاء كتم الصوت'
+                    : 'كتم المحادثة...',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               onTap: () {
@@ -3291,7 +3326,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                             color: Color(0xFFFFB020),
                           ),
                         ],
-                        if (widget.conversation.isMuted) ...[
+                        if (widget.conversation.isEffectivelyMuted) ...[
                           const SizedBox(width: 4),
                           Icon(
                             Icons.volume_off_rounded,

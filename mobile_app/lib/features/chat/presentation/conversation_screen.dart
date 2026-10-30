@@ -52,6 +52,7 @@ import 'widgets/poll_creator_dialog.dart';
 import 'widgets/scheduled_messages_list.dart';
 import 'widgets/whatsapp_reaction_picker.dart';
 import 'widgets/chat_remote_search_sheet.dart';
+import 'widgets/chat_mute_duration_sheet.dart';
 
 /// خطوط احتياطية لعرض الإيموجي ملوّنًا (مهم على سطح المكتب/لينكس).
 const List<String> _kChatReactionEmojiFontFallbacks = <String>[
@@ -4962,12 +4963,58 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     await _clearPinnedMessage();
                     return;
                   }
+                  if (value == 'mute') {
+                    final messenger = ScaffoldMessenger.of(context);
+                    if (_data.isEffectivelyMuted) {
+                      final updated = await ref
+                          .read(chatOverviewControllerProvider.notifier)
+                          .updateConversationPreferences(
+                            conversationId: widget.conversation.id,
+                            isMuted: false,
+                            clearMutedUntil: true,
+                          );
+                      if (!mounted) return;
+                      setState(() => _conversation = updated);
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text('تم إلغاء كتم الإشعارات'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    } else {
+                      final authUserId =
+                          ref.read(authControllerProvider).valueOrNull?.id ?? '';
+                      final result = await showSmartMuteDurationSheet(
+                        context: context,
+                        conversation: _data,
+                        currentUserId: authUserId,
+                      );
+                      if (result != null && mounted) {
+                        final updated = await ref
+                            .read(chatOverviewControllerProvider.notifier)
+                            .updateConversationPreferences(
+                              conversationId: widget.conversation.id,
+                              isMuted: true,
+                              mutedUntil: result.toMutedUntil(),
+                              clearMutedUntil: result.isAlways,
+                            );
+                        if (!mounted) return;
+                        setState(() => _conversation = updated);
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('تم كتم إشعارات المحادثة'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    }
+                    return;
+                  }
                   final updated = await ref
                       .read(chatOverviewControllerProvider.notifier)
                       .updateConversationPreferences(
                         conversationId: widget.conversation.id,
                         isPinned: value == 'pin' ? !_data.isPinned : null,
-                        isMuted: value == 'mute' ? !_data.isMuted : null,
                         isFavorite: value == 'favorite'
                             ? !_data.isFavorite
                             : null,
@@ -5019,7 +5066,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   PopupMenuItem(
                     value: 'mute',
                     child: Text(
-                      _data.isMuted ? 'إلغاء الكتم' : 'كتم الإشعارات',
+                      _data.isEffectivelyMuted ? 'إلغاء الكتم' : 'كتم الإشعارات',
                     ),
                   ),
                   PopupMenuItem(

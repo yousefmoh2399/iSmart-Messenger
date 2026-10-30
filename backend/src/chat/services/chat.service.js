@@ -463,7 +463,9 @@ async function serializeConversation(conversation, currentUserId) {
     conversationId: conversation._id,
     userId: currentUserId,
   })
-    .select("unreadCount isArchived isMuted isPinned isFavorite clearHistoryAt")
+    .select(
+      "unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt"
+    )
     .lean();
 
   const clearHistoryAt = memberState?.clearHistoryAt
@@ -491,53 +493,63 @@ async function serializeConversation(conversation, currentUserId) {
       }
     : (conversation.lastMessage ? buildLastMessagePayload(conversation.lastMessage) : null);
 
-  return {
-    id: conversation._id.toString(),
-    type: conversation.type,
-    name: conversation.name,
-    description: conversation.description || "",
-    avatarUrl: conversation.avatarUrl ? normalizeMediaUrl(conversation.avatarUrl) : null,
-    departmentId: conversation.departmentId
-      ? conversation.departmentId._id
-        ? conversation.departmentId._id.toString()
-        : conversation.departmentId.toString()
-      : null,
-    createdBy: conversation.createdBy?._id
-      ? conversation.createdBy._id.toString()
-      : conversation.createdBy?.toString?.() || conversation.createdBy,
-    members,
-    admins,
-    broadcastPublisherIds: (conversation.broadcastPublisherIds || [])
-      .filter(Boolean)
-      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
-    blockedMemberIds: (conversation.blockedMembers || [])
-      .filter(Boolean)
-      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
-    blockedMembers: (conversation.blockedMembers || [])
-      .filter(Boolean)
-      .map((entry) =>
-        entry._id ? serializeUserLite(entry) : { id: entry.toString() },
-      ),
-    pinnedMessage: conversation.pinnedMessage
-      ? {
-          content: conversation.pinnedMessage.content || "",
-          setBy: getObjectIdString(conversation.pinnedMessage.setBy),
-          setByName: conversation.pinnedMessage.setByName || "",
-          createdAt: conversation.pinnedMessage.createdAt || null,
-          updatedAt: conversation.pinnedMessage.updatedAt || null,
-        }
-      : null,
-    lastMessage: normalizedLastMessage,
-    unreadCount: memberState?.unreadCount || 0,
-    isArchived: memberState?.isArchived || conversation.isArchived || false,
-    isMuted: memberState?.isMuted || false,
-    isPinned: memberState?.isPinned || false,
-    isFavorite: memberState?.isFavorite || false,
-    isActive: conversation.isActive !== false,
-    createdAt: conversation.createdAt,
-    updatedAt: conversation.updatedAt,
-    deletedAt: conversation.deletedAt || null,
-  };
+    const now = new Date();
+    const mutedUntil = memberState?.mutedUntil
+      ? new Date(memberState.mutedUntil)
+      : null;
+    const isMuted = Boolean(
+      memberState?.isMuted &&
+        (!mutedUntil || mutedUntil.getTime() > now.getTime())
+    );
+
+    return {
+      id: conversation._id.toString(),
+      type: conversation.type,
+      name: conversation.name,
+      description: conversation.description || "",
+      avatarUrl: conversation.avatarUrl ? normalizeMediaUrl(conversation.avatarUrl) : null,
+      departmentId: conversation.departmentId
+        ? conversation.departmentId._id
+          ? conversation.departmentId._id.toString()
+          : conversation.departmentId.toString()
+        : null,
+      createdBy: conversation.createdBy?._id
+        ? conversation.createdBy._id.toString()
+        : conversation.createdBy?.toString?.() || conversation.createdBy,
+      members,
+      admins,
+      broadcastPublisherIds: (conversation.broadcastPublisherIds || [])
+        .filter(Boolean)
+        .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+      blockedMemberIds: (conversation.blockedMembers || [])
+        .filter(Boolean)
+        .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+      blockedMembers: (conversation.blockedMembers || [])
+        .filter(Boolean)
+        .map((entry) =>
+          entry._id ? serializeUserLite(entry) : { id: entry.toString() },
+        ),
+      pinnedMessage: conversation.pinnedMessage
+        ? {
+            content: conversation.pinnedMessage.content || "",
+            setBy: getObjectIdString(conversation.pinnedMessage.setBy),
+            setByName: conversation.pinnedMessage.setByName || "",
+            createdAt: conversation.pinnedMessage.createdAt || null,
+            updatedAt: conversation.pinnedMessage.updatedAt || null,
+          }
+        : null,
+      lastMessage: normalizedLastMessage,
+      unreadCount: memberState?.unreadCount || 0,
+      isArchived: memberState?.isArchived || conversation.isArchived || false,
+      isMuted,
+      mutedUntil: isMuted && mutedUntil ? mutedUntil.toISOString() : null,
+      isPinned: memberState?.isPinned || false,
+      isFavorite: memberState?.isFavorite || false,
+      isActive: conversation.isActive !== false,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+      deletedAt: conversation.deletedAt || null,
+    };
 }
 
 function serializeMessage(message, sender = null) {

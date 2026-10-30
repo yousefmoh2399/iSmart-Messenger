@@ -1181,6 +1181,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   Future<ChatConversation> updateConversationPreferences({
     required String conversationId,
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isArchived,
     bool? isPinned,
     bool? isFavorite,
@@ -1189,6 +1191,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final conversation = await repository.updateConversationPreferences(
       conversationId: conversationId,
       isMuted: isMuted,
+      mutedUntil: mutedUntil,
+      clearMutedUntil: clearMutedUntil,
       isArchived: isArchived,
       isPinned: isPinned,
       isFavorite: isFavorite,

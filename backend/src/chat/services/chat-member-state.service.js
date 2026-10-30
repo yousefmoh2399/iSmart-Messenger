@@ -107,7 +107,7 @@ async function markConversationRead({ conversationId, userId, lastReadMessageId 
 
 async function getUnreadCountsForUser(userId) {
   const states = await ConversationMemberState.find({ userId })
-    .select("conversationId unreadCount isMuted isArchived isPinned isFavorite")
+    .select("conversationId unreadCount isMuted mutedUntil isArchived isPinned isFavorite")
     .lean();
 
   return Object.fromEntries(
@@ -163,6 +163,17 @@ async function updateConversationState(userId, conversationId, payload = {}) {
 
   if (Object.prototype.hasOwnProperty.call(payload, "isMuted")) {
     update.isMuted = Boolean(payload.isMuted);
+    if (!update.isMuted) {
+      update.mutedUntil = null;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "mutedUntil")) {
+    const rawDate = payload.mutedUntil ? new Date(payload.mutedUntil) : null;
+    const isValidDate = rawDate && !isNaN(rawDate.getTime());
+    update.mutedUntil = isValidDate ? rawDate : null;
+    if (update.mutedUntil) {
+      update.isMuted = true;
+    }
   }
   if (Object.prototype.hasOwnProperty.call(payload, "isArchived")) {
     update.isArchived = Boolean(payload.isArchived);

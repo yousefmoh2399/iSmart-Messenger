@@ -603,6 +603,8 @@ class ChatRepository {
   Future<ChatConversation> updateConversationPreferences({
     required String conversationId,
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isArchived,
     bool? isPinned,
     bool? isFavorite,
@@ -611,6 +613,9 @@ class ChatRepository {
       '/api/chat/conversations/$conversationId/preferences',
       data: {
         if (isMuted != null) 'isMuted': isMuted,
+        if (mutedUntil != null)
+          'mutedUntil': mutedUntil.toUtc().toIso8601String(),
+        if (clearMutedUntil) 'mutedUntil': null,
         if (isArchived != null) 'isArchived': isArchived,
         if (isPinned != null) 'isPinned': isPinned,
         if (isFavorite != null) 'isFavorite': isFavorite,

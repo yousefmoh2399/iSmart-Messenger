@@ -235,11 +235,13 @@ async function sendChatPushNotifications({
 
   if (allowedUserIds.length > 0 && conversation && message) {
     const mentions = message.metadata?.mentions || [];
+    const now = new Date();
     const memberStates = await ConversationMemberState.find(
       {
         conversationId: conversation._id || conversation.id,
         userId: { $in: allowedUserIds },
         isMuted: true,
+        $or: [{ mutedUntil: null }, { mutedUntil: { $gt: now } }],
       },
       "userId"
     ).lean();
