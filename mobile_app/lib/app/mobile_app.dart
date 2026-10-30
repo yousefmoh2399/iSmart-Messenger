@@ -21,7 +21,7 @@ import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/presentation/chat_home_screen.dart';
 import '../features/chat/presentation/conversation_screen.dart';
 import '../features/chat/models/chat_models.dart';
-import '../features/chat/presentation/widgets/chat_avatar.dart';
+import '../features/chat/presentation/widgets/share_target_picker_sheet.dart';
 import '../features/tickets/presentation/tickets_screen.dart';
 import '../shared/models/update_models.dart';
 import '../shared/providers/providers.dart';
@@ -427,10 +427,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       });
       return;
     }
-    final conversations =
-        ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
-        const [];
-    if (conversations.isEmpty) {
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    if (overview == null) {
       Future<void>.delayed(const Duration(milliseconds: 600), () {
         if (mounted && _pendingAndroidShare != null) {
           _presentIncomingShare(_pendingAndroidShare!);
@@ -442,7 +440,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _pendingAndroidShare = null;
     final directConversation = content.conversationId == null
         ? null
-        : conversations
+        : overview.conversations
               .where((entry) => entry.id == content.conversationId)
               .firstOrNull;
     if (directConversation != null) {
@@ -461,75 +459,48 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
     final currentUserId = ref.read(currentUserProvider)?.id ?? '';
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _ShareBottomSheet(
-        content: content,
-        conversations: conversations,
-        currentUserId: currentUserId,
-        onSelected: (conversation) async {
-          Navigator.pop(sheetContext);
-          await _sendSharedContentToConversation(content, conversation);
-          if (mounted) {
-            Navigator.of(context).push(
-              CupertinoPageRoute(
-                builder: (_) =>
-                    ConversationScreen(conversation: conversation),
-              ),
-            );
-          }
-        },
-      ),
+    final resolved = await ShareTargetPickerSheet.show(
+      context,
+      content: content,
+      currentUserId: currentUserId,
     );
     _shareSheetOpen = false;
-  }
 
-  // ── Share-sheet helpers ────────────────────────────────────────────────────
-
-  static String _getConversationTitle(
-    ChatConversation conversation,
-    String currentUserId,
-  ) => conversation.displayTitle(currentUserId);
-
-  static String? _getConversationAvatarUrl(
-    ChatConversation conversation,
-    String currentUserId,
-  ) {
-    if (conversation.type == 'direct') {
-      final other = conversation.members
-          .where((m) => m.id != currentUserId)
-          .firstOrNull;
-      return other?.avatarUrl;
+    if (resolved != null && resolved.isNotEmpty && mounted) {
+      if (resolved.length == 1) {
+        Navigator.of(context).push(
+          CupertinoPageRoute(
+            builder: (_) =>
+                ConversationScreen(conversation: resolved.first),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF25D366),
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'تمت مشاركة المحتوى مع ${resolved.length} محادثات بنجاح',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
     }
-    return null;
-  }
-
-  static String _avatarLetter(
-    ChatConversation conversation,
-    String currentUserId,
-  ) {
-    final title = conversation.displayTitle(currentUserId);
-    return title.trim().isEmpty
-        ? '?'
-        : title.trim().characters.first.toUpperCase();
-  }
-
-  static String _getConversationSubtitle(
-    ChatConversation conversation, [
-    String? currentUserId,
-  ]) {
-    if (currentUserId != null && conversation.isSelfChat(currentUserId)) {
-      return 'الملاحظات والملفات المحفوظة';
-    }
-    final last = conversation.lastMessage;
-    if (last == null) return 'لا توجد رسائل';
-    final type = last.messageType;
-    if (type == 'image') return '🖼️ صورة';
-    if (type == 'file') return '📎 مرفق';
-    final text = last.content.trim();
-    return text.isEmpty ? '...' : text;
   }
 
   Future<void> _sendSharedContentToConversation(
@@ -1861,441 +1832,6 @@ class _GlobalAnnouncementOverlayState
                 ],
               ),
             ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Telegram-style share bottom sheet
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ShareBottomSheet extends ConsumerStatefulWidget {
-  const _ShareBottomSheet({
-    required this.content,
-    required this.conversations,
-    required this.currentUserId,
-    required this.onSelected,
-  });
-
-  final AndroidSharedContent content;
-  final List<ChatConversation> conversations;
-  final String currentUserId;
-  final Future<void> Function(ChatConversation) onSelected;
-
-  @override
-  ConsumerState<_ShareBottomSheet> createState() => _ShareBottomSheetState();
-}
-
-class _ShareBottomSheetState extends ConsumerState<_ShareBottomSheet> {
-  String _query = '';
-
-  bool _isImage(String path) {
-    final ext = path.split('.').last.toLowerCase();
-    return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].contains(ext);
-  }
-
-  List<ChatConversation> get _filtered {
-    List<ChatConversation> base = widget.conversations;
-    if (_query.trim().isNotEmpty) {
-      final q = _query.toLowerCase();
-      base = base
-          .where(
-            (c) =>
-                c.displayTitle(widget.currentUserId).toLowerCase().contains(q),
-          )
-          .toList();
-    }
-    final selfChats =
-        base.where((c) => c.isSelfChat(widget.currentUserId)).toList();
-    final otherChats =
-        base.where((c) => !c.isSelfChat(widget.currentUserId)).toList();
-    return [...selfChats, ...otherChats];
-  }
-
-  bool get _hasSelfChatInList =>
-      widget.conversations.any((c) => c.isSelfChat(widget.currentUserId));
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    final handleColor =
-        isDark ? Colors.white24 : Colors.black.withOpacity(0.12);
-
-    final paths = widget.content.paths;
-    final hasPaths = paths.isNotEmpty;
-    final hasText = widget.content.text.trim().isNotEmpty;
-    final allImages = hasPaths && paths.every(_isImage);
-
-    final titleText = hasPaths
-        ? (allImages
-            ? 'مشاركة ${paths.length} ${paths.length == 1 ? 'صورة' : 'صور'}'
-            : 'مشاركة ${paths.length} ${paths.length == 1 ? 'ملف' : 'ملفات'}')
-        : 'مشاركة نص ومحتوى';
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: surfaceColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // ── Drag handle ────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: handleColor,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-
-              // ── Header ─────────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      titleText,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700, fontSize: 17),
-                    ),
-
-                    // ── Preview of shared content ──────────────────────────────
-                    if (allImages) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 80,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: paths.length > 4 ? 5 : paths.length,
-                          itemBuilder: (_, i) {
-                            if (i == 4 && paths.length > 4) {
-                              return Padding(
-                                padding:
-                                    const EdgeInsetsDirectional.only(end: 8),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: Stack(
-                                    children: [
-                                      Image.file(
-                                        File(paths[i]),
-                                        width: 80,
-                                        height: 80,
-                                        fit: BoxFit.cover,
-                                      ),
-                                      Positioned.fill(
-                                        child: Container(
-                                          color: Colors.black54,
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            '+${paths.length - 4}',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 18,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-                            return Padding(
-                              padding:
-                                  const EdgeInsetsDirectional.only(end: 8),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: Image.file(
-                                  File(paths[i]),
-                                  width: 80,
-                                  height: 80,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ] else if (hasPaths) ...[
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 42,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: paths.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemBuilder: (_, i) {
-                            final p = paths[i];
-                            final fileName = p.split(Platform.pathSeparator).last;
-                            final isImg = _isImage(p);
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? Colors.white.withOpacity(0.08)
-                                    : Colors.black.withOpacity(0.05),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    isImg
-                                        ? Icons.image_rounded
-                                        : Icons.insert_drive_file_rounded,
-                                    size: 18,
-                                    color: const Color(0xFF007AFF),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  ConstrainedBox(
-                                    constraints:
-                                        const BoxConstraints(maxWidth: 140),
-                                    child: Text(
-                                      fileName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-
-                    // ── Text Preview ──────────────────────────────────────────
-                    if (hasText) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withOpacity(0.05)
-                              : Colors.black.withOpacity(0.04),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: isDark
-                                ? Colors.white10
-                                : Colors.black.withOpacity(0.06),
-                          ),
-                        ),
-                        child: Text(
-                          widget.content.text.trim(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                        ),
-                      ),
-                    ],
-
-                    // ── Search bar ────────────────────────────────────────────
-                    const SizedBox(height: 12),
-                    TextField(
-                      onChanged: (v) => setState(() => _query = v),
-                      style: const TextStyle(fontSize: 15),
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(
-                          Icons.search_rounded,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        hintText: 'البحث عن محادثة...',
-                        hintStyle: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          fontSize: 15,
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : Colors.black.withOpacity(0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // ── Conversation list ───────────────────────────────────────────
-              Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: (!_hasSelfChatInList && _query.isEmpty)
-                      ? _filtered.length + 1
-                      : _filtered.length,
-                  itemBuilder: (_, index) {
-                    // Pinned Saved Messages quick button if not in list yet
-                    if (!_hasSelfChatInList && _query.isEmpty && index == 0) {
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 4,
-                        ),
-                        leading: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.bookmark_rounded,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                        title: const Text(
-                          'الرسائل المحفوظة (أنت)',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                          ),
-                        ),
-                        subtitle: const Text(
-                          'مساحتك السحابية لحفظ الملاحظات والملفات',
-                          style: TextStyle(
-                            color: Color(0xFF5856D6),
-                            fontSize: 13,
-                          ),
-                        ),
-                        onTap: () async {
-                          final conv = await ref
-                              .read(chatOverviewControllerProvider.notifier)
-                              .openOrCreateSavedMessages(widget.currentUserId);
-                          widget.onSelected(conv);
-                        },
-                      );
-                    }
-
-                    final realIndex = (!_hasSelfChatInList && _query.isEmpty)
-                        ? index - 1
-                        : index;
-                    final conv = _filtered[realIndex];
-                    final isSelf = conv.isSelfChat(widget.currentUserId);
-                    final avatarUrl = _AuthGateState._getConversationAvatarUrl(
-                      conv,
-                      widget.currentUserId,
-                    );
-                    final letter = _AuthGateState._avatarLetter(
-                      conv,
-                      widget.currentUserId,
-                    );
-                    final title = _AuthGateState._getConversationTitle(
-                      conv,
-                      widget.currentUserId,
-                    );
-                    final subtitle = _AuthGateState._getConversationSubtitle(
-                      conv,
-                      widget.currentUserId,
-                    );
-
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
-                      ),
-                      leading: isSelf
-                          ? Container(
-                              width: 48,
-                              height: 48,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Color(0xFF5856D6),
-                                    Color(0xFF007AFF),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.bookmark_rounded,
-                                color: Colors.white,
-                                size: 24,
-                              ),
-                            )
-                          : ChatAvatar(
-                              radius: 24,
-                              backgroundColor: colorScheme.primaryContainer,
-                              avatarUrl: avatarUrl,
-                              fallback: Text(
-                                letter,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                  color: colorScheme.onPrimaryContainer,
-                                ),
-                              ),
-                            ),
-                      title: Text(
-                        title,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        subtitle,
-                        style: TextStyle(
-                          color: isSelf
-                              ? const Color(0xFF5856D6)
-                              : Colors.grey.shade600,
-                          fontSize: 13,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      onTap: () => widget.onSelected(conv),
-                    );
-                  },
-                ),
-              ),
-            ],
           ),
         );
       },
