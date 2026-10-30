@@ -748,7 +748,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                         switch (_selectedNavIndex) {
                           0 => 'المحادثات',
                           1 => 'دليل الموظفين',
-                          _ => 'الإعدادات والمزيد',
+                          _ => 'الملف الشخصي والإعدادات',
                         },
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
@@ -1182,7 +1182,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
 
             if (_selectedNavIndex == 3) {
               // ── Tab 3: More / Settings ──
-              return _buildMoreSettingsView(authUser, appearance, isDark, themeMode);
+              return const ProfileScreen(isEmbeddedInTab: true);
             }
 
             // ── Tab 0: Chats ──

@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,66 +11,34 @@ import '../../../core/settings/user_preferences.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
-import '../../../shared/widgets/button_loading_indicator.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
-import 'storage_management_screen.dart';
+import '../../chat/presentation/chat_admin_management_screen.dart';
+import '../../chat/presentation/chat_appearance_screen.dart';
+import '../../chat/presentation/conversation_screen.dart';
+import '../../chat/presentation/favorite_messages_screen.dart';
+import '../../chat/presentation/widgets/create_chat_folder_dialog.dart';
+import '../../files/presentation/my_files_screen.dart';
+import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
+import '../../printers/presentation/printer_monitoring_screen.dart';
+import '../../tickets/presentation/tickets_screen.dart';
 import 'notification_settings_screen.dart';
+import 'storage_management_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
-  const ProfileScreen({super.key});
+  const ProfileScreen({
+    super.key,
+    this.isEmbeddedInTab = false,
+  });
+
+  final bool isEmbeddedInTab;
 
   @override
   ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _fullNameController = TextEditingController();
-  final _jobTitleController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _saving = false;
   bool _uploadingAvatar = false;
-  bool _obscurePassword = true;
-
-  @override
-  void dispose() {
-    _fullNameController.dispose();
-    _jobTitleController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _saveProfile() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() => _saving = true);
-    try {
-      await ref
-          .read(authControllerProvider.notifier)
-          .updateProfile(
-            fullName: _fullNameController.text.trim(),
-            jobTitle: _jobTitleController.text.trim(),
-            password: _passwordController.text.trim(),
-          );
-      if (!mounted) return;
-      _passwordController.clear();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم حفظ التعديلات بنجاح')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
-    } finally {
-      if (mounted) {
-        setState(() => _saving = false);
-      }
-    }
-  }
 
   Future<void> _pickAvatar() async {
     setState(() => _uploadingAvatar = true);
@@ -83,14 +52,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
       await ref.read(authControllerProvider.notifier).uploadAvatar(filePath);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('تم تحديث الصورة الشخصية')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تحديث الصورة الشخصية بنجاح')),
+      );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
     } finally {
       if (mounted) {
         setState(() => _uploadingAvatar = false);
@@ -98,71 +67,604 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _pickScanSaveDirectory() async {
-    try {
-      final selectedPath = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'اختر مجلد حفظ ملفات المسح',
-      );
-      if (selectedPath == null || selectedPath.trim().isEmpty || !mounted) {
-        return;
+  Future<void> _showEditProfileModal(BuildContext context, AppUser user) async {
+    final nameCtrl = TextEditingController(text: user.fullName);
+    final jobCtrl = TextEditingController(text: user.jobTitle);
+    final formKey = GlobalKey<FormState>();
+    bool saving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (modalContext, setModalState) {
+          final isDark = Theme.of(modalContext).brightness == Brightness.dark;
+          final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(modalContext).viewInsets.bottom,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: sheetBg,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4.5,
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.white24 : Colors.black12,
+                          borderRadius: BorderRadius.circular(2.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'تعديل البيانات الشخصية',
+                      textAlign: TextAlign.center,
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 18),
+                    TextFormField(
+                      controller: nameCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'الاسم الكامل',
+                        hintText: 'أدخل اسمك المعروض للزملاء',
+                        prefixIcon: const Icon(Icons.person_rounded, size: 20),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : Colors.black.withOpacity(0.04),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      validator: (v) => (v == null || v.trim().length < 2)
+                          ? 'الاسم الكامل مطلوب'
+                          : null,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: jobCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'المسمى الوظيفي',
+                        hintText: 'مثال: مهندس برمجيات، محاسب، مدير فرع...',
+                        prefixIcon:
+                            const Icon(Icons.work_outline_rounded, size: 20),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : Colors.black.withOpacity(0.04),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              if (!formKey.currentState!.validate()) return;
+                              setModalState(() => saving = true);
+                              final messenger = ScaffoldMessenger.of(modalContext);
+                              try {
+                                await ref
+                                    .read(authControllerProvider.notifier)
+                                    .updateProfile(
+                                      fullName: nameCtrl.text.trim(),
+                                      jobTitle: jobCtrl.text.trim(),
+                                    );
+                                if (modalContext.mounted) {
+                                  Navigator.pop(modalContext);
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text('تم حفظ البيانات بنجاح'),
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (modalContext.mounted) {
+                                  setModalState(() => saving = false);
+                                  messenger.showSnackBar(
+                                    SnackBar(content: Text('تعذر الحفظ: $e')),
+                                  );
+                                }
+                              }
+                            },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF007AFF),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'حفظ التعديلات',
+                              style: TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w700),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showChangePasswordModal(BuildContext context, AppUser user) async {
+    final pwdCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool obscure = true;
+    bool saving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (modalContext, setModalState) {
+          final isDark = Theme.of(modalContext).brightness == Brightness.dark;
+          final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(modalContext).viewInsets.bottom,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: sheetBg,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              child: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4.5,
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.white24 : Colors.black12,
+                          borderRadius: BorderRadius.circular(2.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'تغيير كلمة المرور',
+                      textAlign: TextAlign.center,
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'أدخل كلمة مرور قوية جديدة لتأمين حسابك',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: isDark ? Colors.white54 : Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    TextFormField(
+                      controller: pwdCtrl,
+                      obscureText: obscure,
+                      decoration: InputDecoration(
+                        labelText: 'كلمة المرور الجديدة',
+                        prefixIcon:
+                            const Icon(Icons.lock_outline_rounded, size: 20),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            obscure
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            size: 19,
+                          ),
+                          onPressed: () =>
+                              setModalState(() => obscure = !obscure),
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : Colors.black.withOpacity(0.04),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.trim().length < 6) {
+                          return 'يجب أن تكون كلمة المرور 6 أحرف على الأقل';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: confirmCtrl,
+                      obscureText: obscure,
+                      decoration: InputDecoration(
+                        labelText: 'تأكيد كلمة المرور',
+                        prefixIcon:
+                            const Icon(Icons.lock_reset_rounded, size: 20),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withOpacity(0.06)
+                            : Colors.black.withOpacity(0.04),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      validator: (v) {
+                        if (v != pwdCtrl.text) {
+                          return 'كلمات المرور غير متطابقة';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              if (!formKey.currentState!.validate()) return;
+                              setModalState(() => saving = true);
+                              final messenger = ScaffoldMessenger.of(modalContext);
+                              try {
+                                await ref
+                                    .read(authControllerProvider.notifier)
+                                    .updateProfile(
+                                      fullName: user.fullName,
+                                      password: pwdCtrl.text.trim(),
+                                    );
+                                if (modalContext.mounted) {
+                                  Navigator.pop(modalContext);
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content:
+                                          Text('تم تحديث كلمة المرور بنجاح'),
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (modalContext.mounted) {
+                                  setModalState(() => saving = false);
+                                  messenger.showSnackBar(
+                                    SnackBar(content: Text('تعذر التحديث: $e')),
+                                  );
+                                }
+                              }
+                            },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF007AFF),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'تأكيد وتغيير كلمة المرور',
+                              style: TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w700),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showStorageDirectoriesSheet(
+    BuildContext context,
+    UserPreferences preferences,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+        return Consumer(
+          builder: (context, ref, _) {
+            final prefs = ref.watch(userPreferencesControllerProvider).valueOrNull ??
+                preferences;
+
+            return Container(
+              decoration: BoxDecoration(
+                color: sheetBg,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4.5,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2.5),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'مجلدات الحفظ والتخزين',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'تخصيص أماكن حفظ المستندات والملفات على جهازك',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: isDark ? Colors.white54 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 1. Scan PDF Folder
+                  _buildFolderConfigCard(
+                    title: 'مجلد حفظ ملفات المسح (PDF)',
+                    path: prefs.scanSaveDirectoryPath ??
+                        'المسار الافتراضي داخل التطبيق',
+                    isCustom: prefs.scanSaveDirectoryPath != null,
+                    isDark: isDark,
+                    onPick: () async {
+                      final selected =
+                          await FilePicker.platform.getDirectoryPath(
+                        dialogTitle: 'اختر مجلد حفظ ملفات المسح',
+                      );
+                      if (selected != null && selected.trim().isNotEmpty) {
+                        await ref
+                            .read(userPreferencesControllerProvider.notifier)
+                            .setScanSaveDirectoryPath(selected.trim());
+                      }
+                    },
+                    onReset: () => ref
+                        .read(userPreferencesControllerProvider.notifier)
+                        .setScanSaveDirectoryPath(null),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 2. Storage Attachments Folder
+                  _buildFolderConfigCard(
+                    title: 'مجلد تخزين المرفقات والصور',
+                    path: prefs.localStorageDirectoryPath ??
+                        'iSmart Messenger Storage (داخل مساحة التطبيق)',
+                    isCustom: prefs.localStorageDirectoryPath != null,
+                    isDark: isDark,
+                    onPick: () async {
+                      final current = prefs.localStorageDirectoryPath;
+                      final selected =
+                          await FilePicker.platform.getDirectoryPath(
+                        dialogTitle: 'اختر مجلد تخزين الصور والمستندات',
+                        initialDirectory: current,
+                      );
+                      if (selected != null && selected.trim().isNotEmpty) {
+                        await ref
+                            .read(userPreferencesControllerProvider.notifier)
+                            .setLocalStorageDirectoryPath(selected.trim());
+                      }
+                    },
+                    onReset: () => ref
+                        .read(userPreferencesControllerProvider.notifier)
+                        .setLocalStorageDirectoryPath(null),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFolderConfigCard({
+    required String title,
+    required String path,
+    required bool isCustom,
+    required bool isDark,
+    required VoidCallback onPick,
+    required VoidCallback onReset,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.black.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.white10 : Colors.black.withOpacity(0.06),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            path,
+            style: TextStyle(
+              fontSize: 11.5,
+              color: isDark ? Colors.white60 : Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: onPick,
+                style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  textStyle: const TextStyle(fontSize: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('اختيار مجلد'),
+              ),
+              if (isCustom) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: onReset,
+                  style: TextButton.styleFrom(
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                  child: const Text('استعادة الافتراضي'),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showChangeServerUrlDialog(BuildContext context) async {
+    final currentUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ??
+        AppConfig.defaultApiBaseUrl;
+    final controller = TextEditingController(text: currentUrl);
+
+    final newUrl = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            'تغيير رابط الخادم (API Base URL)',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            style: const TextStyle(fontSize: 14),
+            decoration: InputDecoration(
+              labelText: 'عنوان الخادم',
+              hintText: 'http://192.168.1.10:5000',
+              filled: true,
+              fillColor: isDark
+                  ? const Color(0xFF2C2C2E)
+                  : const Color(0xFFF2F2F7),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('__reset__'),
+              child: const Text('الافتراضي'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+              child: const Text('حفظ'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newUrl == '__reset__') {
+      await ref.read(apiBaseUrlControllerProvider.notifier).reset();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تمت استعادة الرابط الافتراضي للخادم')),
+        );
       }
-      await ref
-          .read(userPreferencesControllerProvider.notifier)
-          .setScanSaveDirectoryPath(selectedPath.trim());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم تحديث مسار حفظ ملفات المسح')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } else if (newUrl != null && newUrl.isNotEmpty) {
+      await ref.read(apiBaseUrlControllerProvider.notifier).save(newUrl);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم تحديث رابط الخادم إلى: $newUrl')),
+        );
+      }
     }
   }
 
-  Future<void> _pickLocalStorageDirectory() async {
+  Future<void> _openSavedMessagesDirect(String currentUserId) async {
     try {
-      final current = ref
-          .read(userPreferencesControllerProvider)
-          .valueOrNull
-          ?.localStorageDirectoryPath;
-      final selectedPath = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'اختر مجلد تخزين الصور والمرفقات والمستندات',
-        initialDirectory: current,
-      );
-      if (selectedPath == null || selectedPath.trim().isEmpty || !mounted) {
-        return;
-      }
-      await ref
-          .read(userPreferencesControllerProvider.notifier)
-          .setLocalStorageDirectoryPath(selectedPath.trim());
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('إعادة تشغيل التطبيق'),
-          content: const Text(
-            'تم تحديث مجلد التخزين. يرجى إعادة تشغيل التطبيق لقراءة الملفات من المسار الجديد.',
+      final conv = await ref
+          .read(chatOverviewControllerProvider.notifier)
+          .openOrCreateSavedMessages(currentUserId);
+      if (mounted) {
+        Navigator.of(context).push(
+          CupertinoPageRoute(
+            builder: (_) => ConversationScreen(conversation: conv),
           ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('حسناً'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم تحديث مسار تخزين الملفات')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر فتح الرسائل المحفوظة: $e')),
+        );
+      }
     }
   }
 
@@ -173,7 +675,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return Dialog(
           backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 380),
             child: Padding(
@@ -189,7 +692,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: const Center(
-                      child: Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 26),
+                      child: Icon(
+                        Icons.logout_rounded,
+                        color: Color(0xFFEF4444),
+                        size: 26,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -214,7 +721,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           onPressed: () => Navigator.pop(ctx, false),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 11),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                           child: const Text('إلغاء'),
                         ),
@@ -227,7 +736,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             backgroundColor: const Color(0xFFDC2626),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 11),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                           child: const Text('خروج'),
                         ),
@@ -252,7 +763,422 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final authState = ref.watch(authControllerProvider);
     final userPreferencesState = ref.watch(userPreferencesControllerProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final scaffoldBg = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+    final scaffoldBg =
+        isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+
+    final content = authState.when(
+      loading: () => ListView(
+        padding: const EdgeInsets.all(16),
+        children: const [
+          ShimmerSkeleton(height: 160, borderRadius: 24),
+          SizedBox(height: 16),
+          ShimmerSkeleton(height: 180, borderRadius: 20),
+          SizedBox(height: 16),
+          ShimmerSkeleton(height: 200, borderRadius: 20),
+        ],
+      ),
+      error: (error, _) => Center(child: Text(error.toString())),
+      data: (user) {
+        if (user == null) {
+          return const Center(child: Text('لا توجد بيانات للمستخدم'));
+        }
+
+        final preferences =
+            userPreferencesState.valueOrNull ?? UserPreferences.defaults();
+
+        final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+        final dividerColor =
+            isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
+
+        final canAdmin = user.can('canCreateUsers') == true ||
+            user.can('canCreateDepartments') == true ||
+            user.role == 'admin';
+        final canPrinters =
+            user.canViewPrinterModule == true || user.role == 'admin';
+        final canItAssets = user.canScanItAssets == true ||
+            user.canScanItSpareParts == true ||
+            user.canScanItInventory == true ||
+            user.role == 'admin';
+
+        return ListView(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            widget.isEmbeddedInTab ? 10 : 16,
+            16,
+            widget.isEmbeddedInTab ? 100 : 40,
+          ),
+          children: [
+            // ── Top Apple Hero Card ──────────────────────────────────────────
+            _buildProfileHeroCard(user, isDark),
+            const SizedBox(height: 18),
+
+            // ── Group 1: Appearance & Display ────────────────────────────────
+            _buildSectionTitle('المظهر والعرض', isDark),
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: isDark
+                      ? CupertinoIcons.moon_fill
+                      : CupertinoIcons.sun_max_fill,
+                  iconColor: const Color(0xFFFF9500),
+                  label: 'الوضع الداكن (Dark Mode)',
+                  subtitle: isDark
+                      ? 'الوضع الليلي مفعّل حالياً'
+                      : 'الوضع النهاري مفعّل حالياً',
+                  trailing: CupertinoSwitch(
+                    value: isDark,
+                    activeTrackColor: const Color(0xFF007AFF),
+                    onChanged: (val) {
+                      ref
+                          .read(themeModeControllerProvider.notifier)
+                          .setThemeMode(val ? ThemeMode.dark : ThemeMode.light);
+                    },
+                  ),
+                  onTap: () {
+                    ref.read(themeModeControllerProvider.notifier).setThemeMode(
+                          isDark ? ThemeMode.light : ThemeMode.dark,
+                        );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.paintbrush_fill,
+                  iconColor: const Color(0xFFAF52DE),
+                  label: 'مظهر وألوان المحادثات',
+                  subtitle: 'تخصيص ثيمات الشات وفقاعات الرسائل',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const ChatAppearanceScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            // ── Group 2: Chat & Messaging ────────────────────────────────────
+            _buildSectionTitle('المحادثات والتواصل', isDark),
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: CupertinoIcons.return_icon,
+                  iconColor: const Color(0xFF34C759),
+                  label: 'زر Enter يرسل الرسالة',
+                  subtitle:
+                      'عند التعطيل، يفتح Enter سطراً جديداً والإرسال عبر زر السهم',
+                  trailing: CupertinoSwitch(
+                    value: preferences.enterSendsMessage,
+                    activeTrackColor: const Color(0xFF34C759),
+                    onChanged: (val) {
+                      ref
+                          .read(userPreferencesControllerProvider.notifier)
+                          .setEnterSendsMessage(val);
+                    },
+                  ),
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.bookmark_fill,
+                  iconColor: const Color(0xFF5856D6),
+                  label: 'الرسائل المحفوظة (الملاحظات الذاتية)',
+                  subtitle: 'مساحتك السحابية لحفظ الملاحظات، الروابط، والمستندات',
+                  onTap: () => _openSavedMessagesDirect(user.id),
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.star_fill,
+                  iconColor: const Color(0xFFFFCC00),
+                  label: 'الرسائل المفضلة',
+                  subtitle: 'الرسائل المحفوظة للرجوع السريع إليها',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const FavoriteMessagesScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.folder_badge_plus,
+                  iconColor: const Color(0xFF007AFF),
+                  label: 'مجلدات وتصنيفات الشات',
+                  subtitle: 'إنشاء مجلدات مخصصة لفرز محادثاتك',
+                  onTap: () async {
+                    final overview = ref
+                        .read(chatOverviewControllerProvider)
+                        .valueOrNull;
+                    await showCreateOrEditChatFolderDialog(
+                      context,
+                      availableConversations:
+                          overview?.conversations ?? const [],
+                      currentUserId: user.id,
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            // ── Group 3: Notifications ───────────────────────────────────────
+            _buildSectionTitle('الإشعارات والتنبيهات', isDark),
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: CupertinoIcons.bell_fill,
+                  iconColor: const Color(0xFFFF3B30),
+                  label: 'إعدادات الإشعارات والتنبيهات',
+                  subtitle:
+                      'نغمات الرسائل، الاهتزاز، وتجميع المحادثات كواتساب',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const NotificationSettingsScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            // ── Group 4: Storage & Files ─────────────────────────────────────
+            _buildSectionTitle('التخزين والملفات والذاكرة', isDark),
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: CupertinoIcons.circle_grid_hex_fill,
+                  iconColor: const Color(0xFF34C759),
+                  label: 'إدارة مساحة التخزين والكاش',
+                  subtitle:
+                      'تفريغ الذاكرة المؤقتة وتسريع الهاتف دون حذف المحادثات',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const StorageManagementScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.doc_checkmark_fill,
+                  iconColor: const Color(0xFF007AFF),
+                  label: 'حفظ تلقائي للمستندات بعد المسح',
+                  subtitle: 'تسمية وحفظ ملفات الـ PDF تلقائياً بعد المسح',
+                  trailing: CupertinoSwitch(
+                    value: preferences.autoSaveAfterScan,
+                    activeTrackColor: const Color(0xFF007AFF),
+                    onChanged: (val) {
+                      ref
+                          .read(userPreferencesControllerProvider.notifier)
+                          .setAutoSaveAfterScan(val);
+                    },
+                  ),
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.folder_fill,
+                  iconColor: const Color(0xFFFF9500),
+                  label: 'مجلدات الحفظ والتخزين',
+                  subtitle: 'تخصيص مسار حفظ مستندات PDF والمرفقات',
+                  onTap: () =>
+                      _showStorageDirectoriesSheet(context, preferences),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            // ── Group 5: Productivity & Cloud ────────────────────────────────
+            _buildSectionTitle('الملفات والإنتاجية', isDark),
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: CupertinoIcons.cloud_fill,
+                  iconColor: const Color(0xFF007AFF),
+                  label: 'ملفاتي ومستنداتي السحابية',
+                  subtitle: 'استعراض وإدارة كافة الملفات والمستندات المرفوعة',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const MyFilesScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.device_laptop,
+                  iconColor: const Color(0xFF5856D6),
+                  label: 'إرسال ملف إلى الكمبيوتر',
+                  subtitle: 'نقل سريع ومباشر للكمبيوتر عبر الشبكة',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const MyFilesScreen(
+                          launchDesktopSendPickerOnOpen: true,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.headphones,
+                  iconColor: const Color(0xFFFF2D55),
+                  label: 'تذاكر الدعم والشكاوى',
+                  subtitle: 'إرسال ومتابعة بلاغات IT والمقترحات',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const TicketsScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            // ── Group 6: Admin & System Tools (if permitted) ─────────────────
+            if (canAdmin || canPrinters || canItAssets) ...[
+              _buildSectionTitle('الأدوات الإدارية والشبكة', isDark),
+              _buildAppleGroup(
+                cardColor: cardColor,
+                dividerColor: dividerColor,
+                children: [
+                  if (canAdmin)
+                    _AppleTile(
+                      icon: CupertinoIcons.shield_fill,
+                      iconColor: const Color(0xFF34C759),
+                      label: 'لوحة إدارة الشات والمستخدمين',
+                      subtitle: 'إدارة المستخدمين والأقسام وسجلات النظام',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const ChatAdminManagementScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  if (canPrinters)
+                    _AppleTile(
+                      icon: CupertinoIcons.printer_fill,
+                      iconColor: const Color(0xFF007AFF),
+                      label: 'مراقبة أسطول الطابعات',
+                      subtitle: 'فحص الطابعات والعدادات ومستويات الأحبار',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const MobilePrinterMonitoringScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  if (canItAssets)
+                    _AppleTile(
+                      icon: CupertinoIcons.barcode_viewfinder,
+                      iconColor: const Color(0xFF00C7BE),
+                      label: 'ماسح أصول IT والمخزون',
+                      subtitle: 'جرد العتاد وقطع الغيار بالكاميرا والباركود',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const MobileItAssetScannerScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                  _AppleTile(
+                    icon: CupertinoIcons.link,
+                    iconColor: const Color(0xFF5856D6),
+                    label: 'إعدادات الاتصال بالخادم',
+                    subtitle: 'تعديل عنوان ورابط API الرئيسي',
+                    onTap: () => _showChangeServerUrlDialog(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+            ],
+
+            // ── Group 7: About & Legal ───────────────────────────────────────
+            _buildSectionTitle('عن المنظومة والأمان', isDark),
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: CupertinoIcons.lock_shield_fill,
+                  iconColor: const Color(0xFF007AFF),
+                  label: 'سياسة الخصوصية وأمان البيانات',
+                  subtitle: 'Privacy Policy & Data Protection',
+                  onTap: () async {
+                    final baseUrl = ref
+                            .read(apiBaseUrlControllerProvider)
+                            .valueOrNull ??
+                        AppConfig.defaultApiBaseUrl;
+                    final uri = Uri.parse(
+                      baseUrl.endsWith('/')
+                          ? '${baseUrl}privacy-policy'
+                          : '$baseUrl/privacy-policy',
+                    );
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.info_circle_fill,
+                  iconColor: const Color(0xFF8E8E93),
+                  label: 'إصدار التطبيق',
+                  subtitle: 'iSmart Workplace Messenger',
+                  trailing: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white12 : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'v1.2.4',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+
+            // ── Group 8: Logout Action ───────────────────────────────────────
+            _buildAppleGroup(
+              cardColor: cardColor,
+              dividerColor: dividerColor,
+              children: [
+                _AppleTile(
+                  icon: CupertinoIcons.square_arrow_right,
+                  iconColor: const Color(0xFFFF3B30),
+                  label: 'تسجيل الخروج',
+                  subtitle: 'إنهاء الجلسة والخروج من الحساب الحالي',
+                  isDestructive: true,
+                  onTap: _confirmLogout,
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+    );
+
+    if (widget.isEmbeddedInTab) {
+      return content;
+    }
 
     return Scaffold(
       backgroundColor: scaffoldBg,
@@ -272,758 +1198,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               )
             : null,
       ),
-      body: authState.when(
-        loading: () => ListView(
-          padding: const EdgeInsets.all(16),
-          children: const [
-            ShimmerSkeleton(height: 140, borderRadius: 24),
-            SizedBox(height: 16),
-            ShimmerSkeleton(height: 260, borderRadius: 20),
-            SizedBox(height: 16),
-            ShimmerSkeleton(height: 180, borderRadius: 20),
-          ],
-        ),
-        error: (error, _) => Center(child: Text(error.toString())),
-        data: (user) {
-          if (user == null) {
-            return const Center(child: Text('لا توجد بيانات للمستخدم'));
-          }
-
-          if (_fullNameController.text.isEmpty) {
-            _fullNameController.text = user.fullName;
-          }
-          if (_jobTitleController.text.isEmpty && user.jobTitle.isNotEmpty) {
-            _jobTitleController.text = user.jobTitle;
-          }
-
-          final preferences =
-              userPreferencesState.valueOrNull ?? UserPreferences.defaults();
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-            children: [
-              // ── Apple Hero Avatar & Info Card ──
-              _AppleProfileHero(
-                user: user,
-                uploadingAvatar: _uploadingAvatar,
-                onPickAvatar: _pickAvatar,
-              ),
-              const SizedBox(height: 20),
-
-              // ── Section 1: Account Information (Inset Grouped) ──
-              _AppleSectionHeader(title: 'البيانات الشخصية والوظيفة', icon: Icons.badge_outlined),
-              _AppleInsetGroup(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      children: [
-                        _AppleSettingsInputField(
-                          controller: _fullNameController,
-                          label: 'الاسم الكامل',
-                          hint: 'اسمك المعروض للموظفين',
-                          icon: Icons.person_rounded,
-                          validator: (value) {
-                            if (value == null || value.trim().length < 2) {
-                              return 'الاسم الكامل مطلوب';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        _AppleSettingsInputField(
-                          controller: _jobTitleController,
-                          label: 'المسمى الوظيفي',
-                          hint: 'مثال: محاسب، مدير فرع، مهندس IT...',
-                          icon: Icons.work_outline_rounded,
-                        ),
-                        const SizedBox(height: 12),
-                        _AppleSettingsInputField(
-                          controller: TextEditingController(
-                            text: user.branchCode.isNotEmpty ? user.branchCode : 'الفرع الرئيسي',
-                          ),
-                          enabled: false,
-                          label: 'الفرع التابع له',
-                          icon: Icons.storefront_rounded,
-                        ),
-                        const SizedBox(height: 12),
-                        _AppleSettingsInputField(
-                          controller: TextEditingController(text: user.username),
-                          enabled: false,
-                          label: 'اسم المستخدم (Username)',
-                          icon: Icons.alternate_email_rounded,
-                        ),
-                        const SizedBox(height: 12),
-                        _AppleSettingsInputField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          label: 'تغيير كلمة المرور',
-                          hint: 'اتركها فارغة للإبقاء على الحالية',
-                          icon: Icons.lock_outline_rounded,
-                          suffix: IconButton(
-                            icon: Icon(
-                              _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                              size: 19,
-                            ),
-                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _saving ? null : _saveProfile,
-                            icon: _saving ? null : const Icon(Icons.check_rounded, size: 18),
-                            label: _saving
-                                ? const SizedBox(width: 18, height: 18, child: ButtonLoadingIndicator())
-                                : const Text('حفظ التغييرات', style: TextStyle(fontWeight: FontWeight.w700)),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF007AFF),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Section 2: Chat & Messaging Preferences ──
-              _AppleSectionHeader(title: 'تفضيلات المحادثات والدردشة', icon: Icons.chat_bubble_outline_rounded),
-              _AppleInsetGroup(
-                child: Column(
-                  children: [
-                    _AppleSettingsSwitchTile(
-                      icon: Icons.keyboard_return_rounded,
-                      iconColor: const Color(0xFF34C759),
-                      title: 'زر Enter يرسل الرسالة',
-                      subtitle: 'عند التعطيل، يفتح Enter سطراً جديداً والإرسال عبر زر السهم',
-                      value: preferences.enterSendsMessage,
-                      onChanged: (val) => ref
-                          .read(userPreferencesControllerProvider.notifier)
-                          .setEnterSendsMessage(val),
-                    ),
-                    const _AppleDivider(),
-                    _AppleSettingsSwitchTile(
-                      icon: Icons.document_scanner_rounded,
-                      iconColor: const Color(0xFF007AFF),
-                      title: 'حفظ تلقائي للمستندات بعد المسح',
-                      subtitle: 'تسمية وحفظ ملفات الـ PDF تلقائياً دون طلب الاسم',
-                      value: preferences.autoSaveAfterScan,
-                      onChanged: (val) => ref
-                          .read(userPreferencesControllerProvider.notifier)
-                          .setAutoSaveAfterScan(val),
-                    ),
-                    const _AppleDivider(),
-                    _AppleSettingsNavTile(
-                      icon: Icons.notifications_active_rounded,
-                      iconColor: const Color(0xFFFF9500),
-                      title: 'إعدادات الإشعارات والتنبيهات',
-                      subtitle: 'تخصيص النغمات، تجميع المحادثات كواتساب، والاهتزاز',
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const NotificationSettingsScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Section 3: Storage & Cache Management ──
-              _AppleSectionHeader(title: 'التخزين والملفات والذاكرة', icon: Icons.folder_outlined),
-              _AppleInsetGroup(
-                child: Column(
-                  children: [
-                    _AppleSettingsNavTile(
-                      icon: Icons.cleaning_services_rounded,
-                      iconColor: const Color(0xFF5856D6),
-                      title: 'إدارة مساحة التخزين والكاش',
-                      subtitle: 'تفريغ الذاكرة المؤقتة وتسريع الهاتف دون حذف الرسائل',
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const StorageManagementScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    const _AppleDivider(),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF007AFF).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.folder_open_rounded, color: Color(0xFF007AFF), size: 18),
-                              ),
-                              const SizedBox(width: 12),
-                              const Expanded(
-                                child: Text(
-                                  'مجلد حفظ ملفات المسح (PDF)',
-                                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 44),
-                            child: Text(
-                              preferences.scanSaveDirectoryPath ?? 'المسار الافتراضي داخل التطبيق',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                color: isDark ? Colors.white54 : const Color(0xFF64748B),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 44),
-                            child: Wrap(
-                              spacing: 8,
-                              children: [
-                                FilledButton.tonal(
-                                  onPressed: _pickScanSaveDirectory,
-                                  style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    textStyle: const TextStyle(fontSize: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  child: const Text('اختيار مجلد'),
-                                ),
-                                if (preferences.scanSaveDirectoryPath != null)
-                                  TextButton(
-                                    onPressed: () => ref
-                                        .read(userPreferencesControllerProvider.notifier)
-                                        .setScanSaveDirectoryPath(null),
-                                    style: TextButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      textStyle: const TextStyle(fontSize: 12),
-                                    ),
-                                    child: const Text('إعادة الافتراضي'),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const _AppleDivider(),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF34C759).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.folder_copy_rounded, color: Color(0xFF34C759), size: 18),
-                              ),
-                              const SizedBox(width: 12),
-                              const Expanded(
-                                child: Text(
-                                  'مجلد تخزين الصور والمرفقات',
-                                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 44),
-                            child: Text(
-                              preferences.localStorageDirectoryPath ?? 'iSmart Messenger / Storage داخل مساحة التطبيق',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                color: isDark ? Colors.white54 : const Color(0xFF64748B),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 44),
-                            child: Wrap(
-                              spacing: 8,
-                              children: [
-                                FilledButton.tonal(
-                                  onPressed: _pickLocalStorageDirectory,
-                                  style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    textStyle: const TextStyle(fontSize: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  ),
-                                  child: const Text('اختيار مجلد'),
-                                ),
-                                if (preferences.localStorageDirectoryPath != null)
-                                  TextButton(
-                                    onPressed: () => ref
-                                        .read(userPreferencesControllerProvider.notifier)
-                                        .setLocalStorageDirectoryPath(null),
-                                    style: TextButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      textStyle: const TextStyle(fontSize: 12),
-                                    ),
-                                    child: const Text('إعادة الافتراضي'),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Section 4: About & System ──
-              _AppleSectionHeader(title: 'عن التطبيق والأمان', icon: Icons.shield_outlined),
-              _AppleInsetGroup(
-                child: Column(
-                  children: [
-                    _AppleSettingsNavTile(
-                      icon: Icons.privacy_tip_outlined,
-                      iconColor: const Color(0xFF007AFF),
-                      title: 'سياسة الخصوصية وأمان البيانات',
-                      subtitle: 'Privacy Policy & Data Security',
-                      onTap: () async {
-                        final baseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ?? AppConfig.defaultApiBaseUrl;
-                        final uri = Uri.parse(baseUrl.endsWith('/') ? '${baseUrl}privacy-policy' : '$baseUrl/privacy-policy');
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        }
-                      },
-                    ),
-                    const _AppleDivider(),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF8E8E93).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(Icons.info_outline_rounded, color: Color(0xFF8E8E93), size: 18),
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'إصدار المنظومة',
-                              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: const Text(
-                              'v1.1.3',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // ── Logout Destructive Button ──
-              _AppleInsetGroup(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: _confirmLogout,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 20),
-                          SizedBox(width: 8),
-                          Text(
-                            'تسجيل الخروج من الحساب',
-                            style: TextStyle(
-                              color: Color(0xFFDC2626),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
-          );
-        },
-      ),
+      body: content,
     );
   }
-}
 
-// ─── Apple Settings Widgets ───────────────────────────────────────────────────
+  // ── Profile Hero Card ──────────────────────────────────────────────────────
 
-class _AppleSectionHeader extends StatelessWidget {
-  const _AppleSectionHeader({required this.title, required this.icon});
-  final String title;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6, bottom: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: isDark ? Colors.white54 : const Color(0xFF64748B)),
-          const SizedBox(width: 6),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
-              letterSpacing: 0.1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AppleInsetGroup extends StatelessWidget {
-  const _AppleInsetGroup({required this.child});
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-          width: 0.8,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: child,
-    );
-  }
-}
-
-class _AppleDivider extends StatelessWidget {
-  const _AppleDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Divider(
-      height: 0.8,
-      thickness: 0.8,
-      indent: 52,
-      color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
-    );
-  }
-}
-
-class _AppleSettingsInputField extends StatelessWidget {
-  const _AppleSettingsInputField({
-    required this.controller,
-    required this.label,
-    this.hint,
-    required this.icon,
-    this.enabled = true,
-    this.obscureText = false,
-    this.suffix,
-    this.validator,
-  });
-
-  final TextEditingController controller;
-  final String label;
-  final String? hint;
-  final IconData icon;
-  final bool enabled;
-  final bool obscureText;
-  final Widget? suffix;
-  final FormFieldValidator<String>? validator;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-          ),
-        ),
-        const SizedBox(height: 5),
-        TextFormField(
-          controller: controller,
-          enabled: enabled,
-          obscureText: obscureText,
-          validator: validator,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: isDark ? Colors.white : const Color(0xFF0F172A),
-          ),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(
-              fontSize: 13,
-              color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
-            ),
-            filled: true,
-            fillColor: enabled
-                ? (isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF8FAFC))
-                : (isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9)),
-            prefixIcon: Icon(icon, size: 18, color: isDark ? Colors.white54 : const Color(0xFF64748B)),
-            suffixIcon: suffix,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-                width: 0.8,
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-                width: 0.8,
-              ),
-            ),
-            disabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFE2E8F0),
-                width: 0.8,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF007AFF), width: 1.4),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AppleSettingsSwitchTile extends StatelessWidget {
-  const _AppleSettingsSwitchTile({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: iconColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: iconColor, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white54 : const Color(0xFF64748B),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          CupertinoSwitch(
-            value: value,
-            activeTrackColor: const Color(0xFF34C759),
-            onChanged: onChanged,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AppleSettingsNavTile extends StatelessWidget {
-  const _AppleSettingsNavTile({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: iconColor, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: isDark ? Colors.white54 : const Color(0xFF64748B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 14,
-                color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AppleProfileHero extends StatelessWidget {
-  const _AppleProfileHero({
-    required this.user,
-    required this.uploadingAvatar,
-    required this.onPickAvatar,
-  });
-
-  final AppUser user;
-  final bool uploadingAvatar;
-  final VoidCallback onPickAvatar;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget _buildProfileHeroCard(AppUser user, bool isDark) {
     final isOnline = user.presenceStatus == 'online';
+    final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        color: cardColor,
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+          color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
           width: 0.8,
         ),
       ),
       child: Column(
         children: [
-          // Avatar with Camera Badge
+          // Avatar + Camera Badge
           Center(
             child: Stack(
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  width: 96,
-                  height: 96,
+                  width: 90,
+                  height: 90,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0),
+                    color: isDark
+                        ? const Color(0xFF2C2C2E)
+                        : const Color(0xFFE2E8F0),
                     border: Border.all(
-                      color: isDark ? Colors.white10 : const Color(0xFFCBD5E1),
+                      color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
                       width: 1.5,
                     ),
                   ),
@@ -1031,23 +1242,30 @@ class _AppleProfileHero extends StatelessWidget {
                       ? ClipOval(
                           child: CachedNetworkImage(
                             imageUrl: user.avatarUrl!,
-                            width: 96,
-                            height: 96,
+                            width: 90,
+                            height: 90,
                             fit: BoxFit.cover,
                             placeholder: (_, __) => const Center(
-                              child: AppLoadingIndicator(size: 22),
+                              child: AppLoadingIndicator(size: 20),
                             ),
-                            errorWidget: (_, __, ___) => _InitialLetter(name: user.fullName.isNotEmpty ? user.fullName : user.username),
+                            errorWidget: (_, __, ___) => _buildInitialLetter(
+                              user.fullName.isNotEmpty
+                                  ? user.fullName
+                                  : user.username,
+                            ),
                           ),
                         )
-                      : _InitialLetter(name: user.fullName.isNotEmpty ? user.fullName : user.username),
+                      : _buildInitialLetter(
+                          user.fullName.isNotEmpty
+                              ? user.fullName
+                              : user.username,
+                        ),
                 ),
-                // Camera Button Badge
                 PositionedDirectional(
-                  bottom: -2,
-                  end: -2,
+                  bottom: -1,
+                  end: -1,
                   child: GestureDetector(
-                    onTap: uploadingAvatar ? null : onPickAvatar,
+                    onTap: _uploadingAvatar ? null : _pickAvatar,
                     child: Container(
                       width: 32,
                       height: 32,
@@ -1055,25 +1273,34 @@ class _AppleProfileHero extends StatelessWidget {
                         color: const Color(0xFF007AFF),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                          width: 2.5,
+                          color: isDark
+                              ? const Color(0xFF1C1C1E)
+                              : Colors.white,
+                          width: 2.2,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.15),
+                            color: Colors.black.withOpacity(0.18),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),
                         ],
                       ),
                       child: Center(
-                        child: uploadingAvatar
+                        child: _uploadingAvatar
                             ? const SizedBox(
                                 width: 14,
                                 height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
-                            : const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                            : const Icon(
+                                Icons.camera_alt_rounded,
+                                size: 16,
+                                color: Colors.white,
+                              ),
                       ),
                     ),
                   ),
@@ -1081,32 +1308,63 @@ class _AppleProfileHero extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
+
           // Name
           Text(
             user.fullName.isNotEmpty ? user.fullName : user.username,
             style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 5),
+          const SizedBox(height: 4),
+
+          // Job Title (if present)
+          if (user.jobTitle.isNotEmpty) ...[
+            Text(
+              user.jobTitle,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+          ],
+
           // Badges Wrap (Username, Role, Branch)
           Wrap(
             alignment: WrapAlignment.center,
             spacing: 6,
             runSpacing: 6,
             children: [
-              _HeroPill(
-                icon: Icons.alternate_email_rounded,
-                label: user.username,
-                color: const Color(0xFF007AFF),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: user.username));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('تم نسخ اسم المستخدم: @${user.username}'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                },
+                child: _buildPill(
+                  icon: Icons.alternate_email_rounded,
+                  label: user.username,
+                  color: const Color(0xFF007AFF),
+                ),
               ),
-              _HeroPill(
-                icon: user.role == 'admin' ? Icons.shield_rounded : Icons.person_rounded,
-                label: user.role == 'admin' ? 'مسؤول نظام' : 'موظف',
-                color: user.role == 'admin' ? const Color(0xFFEA580C) : const Color(0xFF64748B),
+              _buildPill(
+                icon: user.role == 'admin'
+                    ? Icons.shield_rounded
+                    : Icons.person_rounded,
+                label: user.role == 'admin' ? 'مسؤول نظام' : 'حساب موظف',
+                color: user.role == 'admin'
+                    ? const Color(0xFFEA580C)
+                    : const Color(0xFF64748B),
               ),
               if (user.branchCode.isNotEmpty)
-                _HeroPill(
+                _buildPill(
                   icon: Icons.storefront_rounded,
                   label: 'فرع ${user.branchCode}',
                   color: const Color(0xFF9333EA),
@@ -1114,7 +1372,8 @@ class _AppleProfileHero extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // Status indicator
+
+          // Online Status
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1123,12 +1382,18 @@ class _AppleProfileHero extends StatelessWidget {
                 height: 7,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isOnline ? const Color(0xFF34C759) : const Color(0xFF94A3B8),
+                  color: isOnline
+                      ? const Color(0xFF34C759)
+                      : const Color(0xFF94A3B8),
                 ),
               ),
               const SizedBox(width: 6),
               Text(
-                isOnline ? 'متصل الآن' : (user.lastSeen != null ? 'آخر ظهور ${formatEgyptDateTime(user.lastSeen!)}' : 'غير متصل'),
+                isOnline
+                    ? 'متصل الآن'
+                    : (user.lastSeen != null
+                        ? 'آخر ظهور ${formatEgyptDateTime(user.lastSeen!)}'
+                        : 'غير متصل'),
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w500,
@@ -1137,40 +1402,76 @@ class _AppleProfileHero extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+
+          // Action Buttons: Edit Info + Change Password
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: () => _showEditProfileModal(context, user),
+                  icon: const Icon(Icons.edit_rounded, size: 16),
+                  label: const Text(
+                    'تعديل البيانات',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                  ),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showChangePasswordModal(context, user),
+                  icon: const Icon(Icons.lock_outline_rounded, size: 16),
+                  label: const Text(
+                    'كلمة المرور',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
-}
 
-class _InitialLetter extends StatelessWidget {
-  const _InitialLetter({required this.name});
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final letter = name.trim().isNotEmpty ? name.trim().characters.first.toUpperCase() : 'U';
+  Widget _buildInitialLetter(String name) {
+    final letter = name.trim().isNotEmpty
+        ? name.trim().characters.first.toUpperCase()
+        : 'U';
     return Center(
       child: Text(
         letter,
-        style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Color(0xFF007AFF)),
+        style: const TextStyle(
+          fontSize: 32,
+          fontWeight: FontWeight.w900,
+          color: Color(0xFF007AFF),
+        ),
       ),
     );
   }
-}
 
-class _HeroPill extends StatelessWidget {
-  const _HeroPill({required this.icon, required this.label, required this.color});
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -1180,9 +1481,159 @@ class _HeroPill extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             label,
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: color),
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF64748B),
+          letterSpacing: 0.1,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppleGroup({
+    required Color cardColor,
+    required Color dividerColor,
+    required List<Widget> children,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: dividerColor, width: 0.7),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: List.generate(children.length, (index) {
+          if (index == children.length - 1) return children[index];
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              children[index],
+              Divider(
+                height: 0.6,
+                thickness: 0.6,
+                indent: 60,
+                color: dividerColor,
+              ),
+            ],
+          );
+        }),
+      ),
+    );
+  }
+}
+
+// ── Apple Menu Tile Widget ───────────────────────────────────────────────────
+
+class _AppleTile extends StatelessWidget {
+  const _AppleTile({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    this.subtitle,
+    this.trailing,
+    this.isDestructive = false,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String? subtitle;
+  final Widget? trailing;
+  final bool isDestructive;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDestructive
+        ? const Color(0xFFFF3B30)
+        : (isDark ? Colors.white : const Color(0xFF0F172A));
+    final subtitleColor = isDark ? Colors.white54 : const Color(0xFF8E8E93);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: isDestructive
+                      ? const Color(0xFFFF3B30).withOpacity(0.12)
+                      : iconColor,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Center(
+                  child: Icon(
+                    icon,
+                    color: isDestructive
+                        ? const Color(0xFFFF3B30)
+                        : Colors.white,
+                    size: 19,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: subtitleColor,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null)
+                trailing!
+              else if (onTap != null)
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 13,
+                  color: isDark ? Colors.white24 : const Color(0xFFB0B0B8),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
