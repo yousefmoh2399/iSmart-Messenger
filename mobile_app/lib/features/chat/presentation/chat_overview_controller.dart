@@ -760,9 +760,10 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return;
     }
 
-    final effectiveSenderId = message.sender?.id ?? message.senderId;
+    final myId = _effectiveCurrentUserId.trim();
+    final effectiveSenderId = (message.sender?.id ?? message.senderId).trim();
     final isFromCurrentUser =
-        effectiveSenderId.isNotEmpty && effectiveSenderId == _effectiveCurrentUserId;
+        myId.isNotEmpty && effectiveSenderId.isNotEmpty && effectiveSenderId == myId;
 
     final index = current.conversations.indexWhere(
       (conversation) => conversation.id == message.conversationId,
@@ -1004,8 +1005,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       final last = conv.lastMessage;
       if (last != null && _isMessageFromMe(last, conv)) {
         final updatedSeenBy = [
-          ...last.seenBy.where((e) => e.userId != userId),
-          ChatReceipt(userId: userId, at: DateTime.now()),
+          ...last.seenBy.where((e) => e.userId.trim() != userId.trim()),
+          ChatReceipt(userId: userId.trim(), at: DateTime.now()),
         ];
         conv = conv.copyWith(
           lastMessage: last.copyWith(
@@ -1041,8 +1042,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       if (last != null && _isMessageFromMe(last, conversation)) {
         if (!last.isSeenByAny(myId)) {
           final updatedDelivered = [
-            ...last.deliveredTo.where((e) => e.userId != userId),
-            ChatReceipt(userId: userId, at: DateTime.now()),
+            ...last.deliveredTo.where((e) => e.userId.trim() != userId.trim()),
+            ChatReceipt(userId: userId.trim(), at: DateTime.now()),
           ];
           return conversation.copyWith(
             lastMessage: last.copyWith(

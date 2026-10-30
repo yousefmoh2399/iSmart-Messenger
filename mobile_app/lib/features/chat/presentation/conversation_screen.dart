@@ -8546,18 +8546,19 @@ _MessageStatus _status(ChatMessage message, String currentUserId) {
     return const _MessageStatus(Icons.error_outline_rounded, Color(0xFFEF4444));
   }
   if (message.isPending || message.id.startsWith('temp_')) {
-    return const _MessageStatus(Icons.access_time_rounded, Color(0xFF94A3B8));
+    return const _MessageStatus(Icons.access_time_rounded, Color(0xFF8696A0));
   }
 
-  if (message.seenBy.any((entry) => entry.userId != currentUserId)) {
+  final myId = currentUserId.trim();
+  if (message.seenBy.any((entry) => entry.userId.trim().isNotEmpty && entry.userId.trim() != myId)) {
     return const _MessageStatus(Icons.done_all_rounded, Color(0xFF53BDEB));
   }
 
-  if (message.deliveredTo.any((entry) => entry.userId != currentUserId)) {
-    return const _MessageStatus(Icons.done_all_rounded, Color(0xFF94A3B8));
+  if (message.deliveredTo.any((entry) => entry.userId.trim().isNotEmpty && entry.userId.trim() != myId)) {
+    return const _MessageStatus(Icons.done_all_rounded, Color(0xFF8696A0));
   }
 
-  return const _MessageStatus(Icons.done_rounded, Color(0xFF94A3B8));
+  return const _MessageStatus(Icons.done_rounded, Color(0xFF8696A0));
 }
 
 IconData _attachmentIcon(String type) => switch (type) {
