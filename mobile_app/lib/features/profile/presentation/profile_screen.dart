@@ -18,6 +18,7 @@ import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/conversation_screen.dart';
 import '../../chat/presentation/favorite_messages_screen.dart';
 import '../../chat/presentation/widgets/create_chat_folder_dialog.dart';
+import '../../chat/presentation/widgets/instant_clipboard_sync_sheet.dart';
 import '../../chat/presentation/widgets/message_reminder_sheet.dart';
 import '../../chat/presentation/widgets/quick_replies_sheet.dart';
 import '../../files/presentation/my_files_screen.dart';
@@ -1074,6 +1075,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     );
                   },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.doc_on_clipboard_fill,
+                  iconColor: const Color(0xFF00C7BE),
+                  label: 'الحافظة المشتركة الفورية (Clipboard Sync)',
+                  subtitle:
+                      'نسخ النصوص والروابط والأكواد فوراً بين الموبايل والكمبيوتر',
+                  onTap: () => showInstantClipboardSyncSheet(context, ref),
                 ),
                 _AppleTile(
                   icon: CupertinoIcons.device_laptop,

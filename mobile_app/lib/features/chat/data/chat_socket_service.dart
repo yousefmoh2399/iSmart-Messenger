@@ -232,6 +232,8 @@ class ChatSocketService {
     bind('tickets_updated');
     bind('ticket_settings_updated');
     bind('stickers_updated');
+    bind('clipboard_synced');
+    bind('clipboard_history_updated');
 
     socket.connect();
     _socket = socket;

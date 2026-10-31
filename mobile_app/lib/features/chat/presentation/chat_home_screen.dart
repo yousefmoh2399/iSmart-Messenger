@@ -36,6 +36,7 @@ import 'favorite_messages_screen.dart';
 import 'rooms_screen.dart';
 import 'widgets/chat_avatar.dart';
 import 'widgets/chat_audio_attachment_player.dart';
+import 'widgets/instant_clipboard_sync_sheet.dart';
 import 'widgets/message_reminder_sheet.dart';
 import 'widgets/new_conversation_sheet.dart';
 import 'widgets/chat_folder_inline_item.dart';
@@ -866,6 +867,17 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                       appearance: appearance,
                       isDark: isDark,
                       onPressed: () => _showCreateDialog(authUser),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 4),
+                    child: _HeaderIconButton(
+                      tooltip: 'الحافظة المشتركة الفورية (موبايل ⇄ كمبيوتر)',
+                      icon: Icons.content_paste_go_rounded,
+                      appearance: appearance,
+                      isDark: isDark,
+                      onPressed: () =>
+                          showInstantClipboardSyncSheet(context, ref),
                     ),
                   ),
                   Padding(

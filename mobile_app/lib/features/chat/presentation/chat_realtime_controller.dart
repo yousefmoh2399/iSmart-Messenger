@@ -6,6 +6,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
+import 'widgets/instant_clipboard_sync_sheet.dart';
 
 enum ChatConnectionStatus { connecting, connected, reconnecting, disconnected }
 
@@ -273,6 +274,33 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               }
             }
             await ref.read(authControllerProvider.notifier).logout();
+          } catch (_) {}
+          break;
+        case 'clipboard_synced':
+          try {
+            final item = await ref
+                .read(instantClipboardSyncControllerProvider.notifier)
+                .handleIncomingSyncEvent(event.payload);
+            if (item != null && item.isFromDesktop) {
+              final preview = item.text.length > 90
+                  ? '${item.text.substring(0, 90)}...'
+                  : item.text;
+              await notifications.showIncomingMessage(
+                title: '📋 تم نسخ نص من الكمبيوتر إلى حافظتك',
+                body: preview,
+                payload: <String, dynamic>{
+                  'type': 'clipboard_sync',
+                  'clipId': item.id,
+                },
+              );
+            }
+          } catch (_) {}
+          break;
+        case 'clipboard_history_updated':
+          try {
+            await ref
+                .read(instantClipboardSyncControllerProvider.notifier)
+                .handleHistoryUpdatedEvent(event.payload);
           } catch (_) {}
           break;
       }

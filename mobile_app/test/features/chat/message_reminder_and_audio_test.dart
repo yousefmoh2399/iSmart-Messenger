@@ -3,6 +3,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:mobile_app/features/auth/data/auth_repository.dart';
 import 'package:mobile_app/features/chat/models/chat_models.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/chat_audio_attachment_player.dart';
+import 'package:mobile_app/features/chat/presentation/widgets/instant_clipboard_sync_sheet.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/message_reminder_sheet.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/message_to_task_ticket_sheet.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/quick_replies_sheet.dart';
@@ -214,6 +215,27 @@ void main() {
         overview.otherSessions.first.platformDisplayLabel,
         'Windows Desktop',
       );
+    });
+  });
+
+  group('SyncedClipboardItem (Instant Clipboard Sync)', () {
+    test('detects URLs, source client type, and serializes cleanly', () {
+      final item = SyncedClipboardItem.fromJson({
+        'id': 'clip_100',
+        'text': 'https://ismartdbacd.dpdns.org/reports/42',
+        'sourceClientType': 'desktop',
+        'sourceDeviceName': 'كمبيوتر المكتب Windows',
+        'autoCopy': true,
+        'createdAt': '2026-10-31T07:40:00.000Z',
+      });
+
+      expect(item.id, 'clip_100');
+      expect(item.isFromDesktop, isTrue);
+      expect(item.isUrl, isTrue);
+
+      final restored = SyncedClipboardItem.fromJson(item.toJson());
+      expect(restored.text, 'https://ismartdbacd.dpdns.org/reports/42');
+      expect(restored.isFromDesktop, isTrue);
     });
   });
 }

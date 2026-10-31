@@ -13,6 +13,7 @@ import 'chat_folder_inline_item.dart';
 import 'create_chat_folder_dialog.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
+import 'instant_clipboard_sync_dialog.dart';
 
 class _SidebarGroupingCache {
   static Object? _lastUsers;
@@ -961,6 +962,16 @@ class _CompactChatSidebar extends StatelessWidget {
                   onPressed: onCreateConversation,
                 ),
                 const SizedBox(height: 6),
+                Consumer(
+                  builder: (context, ref, _) => _CompactSidebarIconButton(
+                    tooltip: 'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
+                    icon: Icons.content_paste_go_rounded,
+                    color: isDark ? Colors.white70 : const Color(0xFF708499),
+                    onPressed: () =>
+                        showDesktopInstantClipboardSyncDialog(context, ref),
+                  ),
+                ),
+                const SizedBox(height: 6),
                 _CompactSidebarIconButton(
                   tooltip: 'الرسائل المفضلة',
                   icon: Icons.star_outline_rounded,
@@ -1299,6 +1310,16 @@ class _SidebarHeader extends ConsumerWidget {
                     currentUserId: currentUserId,
                   );
                 },
+                dense: true,
+              ),
+              const SizedBox(width: 6),
+              _TgIconButton(
+                tooltip: 'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
+                icon: Icons.content_paste_go_rounded,
+                isDark: isDark,
+                accentColor: appearance.accent,
+                onPressed: () =>
+                    showDesktopInstantClipboardSyncDialog(context, ref),
                 dense: true,
               ),
               const SizedBox(width: 6),

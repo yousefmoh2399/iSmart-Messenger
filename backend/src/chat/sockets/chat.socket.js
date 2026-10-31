@@ -41,6 +41,7 @@ const publishedPresenceState = new Map();
 const printerCatalogByUser = new Map();
 const printJobOwnerById = new Map();
 const desktopStorageByUser = new Map();
+const clipboardHistoryByUser = new Map();
 const saveJobOwnerById = new Map();
 const receiveJobOwnerById = new Map();
 const SOCKET_MAX_PAYLOAD_BYTES =
@@ -953,6 +954,105 @@ function initializeChatSocketServer(httpServer) {
           ...storage,
           hasDesktop: getDesktopSocketIds(io, currentUser.id).length > 0,
         },
+      });
+    });
+
+    socket.on("clipboard:sync", (payload = {}, ack) => {
+      const rawText = String(payload.text || "").trim();
+      if (!rawText) {
+        socketAck(ack, {
+          ok: false,
+          success: false,
+          error: "النص المراد مزامنته فارغ.",
+        });
+        return;
+      }
+      if (rawText.length > 50000) {
+        socketAck(ack, {
+          ok: false,
+          success: false,
+          error: "حجم النص يتجاوز الحد المسموح به للحافظة الفورية.",
+        });
+        return;
+      }
+
+      const sourceClientType =
+        socketClientType.get(socket.id) ||
+        currentUser.clientType ||
+        normalizeClientType(payload.sourceClientType);
+      const fallbackDeviceName =
+        sourceClientType === "desktop"
+          ? "كمبيوتر المكتب Windows"
+          : sourceClientType === "mobile"
+            ? "هاتف الموبايل"
+            : "جهاز متصل";
+      const sourceDeviceName =
+        String(payload.sourceDeviceName || "")
+          .trim()
+          .slice(0, 120) || fallbackDeviceName;
+
+      const clipItem = {
+        id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        text: rawText,
+        sourceClientType,
+        sourceDeviceName,
+        sourceDeviceUid: currentUser.deviceUid || null,
+        autoCopy: payload.autoCopy !== false,
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingHistory = clipboardHistoryByUser.get(currentUser.id) || [];
+      const filteredHistory = existingHistory.filter(
+        (entry) => entry && entry.text !== rawText,
+      );
+      const updatedHistory = [clipItem, ...filteredHistory].slice(0, 20);
+      clipboardHistoryByUser.set(currentUser.id, updatedHistory);
+
+      // Emit to all OTHER sockets of the same user so they copy it immediately
+      socket.to(`user:${currentUser.id}`).emit("clipboard_synced", clipItem);
+      // Emit updated history to all sockets of the user
+      io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
+        history: updatedHistory,
+        latestItem: clipItem,
+      });
+
+      const deliveryCtx = getUserDeliveryContext(io, currentUser.id);
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: {
+          item: clipItem,
+          history: updatedHistory,
+          hasDesktop: deliveryCtx.hasDesktop,
+          hasMobile: deliveryCtx.hasMobile,
+        },
+      });
+    });
+
+    socket.on("clipboard:get_history", (payload = {}, ack) => {
+      const history = clipboardHistoryByUser.get(currentUser.id) || [];
+      const deliveryCtx = getUserDeliveryContext(io, currentUser.id);
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: {
+          history,
+          hasDesktop: deliveryCtx.hasDesktop,
+          hasMobile: deliveryCtx.hasMobile,
+        },
+      });
+    });
+
+    socket.on("clipboard:clear_history", (payload = {}, ack) => {
+      clipboardHistoryByUser.delete(currentUser.id);
+      io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
+        history: [],
+        latestItem: null,
+      });
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: { history: [] },
       });
     });
 
