@@ -250,6 +250,28 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
           break;
         case 'force_logout':
           try {
+            final targetUid = event.payload['targetDeviceUid']
+                ?.toString()
+                .trim();
+            final excludeUid = event.payload['excludeDeviceUid']
+                ?.toString()
+                .trim();
+            if ((targetUid != null && targetUid.isNotEmpty) ||
+                (excludeUid != null && excludeUid.isNotEmpty)) {
+              final myUid = await ref
+                  .read(authRepositoryProvider)
+                  .getDeviceUid();
+              if (excludeUid != null &&
+                  excludeUid.isNotEmpty &&
+                  myUid == excludeUid) {
+                break;
+              }
+              if (targetUid != null &&
+                  targetUid.isNotEmpty &&
+                  myUid != targetUid) {
+                break;
+              }
+            }
             await ref.read(authControllerProvider.notifier).logout();
           } catch (_) {}
           break;

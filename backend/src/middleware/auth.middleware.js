@@ -9,7 +9,7 @@ function resolveTokenVersion(value) {
   return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
-function buildUserPayload(user, permissions) {
+function buildUserPayload(user, permissions, deviceUid = null) {
   return {
     id: user._id.toString(),
     username: user.username,
@@ -34,8 +34,22 @@ function buildUserPayload(user, permissions) {
     lastActiveAt: user.lastActiveAt || null,
     maxAttachmentSizeMB: user.maxAttachmentSizeMB,
     tokenVersion: resolveTokenVersion(user.tokenVersion),
+    deviceUid: deviceUid || null,
     permissions,
   };
+}
+
+function isDeviceSessionRevoked(user, tokenDeviceUid) {
+  if (!tokenDeviceUid || tokenDeviceUid === 'unknown') {
+    return false;
+  }
+  const sessions = Array.isArray(user?.refreshSessions)
+    ? user.refreshSessions
+    : [];
+  if (!sessions.length) {
+    return false;
+  }
+  return !sessions.some((s) => s && s.deviceUid === tokenDeviceUid);
 }
 
 async function authenticateRequest(req) {
@@ -52,7 +66,9 @@ async function authenticateRequest(req) {
     return null;
   }
 
-  const user = await User.findById(payload.sub).select('+tokenVersion').lean();
+  const user = await User.findById(payload.sub)
+    .select('+tokenVersion +refreshSessions')
+    .lean();
   if (!user || user.isActive === false) {
     return null;
   }
@@ -64,8 +80,12 @@ async function authenticateRequest(req) {
     return null;
   }
 
+  if (isDeviceSessionRevoked(user, payload.did)) {
+    return null;
+  }
+
   const permissions = await getEffectivePermissionsForUser(user);
-  return buildUserPayload(user, permissions);
+  return buildUserPayload(user, permissions, payload.did || null);
 }
 
 const optionalAuth = asyncHandler(async (req, res, next) => {
@@ -92,7 +112,9 @@ const requireAuth = asyncHandler(async (req, res, next) => {
     throw new ApiError(401, 'Invalid or expired token.');
   }
 
-  const user = await User.findById(payload.sub).select('+tokenVersion').lean();
+  const user = await User.findById(payload.sub)
+    .select('+tokenVersion +refreshSessions')
+    .lean();
   if (!user) {
     throw new ApiError(401, 'User no longer exists.');
   }
@@ -104,12 +126,16 @@ const requireAuth = asyncHandler(async (req, res, next) => {
     throw new ApiError(401, 'Token version mismatch. Please login again.');
   }
 
+  if (isDeviceSessionRevoked(user, payload.did)) {
+    throw new ApiError(401, 'Session expired. Please login again.');
+  }
+
   if (user.isActive === false) {
     throw new ApiError(403, 'This account is inactive.');
   }
 
   const permissions = await getEffectivePermissionsForUser(user);
-  req.user = buildUserPayload(user, permissions);
+  req.user = buildUserPayload(user, permissions, payload.did || null);
 
   next();
 });

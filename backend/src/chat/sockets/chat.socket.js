@@ -304,13 +304,24 @@ async function resolveSocketUser(socket) {
   }
 
   const payload = jwt.verify(rawToken, jwtSecret);
-  const user = await User.findById(payload.sub).lean();
+  const user = await User.findById(payload.sub)
+    .select("+tokenVersion +refreshSessions")
+    .lean();
   if (!user || user.isActive === false) {
     throw new Error("User not found.");
   }
   if (
     resolveTokenVersion(user.tokenVersion) !==
     resolveTokenVersion(payload.tokenVersion)
+  ) {
+    throw new Error("Session expired. Please login again.");
+  }
+  if (
+    payload.did &&
+    payload.did !== "unknown" &&
+    Array.isArray(user.refreshSessions) &&
+    user.refreshSessions.length > 0 &&
+    !user.refreshSessions.some((s) => s && s.deviceUid === payload.did)
   ) {
     throw new Error("Session expired. Please login again.");
   }
@@ -322,7 +333,11 @@ async function resolveSocketUser(socket) {
     "unknown";
 
   const deviceInfo = socket.handshake.auth?.deviceInfo || {};
-  console.log("Extracted deviceInfo from auth:", deviceInfo);
+  const deviceUid =
+    payload.did ||
+    socket.handshake.auth?.deviceUid ||
+    socket.handshake.headers?.["x-device-uid"] ||
+    null;
   const ipAddress = socket.handshake.headers?.["x-forwarded-for"] || socket.handshake.address || null;
 
   return {
@@ -333,6 +348,7 @@ async function resolveSocketUser(socket) {
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     permissions: await getEffectivePermissionsForUser(user),
     clientType: normalizeClientType(clientType),
+    deviceUid: deviceUid ? String(deviceUid).trim() : null,
     deviceInfo,
     ipAddress,
   };
@@ -1591,8 +1607,98 @@ function getLiveSocketMetrics() {
   };
 }
 
+function getUserConnectedSocketsSnapshot(userId) {
+  const io = activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  if (!uid || !io?.sockets?.sockets) {
+    return [];
+  }
+  const socketIds = pruneUserSockets(io, uid);
+  const result = [];
+  for (const socketId of socketIds) {
+    const sock =
+      typeof io.sockets.sockets.get === "function"
+        ? io.sockets.sockets.get(socketId)
+        : io.sockets.sockets[socketId];
+    if (!sock) continue;
+    result.push({
+      socketId,
+      deviceUid: sock.user?.deviceUid || null,
+      clientType:
+        sock.user?.clientType || socketClientType.get(socketId) || "unknown",
+      ipAddress: sock.user?.ipAddress || null,
+      deviceInfo: sock.user?.deviceInfo || {},
+      presenceStatus: socketPresence.get(socketId) || "online",
+    });
+  }
+  return result;
+}
+
+function forceLogoutUserDevices(
+  ioInstance,
+  userId,
+  { targetDeviceUid = null, excludeDeviceUid = null, reason = "session_revoked" } = {},
+) {
+  const io = ioInstance || activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  if (!io || !uid) {
+    return 0;
+  }
+
+  const normalizedTarget = targetDeviceUid ? String(targetDeviceUid).trim() : null;
+  const normalizedExclude = excludeDeviceUid ? String(excludeDeviceUid).trim() : null;
+  const payload = {
+    reason,
+    targetDeviceUid: normalizedTarget,
+    excludeDeviceUid: normalizedExclude,
+    at: new Date().toISOString(),
+  };
+
+  // Emit to user room with targetDeviceUid / excludeDeviceUid filter metadata
+  io.to(`user:${uid}`).emit("force_logout", payload);
+
+  // Also explicitly disconnect matching live sockets when deviceUid is known on socket
+  let disconnectedCount = 0;
+  if (io.sockets?.sockets) {
+    const socketIds = pruneUserSockets(io, uid);
+    for (const socketId of socketIds) {
+      const sock =
+        typeof io.sockets.sockets.get === "function"
+          ? io.sockets.sockets.get(socketId)
+          : io.sockets.sockets[socketId];
+      if (!sock) continue;
+      const sockDeviceUid = sock.user?.deviceUid
+        ? String(sock.user.deviceUid).trim()
+        : null;
+      if (!sockDeviceUid) continue;
+
+      const shouldDisconnect = normalizedTarget
+        ? sockDeviceUid === normalizedTarget
+        : normalizedExclude
+          ? sockDeviceUid !== normalizedExclude
+          : true;
+
+      if (shouldDisconnect) {
+        disconnectedCount += 1;
+        try {
+          sock.emit("force_logout", payload);
+          setTimeout(() => {
+            try {
+              sock.disconnect(true);
+            } catch (_) {}
+          }, 120);
+        } catch (_) {}
+      }
+    }
+  }
+
+  return disconnectedCount;
+}
+
 module.exports = {
   initializeChatSocketServer,
   getUserDeliveryContext,
   getLiveSocketMetrics,
+  getUserConnectedSocketsSnapshot,
+  forceLogoutUserDevices,
 };

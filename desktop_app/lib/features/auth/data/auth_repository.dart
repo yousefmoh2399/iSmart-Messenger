@@ -70,6 +70,8 @@ class AuthRepository {
     return created;
   }
 
+  Future<String> getDeviceUid() => _loadOrCreateDeviceUid();
+
   Future<AppUser?> restoreSession() async {
     await _sessionManager.initialize();
     final token = _sessionManager.accessToken;
@@ -141,6 +143,8 @@ class AuthRepository {
           'username': username,
           'password': password,
           'deviceUid': deviceUid,
+          'platform': 'windows',
+          'deviceName': 'كمبيوتر المكتب Windows',
         },
       );
 

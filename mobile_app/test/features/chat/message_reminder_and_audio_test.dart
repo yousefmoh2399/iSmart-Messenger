@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:mobile_app/features/auth/data/auth_repository.dart';
 import 'package:mobile_app/features/chat/models/chat_models.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/chat_audio_attachment_player.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/message_reminder_sheet.dart';
@@ -168,6 +169,51 @@ void main() {
       expect(draft.attachmentLabel, isNotNull);
       expect(draft.attachmentLabel, contains('printer_error.jpg'));
       expect(draft.taskContent, contains('الطابعة في الدور الثاني'));
+    });
+  });
+
+  group('ActiveSessionsOverview (Active Devices & Sessions Manager)', () {
+    test('parses current and other device sessions accurately', () {
+      final overview = ActiveSessionsOverview.fromJson({
+        'currentDeviceUid': 'mob-111',
+        'sessions': [
+          {
+            'deviceUid': 'mob-111',
+            'deviceName': 'هاتف Android',
+            'platform': 'android',
+            'appVersion': '1.2.4',
+            'ipAddress': '192.168.1.25',
+            'isCurrent': true,
+            'isOnline': true,
+            'createdAt': '2026-10-30T08:00:00.000Z',
+            'lastUsedAt': '2026-10-31T07:30:00.000Z',
+          },
+          {
+            'deviceUid': 'dev-222',
+            'deviceName': 'كمبيوتر المكتب Windows (OFFICE-PC)',
+            'platform': 'windows',
+            'appVersion': '1.2.4',
+            'ipAddress': '192.168.1.10',
+            'isCurrent': false,
+            'isOnline': true,
+            'createdAt': '2026-10-29T09:00:00.000Z',
+            'lastUsedAt': '2026-10-31T07:20:00.000Z',
+          },
+        ],
+      });
+
+      expect(overview.currentDeviceUid, 'mob-111');
+      expect(overview.sessions.length, 2);
+      expect(overview.currentSession?.deviceUid, 'mob-111');
+      expect(overview.currentSession?.isDesktop, isFalse);
+      expect(overview.currentSession?.platformDisplayLabel, 'Android Mobile');
+      expect(overview.otherSessions.length, 1);
+      expect(overview.otherSessions.first.deviceUid, 'dev-222');
+      expect(overview.otherSessions.first.isDesktop, isTrue);
+      expect(
+        overview.otherSessions.first.platformDisplayLabel,
+        'Windows Desktop',
+      );
     });
   });
 }

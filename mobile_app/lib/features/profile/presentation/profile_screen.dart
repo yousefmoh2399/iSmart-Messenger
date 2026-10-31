@@ -24,6 +24,7 @@ import '../../files/presentation/my_files_screen.dart';
 import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
 import '../../printers/presentation/printer_monitoring_screen.dart';
 import '../../tickets/presentation/tickets_screen.dart';
+import 'active_sessions_screen.dart';
 import 'notification_settings_screen.dart';
 import 'storage_management_screen.dart';
 
@@ -1166,6 +1167,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               cardColor: cardColor,
               dividerColor: dividerColor,
               children: [
+                _AppleTile(
+                  icon: CupertinoIcons.device_laptop,
+                  iconColor: const Color(0xFF34C759),
+                  label: 'الأجهزة المتصلة والجلسات النشطة',
+                  subtitle:
+                      'عرض الأجهزة المسجل الدخول منها وإنهاء الجلسات الأخرى',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const ActiveSessionsScreen(),
+                      ),
+                    );
+                  },
+                ),
                 _AppleTile(
                   icon: CupertinoIcons.link,
                   iconColor: const Color(0xFF5856D6),
