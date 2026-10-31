@@ -514,6 +514,96 @@ function initializeChatSocketServer(httpServer) {
     },
   ).catch(() => {});
 
+  const scheduleServerRemindersForUser = async (uid) => {
+    const normalizedUid = String(uid || "").trim();
+    if (!normalizedUid) return;
+    const prevTimer = userReminderTimers.get(normalizedUid);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      userReminderTimers.delete(normalizedUid);
+    }
+    try {
+      const u = await User.findById(normalizedUid, "messageReminders").lean();
+      const list = Array.isArray(u?.messageReminders) ? u.messageReminders : [];
+      const pending = list.filter((r) => !r.isNotified && r.remindAt);
+      if (!pending.length) return;
+
+      pending.sort(
+        (a, b) =>
+          new Date(a.remindAt).getTime() - new Date(b.remindAt).getTime(),
+      );
+      const nextItem = pending[0];
+      const delayMs = Math.max(
+        250,
+        new Date(nextItem.remindAt).getTime() - Date.now(),
+      );
+      const cappedDelay = Math.min(delayMs, 2147483647);
+
+      const timer = setTimeout(async () => {
+        userReminderTimers.delete(normalizedUid);
+        try {
+          const freshUser = await User.findById(
+            normalizedUid,
+            "messageReminders",
+          ).lean();
+          const currentReminders = Array.isArray(freshUser?.messageReminders)
+            ? freshUser.messageReminders
+            : [];
+          const now = Date.now();
+          let changed = false;
+          const dueItems = [];
+
+          const updatedReminders = currentReminders.map((rem) => {
+            if (!rem.isNotified && new Date(rem.remindAt).getTime() <= now) {
+              changed = true;
+              const notified = { ...rem, isNotified: true };
+              dueItems.push(notified);
+              return notified;
+            }
+            return rem;
+          });
+
+          if (changed) {
+            await User.findByIdAndUpdate(normalizedUid, {
+              $set: { messageReminders: updatedReminders },
+            });
+            io.to(`user:${normalizedUid}`).emit("reminders_updated", {
+              reminders: updatedReminders,
+              dueReminders: dueItems,
+            });
+            for (const due of dueItems) {
+              const title = `⏰ تذكير برسالة من ${due.senderName || "محادثة"}`;
+              const body = due.note
+                ? `${due.note} — "${due.messagePreview || ""}"`
+                : due.messagePreview || "لديك تذكير برسالة مجدولة";
+              sendTicketPushNotifications({
+                recipientUserIds: [normalizedUid],
+                title,
+                body,
+                action: "message_reminder",
+              }).catch(() => {});
+            }
+          }
+          await scheduleServerRemindersForUser(normalizedUid);
+        } catch (_) {}
+      }, cappedDelay);
+
+      userReminderTimers.set(normalizedUid, timer);
+    } catch (_) {}
+  };
+
+  // On server startup/restart, re-arm all pending message reminders across all users
+  User.find({ "messageReminders.isNotified": false }, "_id")
+    .lean()
+    .then((usersWithReminders) => {
+      for (const u of usersWithReminders || []) {
+        if (u?._id) {
+          scheduleServerRemindersForUser(u._id.toString()).catch(() => {});
+        }
+      }
+    })
+    .catch(() => {});
+
   const sweepInterval = setInterval(() => {
     for (const userId of [...userSockets.keys()]) {
       publishAggregatedPresence(io, userId).catch(() => {});
@@ -1109,78 +1199,6 @@ function initializeChatSocketServer(httpServer) {
     });
 
     // ── Message Reminders Cross-Device Sync + Server Push ──────────────────
-    const scheduleServerRemindersForUser = async (uid) => {
-      const prevTimer = userReminderTimers.get(uid);
-      if (prevTimer) {
-        clearTimeout(prevTimer);
-        userReminderTimers.delete(uid);
-      }
-      try {
-        const u = await User.findById(uid, "messageReminders").lean();
-        const list = Array.isArray(u?.messageReminders) ? u.messageReminders : [];
-        const pending = list.filter((r) => !r.isNotified && r.remindAt);
-        if (!pending.length) return;
-
-        pending.sort(
-          (a, b) => new Date(a.remindAt).getTime() - new Date(b.remindAt).getTime(),
-        );
-        const nextItem = pending[0];
-        const delayMs = Math.max(
-          250,
-          new Date(nextItem.remindAt).getTime() - Date.now(),
-        );
-        const cappedDelay = Math.min(delayMs, 2147483647);
-
-        const timer = setTimeout(async () => {
-          userReminderTimers.delete(uid);
-          try {
-            const freshUser = await User.findById(uid, "messageReminders").lean();
-            const currentReminders = Array.isArray(freshUser?.messageReminders)
-              ? freshUser.messageReminders
-              : [];
-            const now = Date.now();
-            let changed = false;
-            const dueItems = [];
-
-            const updatedReminders = currentReminders.map((rem) => {
-              if (!rem.isNotified && new Date(rem.remindAt).getTime() <= now) {
-                changed = true;
-                const notified = { ...rem, isNotified: true };
-                dueItems.push(notified);
-                return notified;
-              }
-              return rem;
-            });
-
-            if (changed) {
-              await User.findByIdAndUpdate(uid, {
-                $set: { messageReminders: updatedReminders },
-              });
-              io.to(`user:${uid}`).emit("reminders_updated", {
-                reminders: updatedReminders,
-                dueReminders: dueItems,
-              });
-              for (const due of dueItems) {
-                const title = `⏰ تذكير برسالة من ${due.senderName || "محادثة"}`;
-                const body = due.note
-                  ? `${due.note} — "${due.messagePreview || ""}"`
-                  : due.messagePreview || "لديك تذكير برسالة مجدولة";
-                sendTicketPushNotifications({
-                  recipientUserIds: [uid],
-                  title,
-                  body,
-                  action: "message_reminder",
-                }).catch(() => {});
-              }
-            }
-            await scheduleServerRemindersForUser(uid);
-          } catch (_) {}
-        }, cappedDelay);
-
-        userReminderTimers.set(uid, timer);
-      } catch (_) {}
-    };
-
     // Ensure server timer is armed when user connects
     scheduleServerRemindersForUser(currentUser.id).catch(() => {});
 

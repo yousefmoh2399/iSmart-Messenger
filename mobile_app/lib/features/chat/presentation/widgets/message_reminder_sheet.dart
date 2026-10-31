@@ -98,6 +98,7 @@ class ChatMessageRemindersController
 
   Timer? _nextReminderTimer;
   StreamSubscription<ChatSocketEvent>? _socketSub;
+  final Set<String> _alertedIds = <String>{};
 
   @override
   Future<List<ChatMessageReminder>> build() async {
@@ -121,6 +122,17 @@ class ChatMessageRemindersController
     final socketService = ref.read(chatSocketServiceProvider);
     _socketSub = socketService.events.listen((event) {
       if (event.type == 'reminders_updated') {
+        final rawDue = event.payload['dueReminders'];
+        if (rawDue is List) {
+          for (final item in rawDue.whereType<Map>()) {
+            final dueRem = ChatMessageReminder.fromJson(
+              Map<String, dynamic>.from(item),
+            );
+            if (dueRem.id.isNotEmpty) {
+              unawaited(_notifyDueReminder(dueRem));
+            }
+          }
+        }
         final rawList = event.payload['reminders'];
         if (rawList is List) {
           final parsed = rawList
@@ -263,26 +275,31 @@ class ChatMessageRemindersController
     await _saveToStorage(remaining);
     _scheduleNextDueTimer(remaining);
 
-    final notificationService = ref.read(localNotificationServiceProvider);
     for (final reminder in due) {
-      HapticFeedback.heavyImpact();
-      dueReminderAlertNotifier.value = reminder;
-      final hasNote = reminder.note != null && reminder.note!.trim().isNotEmpty;
-      final bodyText = hasNote
-          ? '📝 ${reminder.note!.trim()} — ${reminder.contentPreview}'
-          : reminder.contentPreview;
-      try {
-        await notificationService.showIncomingMessage(
-          title: '⏰ تذكير: ${reminder.senderName} (${reminder.conversationTitle})',
-          body: bodyText,
-          payload: <String, dynamic>{
-            'type': 'chat',
-            'conversationId': reminder.conversationId,
-            'messageId': reminder.messageId,
-          },
-        );
-      } catch (_) {}
+      await _notifyDueReminder(reminder);
     }
+  }
+
+  Future<void> _notifyDueReminder(ChatMessageReminder reminder) async {
+    if (!_alertedIds.add(reminder.id)) return;
+    HapticFeedback.heavyImpact();
+    dueReminderAlertNotifier.value = reminder;
+    final hasNote = reminder.note != null && reminder.note!.trim().isNotEmpty;
+    final bodyText = hasNote
+        ? '📝 ${reminder.note!.trim()} — ${reminder.contentPreview}'
+        : reminder.contentPreview;
+    try {
+      final notificationService = ref.read(localNotificationServiceProvider);
+      await notificationService.showIncomingMessage(
+        title: '⏰ تذكير: ${reminder.senderName} (${reminder.conversationTitle})',
+        body: bodyText,
+        payload: <String, dynamic>{
+          'type': 'chat',
+          'conversationId': reminder.conversationId,
+          'messageId': reminder.messageId,
+        },
+      );
+    } catch (_) {}
   }
 
   /// Adds or updates a reminder for a specific message.

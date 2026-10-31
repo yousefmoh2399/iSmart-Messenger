@@ -21,9 +21,11 @@ import 'chat_admin_panel.dart';
 import 'chat_appearance.dart';
 import 'favorite_messages_screen.dart';
 import 'group_management_dialog.dart';
+import 'widgets/chat_audio_attachment_player.dart';
 import 'widgets/chat_screen.dart';
 import 'widgets/chat_sidebar.dart';
 import 'widgets/chat_ui_helpers.dart';
+import 'widgets/desktop_message_actions_dialogs.dart';
 import 'widgets/new_conversation_dialog.dart' as widgets;
 import 'widgets/right_panel.dart';
 
@@ -122,6 +124,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     _showAdminPanel = widget.openAdminOnStart;
     _showTicketsPanel = !widget.openAdminOnStart && widget.openTicketsOnStart;
     _sidebarSearchController.addListener(_onSearchChanged);
+    desktopJumpToMessageNotifier.addListener(_onJumpToMessageRequested);
     _chatEventsSubscription = ref.read(chatSocketServiceProvider).events.listen(
       (event) {
         if (!mounted) {
@@ -193,6 +196,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
 
   @override
   void dispose() {
+    desktopJumpToMessageNotifier.removeListener(_onJumpToMessageRequested);
     _chatEventsSubscription?.cancel();
     for (final timer in _typingPreviewTimers.values) {
       timer.cancel();
@@ -202,6 +206,28 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
       ..removeListener(_onSearchChanged)
       ..dispose();
     super.dispose();
+  }
+
+  void _onJumpToMessageRequested() {
+    final target = desktopJumpToMessageNotifier.value;
+    if (target == null || !mounted) return;
+    desktopJumpToMessageNotifier.value = null;
+
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    if (overview == null) return;
+    ChatConversation? targetConv;
+    for (final c in overview.conversations) {
+      if (c.id == target.conversationId) {
+        targetConv = c;
+        break;
+      }
+    }
+    if (targetConv != null) {
+      _selectConversation(
+        targetConv,
+        targetMessageId: target.messageId,
+      );
+    }
   }
 
   void _onSearchChanged() {
@@ -691,6 +717,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     final chatState = ref.watch(chatOverviewControllerProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
+    ref.watch(desktopMessageRemindersProvider);
     final isDark = themeMode == ThemeMode.dark;
     final colorScheme = Theme.of(context).colorScheme;
     final chatPreferences =
@@ -1093,7 +1120,24 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                             },
                           )
                         : selectedConversation == null
-                        ? const _TelegramEmptyState()
+                        ? Column(
+                            children: [
+                              const DesktopDueReminderBanner(),
+                              GlobalDesktopMiniAudioPlayerBar(
+                                onTapSession: (session) {
+                                  if (session.message.conversationId
+                                      .isNotEmpty) {
+                                    desktopJumpToMessageNotifier.value = (
+                                      conversationId:
+                                          session.message.conversationId,
+                                      messageId: session.message.id,
+                                    );
+                                  }
+                                },
+                              ),
+                              const Expanded(child: _TelegramEmptyState()),
+                            ],
+                          )
                         : ChatScreen(
                             key: ValueKey(
                               'chat_${selectedConversation.id}_$_targetMessageSignal',

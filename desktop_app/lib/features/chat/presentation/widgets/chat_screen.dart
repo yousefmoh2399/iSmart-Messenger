@@ -4193,10 +4193,17 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 appearance: appearance,
               ),
 
+              const DesktopDueReminderBanner(),
+
               GlobalDesktopMiniAudioPlayerBar(
                 onTapSession: (session) {
                   if (session.message.conversationId == _conversationId) {
                     _scrollToMessageById(session.message.id);
+                  } else if (session.message.conversationId.isNotEmpty) {
+                    desktopJumpToMessageNotifier.value = (
+                      conversationId: session.message.conversationId,
+                      messageId: session.message.id,
+                    );
                   }
                 },
               ),

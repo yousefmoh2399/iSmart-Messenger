@@ -17,6 +17,8 @@ class QuickReplyTemplate {
     required this.shortcut,
     required this.content,
     required this.createdAt,
+    this.title = '',
+    this.category = 'عام',
     this.usageCount = 0,
   });
 
@@ -24,6 +26,8 @@ class QuickReplyTemplate {
   final String shortcut;
   final String content;
   final DateTime createdAt;
+  final String title;
+  final String category;
   final int usageCount;
 
   /// Normalized shortcut without leading `/` for display or matching.
@@ -33,6 +37,12 @@ class QuickReplyTemplate {
       return trimmed.substring(1).trim();
     }
     return trimmed;
+  }
+
+  /// Display title (falls back to cleanShortcut when empty).
+  String get displayTitle {
+    final trimmed = title.trim();
+    return trimmed.isNotEmpty ? trimmed : cleanShortcut;
   }
 
   /// Formatted slash trigger (e.g. `/استلام`).
@@ -46,6 +56,8 @@ class QuickReplyTemplate {
     String? shortcut,
     String? content,
     DateTime? createdAt,
+    String? title,
+    String? category,
     int? usageCount,
   }) {
     return QuickReplyTemplate(
@@ -53,6 +65,8 @@ class QuickReplyTemplate {
       shortcut: shortcut ?? this.shortcut,
       content: content ?? this.content,
       createdAt: createdAt ?? this.createdAt,
+      title: title ?? this.title,
+      category: category ?? this.category,
       usageCount: usageCount ?? this.usageCount,
     );
   }
@@ -61,7 +75,9 @@ class QuickReplyTemplate {
     return <String, dynamic>{
       'id': id,
       'shortcut': cleanShortcut,
+      'title': displayTitle,
       'content': content,
+      'category': category.trim().isNotEmpty ? category.trim() : 'عام',
       'createdAt': createdAt.toIso8601String(),
       'usageCount': usageCount,
     };
@@ -72,23 +88,29 @@ class QuickReplyTemplate {
     final clean = rawShortcut.startsWith('/')
         ? rawShortcut.substring(1).trim()
         : rawShortcut;
+    final rawTitle = json['title']?.toString().trim() ?? '';
+    final rawCategory = json['category']?.toString().trim() ?? '';
     return QuickReplyTemplate(
       id: json['id']?.toString() ?? '',
       shortcut: clean,
+      title: rawTitle.isNotEmpty ? rawTitle : clean,
       content: json['content']?.toString() ?? '',
+      category: rawCategory.isNotEmpty ? rawCategory : 'عام',
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       usageCount: (json['usageCount'] as num?)?.toInt() ?? 0,
     );
   }
 
-  /// Matches a user query typed after `/` against both shortcut and content.
+  /// Matches a user query typed after `/` against shortcut, title, category, and content.
   bool matchesQuery(String rawQuery) {
     final q = rawQuery.trim().toLowerCase();
     if (q.isEmpty) return true;
     final cleanQ = q.startsWith('/') ? q.substring(1).trim() : q;
     if (cleanQ.isEmpty) return true;
     return cleanShortcut.toLowerCase().contains(cleanQ) ||
+        displayTitle.toLowerCase().contains(cleanQ) ||
+        category.toLowerCase().contains(cleanQ) ||
         content.toLowerCase().contains(cleanQ);
   }
 
@@ -218,9 +240,11 @@ class QuickRepliesController extends AsyncNotifier<List<QuickReplyTemplate>> {
               (e) => {
                 'id': e.id,
                 'shortcut': e.cleanShortcut,
-                'title': e.cleanShortcut,
+                'title': e.displayTitle,
                 'content': e.content,
-                'category': 'عام',
+                'category': e.category.trim().isNotEmpty
+                    ? e.category.trim()
+                    : 'عام',
               },
             )
             .toList(),

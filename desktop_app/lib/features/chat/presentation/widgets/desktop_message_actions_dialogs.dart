@@ -94,6 +94,13 @@ class DesktopMessageReminder {
   }
 }
 
+final ValueNotifier<({String conversationId, String messageId})?>
+desktopJumpToMessageNotifier =
+    ValueNotifier<({String conversationId, String messageId})?>(null);
+
+final ValueNotifier<DesktopMessageReminder?> dueDesktopReminderAlertNotifier =
+    ValueNotifier<DesktopMessageReminder?>(null);
+
 final desktopMessageRemindersProvider =
     StateNotifierProvider<
       DesktopMessageRemindersController,
@@ -110,6 +117,7 @@ class DesktopMessageRemindersController
   final Ref _ref;
   Timer? _nextDueTimer;
   StreamSubscription<ChatSocketEvent>? _socketSub;
+  final Set<String> _alertedIds = <String>{};
   static const _storageKey = 'ismart_desktop_message_reminders_v1';
 
   void _listenToSocketSync() {
@@ -118,6 +126,17 @@ class DesktopMessageRemindersController
     _socketSub = socketService.events.listen((event) {
       if (!mounted) return;
       if (event.type == 'reminders_updated') {
+        final rawDue = event.payload['dueReminders'];
+        if (rawDue is List) {
+          for (final item in rawDue.whereType<Map>()) {
+            final dueRem = DesktopMessageReminder.fromJson(
+              Map<String, dynamic>.from(item),
+            );
+            if (dueRem.id.isNotEmpty) {
+              unawaited(_notifyDueReminder(dueRem));
+            }
+          }
+        }
         final rawList = event.payload['reminders'];
         if (rawList is List) {
           final parsed = rawList
@@ -236,6 +255,23 @@ class DesktopMessageRemindersController
     _nextDueTimer = Timer(effectiveDelay, _checkDueReminders);
   }
 
+  Future<void> _notifyDueReminder(DesktopMessageReminder item) async {
+    if (!_alertedIds.add(item.id)) return;
+    dueDesktopReminderAlertNotifier.value = item;
+    final body = item.note.trim().isNotEmpty
+        ? '${item.note.trim()} — "${item.messagePreview}"'
+        : item.messagePreview;
+    try {
+      await _ref
+          .read(localNotificationServiceProvider)
+          .showIncomingMessage(
+            title:
+                '⏰ تذكير برسالة من ${item.senderName} (${item.conversationTitle})',
+            body: body,
+          );
+    } catch (_) {}
+  }
+
   Future<void> _checkDueReminders() async {
     if (!mounted) return;
     final now = DateTime.now();
@@ -245,19 +281,9 @@ class DesktopMessageRemindersController
     for (final item in state) {
       if (!item.isNotified && !item.remindAt.isAfter(now)) {
         changed = true;
-        updated.add(item.copyWith(isNotified: true));
-        final body = item.note.trim().isNotEmpty
-            ? '${item.note.trim()} — "${item.messagePreview}"'
-            : item.messagePreview;
-        try {
-          await _ref
-              .read(localNotificationServiceProvider)
-              .showIncomingMessage(
-                title:
-                    '⏰ تذكير برسالة من ${item.senderName} (${item.conversationTitle})',
-                body: body,
-              );
-        } catch (_) {}
+        final notified = item.copyWith(isNotified: true);
+        updated.add(notified);
+        await _notifyDueReminder(notified);
       } else {
         updated.add(item);
       }
@@ -306,6 +332,105 @@ class DesktopMessageRemindersController
     _nextDueTimer?.cancel();
     _socketSub?.cancel();
     super.dispose();
+  }
+}
+
+/// Interactive banner shown at the top of Desktop Chat when a reminder becomes due
+class DesktopDueReminderBanner extends StatelessWidget {
+  const DesktopDueReminderBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ValueListenableBuilder<DesktopMessageReminder?>(
+      valueListenable: dueDesktopReminderAlertNotifier,
+      builder: (context, reminder, _) {
+        if (reminder == null) {
+          return const SizedBox.shrink();
+        }
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF3A2800) : const Color(0xFFFFFBEB),
+            border: Border(
+              bottom: BorderSide(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.alarm_on_rounded,
+                color: Color(0xFFF59E0B),
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '⏰ تذكير برسالة من ${reminder.senderName} (${reminder.conversationTitle})',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: isDark
+                            ? const Color(0xFFFDE68A)
+                            : const Color(0xFF92400E),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      reminder.note.trim().isNotEmpty
+                          ? '${reminder.note.trim()} — "${reminder.messagePreview}"'
+                          : reminder.messagePreview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isDark
+                            ? Colors.white70
+                            : const Color(0xFF78350F),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                onPressed: () {
+                  desktopJumpToMessageNotifier.value = (
+                    conversationId: reminder.conversationId,
+                    messageId: reminder.messageId,
+                  );
+                  dueDesktopReminderAlertNotifier.value = null;
+                },
+                icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                label: const Text(
+                  'الانتقال للرسالة',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'إغلاق التنبيه',
+                onPressed: () => dueDesktopReminderAlertNotifier.value = null,
+                icon: const Icon(Icons.close_rounded, size: 18),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
