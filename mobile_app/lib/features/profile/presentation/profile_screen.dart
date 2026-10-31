@@ -18,6 +18,7 @@ import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/conversation_screen.dart';
 import '../../chat/presentation/favorite_messages_screen.dart';
 import '../../chat/presentation/widgets/create_chat_folder_dialog.dart';
+import '../../chat/presentation/widgets/message_reminder_sheet.dart';
 import '../../files/presentation/my_files_screen.dart';
 import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
 import '../../printers/presentation/printer_monitoring_screen.dart';
@@ -907,6 +908,38 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => const FavoriteMessagesScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.alarm_fill,
+                  iconColor: const Color(0xFFFF9500),
+                  label: 'تذكيرات الرسائل',
+                  subtitle: 'استعراض وإدارة تذكيرات المهام والرسائل المجدولة للتنبيه',
+                  onTap: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (_) => MessageRemindersSheet(
+                        onJumpToMessage: (reminder) {
+                          final overview =
+                              ref.read(chatOverviewControllerProvider).valueOrNull;
+                          final conv = overview?.conversations
+                              .where((c) => c.id == reminder.conversationId)
+                              .firstOrNull;
+                          if (conv != null && mounted) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => ConversationScreen(
+                                  conversation: conv,
+                                  initialMessageId: reminder.messageId,
+                                ),
+                              ),
+                            );
+                          }
+                        },
                       ),
                     );
                   },

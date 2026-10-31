@@ -35,6 +35,8 @@ import 'departments_screen.dart';
 import 'favorite_messages_screen.dart';
 import 'rooms_screen.dart';
 import 'widgets/chat_avatar.dart';
+import 'widgets/chat_audio_attachment_player.dart';
+import 'widgets/message_reminder_sheet.dart';
 import 'widgets/new_conversation_sheet.dart';
 import 'widgets/chat_folder_inline_item.dart';
 import 'widgets/create_chat_folder_dialog.dart';
@@ -463,13 +465,19 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     }
   }
 
-  Future<void> _openConversation(ChatConversation conversation) async {
+  Future<void> _openConversation(
+    ChatConversation conversation, {
+    String? initialMessageId,
+  }) async {
     if (!mounted) {
       return;
     }
     await Navigator.of(context).push(
       CupertinoPageRoute(
-        builder: (_) => ConversationScreen(conversation: conversation),
+        builder: (_) => ConversationScreen(
+          conversation: conversation,
+          initialMessageId: initialMessageId,
+        ),
       ),
     );
   }
@@ -712,6 +720,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   Widget build(BuildContext context) {
     final authUser = ref.watch(authControllerProvider).valueOrNull;
     final overviewState = ref.watch(chatOverviewControllerProvider);
+    ref.watch(chatMessageRemindersProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -908,11 +917,29 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         isDark: isDark,
       ),
       body: SafeArea(
-        child: _selectedNavIndex == 2
-            ? const HomeScreen()
-            : _selectedNavIndex == 3
-                ? const ProfileScreen(isEmbeddedInTab: true)
-                : overviewState.when(
+        child: Column(
+          children: [
+            GlobalMiniAudioPlayerBar(
+              onTapSession: (session) {
+                final overview = overviewState.valueOrNull;
+                if (overview == null) return;
+                for (final conv in overview.conversations) {
+                  if (conv.id == session.conversationId) {
+                    _openConversation(
+                      conv,
+                      initialMessageId: session.message.id,
+                    );
+                    break;
+                  }
+                }
+              },
+            ),
+            Expanded(
+              child: _selectedNavIndex == 2
+                  ? const HomeScreen()
+                  : _selectedNavIndex == 3
+                      ? const ProfileScreen(isEmbeddedInTab: true)
+                      : overviewState.when(
           skipLoadingOnReload: true,
           skipLoadingOnRefresh: true,
           skipError: true,
@@ -1507,6 +1534,9 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               ),
             );
           },
+        ),
+            ),
+          ],
         ),
       ),
     );

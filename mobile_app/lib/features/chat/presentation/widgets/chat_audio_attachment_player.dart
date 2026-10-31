@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,18 +11,127 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../models/chat_models.dart';
 
-/// Global coordinator to ensure only one voice note plays at a time (like WhatsApp)
-/// and to coordinate persistent voice note playback speed across all audio players.
+/// Represents the currently active voice note session in the global player.
+class GlobalVoiceSession {
+  const GlobalVoiceSession({
+    required this.message,
+    required this.conversationId,
+    required this.conversationTitle,
+    required this.senderName,
+    required this.filePath,
+    required this.totalDuration,
+  });
+
+  final ChatMessage message;
+  final String conversationId;
+  final String conversationTitle;
+  final String senderName;
+  final String filePath;
+  final Duration totalDuration;
+
+  GlobalVoiceSession copyWith({
+    ChatMessage? message,
+    String? conversationId,
+    String? conversationTitle,
+    String? senderName,
+    String? filePath,
+    Duration? totalDuration,
+  }) {
+    return GlobalVoiceSession(
+      message: message ?? this.message,
+      conversationId: conversationId ?? this.conversationId,
+      conversationTitle: conversationTitle ?? this.conversationTitle,
+      senderName: senderName ?? this.senderName,
+      filePath: filePath ?? this.filePath,
+      totalDuration: totalDuration ?? this.totalDuration,
+    );
+  }
+}
+
+/// Global coordinator & singleton audio engine (Telegram-style):
+/// - Ensures only one voice note plays at a time across the entire app.
+/// - Keeps playback alive when navigating out of a conversation or switching tabs.
+/// - Coordinates persistent voice note playback speed (1x, 1.5x, 2x).
+/// - Drives both inline `ChatAudioAttachmentPlayer` bubbles and `GlobalMiniAudioPlayerBar`.
 class ChatAudioPlaybackCoordinator {
   static const String _voiceSpeedPrefKey = 'preferred_voice_speed';
 
   static final ValueNotifier<String?> activePlayerNotifier =
       ValueNotifier<String?>(null);
 
+  static final ValueNotifier<GlobalVoiceSession?> activeSessionNotifier =
+      ValueNotifier<GlobalVoiceSession?>(null);
+
+  static final ValueNotifier<bool> isPlayingNotifier =
+      ValueNotifier<bool>(false);
+
+  static final ValueNotifier<bool> isBufferingNotifier =
+      ValueNotifier<bool>(false);
+
+  static final ValueNotifier<Duration> positionNotifier =
+      ValueNotifier<Duration>(Duration.zero);
+
+  static final ValueNotifier<Duration> durationNotifier =
+      ValueNotifier<Duration>(Duration.zero);
+
   static final ValueNotifier<double> playbackSpeedNotifier =
       ValueNotifier<double>(1.0);
 
+  static final Set<String> playedMessageIds = <String>{};
+
+  static AudioPlayer? _sharedPlayer;
   static bool _isSpeedInitialized = false;
+  static bool _audioPluginUnavailable = false;
+
+  static bool get isAudioPluginUnavailable => _audioPluginUnavailable;
+
+  static AudioPlayer _ensurePlayer() {
+    if (_sharedPlayer != null) return _sharedPlayer!;
+    final player = AudioPlayer(useProxyForRequestHeaders: false);
+    _sharedPlayer = player;
+
+    player.setSpeed(playbackSpeedNotifier.value).catchError((_) {});
+
+    player.playerStateStream.listen((state) {
+      isPlayingNotifier.value = state.playing;
+      isBufferingNotifier.value =
+          state.processingState == ProcessingState.buffering ||
+              state.processingState == ProcessingState.loading;
+
+      if (state.playing) {
+        final activeId = activePlayerNotifier.value;
+        if (activeId != null) {
+          playedMessageIds.add(activeId);
+        }
+      }
+
+      if (state.processingState == ProcessingState.completed) {
+        player.seek(Duration.zero);
+        player.pause();
+        positionNotifier.value = Duration.zero;
+        isPlayingNotifier.value = false;
+        activePlayerNotifier.value = null;
+        activeSessionNotifier.value = null;
+      }
+    });
+
+    player.positionStream.listen((pos) {
+      positionNotifier.value = pos;
+    });
+
+    player.durationStream.listen((dur) {
+      if (dur != null && dur > Duration.zero) {
+        durationNotifier.value = dur;
+        final currentSession = activeSessionNotifier.value;
+        if (currentSession != null) {
+          activeSessionNotifier.value =
+              currentSession.copyWith(totalDuration: dur);
+        }
+      }
+    });
+
+    return player;
+  }
 
   static void setActive(String messageId) {
     activePlayerNotifier.value = messageId;
@@ -29,7 +139,121 @@ class ChatAudioPlaybackCoordinator {
 
   static void stopIfActive(String messageId) {
     if (activePlayerNotifier.value == messageId) {
-      activePlayerNotifier.value = null;
+      stopAndDismiss();
+    }
+  }
+
+  /// Stops playback and hides the global mini player bar.
+  static Future<void> stopAndDismiss() async {
+    activePlayerNotifier.value = null;
+    activeSessionNotifier.value = null;
+    isPlayingNotifier.value = false;
+    isBufferingNotifier.value = false;
+    positionNotifier.value = Duration.zero;
+    try {
+      await _sharedPlayer?.stop();
+      await _sharedPlayer?.seek(Duration.zero);
+    } catch (_) {}
+  }
+
+  /// Toggles play/pause for the currently active session.
+  static Future<void> toggleCurrentSession() async {
+    final session = activeSessionNotifier.value;
+    if (session == null || _audioPluginUnavailable) return;
+    final player = _ensurePlayer();
+    try {
+      if (player.playing) {
+        await player.pause();
+      } else {
+        await player.play();
+      }
+    } catch (_) {}
+  }
+
+  /// Seeks the currently active session to [target].
+  static Future<void> seekCurrentSession(Duration target) async {
+    if (_sharedPlayer == null || activeSessionNotifier.value == null) return;
+    positionNotifier.value = target;
+    try {
+      await _sharedPlayer!.seek(target);
+    } catch (_) {}
+  }
+
+  /// Starts or toggles playback of a voice note using the global engine.
+  static Future<Duration?> playOrToggleVoiceNote({
+    required ChatMessage message,
+    required String localPath,
+    required String conversationTitle,
+    required String senderName,
+    Duration? knownDuration,
+    Duration? initialSeek,
+  }) async {
+    if (_audioPluginUnavailable) return null;
+    final player = _ensurePlayer();
+
+    final isSameMessage = activePlayerNotifier.value == message.id &&
+        activeSessionNotifier.value?.filePath == localPath;
+
+    if (isSameMessage) {
+      if (player.playing) {
+        await player.pause();
+        return durationNotifier.value;
+      } else {
+        if (initialSeek != null) {
+          await player.seek(initialSeek);
+        }
+        await player.play();
+        return durationNotifier.value;
+      }
+    }
+
+    try {
+      isBufferingNotifier.value = true;
+      activePlayerNotifier.value = message.id;
+      positionNotifier.value = initialSeek ?? Duration.zero;
+      final fallbackDuration = knownDuration ?? Duration.zero;
+      durationNotifier.value = fallbackDuration;
+
+      activeSessionNotifier.value = GlobalVoiceSession(
+        message: message,
+        conversationId: message.conversationId,
+        conversationTitle: conversationTitle,
+        senderName: senderName,
+        filePath: localPath,
+        totalDuration: fallbackDuration,
+      );
+
+      final resolvedDur = await player
+          .setFilePath(localPath)
+          .timeout(const Duration(seconds: 15));
+      await player.setSpeed(playbackSpeedNotifier.value);
+
+      final effectiveDur =
+          (resolvedDur != null && resolvedDur > Duration.zero)
+              ? resolvedDur
+              : fallbackDuration;
+      if (effectiveDur > Duration.zero) {
+        durationNotifier.value = effectiveDur;
+        activeSessionNotifier.value = activeSessionNotifier.value?.copyWith(
+          totalDuration: effectiveDur,
+        );
+      }
+
+      if (initialSeek != null && initialSeek > Duration.zero) {
+        await player.seek(initialSeek);
+      }
+      playedMessageIds.add(message.id);
+      await player.play();
+      return effectiveDur;
+    } on MissingPluginException {
+      _audioPluginUnavailable = true;
+      await stopAndDismiss();
+      return null;
+    } catch (_) {
+      isBufferingNotifier.value = false;
+      rethrow;
+    } finally {
+      isBufferingNotifier.value = false;
     }
   }
 
@@ -50,9 +274,326 @@ class ChatAudioPlaybackCoordinator {
   static Future<void> setPlaybackSpeed(double speed) async {
     playbackSpeedNotifier.value = speed;
     try {
+      await _sharedPlayer?.setSpeed(speed);
+    } catch (_) {}
+    try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble(_voiceSpeedPrefKey, speed);
     } catch (_) {}
+  }
+
+  /// Cycles playback speed: 1.0 -> 1.5 -> 2.0 -> 1.0.
+  static void cyclePlaybackSpeed() {
+    HapticFeedback.selectionClick();
+    final current = playbackSpeedNotifier.value;
+    double nextSpeed = 1.0;
+    if (current == 1.0) {
+      nextSpeed = 1.5;
+    } else if (current == 1.5) {
+      nextSpeed = 2.0;
+    } else {
+      nextSpeed = 1.0;
+    }
+    setPlaybackSpeed(nextSpeed);
+  }
+}
+
+/// Telegram / Apple-style Global Mini Audio Player Bar.
+///
+/// Appears at the top of `ChatHomeScreen` and `ConversationScreen` whenever a
+/// voice note is active in `ChatAudioPlaybackCoordinator`, allowing the user
+/// to control playback, change speed (1x/1.5x/2x), scrub, or jump back to the
+/// conversation while browsing anywhere in the app.
+class GlobalMiniAudioPlayerBar extends ConsumerWidget {
+  const GlobalMiniAudioPlayerBar({
+    super.key,
+    this.currentConversationId,
+    this.onTapSession,
+  });
+
+  final String? currentConversationId;
+  final void Function(GlobalVoiceSession session)? onTapSession;
+
+  String _formatDuration(Duration value) {
+    final minutes = value.inMinutes.remainder(60).toString();
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ValueListenableBuilder<GlobalVoiceSession?>(
+      valueListenable: ChatAudioPlaybackCoordinator.activeSessionNotifier,
+      builder: (context, session, _) {
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: session == null
+              ? const SizedBox.shrink()
+              : _buildBarContent(context, session, isDark),
+        );
+      },
+    );
+  }
+
+  Widget _buildBarContent(
+    BuildContext context,
+    GlobalVoiceSession session,
+    bool isDark,
+  ) {
+    final bgColor = isDark
+        ? const Color(0xFF1C1C1E).withValues(alpha: 0.96)
+        : Colors.white.withValues(alpha: 0.96);
+    final borderColor =
+        isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA);
+    const accentColor = Color(0xFF007AFF);
+
+    return Material(
+      color: bgColor,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: onTapSession != null ? () => onTapSession!(session) : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Row(
+                children: [
+                  // 1. Play / Pause Button
+                  ValueListenableBuilder<bool>(
+                    valueListenable:
+                        ChatAudioPlaybackCoordinator.isPlayingNotifier,
+                    builder: (context, isPlaying, _) {
+                      return ValueListenableBuilder<bool>(
+                        valueListenable:
+                            ChatAudioPlaybackCoordinator.isBufferingNotifier,
+                        builder: (context, isBuffering, _) {
+                          return GestureDetector(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              ChatAudioPlaybackCoordinator
+                                  .toggleCurrentSession();
+                            },
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: accentColor.withValues(alpha: 0.14),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: isBuffering
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: accentColor,
+                                        ),
+                                      )
+                                    : Icon(
+                                        isPlaying
+                                            ? CupertinoIcons.pause_fill
+                                            : CupertinoIcons.play_fill,
+                                        size: 17,
+                                        color: accentColor,
+                                      ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 10),
+
+                  // 2. Sender Name, Conversation Title & Live Timer
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              CupertinoIcons.mic_fill,
+                              size: 13,
+                              color: Color(0xFF00A884),
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                session.conversationTitle.isNotEmpty &&
+                                        session.conversationTitle !=
+                                            session.senderName
+                                    ? '${session.senderName} • ${session.conversationTitle}'
+                                    : session.senderName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF0F172A),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 1),
+                        ValueListenableBuilder<Duration>(
+                          valueListenable:
+                              ChatAudioPlaybackCoordinator.positionNotifier,
+                          builder: (context, pos, _) {
+                            return ValueListenableBuilder<Duration>(
+                              valueListenable:
+                                  ChatAudioPlaybackCoordinator.durationNotifier,
+                              builder: (context, dur, _) {
+                                final total = dur > Duration.zero
+                                    ? dur
+                                    : session.totalDuration;
+                                return Text(
+                                  total > Duration.zero
+                                      ? '${_formatDuration(pos)} / ${_formatDuration(total)}'
+                                      : _formatDuration(pos),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: isDark
+                                        ? Colors.white54
+                                        : const Color(0xFF64748B),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  // 3. Speed Toggle Pill (1x / 1.5x / 2x)
+                  ValueListenableBuilder<double>(
+                    valueListenable:
+                        ChatAudioPlaybackCoordinator.playbackSpeedNotifier,
+                    builder: (context, speed, _) {
+                      final label = speed == 1.0
+                          ? '1×'
+                          : speed == 1.5
+                              ? '1.5×'
+                              : '2×';
+                      return InkWell(
+                        onTap: ChatAudioPlaybackCoordinator.cyclePlaybackSpeed,
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            label,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              color: accentColor,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(width: 4),
+
+                  // 4. Close / Stop Button
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 30,
+                      minHeight: 30,
+                    ),
+                    tooltip: 'إيقاف وإغلاق المشغل',
+                    icon: Icon(
+                      CupertinoIcons.xmark,
+                      size: 16,
+                      color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                    ),
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      ChatAudioPlaybackCoordinator.stopAndDismiss();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Interactive Thin Scrubbing Progress Bar at Bottom
+          ValueListenableBuilder<Duration>(
+            valueListenable: ChatAudioPlaybackCoordinator.positionNotifier,
+            builder: (context, pos, _) {
+              return ValueListenableBuilder<Duration>(
+                valueListenable: ChatAudioPlaybackCoordinator.durationNotifier,
+                builder: (context, dur, _) {
+                  final total =
+                      dur > Duration.zero ? dur : session.totalDuration;
+                  final maxMs = total.inMilliseconds <= 0
+                      ? 1.0
+                      : total.inMilliseconds.toDouble();
+                  final progress =
+                      (pos.inMilliseconds / maxMs).clamp(0.0, 1.0);
+
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final barWidth = constraints.maxWidth;
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (details) {
+                          if (barWidth <= 0 || total.inMilliseconds <= 0) {
+                            return;
+                          }
+                          final pct = (details.localPosition.dx / barWidth)
+                              .clamp(0.0, 1.0);
+                          final target = Duration(
+                            milliseconds:
+                                (pct * total.inMilliseconds).round(),
+                          );
+                          ChatAudioPlaybackCoordinator.seekCurrentSession(
+                            target,
+                          );
+                        },
+                        child: SizedBox(
+                          height: 3,
+                          width: double.infinity,
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            backgroundColor: borderColor,
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              accentColor,
+                            ),
+                            minHeight: 2.5,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -63,16 +604,18 @@ class ChatAudioPlaybackCoordinator {
 /// - Instant duration preview from metadata so the duration is visible before streaming starts.
 /// - Interactive touch scrubbing: drag or tap along the waveform to seek.
 /// - Speed toggle pill (1x, 1.5x, 2x).
-/// - Auto-rewind on playback completion.
+/// - Powered by `ChatAudioPlaybackCoordinator` so playback continues seamlessly when leaving the chat.
 class ChatAudioAttachmentPlayer extends ConsumerStatefulWidget {
   const ChatAudioAttachmentPlayer({
     super.key,
     required this.message,
     this.isMine = false,
+    this.conversationTitle,
   });
 
   final ChatMessage message;
   final bool isMine;
+  final String? conversationTitle;
 
   @override
   ConsumerState<ChatAudioAttachmentPlayer> createState() =>
@@ -81,32 +624,26 @@ class ChatAudioAttachmentPlayer extends ConsumerStatefulWidget {
 
 class _ChatAudioAttachmentPlayerState
     extends ConsumerState<ChatAudioAttachmentPlayer> {
-  late final AudioPlayer _player;
-  StreamSubscription<PlayerState>? _playerStateSub;
-  StreamSubscription<Duration?>? _durationSub;
   String? _loadedFilePath;
-  bool _isLoaded = false;
   bool _loading = false;
-  bool _audioPluginUnavailable = false;
   double _playbackSpeed = 1.0;
 
   bool _isScrubbing = false;
   double _scrubPercent = 0.0;
   Duration? _pendingSeekDuration;
   Duration? _knownTotalDuration;
-  bool _hasBeenPlayed = false;
 
   late final List<double> _waveformAmplitudes;
+
+  bool get _isThisMessageActive =>
+      ChatAudioPlaybackCoordinator.activePlayerNotifier.value ==
+      widget.message.id;
 
   @override
   void initState() {
     super.initState();
     _playbackSpeed = ChatAudioPlaybackCoordinator.playbackSpeedNotifier.value;
-    _player = AudioPlayer(useProxyForRequestHeaders: false);
     _waveformAmplitudes = _generateVoiceAmplitudes(widget.message.id);
-
-    // Apply currently active playback speed
-    _player.setSpeed(_playbackSpeed).catchError((_) {});
 
     // Seed duration from message metadata if available so it displays instantly
     final metaMs = (widget.message.metadata?['durationMs'] as num?)?.toInt();
@@ -115,7 +652,7 @@ class _ChatAudioAttachmentPlayerState
     }
 
     ChatAudioPlaybackCoordinator.activePlayerNotifier
-        .addListener(_onActivePlayerChanged);
+        .addListener(_onCoordinatorStateChanged);
     ChatAudioPlaybackCoordinator.playbackSpeedNotifier
         .addListener(_onPlaybackSpeedChanged);
 
@@ -128,36 +665,7 @@ class _ChatAudioAttachmentPlayerState
           setState(() {
             _playbackSpeed = currentGlobal;
           });
-          _player.setSpeed(currentGlobal).catchError((_) {});
         }
-      }
-    });
-
-    _playerStateSub = _player.playerStateStream.listen((state) {
-      if (!mounted) return;
-      if (state.playing) {
-        ChatAudioPlaybackCoordinator.setActive(widget.message.id);
-        if (!_hasBeenPlayed) {
-          setState(() => _hasBeenPlayed = true);
-        }
-      }
-      if (state.processingState == ProcessingState.completed) {
-        _player.seek(Duration.zero);
-        _player.pause();
-        if (mounted) {
-          setState(() {
-            _pendingSeekDuration = null;
-          });
-        }
-        ChatAudioPlaybackCoordinator.stopIfActive(widget.message.id);
-      }
-    });
-
-    _durationSub = _player.durationStream.listen((duration) {
-      if (duration != null && duration > Duration.zero && mounted) {
-        setState(() {
-          _knownTotalDuration = duration;
-        });
       }
     });
 
@@ -169,13 +677,9 @@ class _ChatAudioAttachmentPlayerState
     });
   }
 
-  void _onActivePlayerChanged() {
-    if (ChatAudioPlaybackCoordinator.activePlayerNotifier.value !=
-        widget.message.id) {
-      if (_player.playing) {
-        _player.pause();
-      }
-    }
+  void _onCoordinatorStateChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _onPlaybackSpeedChanged() {
@@ -188,34 +692,30 @@ class _ChatAudioAttachmentPlayerState
       } else {
         _playbackSpeed = newSpeed;
       }
-      _player.setSpeed(newSpeed).catchError((_) {});
     }
   }
 
   @override
   void dispose() {
-    _playerStateSub?.cancel();
-    _durationSub?.cancel();
     ChatAudioPlaybackCoordinator.activePlayerNotifier
-        .removeListener(_onActivePlayerChanged);
+        .removeListener(_onCoordinatorStateChanged);
     ChatAudioPlaybackCoordinator.playbackSpeedNotifier
         .removeListener(_onPlaybackSpeedChanged);
-    ChatAudioPlaybackCoordinator.stopIfActive(widget.message.id);
-    _player.dispose().catchError((_) {});
+    // Intentionally do NOT stop playback on dispose so the voice note
+    // continues playing in the GlobalMiniAudioPlayerBar when leaving the chat!
     super.dispose();
   }
 
   Future<void> _checkAndPreloadAudio() async {
-    if (_audioPluginUnavailable || _isLoaded || _loading) return;
+    if (ChatAudioPlaybackCoordinator.isAudioPluginUnavailable || _loading) {
+      return;
+    }
     try {
       final repository = ref.read(chatRepositoryProvider);
       final cachedPath =
           await repository.getCachedAttachmentPath(widget.message);
       if (cachedPath != null && await File(cachedPath).exists()) {
         _loadedFilePath = cachedPath;
-        if (_knownTotalDuration == null) {
-          await _loadFromLocalFile(cachedPath);
-        }
       } else {
         // Pre-cache voice note file into internal storage in background
         final fileUrl = widget.message.fileUrl;
@@ -225,59 +725,45 @@ class _ChatAudioAttachmentPlayerState
               .timeout(const Duration(seconds: 25));
           if (mounted && path.isNotEmpty && await File(path).exists()) {
             _loadedFilePath = path;
-            if (_knownTotalDuration == null) {
-              await _loadFromLocalFile(path);
-            }
           }
         }
       }
     } catch (_) {}
   }
 
-  Future<void> _loadFromLocalFile(String path) async {
+  String _resolveConversationTitle() {
+    final explicitTitle = widget.conversationTitle?.trim() ?? '';
+    if (explicitTitle.isNotEmpty) return explicitTitle;
     try {
-      final dur = await _player.setFilePath(path);
-      await _player.setSpeed(_playbackSpeed);
-      _loadedFilePath = path;
-      _isLoaded = true;
-      if (dur != null && dur > Duration.zero && mounted) {
-        setState(() {
-          _knownTotalDuration = dur;
-        });
+      final authUserId =
+          ref.read(authControllerProvider).valueOrNull?.id ?? '';
+      final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+      if (overview != null) {
+        for (final conv in overview.conversations) {
+          if (conv.id == widget.message.conversationId) {
+            return conv.displayTitle(authUserId);
+          }
+        }
       }
-    } on MissingPluginException {
-      _audioPluginUnavailable = true;
-      _isLoaded = false;
-    } catch (_) {
-      _isLoaded = false;
-      _loadedFilePath = null;
-    }
+    } catch (_) {}
+    return 'محادثة';
+  }
+
+  String _resolveSenderName() {
+    final senderName = widget.message.sender?.displayName.trim() ?? '';
+    if (senderName.isNotEmpty) return senderName;
+    return widget.isMine ? 'رسالتك الصوتية' : 'رسالة صوتية';
   }
 
   Future<void> _handlePlayPause() async {
-    if (_audioPluginUnavailable) return;
+    if (ChatAudioPlaybackCoordinator.isAudioPluginUnavailable) return;
     HapticFeedback.selectionClick();
 
-    if (_player.playing) {
-      await _player.pause();
+    if (_isThisMessageActive) {
+      await ChatAudioPlaybackCoordinator.toggleCurrentSession();
       return;
     }
 
-    // 1. If already loaded into player, play immediately!
-    if (_isLoaded &&
-        _loadedFilePath != null &&
-        File(_loadedFilePath!).existsSync()) {
-      ChatAudioPlaybackCoordinator.setActive(widget.message.id);
-      if (_pendingSeekDuration != null) {
-        final seekTarget = _pendingSeekDuration!;
-        _pendingSeekDuration = null;
-        await _player.seek(seekTarget);
-      }
-      await _player.play();
-      return;
-    }
-
-    // 2. Not yet loaded: load from internal storage or download
     if (_loading) return;
     setState(() => _loading = true);
 
@@ -297,28 +783,23 @@ class _ChatAudioAttachmentPlayerState
       if (!mounted) return;
 
       if (localPath.isNotEmpty && await File(localPath).exists()) {
-        final dur = await _player
-            .setFilePath(localPath)
-            .timeout(const Duration(seconds: 15));
-        await _player.setSpeed(_playbackSpeed);
         _loadedFilePath = localPath;
-        _isLoaded = true;
+        final seekTarget = _pendingSeekDuration;
+        _pendingSeekDuration = null;
+
+        final dur = await ChatAudioPlaybackCoordinator.playOrToggleVoiceNote(
+          message: widget.message,
+          localPath: localPath,
+          conversationTitle: _resolveConversationTitle(),
+          senderName: _resolveSenderName(),
+          knownDuration: _knownTotalDuration,
+          initialSeek: seekTarget,
+        );
         if (dur != null && dur > Duration.zero && mounted) {
-          _knownTotalDuration = dur;
+          setState(() {
+            _knownTotalDuration = dur;
+          });
         }
-        if (mounted) {
-          ChatAudioPlaybackCoordinator.setActive(widget.message.id);
-          if (_pendingSeekDuration != null) {
-            final seekTarget = _pendingSeekDuration!;
-            _pendingSeekDuration = null;
-            await _player.seek(seekTarget);
-          }
-          await _player.play();
-        }
-      }
-    } on MissingPluginException {
-      if (mounted) {
-        setState(() => _audioPluginUnavailable = true);
       }
     } catch (_) {
       if (mounted) {
@@ -343,17 +824,7 @@ class _ChatAudioAttachmentPlayerState
   }
 
   void _cyclePlaybackSpeed() {
-    HapticFeedback.selectionClick();
-    final current = ChatAudioPlaybackCoordinator.playbackSpeedNotifier.value;
-    double nextSpeed = 1.0;
-    if (current == 1.0) {
-      nextSpeed = 1.5;
-    } else if (current == 1.5) {
-      nextSpeed = 2.0;
-    } else {
-      nextSpeed = 1.0;
-    }
-    ChatAudioPlaybackCoordinator.setPlaybackSpeed(nextSpeed);
+    ChatAudioPlaybackCoordinator.cyclePlaybackSpeed();
   }
 
   void _onWaveformTap(TapDownDetails details, double width, Duration total) {
@@ -361,8 +832,8 @@ class _ChatAudioAttachmentPlayerState
     final percent = (details.localPosition.dx / width).clamp(0.0, 1.0);
     final targetDuration =
         Duration(milliseconds: (percent * total.inMilliseconds).round());
-    if (_isLoaded) {
-      _player.seek(targetDuration);
+    if (_isThisMessageActive) {
+      ChatAudioPlaybackCoordinator.seekCurrentSession(targetDuration);
     } else {
       setState(() {
         _pendingSeekDuration = targetDuration;
@@ -389,10 +860,11 @@ class _ChatAudioAttachmentPlayerState
 
   void _onWaveformDragEnd(DragEndDetails details, Duration total) {
     if (total.inMilliseconds > 0) {
-      final targetDuration =
-          Duration(milliseconds: (_scrubPercent * total.inMilliseconds).round());
-      if (_isLoaded) {
-        _player.seek(targetDuration);
+      final targetDuration = Duration(
+        milliseconds: (_scrubPercent * total.inMilliseconds).round(),
+      );
+      if (_isThisMessageActive) {
+        ChatAudioPlaybackCoordinator.seekCurrentSession(targetDuration);
       } else {
         _pendingSeekDuration = targetDuration;
       }
@@ -408,7 +880,7 @@ class _ChatAudioAttachmentPlayerState
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    if (_audioPluginUnavailable) {
+    if (ChatAudioPlaybackCoordinator.isAudioPluginUnavailable) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -422,163 +894,171 @@ class _ChatAudioAttachmentPlayerState
       );
     }
 
-// Audio preloading and caching handled locally via internal storage
-
-    // Determine colors tailored to outgoing vs incoming bubbles
     final isMine = widget.isMine;
-    final Color playedWaveColor;
-    final Color unplayedWaveColor;
-    final Color thumbColor;
-    final Color actionIconColor;
-    final Color actionBgColor;
-    final Color durationTextColor;
-
-    if (isMine) {
-      // Outgoing bubble styling
-      playedWaveColor = const Color(0xFF00A884);
-      unplayedWaveColor = isDark
-          ? Colors.white.withValues(alpha: 0.28)
-          : const Color(0xFF94A3B8);
-      thumbColor = const Color(0xFF00A884);
-      actionIconColor = Colors.white;
-      actionBgColor = const Color(0xFF00A884);
-      durationTextColor = isDark
-          ? Colors.white70
-          : const Color(0xFF475569);
-    } else {
-      // Incoming bubble styling
-      playedWaveColor = const Color(0xFF00A884);
-      unplayedWaveColor = isDark
-          ? Colors.white.withValues(alpha: 0.24)
-          : const Color(0xFFCBD5E1);
-      thumbColor = const Color(0xFF00A884);
-      actionIconColor = Colors.white;
-      actionBgColor = const Color(0xFF00A884);
-      durationTextColor = isDark
-          ? Colors.white70
-          : const Color(0xFF64748B);
-    }
+    final Color playedWaveColor = const Color(0xFF00A884);
+    final Color unplayedWaveColor = isMine
+        ? (isDark
+            ? Colors.white.withValues(alpha: 0.28)
+            : const Color(0xFF94A3B8))
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.24)
+            : const Color(0xFFCBD5E1));
+    const Color thumbColor = Color(0xFF00A884);
+    const Color actionIconColor = Colors.white;
+    const Color actionBgColor = Color(0xFF00A884);
+    final Color durationTextColor = isMine
+        ? (isDark ? Colors.white70 : const Color(0xFF475569))
+        : (isDark ? Colors.white70 : const Color(0xFF64748B));
 
     return SizedBox(
       width: 272,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-        child: StreamBuilder<PlayerState>(
-          stream: _player.playerStateStream,
-          builder: (context, playerSnapshot) {
-            final playerState = playerSnapshot.data;
-            final isPlaying = playerState?.playing == true;
-            final isBuffering = playerState?.processingState == ProcessingState.buffering ||
-                _loading;
+        child: ValueListenableBuilder<bool>(
+          valueListenable: ChatAudioPlaybackCoordinator.isPlayingNotifier,
+          builder: (context, globalPlaying, _) {
+            return ValueListenableBuilder<bool>(
+              valueListenable: ChatAudioPlaybackCoordinator.isBufferingNotifier,
+              builder: (context, globalBuffering, _) {
+                return ValueListenableBuilder<Duration>(
+                  valueListenable:
+                      ChatAudioPlaybackCoordinator.positionNotifier,
+                  builder: (context, globalPosition, _) {
+                    return ValueListenableBuilder<Duration>(
+                      valueListenable:
+                          ChatAudioPlaybackCoordinator.durationNotifier,
+                      builder: (context, globalDuration, _) {
+                        final isActive = _isThisMessageActive;
+                        final isPlaying = isActive && globalPlaying;
+                        final isBuffering =
+                            _loading || (isActive && globalBuffering);
 
-            return StreamBuilder<Duration>(
-              stream: _player.positionStream,
-              builder: (context, posSnapshot) {
-                final rawPos = posSnapshot.data ?? Duration.zero;
-                final position = (rawPos == Duration.zero && _pendingSeekDuration != null)
-                    ? _pendingSeekDuration!
-                    : rawPos;
-                final total = _knownTotalDuration ?? Duration.zero;
-                final safeMaxMs = total.inMilliseconds <= 0
-                    ? 1.0
-                    : total.inMilliseconds.toDouble();
+                        final position = isActive
+                            ? globalPosition
+                            : (_pendingSeekDuration ?? Duration.zero);
+                        final total = (isActive && globalDuration > Duration.zero)
+                            ? globalDuration
+                            : (_knownTotalDuration ?? Duration.zero);
+                        final safeMaxMs = total.inMilliseconds <= 0
+                            ? 1.0
+                            : total.inMilliseconds.toDouble();
 
-                final currentProgress = (position.inMilliseconds / safeMaxMs).clamp(0.0, 1.0);
-                final effectiveProgress = _isScrubbing ? _scrubPercent : currentProgress;
+                        final currentProgress =
+                            (position.inMilliseconds / safeMaxMs)
+                                .clamp(0.0, 1.0);
+                        final effectiveProgress =
+                            _isScrubbing ? _scrubPercent : currentProgress;
 
-                // Display duration: while playing/scrubbing show current elapsed, otherwise show total duration
-                final displayDuration = _isScrubbing
-                    ? Duration(milliseconds: (_scrubPercent * safeMaxMs).round())
-                    : (isPlaying || position > Duration.zero
-                        ? position
-                        : total);
+                        final displayDuration = _isScrubbing
+                            ? Duration(
+                                milliseconds:
+                                    (_scrubPercent * safeMaxMs).round(),
+                              )
+                            : (isPlaying || position > Duration.zero
+                                ? position
+                                : total);
 
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // 1. Play / Pause circular button
-                    _buildPlayButton(
-                      isPlaying: isPlaying,
-                      isBuffering: isBuffering,
-                      actionBgColor: actionBgColor,
-                      actionIconColor: actionIconColor,
-                    ),
-                    const SizedBox(width: 8),
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // 1. Play / Pause circular button
+                            _buildPlayButton(
+                              isPlaying: isPlaying,
+                              isBuffering: isBuffering,
+                              actionBgColor: actionBgColor,
+                              actionIconColor: actionIconColor,
+                            ),
+                            const SizedBox(width: 8),
 
-                    // 2. Center: Waveform + Duration / Speed
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Waveform with Draggable Thumb (using Builder instead of LayoutBuilder to support IntrinsicWidth)
-                          Builder(
-                            builder: (waveContext) {
-                              double resolveWaveWidth() {
-                                final box = waveContext.findRenderObject();
-                                if (box is RenderBox && box.hasSize) {
-                                  return box.size.width;
-                                }
-                                return 160.0;
-                              }
+                            // 2. Center: Waveform + Duration / Speed
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Builder(
+                                    builder: (waveContext) {
+                                      double resolveWaveWidth() {
+                                        final box =
+                                            waveContext.findRenderObject();
+                                        if (box is RenderBox && box.hasSize) {
+                                          return box.size.width;
+                                        }
+                                        return 160.0;
+                                      }
 
-                              return GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTapDown: (d) =>
-                                    _onWaveformTap(d, resolveWaveWidth(), total),
-                                onHorizontalDragStart: (d) =>
-                                    _onWaveformDragStart(d, resolveWaveWidth()),
-                                onHorizontalDragUpdate: (d) =>
-                                    _onWaveformDragUpdate(d, resolveWaveWidth()),
-                                onHorizontalDragEnd: (d) =>
-                                    _onWaveformDragEnd(d, total),
-                                child: Container(
-                                  height: 32,
-                                  width: double.infinity,
-                                  color: Colors.transparent,
-                                  child: CustomPaint(
-                                    painter: _WhatsAppWaveformPainter(
-                                      amplitudes: _waveformAmplitudes,
-                                      progress: effectiveProgress,
-                                      playedColor: playedWaveColor,
-                                      unplayedColor: unplayedWaveColor,
-                                      thumbColor: thumbColor,
-                                    ),
+                                      return GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTapDown: (d) => _onWaveformTap(
+                                          d,
+                                          resolveWaveWidth(),
+                                          total,
+                                        ),
+                                        onHorizontalDragStart: (d) =>
+                                            _onWaveformDragStart(
+                                          d,
+                                          resolveWaveWidth(),
+                                        ),
+                                        onHorizontalDragUpdate: (d) =>
+                                            _onWaveformDragUpdate(
+                                          d,
+                                          resolveWaveWidth(),
+                                        ),
+                                        onHorizontalDragEnd: (d) =>
+                                            _onWaveformDragEnd(d, total),
+                                        child: Container(
+                                          height: 32,
+                                          width: double.infinity,
+                                          color: Colors.transparent,
+                                          child: CustomPaint(
+                                            painter: _WhatsAppWaveformPainter(
+                                              amplitudes: _waveformAmplitudes,
+                                              progress: effectiveProgress,
+                                              playedColor: playedWaveColor,
+                                              unplayedColor: unplayedWaveColor,
+                                              thumbColor: thumbColor,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 2),
-                          // Duration & Speed Indicator
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _formatDuration(displayDuration),
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: durationTextColor,
-                                  letterSpacing: 0.2,
-                                ),
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        _formatDuration(displayDuration),
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: durationTextColor,
+                                          letterSpacing: 0.2,
+                                        ),
+                                      ),
+                                      _buildSpeedPill(isDark: isDark),
+                                    ],
+                                  ),
+                                ],
                               ),
-                              _buildSpeedPill(isDark: isDark),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
+                            ),
+                            const SizedBox(width: 10),
 
-                    // 3. WhatsApp Mic Status Badge (Unplayed: Green, Played: Blue)
-                    _buildMicStatusBadge(
-                      isPlayed: _hasBeenPlayed ||
-                          position > Duration.zero ||
-                          widget.message.seenBy.isNotEmpty,
-                      isDark: isDark,
-                    ),
-                  ],
+                            // 3. WhatsApp Mic Status Badge (Unplayed: Green, Played: Blue)
+                            _buildMicStatusBadge(
+                              isPlayed: ChatAudioPlaybackCoordinator
+                                      .playedMessageIds
+                                      .contains(widget.message.id) ||
+                                  position > Duration.zero ||
+                                  widget.message.seenBy.isNotEmpty,
+                              isDark: isDark,
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
                 );
               },
             );
@@ -667,8 +1147,6 @@ class _ChatAudioAttachmentPlayerState
     required bool isPlayed,
     required bool isDark,
   }) {
-    // WhatsApp mic badge colors:
-    // Green (0xFF00A884) if unplayed, Cyan Blue (0xFF34B7F1) if played/heard
     final micColor = isPlayed
         ? const Color(0xFF34B7F1)
         : const Color(0xFF00A884);
@@ -697,7 +1175,6 @@ List<double> _generateVoiceAmplitudes(String seedStr) {
   final random = math.Random(seed);
   const count = 34;
   return List.generate(count, (index) {
-    // Mimic speech cadence: slightly softer towards edges, expressive in the middle
     final normalizedPos = (index / (count - 1)) * math.pi;
     final envelope = math.sin(normalizedPos).clamp(0.25, 1.0);
     final variance = 0.25 + random.nextDouble() * 0.75;
@@ -763,7 +1240,6 @@ class _WhatsAppWaveformPainter extends CustomPainter {
       );
     }
 
-    // Draggable Scrubber Thumb Circle (WhatsApp style dot)
     final thumbPaint = Paint()
       ..color = thumbColor
       ..style = PaintingStyle.fill;

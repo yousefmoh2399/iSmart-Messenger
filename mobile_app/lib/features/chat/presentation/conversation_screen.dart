@@ -48,6 +48,7 @@ import 'widgets/chat_link_text.dart';
 import 'widgets/chat_poll_bubble.dart';
 import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/gif_picker_panel.dart';
+import 'widgets/message_reminder_sheet.dart';
 import 'widgets/poll_creator_dialog.dart';
 import 'widgets/scheduled_messages_list.dart';
 import 'widgets/whatsapp_reaction_picker.dart';
@@ -697,157 +698,275 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final hasContent = _messageController.text.trim().isNotEmpty;
     if (!hasContent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('يرجى كتابة نص الرسالة أولاً قبل جدولتها.'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: const Text('اكتب نص الرسالة أولاً لجدولة إرسالها.'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'عرض المجدولة',
+            onPressed: _showScheduledMessagesSheet,
+          ),
         ),
       );
       return;
     }
 
+    HapticFeedback.mediumImpact();
     final now = DateTime.now();
     final today6PM = DateTime(now.year, now.month, now.day, 18, 0);
     final tomorrow9AM = DateTime(now.year, now.month, now.day + 1, 9, 0);
+    final daysUntilSunday = (DateTime.sunday - now.weekday + 7) % 7;
+    final nextWorkWeek9AM = DateTime(
+      now.year,
+      now.month,
+      now.day + (daysUntilSunday == 0 ? 7 : daysUntilSunday),
+      9,
+      0,
+    );
 
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Container(
-                  margin: const EdgeInsets.only(top: 8, bottom: 6),
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white24 : Colors.black26,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.notifications_off_rounded, color: Colors.orange, size: 18),
-                ),
-                title: const Text('إرسال بدون صوت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('يصل إشعار صامت للمستلم دون إصدار نغمة', style: TextStyle(fontSize: 12)),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _sendText(isSilent: true);
-                },
-              ),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    'جدولة الرسالة',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white60 : Colors.black54,
+        final surfaceColor = isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7);
+        final cardColor = isDark ? const Color(0xFF2C2C2E) : Colors.white;
+        return Container(
+          decoration: BoxDecoration(
+            color: surfaceColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 38,
+                      height: 4.5,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black26,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
-                title: const Text('بعد 30 دقيقة', style: TextStyle(fontSize: 14)),
-                trailing: Text(
-                  DateFormat('hh:mm a', 'ar').format(now.add(const Duration(minutes: 30))),
-                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _sendText(scheduledFor: now.add(const Duration(minutes: 30)));
-                },
-              ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
-                title: const Text('بعد ساعة واحدة', style: TextStyle(fontSize: 14)),
-                trailing: Text(
-                  DateFormat('hh:mm a', 'ar').format(now.add(const Duration(hours: 1))),
-                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _sendText(scheduledFor: now.add(const Duration(hours: 1)));
-                },
-              ),
-              if (now.isBefore(today6PM.subtract(const Duration(minutes: 30))))
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.nightlight_round, size: 20, color: Color(0xFF007AFF)),
-                  title: const Text('مساء اليوم (06:00 م)', style: TextStyle(fontSize: 14)),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _sendText(scheduledFor: today6PM);
-                  },
-                ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.wb_sunny_rounded, size: 20, color: Color(0xFF007AFF)),
-                title: const Text('صباح الغد (09:00 ص)', style: TextStyle(fontSize: 14)),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _sendText(scheduledFor: tomorrow9AM);
-                },
-              ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.edit_calendar_rounded, size: 20, color: Color(0xFF007AFF)),
-                title: const Text('تحديد موعد مخصص...', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  final selectedDate = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (selectedDate != null && mounted) {
-                    final selectedTime = await showTimePicker(
-                      context: context,
-                      initialTime: TimeOfDay.now(),
-                    );
-                    if (selectedTime != null && mounted) {
-                      final scheduledFor = DateTime(
-                        selectedDate.year,
-                        selectedDate.month,
-                        selectedDate.day,
-                        selectedTime.hour,
-                        selectedTime.minute,
-                      );
-                      if (scheduledFor.isAfter(DateTime.now())) {
-                        _sendText(scheduledFor: scheduledFor);
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('يجب أن يكون الوقت في المستقبل.'),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          CupertinoIcons.clock_fill,
+                          color: Color(0xFF007AFF),
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'خيارات الإرسال والجدولة',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
                           ),
-                        );
-                      }
-                    }
-                  }
-                },
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _showScheduledMessagesSheet();
+                        },
+                        icon: const Icon(Icons.schedule_send_rounded, size: 16),
+                        label: const Text(
+                          'الرسائل المجدولة',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: ListTile(
+                      leading: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF9500).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Icon(
+                          CupertinoIcons.bell_slash_fill,
+                          color: Color(0xFFFF9500),
+                          size: 18,
+                        ),
+                      ),
+                      title: const Text(
+                        'إرسال الآن بدون صوت',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                      ),
+                      subtitle: const Text(
+                        'يصل إشعار صامت للمستلم دون إزعاج',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _sendText(isSilent: true);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6, bottom: 6),
+                    child: Text(
+                      'إرسال في وقت لاحق (أوقات العمل المقترحة)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(CupertinoIcons.sun_max_fill, size: 20, color: Color(0xFFFF9500)),
+                          title: const Text(
+                            'غداً في بداية الدوام (09:00 ص)',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                          ),
+                          trailing: Text(
+                            formatReminderDateTime(tomorrow9AM),
+                            style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white54 : Colors.black45),
+                          ),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            _sendText(scheduledFor: tomorrow9AM);
+                          },
+                        ),
+                        const Divider(height: 1, indent: 48),
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(CupertinoIcons.timer, size: 20, color: Color(0xFF007AFF)),
+                          title: const Text('بعد 30 دقيقة', style: TextStyle(fontSize: 14)),
+                          trailing: Text(
+                            DateFormat('hh:mm a', 'ar').format(now.add(const Duration(minutes: 30))),
+                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black45),
+                          ),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            _sendText(scheduledFor: now.add(const Duration(minutes: 30)));
+                          },
+                        ),
+                        const Divider(height: 1, indent: 48),
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(CupertinoIcons.clock, size: 20, color: Color(0xFF007AFF)),
+                          title: const Text('بعد ساعة واحدة', style: TextStyle(fontSize: 14)),
+                          trailing: Text(
+                            DateFormat('hh:mm a', 'ar').format(now.add(const Duration(hours: 1))),
+                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black45),
+                          ),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            _sendText(scheduledFor: now.add(const Duration(hours: 1)));
+                          },
+                        ),
+                        if (now.isBefore(today6PM.subtract(const Duration(minutes: 30)))) ...[
+                          const Divider(height: 1, indent: 48),
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(CupertinoIcons.moon_stars_fill, size: 20, color: Color(0xFF5856D6)),
+                            title: const Text('مساء اليوم (06:00 م)', style: TextStyle(fontSize: 14)),
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              _sendText(scheduledFor: today6PM);
+                            },
+                          ),
+                        ],
+                        const Divider(height: 1, indent: 48),
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(CupertinoIcons.briefcase_fill, size: 19, color: Color(0xFF34C759)),
+                          title: const Text('بداية الأسبوع القادم (الأحد 09:00 ص)', style: TextStyle(fontSize: 14)),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            _sendText(scheduledFor: nextWorkWeek9AM);
+                          },
+                        ),
+                        const Divider(height: 1, indent: 48),
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(CupertinoIcons.calendar_badge_plus, size: 20, color: Color(0xFF007AFF)),
+                          title: const Text(
+                            'تحديد تاريخ ووقت مخصص...',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF007AFF),
+                            ),
+                          ),
+                          onTap: () async {
+                            Navigator.pop(sheetContext);
+                            final selectedDate = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime.now(),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (selectedDate != null && mounted) {
+                              final selectedTime = await showTimePicker(
+                                context: context,
+                                initialTime: TimeOfDay.fromDateTime(
+                                  DateTime.now().add(const Duration(hours: 1)),
+                                ),
+                              );
+                              if (selectedTime != null && mounted) {
+                                final scheduledFor = DateTime(
+                                  selectedDate.year,
+                                  selectedDate.month,
+                                  selectedDate.day,
+                                  selectedTime.hour,
+                                  selectedTime.minute,
+                                );
+                                if (scheduledFor.isAfter(DateTime.now())) {
+                                  _sendText(scheduledFor: scheduledFor);
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('يجب اختيار وقت في المستقبل لجدولة الرسالة.'),
+                                    ),
+                                  );
+                                }
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         );
       },
@@ -1009,6 +1128,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           isSilent: isSilent,
           scheduledFor: scheduledFor,
         );
+        if (scheduledFor != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'تمت جدولة الرسالة للإرسال (${formatReminderDateTime(scheduledFor)})',
+              ),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'عرض المجدولة',
+                onPressed: _showScheduledMessagesSheet,
+              ),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted && !_isNetworkError(e)) {
@@ -3510,6 +3643,35 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                 ],
                                 _buildWhatsAppMenuDivider(isDark),
                                 _buildWhatsAppContextMenuItem(
+                                  title: 'تذكير بهذه الرسالة',
+                                  icon: CupertinoIcons.alarm,
+                                  onTap: () async {
+                                    final reminder = await showSetMessageReminderSheet(
+                                      context: context,
+                                      ref: ref,
+                                      message: message,
+                                      conversationTitle: _data.displayTitle(
+                                        authUser?.id ?? '',
+                                      ),
+                                    );
+                                    if (reminder != null && mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'سيتم تذكيرك بهذه الرسالة (${formatReminderDateTime(reminder.remindAt)})',
+                                          ),
+                                          duration: const Duration(seconds: 4),
+                                          action: SnackBarAction(
+                                            label: 'التذكيرات',
+                                            onPressed: _showMessageRemindersSheet,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
                                   title: message.isFavoritedBy(authUser?.id)
                                       ? 'إلغاء التمييز بنجمة'
                                       : 'تمييز بنجمة',
@@ -4310,6 +4472,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     );
   }
 
+  void _showMessageRemindersSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MessageRemindersSheet(
+        conversationId: widget.conversation.id,
+        onJumpToMessage: (reminder) {
+          _jumpToRepliedMessage(reminder.messageId);
+        },
+      ),
+    );
+  }
+
   Future<void> _showSearchSheet() async {
     if (!mounted) {
       return;
@@ -4697,6 +4873,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final messagesState = ref.watch(
       conversationMessagesControllerProvider(widget.conversation.id),
     );
+    final allReminders =
+        ref.watch(chatMessageRemindersProvider).valueOrNull ??
+        const <ChatMessageReminder>[];
+    final conversationReminders = allReminders
+        .where((r) => r.conversationId == widget.conversation.id)
+        .toList(growable: false);
+    final remindedMessageIds = {
+      for (final r in conversationReminders) r.messageId,
+    };
     final loadedMessages =
         messagesState.valueOrNull?.messages ?? const <ChatMessage>[];
     _syncCachedAttachments(loadedMessages);
@@ -4927,6 +5112,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     _showScheduledMessagesSheet();
                     return;
                   }
+                  if (value == 'reminders') {
+                    _showMessageRemindersSheet();
+                    return;
+                  }
                   if (value == 'delete_self') {
                     await _deleteConversationForMe();
                     return;
@@ -5056,6 +5245,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       ],
                     ),
                   ),
+                  const PopupMenuItem(
+                    value: 'reminders',
+                    child: Row(
+                      children: [
+                        Icon(CupertinoIcons.alarm, size: 20),
+                        SizedBox(width: 10),
+                        Text('تذكيرات الرسائل'),
+                      ],
+                    ),
+                  ),
                   const PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'pin',
@@ -5153,11 +5352,99 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ),
             Column(
               children: [
-                if (isReadOnly ||
-                    (_data.pinnedMessage != null &&
-                        _data.pinnedMessage!.content.trim().isNotEmpty))
-                  SizedBox(
-                    height: MediaQuery.of(context).padding.top + kToolbarHeight,
+                ValueListenableBuilder<GlobalVoiceSession?>(
+                  valueListenable:
+                      ChatAudioPlaybackCoordinator.activeSessionNotifier,
+                  builder: (context, activeAudioSession, _) {
+                    final hasTopSpacer =
+                        activeAudioSession != null ||
+                        isReadOnly ||
+                        (_data.pinnedMessage != null &&
+                            _data.pinnedMessage!.content.trim().isNotEmpty) ||
+                        conversationReminders.isNotEmpty;
+                    if (!hasTopSpacer) return const SizedBox.shrink();
+                    return SizedBox(
+                      height:
+                          MediaQuery.of(context).padding.top + kToolbarHeight,
+                    );
+                  },
+                ),
+                GlobalMiniAudioPlayerBar(
+                  currentConversationId: widget.conversation.id,
+                  onTapSession: (session) {
+                    if (session.conversationId == widget.conversation.id) {
+                      _jumpToRepliedMessage(session.message.id);
+                    } else {
+                      final allConvs =
+                          overview?.conversations ?? const <ChatConversation>[];
+                      final targetConv = allConvs
+                          .where((c) => c.id == session.conversationId)
+                          .firstOrNull;
+                      if (targetConv != null && mounted) {
+                        Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(
+                            builder: (_) => ConversationScreen(
+                              conversation: targetConv,
+                              initialMessageId: session.message.id,
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  },
+                ),
+                if (conversationReminders.isNotEmpty)
+                  GestureDetector(
+                    onTap: _showMessageRemindersSheet,
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF9500).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFFFF9500).withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            CupertinoIcons.alarm_fill,
+                            size: 16,
+                            color: Color(0xFFFF9500),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              conversationReminders.length == 1
+                                  ? 'تذكير مجدول: ${conversationReminders.first.contentPreview} (${formatReminderDateTime(conversationReminders.first.remindAt)})'
+                                  : 'لديك ${conversationReminders.length} تذكيرات نشطة في هذه المحادثة',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: theme.brightness == Brightness.dark
+                                    ? const Color(0xFFFFB340)
+                                    : const Color(0xFFB45309),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Icon(
+                            CupertinoIcons.chevron_left,
+                            size: 14,
+                            color: theme.brightness == Brightness.dark
+                                ? const Color(0xFFFFB340)
+                                : const Color(0xFFB45309),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 if (isReadOnly)
                   Container(
@@ -5338,6 +5625,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       _lastMessageCount = messages.length;
 
                       final hasTopBanner =
+                          ChatAudioPlaybackCoordinator
+                                  .activeSessionNotifier
+                                  .value !=
+                              null ||
+                          conversationReminders.isNotEmpty ||
                           isReadOnly ||
                           (_data.pinnedMessage != null &&
                               _data.pinnedMessage!.content.trim().isNotEmpty);
@@ -5969,6 +6261,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                   ? ChatAudioAttachmentPlayer(
                                                                                       message: message,
                                                                                       isMine: isMine,
+                                                                                      conversationTitle: _data.displayTitle(
+                                                                                        authUser?.id ?? '',
+                                                                                      ),
                                                                                     )
                                                                                   : message.isImageMessage &&
                                                                                         albumMessages.length >
@@ -6217,6 +6512,17 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                           Icons.lock_rounded,
                                                                           size: 11.5,
                                                                           color: Color(0xFF10B981),
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(width: 3),
+                                                                    ],
+                                                                    if (remindedMessageIds.contains(message.id)) ...[
+                                                                      const Tooltip(
+                                                                        message: 'تم ضبط تذكير لهذه الرسالة',
+                                                                        child: Icon(
+                                                                          CupertinoIcons.alarm_fill,
+                                                                          size: 12,
+                                                                          color: Color(0xFFFF9500),
                                                                         ),
                                                                       ),
                                                                       const SizedBox(width: 3),
