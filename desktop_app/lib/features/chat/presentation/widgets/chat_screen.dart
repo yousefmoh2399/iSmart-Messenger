@@ -4193,7 +4193,13 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 appearance: appearance,
               ),
 
-              const GlobalDesktopMiniAudioPlayerBar(),
+              GlobalDesktopMiniAudioPlayerBar(
+                onTapSession: (session) {
+                  if (session.message.conversationId == _conversationId) {
+                    _scrollToMessageById(session.message.id);
+                  }
+                },
+              ),
 
               if (liveConversation.pinnedMessage?.content.trim().isNotEmpty ==
                   true)
@@ -5002,6 +5008,15 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 onSendPoll: _createPoll,
                 onSendChecklist: _createChecklist,
                 onSendGif: _openGifPicker,
+                onOpenQuickReplies: () {
+                  setState(() {
+                    if (_slashReplyQuery != null) {
+                      _slashReplyQuery = null;
+                    } else {
+                      _slashReplyQuery = '';
+                    }
+                  });
+                },
                 enabled: !isReadOnly,
               ),
             ],

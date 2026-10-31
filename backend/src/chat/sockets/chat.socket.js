@@ -29,10 +29,12 @@ const {
 const { getChatTransferForUser } = require("../services/chat-transfer.service");
 const {
   sendChatPushNotifications,
+  sendTicketPushNotifications,
 } = require("../../services/push-notification.service");
 
 const typingState = new Map();
 const typingTimeouts = new Map();
+const userReminderTimers = new Map();
 let activeIOInstance = null;
 const userSockets = new Map();
 const socketPresence = new Map();
@@ -1054,6 +1056,231 @@ function initializeChatSocketServer(httpServer) {
         success: true,
         data: { history: [] },
       });
+    });
+
+    // ── Quick Replies Cross-Device Sync (Mobile ⇄ Desktop) ─────────────────
+    socket.on("quick_replies:get", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(currentUser.id, "quickReplies").lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { quickReplies: userDoc?.quickReplies || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("quick_replies:sync", async (payload = {}, ack) => {
+      try {
+        const rawList = Array.isArray(payload.quickReplies)
+          ? payload.quickReplies
+          : [];
+        const sanitized = rawList
+          .filter((item) => item && typeof item === "object")
+          .slice(0, 150)
+          .map((item) => ({
+            id: String(item.id || `qr_${Date.now()}`).trim().slice(0, 80),
+            shortcut: String(item.shortcut || "رد").trim().slice(0, 60),
+            title: String(item.title || "رد سريع").trim().slice(0, 120),
+            content: String(item.content || "").trim().slice(0, 4000),
+            category: String(item.category || "عام").trim().slice(0, 60),
+          }))
+          .filter((item) => item.content.length > 0);
+
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { quickReplies: sanitized },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("quick_replies_updated", {
+          quickReplies: sanitized,
+          updatedAt: new Date().toISOString(),
+        });
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { quickReplies: sanitized },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    // ── Message Reminders Cross-Device Sync + Server Push ──────────────────
+    const scheduleServerRemindersForUser = async (uid) => {
+      const prevTimer = userReminderTimers.get(uid);
+      if (prevTimer) {
+        clearTimeout(prevTimer);
+        userReminderTimers.delete(uid);
+      }
+      try {
+        const u = await User.findById(uid, "messageReminders").lean();
+        const list = Array.isArray(u?.messageReminders) ? u.messageReminders : [];
+        const pending = list.filter((r) => !r.isNotified && r.remindAt);
+        if (!pending.length) return;
+
+        pending.sort(
+          (a, b) => new Date(a.remindAt).getTime() - new Date(b.remindAt).getTime(),
+        );
+        const nextItem = pending[0];
+        const delayMs = Math.max(
+          250,
+          new Date(nextItem.remindAt).getTime() - Date.now(),
+        );
+        const cappedDelay = Math.min(delayMs, 2147483647);
+
+        const timer = setTimeout(async () => {
+          userReminderTimers.delete(uid);
+          try {
+            const freshUser = await User.findById(uid, "messageReminders").lean();
+            const currentReminders = Array.isArray(freshUser?.messageReminders)
+              ? freshUser.messageReminders
+              : [];
+            const now = Date.now();
+            let changed = false;
+            const dueItems = [];
+
+            const updatedReminders = currentReminders.map((rem) => {
+              if (!rem.isNotified && new Date(rem.remindAt).getTime() <= now) {
+                changed = true;
+                const notified = { ...rem, isNotified: true };
+                dueItems.push(notified);
+                return notified;
+              }
+              return rem;
+            });
+
+            if (changed) {
+              await User.findByIdAndUpdate(uid, {
+                $set: { messageReminders: updatedReminders },
+              });
+              io.to(`user:${uid}`).emit("reminders_updated", {
+                reminders: updatedReminders,
+                dueReminders: dueItems,
+              });
+              for (const due of dueItems) {
+                const title = `⏰ تذكير برسالة من ${due.senderName || "محادثة"}`;
+                const body = due.note
+                  ? `${due.note} — "${due.messagePreview || ""}"`
+                  : due.messagePreview || "لديك تذكير برسالة مجدولة";
+                sendTicketPushNotifications({
+                  recipientUserIds: [uid],
+                  title,
+                  body,
+                  action: "message_reminder",
+                }).catch(() => {});
+              }
+            }
+            await scheduleServerRemindersForUser(uid);
+          } catch (_) {}
+        }, cappedDelay);
+
+        userReminderTimers.set(uid, timer);
+      } catch (_) {}
+    };
+
+    // Ensure server timer is armed when user connects
+    scheduleServerRemindersForUser(currentUser.id).catch(() => {});
+
+    socket.on("reminders:get", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(
+          currentUser.id,
+          "messageReminders",
+        ).lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { reminders: userDoc?.messageReminders || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("reminders:sync", async (payload = {}, ack) => {
+      try {
+        const rawList = Array.isArray(payload.reminders) ? payload.reminders : [];
+        const sanitized = rawList
+          .filter((item) => item && typeof item === "object")
+          .slice(0, 200)
+          .map((item) => ({
+            id: String(item.id || `rem_${Date.now()}`).trim().slice(0, 80),
+            conversationId: String(item.conversationId || "").trim().slice(0, 80),
+            conversationTitle: String(item.conversationTitle || "")
+              .trim()
+              .slice(0, 160),
+            messageId: String(item.messageId || "").trim().slice(0, 80),
+            senderName: String(item.senderName || "").trim().slice(0, 120),
+            messagePreview: String(item.messagePreview || "")
+              .trim()
+              .slice(0, 1000),
+            remindAt: item.remindAt ? new Date(item.remindAt) : new Date(),
+            createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+            note: String(item.note || "").trim().slice(0, 500),
+            isNotified: item.isNotified === true,
+          }))
+          .filter((item) => item.id && item.messageId);
+
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { messageReminders: sanitized },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("reminders_updated", {
+          reminders: sanitized,
+          updatedAt: new Date().toISOString(),
+        });
+
+        await scheduleServerRemindersForUser(currentUser.id);
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { reminders: sanitized },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    // ── Workspace Tasks / Docs Cross-Device Sync (Mobile ⇄ Desktop) ────────
+    socket.on("workspace:get_docs", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(currentUser.id, "workspaceDocs").lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { docs: userDoc?.workspaceDocs || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("workspace:sync_docs", async (payload = {}, ack) => {
+      try {
+        const docs = Array.isArray(payload.docs)
+          ? payload.docs.slice(0, 300)
+          : [];
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { workspaceDocs: docs },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("workspace_docs_updated", {
+          docs,
+          updatedAt: new Date().toISOString(),
+        });
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { docs },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("print_request", (payload = {}, ack) => {

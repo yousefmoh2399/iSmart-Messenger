@@ -9,6 +9,7 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../../workspace/models/workspace_doc.dart';
 import '../../../workspace/presentation/workspace_controller.dart';
+import '../../data/chat_socket_service.dart';
 import '../../models/chat_models.dart';
 
 class AppColors {
@@ -65,6 +66,7 @@ class DesktopMessageReminder {
     'messageId': messageId,
     'senderName': senderName,
     'messagePreview': messagePreview,
+    'contentPreview': messagePreview,
     'remindAt': remindAt.toIso8601String(),
     'createdAt': createdAt.toIso8601String(),
     'note': note,
@@ -78,7 +80,8 @@ class DesktopMessageReminder {
       conversationTitle: (json['conversationTitle'] ?? '').toString(),
       messageId: (json['messageId'] ?? '').toString(),
       senderName: (json['senderName'] ?? '').toString(),
-      messagePreview: (json['messagePreview'] ?? '').toString(),
+      messagePreview:
+          (json['messagePreview'] ?? json['contentPreview'] ?? '').toString(),
       remindAt:
           DateTime.tryParse((json['remindAt'] ?? '').toString())?.toLocal() ??
           DateTime.now(),
@@ -100,35 +103,110 @@ final desktopMessageRemindersProvider =
 class DesktopMessageRemindersController
     extends StateNotifier<List<DesktopMessageReminder>> {
   DesktopMessageRemindersController(this._ref) : super(const []) {
+    _listenToSocketSync();
     _load();
   }
 
   final Ref _ref;
   Timer? _nextDueTimer;
+  StreamSubscription<ChatSocketEvent>? _socketSub;
   static const _storageKey = 'ismart_desktop_message_reminders_v1';
+
+  void _listenToSocketSync() {
+    _socketSub?.cancel();
+    final socketService = _ref.read(chatSocketServiceProvider);
+    _socketSub = socketService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'reminders_updated') {
+        final rawList = event.payload['reminders'];
+        if (rawList is List) {
+          final parsed = rawList
+              .whereType<Map>()
+              .map(
+                (e) => DesktopMessageReminder.fromJson(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .where((e) => e.id.isNotEmpty)
+              .toList(growable: false);
+          unawaited(_save(parsed, syncToServer: false));
+        }
+      } else if (event.type == 'socket_connected') {
+        unawaited(_pullFromServer());
+      }
+    });
+  }
+
+  Future<void> _pullFromServer() async {
+    try {
+      final sock = _ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emitWithAck('reminders:get', const <String, dynamic>{}, ack: (res) {
+        if (!mounted) return;
+        try {
+          if (res is Map && res['ok'] == true && res['data'] is Map) {
+            final raw = (res['data'] as Map)['reminders'];
+            if (raw is List && raw.isNotEmpty) {
+              final remoteList = raw
+                  .whereType<Map>()
+                  .map(
+                    (e) => DesktopMessageReminder.fromJson(
+                      Map<String, dynamic>.from(e),
+                    ),
+                  )
+                  .where((e) => e.id.isNotEmpty)
+                  .toList(growable: false);
+              unawaited(_save(remoteList, syncToServer: false));
+              return;
+            } else if (state.isNotEmpty) {
+              unawaited(_pushToServer(state));
+            }
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _pushToServer(List<DesktopMessageReminder> items) async {
+    try {
+      final sock = _ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emit('reminders:sync', {
+        'reminders': items.map((e) => e.toJson()).toList(),
+      });
+    } catch (_) {}
+  }
 
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_storageKey);
-      if (raw == null || raw.trim().isEmpty) return;
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return;
-      final list = decoded
-          .whereType<Map>()
-          .map(
-            (e) =>
-                DesktopMessageReminder.fromJson(Map<String, dynamic>.from(e)),
-          )
-          .where((e) => e.id.isNotEmpty)
-          .toList(growable: false);
-      if (!mounted) return;
-      state = list;
-      _scheduleNextTimer();
+      if (raw != null && raw.trim().isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          final list = decoded
+              .whereType<Map>()
+              .map(
+                (e) => DesktopMessageReminder.fromJson(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .where((e) => e.id.isNotEmpty)
+              .toList(growable: false);
+          if (mounted) {
+            state = list;
+            _scheduleNextTimer();
+          }
+        }
+      }
     } catch (_) {}
+    unawaited(_pullFromServer());
   }
 
-  Future<void> _save(List<DesktopMessageReminder> next) async {
+  Future<void> _save(
+    List<DesktopMessageReminder> next, {
+    bool syncToServer = true,
+  }) async {
     state = next;
     _scheduleNextTimer();
     try {
@@ -138,6 +216,9 @@ class DesktopMessageRemindersController
         jsonEncode(next.map((e) => e.toJson()).toList()),
       );
     } catch (_) {}
+    if (syncToServer) {
+      unawaited(_pushToServer(next));
+    }
   }
 
   void _scheduleNextTimer() {
@@ -223,6 +304,7 @@ class DesktopMessageRemindersController
   @override
   void dispose() {
     _nextDueTimer?.cancel();
+    _socketSub?.cancel();
     super.dispose();
   }
 }

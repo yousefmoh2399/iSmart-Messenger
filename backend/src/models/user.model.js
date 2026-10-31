@@ -183,6 +183,45 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 20,
     },
+    quickReplies: {
+      type: [
+        new mongoose.Schema(
+          {
+            id: { type: String, required: true },
+            shortcut: { type: String, required: true },
+            title: { type: String, required: true },
+            content: { type: String, required: true },
+            category: { type: String, default: "عام" },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    messageReminders: {
+      type: [
+        new mongoose.Schema(
+          {
+            id: { type: String, required: true },
+            conversationId: { type: String, required: true },
+            conversationTitle: { type: String, default: "" },
+            messageId: { type: String, required: true },
+            senderName: { type: String, default: "" },
+            messagePreview: { type: String, default: "" },
+            remindAt: { type: Date, required: true, index: true },
+            createdAt: { type: Date, default: Date.now },
+            note: { type: String, default: "" },
+            isNotified: { type: Boolean, default: false },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    workspaceDocs: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
   },
   {
     timestamps: true,

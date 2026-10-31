@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../shared/providers/providers.dart';
+import '../../data/chat_socket_service.dart';
 import '../../models/chat_models.dart';
 
 /// Model representing a scheduled reminder for a specific chat message.
@@ -59,22 +60,25 @@ class ChatMessageReminder {
         'conversationTitle': conversationTitle,
         'senderName': senderName,
         'contentPreview': contentPreview,
+        'messagePreview': contentPreview,
         'remindAt': remindAt.toIso8601String(),
         'createdAt': createdAt.toIso8601String(),
         if (note != null && note!.trim().isNotEmpty) 'note': note!.trim(),
       };
 
   factory ChatMessageReminder.fromJson(Map<String, dynamic> json) {
+    final preview = (json['contentPreview'] ?? json['messagePreview'] ?? '')
+        .toString();
     return ChatMessageReminder(
       id: json['id']?.toString() ?? '',
       messageId: json['messageId']?.toString() ?? '',
       conversationId: json['conversationId']?.toString() ?? '',
       conversationTitle: json['conversationTitle']?.toString() ?? 'محادثة',
       senderName: json['senderName']?.toString() ?? 'رسالة',
-      contentPreview: json['contentPreview']?.toString() ?? '',
-      remindAt: DateTime.tryParse(json['remindAt']?.toString() ?? '') ??
+      contentPreview: preview,
+      remindAt: DateTime.tryParse(json['remindAt']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
-      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
       note: json['note']?.toString(),
     );
@@ -93,19 +97,94 @@ class ChatMessageRemindersController
       ValueNotifier<ChatMessageReminder?>(null);
 
   Timer? _nextReminderTimer;
+  StreamSubscription<ChatSocketEvent>? _socketSub;
 
   @override
   Future<List<ChatMessageReminder>> build() async {
     ref.onDispose(() {
       _nextReminderTimer?.cancel();
+      _socketSub?.cancel();
     });
     _nextReminderTimer?.cancel();
+    _listenToSocketSync();
 
     final loaded = await _loadFromStorage();
     _scheduleNextDueTimer(loaded);
+    unawaited(_pullFromServer(loaded));
     // Run an immediate check in case any reminder became due while the app was closed
     unawaited(Future<void>.microtask(_checkDueReminders));
     return loaded;
+  }
+
+  void _listenToSocketSync() {
+    _socketSub?.cancel();
+    final socketService = ref.read(chatSocketServiceProvider);
+    _socketSub = socketService.events.listen((event) {
+      if (event.type == 'reminders_updated') {
+        final rawList = event.payload['reminders'];
+        if (rawList is List) {
+          final parsed = rawList
+              .whereType<Map>()
+              .where((m) => m['isNotified'] != true)
+              .map(
+                (e) =>
+                    ChatMessageReminder.fromJson(Map<String, dynamic>.from(e)),
+              )
+              .where((r) => r.messageId.isNotEmpty)
+              .toList()
+            ..sort((a, b) => a.remindAt.compareTo(b.remindAt));
+          state = AsyncData(parsed);
+          _scheduleNextDueTimer(parsed);
+          unawaited(_saveToStorage(parsed, syncToServer: false));
+        }
+      } else if (event.type == 'socket_connected') {
+        final current = state.valueOrNull ?? const <ChatMessageReminder>[];
+        unawaited(_pullFromServer(current));
+      }
+    });
+  }
+
+  Future<void> _pullFromServer(List<ChatMessageReminder> fallbackLocal) async {
+    try {
+      final sock = ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emitWithAck('reminders:get', const <String, dynamic>{}, ack: (res) {
+        try {
+          if (res is Map && res['ok'] == true && res['data'] is Map) {
+            final raw = (res['data'] as Map)['reminders'];
+            if (raw is List && raw.isNotEmpty) {
+              final remoteList = raw
+                  .whereType<Map>()
+                  .where((m) => m['isNotified'] != true)
+                  .map(
+                    (e) => ChatMessageReminder.fromJson(
+                      Map<String, dynamic>.from(e),
+                    ),
+                  )
+                  .where((r) => r.messageId.isNotEmpty)
+                  .toList()
+                ..sort((a, b) => a.remindAt.compareTo(b.remindAt));
+              state = AsyncData(remoteList);
+              _scheduleNextDueTimer(remoteList);
+              unawaited(_saveToStorage(remoteList, syncToServer: false));
+              return;
+            } else if (fallbackLocal.isNotEmpty) {
+              unawaited(_pushToServer(fallbackLocal));
+            }
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _pushToServer(List<ChatMessageReminder> items) async {
+    try {
+      final sock = ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emit('reminders:sync', {
+        'reminders': items.map((e) => e.toJson()).toList(),
+      });
+    } catch (_) {}
   }
 
   void _scheduleNextDueTimer(List<ChatMessageReminder> items) {
@@ -147,12 +226,18 @@ class ChatMessageRemindersController
     }
   }
 
-  Future<void> _saveToStorage(List<ChatMessageReminder> items) async {
+  Future<void> _saveToStorage(
+    List<ChatMessageReminder> items, {
+    bool syncToServer = true,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
       await prefs.setString(_storageKey, encoded);
     } catch (_) {}
+    if (syncToServer) {
+      unawaited(_pushToServer(items));
+    }
   }
 
   Future<void> _checkDueReminders() async {

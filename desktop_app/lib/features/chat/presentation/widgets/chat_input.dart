@@ -19,6 +19,7 @@ class ChatInput extends StatefulWidget {
     this.onSendPoll,
     this.onSendChecklist,
     this.onSendGif,
+    this.onOpenQuickReplies,
     this.isEditing = false,
     this.isUploading = false,
     this.uploadProgress = 0,
@@ -39,6 +40,7 @@ class ChatInput extends StatefulWidget {
   final VoidCallback? onSendPoll;
   final VoidCallback? onSendChecklist;
   final VoidCallback? onSendGif;
+  final VoidCallback? onOpenQuickReplies;
   final bool isEditing;
   final bool isUploading;
   final double uploadProgress;
@@ -374,6 +376,16 @@ class _ChatInputState extends State<ChatInput> {
                       : null,
                   icon: const Icon(Icons.emoji_emotions_rounded),
                 ),
+                if (widget.onOpenQuickReplies != null) ...[
+                  const SizedBox(width: 2),
+                  IconButton.filledTonal(
+                    tooltip: 'الردود السريعة والقوالب الجاهزة (/)',
+                    onPressed: widget.enabled && !widget.isUploading
+                        ? widget.onOpenQuickReplies
+                        : null,
+                    icon: const Icon(Icons.bolt_rounded),
+                  ),
+                ],
                 const SizedBox(width: 6),
                 Expanded(
                   child: ConstrainedBox(

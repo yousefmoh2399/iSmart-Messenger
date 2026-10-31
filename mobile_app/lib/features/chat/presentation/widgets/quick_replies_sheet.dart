@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/cupertino.dart';
@@ -5,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../../shared/providers/providers.dart';
+import '../../data/chat_socket_service.dart';
 
 /// Represents a customizable quick reply / slash command template.
 class QuickReplyTemplate {
@@ -130,10 +134,98 @@ class QuickReplyTemplate {
 class QuickRepliesController extends AsyncNotifier<List<QuickReplyTemplate>> {
   static const String _storageKey = 'chat_quick_replies_v1';
   static const String _seededKey = 'chat_quick_replies_seeded_v1';
+  StreamSubscription<ChatSocketEvent>? _socketSub;
 
   @override
   Future<List<QuickReplyTemplate>> build() async {
-    return _loadFromStorage();
+    _listenToSocketSync();
+    ref.onDispose(() => _socketSub?.cancel());
+    final local = await _loadFromStorage();
+    unawaited(_pullFromServer(local));
+    return local;
+  }
+
+  void _listenToSocketSync() {
+    _socketSub?.cancel();
+    final socketService = ref.read(chatSocketServiceProvider);
+    _socketSub = socketService.events.listen((event) {
+      if (event.type == 'quick_replies_updated') {
+        final rawList = event.payload['quickReplies'];
+        if (rawList is List) {
+          final parsed = rawList
+              .whereType<Map>()
+              .map(
+                (e) =>
+                    QuickReplyTemplate.fromJson(Map<String, dynamic>.from(e)),
+              )
+              .where((item) => item.content.trim().isNotEmpty)
+              .toList();
+          if (parsed.isNotEmpty) {
+            state = AsyncData(parsed);
+            unawaited(_saveToStorage(parsed, syncToServer: false));
+          }
+        }
+      } else if (event.type == 'socket_connected') {
+        final current = state.valueOrNull ?? const <QuickReplyTemplate>[];
+        unawaited(_pullFromServer(current));
+      }
+    });
+  }
+
+  Future<void> _pullFromServer(List<QuickReplyTemplate> fallbackLocal) async {
+    try {
+      final sock = ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      final completer = Completer<void>();
+      sock.emitWithAck('quick_replies:get', const <String, dynamic>{}, ack: (res) {
+        try {
+          if (res is Map && res['ok'] == true && res['data'] is Map) {
+            final raw = (res['data'] as Map)['quickReplies'];
+            if (raw is List && raw.isNotEmpty) {
+              final remoteList = raw
+                  .whereType<Map>()
+                  .map(
+                    (e) => QuickReplyTemplate.fromJson(
+                      Map<String, dynamic>.from(e),
+                    ),
+                  )
+                  .where((item) => item.content.trim().isNotEmpty)
+                  .toList();
+              if (remoteList.isNotEmpty) {
+                state = AsyncData(remoteList);
+                unawaited(_saveToStorage(remoteList, syncToServer: false));
+                completer.complete();
+                return;
+              }
+            } else if (fallbackLocal.isNotEmpty) {
+              unawaited(_pushToServer(fallbackLocal));
+            }
+          }
+        } catch (_) {}
+        if (!completer.isCompleted) completer.complete();
+      });
+      await completer.future.timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
+
+  Future<void> _pushToServer(List<QuickReplyTemplate> items) async {
+    try {
+      final sock = ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emit('quick_replies:sync', {
+        'quickReplies': items
+            .map(
+              (e) => {
+                'id': e.id,
+                'shortcut': e.cleanShortcut,
+                'title': e.cleanShortcut,
+                'content': e.content,
+                'category': 'عام',
+              },
+            )
+            .toList(),
+      });
+    } catch (_) {}
   }
 
   Future<List<QuickReplyTemplate>> _loadFromStorage() async {
@@ -144,7 +236,7 @@ class QuickRepliesController extends AsyncNotifier<List<QuickReplyTemplate>> {
 
       if ((raw == null || raw.isEmpty) && !alreadySeeded) {
         final defaults = QuickReplyTemplate.defaultTemplates();
-        await _saveToStorage(defaults, markSeeded: true);
+        await _saveToStorage(defaults, markSeeded: true, syncToServer: false);
         return defaults;
       }
 
@@ -171,6 +263,7 @@ class QuickRepliesController extends AsyncNotifier<List<QuickReplyTemplate>> {
   Future<void> _saveToStorage(
     List<QuickReplyTemplate> items, {
     bool markSeeded = true,
+    bool syncToServer = true,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -180,6 +273,9 @@ class QuickRepliesController extends AsyncNotifier<List<QuickReplyTemplate>> {
         await prefs.setBool(_seededKey, true);
       }
     } catch (_) {}
+    if (syncToServer) {
+      unawaited(_pushToServer(items));
+    }
   }
 
   String _normalizeShortcut(String shortcut, String content) {

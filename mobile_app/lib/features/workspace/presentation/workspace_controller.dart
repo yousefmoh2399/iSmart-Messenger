@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/providers/providers.dart';
+import '../../chat/data/chat_socket_service.dart';
 import '../data/workspace_repository.dart';
 import '../models/workspace_doc.dart';
 import 'workspace_templates.dart';
@@ -14,31 +17,113 @@ final workspaceDocsProvider =
     final repo = ref.watch(workspaceRepositoryProvider);
     final user = ref.watch(currentUserProvider);
     final userId = user?.id ?? '';
-    return WorkspaceDocsNotifier(repo: repo, userId: userId);
+    return WorkspaceDocsNotifier(ref: ref, repo: repo, userId: userId);
   },
 );
 
 class WorkspaceDocsNotifier extends StateNotifier<AsyncValue<List<WorkspaceDoc>>> {
-  WorkspaceDocsNotifier({required this.repo, required this.userId})
-      : super(const AsyncValue.loading()) {
+  WorkspaceDocsNotifier({
+    required this.ref,
+    required this.repo,
+    required this.userId,
+  }) : super(const AsyncValue.loading()) {
     if (userId.isNotEmpty) {
+      _listenToSocketSync();
       loadDocs();
     } else {
       state = const AsyncValue.data([]);
     }
   }
 
+  final Ref ref;
   final WorkspaceRepository repo;
   final String userId;
+  StreamSubscription<ChatSocketEvent>? _socketSub;
+
+  void _listenToSocketSync() {
+    _socketSub?.cancel();
+    final socketService = ref.read(chatSocketServiceProvider);
+    _socketSub = socketService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'workspace_docs_updated') {
+        final rawList = event.payload['docs'];
+        if (rawList is List) {
+          final parsed = rawList
+              .whereType<Map>()
+              .map((e) => WorkspaceDoc.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+          state = AsyncValue.data(parsed);
+          unawaited(repo.saveDocs(userId, parsed));
+        }
+      } else if (event.type == 'socket_connected') {
+        unawaited(_pullFromServer());
+      }
+    });
+  }
+
+  Future<void> _pullFromServer() async {
+    try {
+      final sock = ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emitWithAck('workspace:get_docs', const <String, dynamic>{}, ack: (res) {
+        if (!mounted) return;
+        try {
+          if (res is Map && res['ok'] == true && res['data'] is Map) {
+            final raw = (res['data'] as Map)['docs'];
+            if (raw is List && raw.isNotEmpty) {
+              final remoteDocs = raw
+                  .whereType<Map>()
+                  .map(
+                    (e) => WorkspaceDoc.fromJson(Map<String, dynamic>.from(e)),
+                  )
+                  .toList();
+              if (remoteDocs.isNotEmpty) {
+                state = AsyncValue.data(remoteDocs);
+                unawaited(repo.saveDocs(userId, remoteDocs));
+                return;
+              }
+            } else {
+              final localDocs = state.valueOrNull ?? const <WorkspaceDoc>[];
+              if (localDocs.isNotEmpty) {
+                unawaited(_pushToServer(localDocs));
+              }
+            }
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _pushToServer(List<WorkspaceDoc> docs) async {
+    try {
+      final sock = ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emit('workspace:sync_docs', {
+        'docs': docs.map((d) => d.toJson()).toList(),
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _persistAndSync(List<WorkspaceDoc> docs) async {
+    await repo.saveDocs(userId, docs);
+    unawaited(_pushToServer(docs));
+  }
 
   Future<void> loadDocs() async {
     state = const AsyncValue.loading();
     try {
       final docs = await repo.getDocs(userId);
       state = AsyncValue.data(docs);
+      unawaited(_pullFromServer());
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
+  }
+
+  @override
+  void dispose() {
+    _socketSub?.cancel();
+    super.dispose();
   }
 
   Future<WorkspaceDoc> createDoc({
@@ -66,7 +151,7 @@ class WorkspaceDocsNotifier extends StateNotifier<AsyncValue<List<WorkspaceDoc>>
 
     final updated = [newDoc, ...current];
     state = AsyncValue.data(updated);
-    await repo.saveDocs(userId, updated);
+    await _persistAndSync(updated);
     return newDoc;
   }
 
@@ -83,7 +168,7 @@ class WorkspaceDocsNotifier extends StateNotifier<AsyncValue<List<WorkspaceDoc>>
 
     final updated = [newDoc, ...current];
     state = AsyncValue.data(updated);
-    await repo.saveDocs(userId, updated);
+    await _persistAndSync(updated);
     return newDoc;
   }
 
@@ -104,7 +189,7 @@ class WorkspaceDocsNotifier extends StateNotifier<AsyncValue<List<WorkspaceDoc>>
     });
 
     state = AsyncValue.data(next);
-    await repo.saveDocs(userId, next);
+    await _persistAndSync(next);
   }
 
   Future<void> togglePin(String docId) async {
@@ -170,13 +255,13 @@ class WorkspaceDocsNotifier extends StateNotifier<AsyncValue<List<WorkspaceDoc>>
 
     final updated = [duplicated, ...current];
     state = AsyncValue.data(updated);
-    await repo.saveDocs(userId, updated);
+    await _persistAndSync(updated);
   }
 
   Future<void> deleteDoc(String docId) async {
     final current = state.valueOrNull ?? [];
     final updated = current.where((d) => d.id != docId).toList();
     state = AsyncValue.data(updated);
-    await repo.saveDocs(userId, updated);
+    await _persistAndSync(updated);
   }
 }

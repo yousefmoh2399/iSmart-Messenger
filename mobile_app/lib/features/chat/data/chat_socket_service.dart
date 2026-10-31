@@ -22,6 +22,8 @@ class ChatSocketService {
 
   Stream<ChatSocketEvent> get events => _eventsController.stream;
 
+  io.Socket? get socket => _socket;
+
   bool get isConnected => _socket?.connected == true;
 
   bool _isSessionExpiredError(Object? error) {
@@ -234,6 +236,9 @@ class ChatSocketService {
     bind('stickers_updated');
     bind('clipboard_synced');
     bind('clipboard_history_updated');
+    bind('quick_replies_updated');
+    bind('reminders_updated');
+    bind('workspace_docs_updated');
 
     socket.connect();
     _socket = socket;

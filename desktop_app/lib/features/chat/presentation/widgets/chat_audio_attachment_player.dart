@@ -208,7 +208,12 @@ class DesktopAudioPlaybackCoordinator {
 /// Sleek Telegram-style floating top bar for Desktop that keeps voice notes playing
 /// even when switching conversations.
 class GlobalDesktopMiniAudioPlayerBar extends StatelessWidget {
-  const GlobalDesktopMiniAudioPlayerBar({super.key});
+  const GlobalDesktopMiniAudioPlayerBar({
+    super.key,
+    this.onTapSession,
+  });
+
+  final ValueChanged<GlobalDesktopVoiceSession>? onTapSession;
 
   String _formatDuration(Duration value) {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -261,29 +266,49 @@ class GlobalDesktopMiniAudioPlayerBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.graphic_eq_rounded,
-                          size: 15,
-                          color: _kAudioPrimary,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'رسالة صوتية • ${session.senderName}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w800,
-                              color: isDark
-                                  ? Colors.white
-                                  : const Color(0xFF0F172A),
+                    InkWell(
+                      onTap: onTapSession != null
+                          ? () => onTapSession!(session)
+                          : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.graphic_eq_rounded,
+                              size: 15,
+                              color: _kAudioPrimary,
                             ),
-                          ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'رسالة صوتية • ${session.senderName}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF0F172A),
+                                ),
+                              ),
+                            ),
+                            if (onTapSession != null) ...[
+                              const SizedBox(width: 6),
+                              const Text(
+                                'الانتقال للرسالة ↗',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: _kAudioPrimary,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 4),
                     ValueListenableBuilder<Duration>(

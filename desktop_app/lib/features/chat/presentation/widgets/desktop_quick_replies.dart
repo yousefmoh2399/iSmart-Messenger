@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../../shared/providers/providers.dart';
+import '../../data/chat_socket_service.dart';
 
 class AppColors {
   static const Color primary = Color(0xFF007AFF);
@@ -100,38 +104,125 @@ const List<QuickReplyTemplate> kDefaultQuickReplies = [
 
 final desktopQuickRepliesProvider =
     StateNotifierProvider<DesktopQuickRepliesController, List<QuickReplyTemplate>>(
-      (ref) => DesktopQuickRepliesController(),
+      (ref) => DesktopQuickRepliesController(ref),
     );
 
 class DesktopQuickRepliesController
     extends StateNotifier<List<QuickReplyTemplate>> {
-  DesktopQuickRepliesController() : super(kDefaultQuickReplies) {
+  DesktopQuickRepliesController(this._ref) : super(kDefaultQuickReplies) {
+    _listenToSocketSync();
     _load();
   }
 
+  final Ref _ref;
+  StreamSubscription<ChatSocketEvent>? _socketSub;
   static const _storageKey = 'ismart_quick_replies_v1';
+
+  void _listenToSocketSync() {
+    _socketSub?.cancel();
+    final socketService = _ref.read(chatSocketServiceProvider);
+    _socketSub = socketService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'quick_replies_updated') {
+        final rawList = event.payload['quickReplies'];
+        if (rawList is List) {
+          final parsed = rawList
+              .whereType<Map>()
+              .map(
+                (item) => QuickReplyTemplate.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where(
+                (item) => item.id.isNotEmpty && item.content.trim().isNotEmpty,
+              )
+              .toList(growable: false);
+          if (parsed.isNotEmpty) {
+            unawaited(_persist(parsed, syncToServer: false));
+          }
+        }
+      } else if (event.type == 'socket_connected') {
+        unawaited(_pullFromServer());
+      }
+    });
+  }
+
+  Future<void> _pullFromServer() async {
+    try {
+      final sock = _ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emitWithAck('quick_replies:get', const <String, dynamic>{}, ack: (res) {
+        if (!mounted) return;
+        try {
+          if (res is Map && res['ok'] == true && res['data'] is Map) {
+            final raw = (res['data'] as Map)['quickReplies'];
+            if (raw is List && raw.isNotEmpty) {
+              final remoteList = raw
+                  .whereType<Map>()
+                  .map(
+                    (item) => QuickReplyTemplate.fromJson(
+                      Map<String, dynamic>.from(item),
+                    ),
+                  )
+                  .where(
+                    (item) =>
+                        item.id.isNotEmpty && item.content.trim().isNotEmpty,
+                  )
+                  .toList(growable: false);
+              if (remoteList.isNotEmpty) {
+                unawaited(_persist(remoteList, syncToServer: false));
+                return;
+              }
+            } else if (state.isNotEmpty) {
+              unawaited(_pushToServer(state));
+            }
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _pushToServer(List<QuickReplyTemplate> items) async {
+    try {
+      final sock = _ref.read(chatSocketServiceProvider).socket;
+      if (sock == null || !sock.connected) return;
+      sock.emit('quick_replies:sync', {
+        'quickReplies': items.map((e) => e.toJson()).toList(),
+      });
+    } catch (_) {}
+  }
 
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_storageKey);
-      if (raw == null || raw.trim().isEmpty) {
-        return;
-      }
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return;
-      final parsed = decoded
-          .whereType<Map>()
-          .map((item) => QuickReplyTemplate.fromJson(Map<String, dynamic>.from(item)))
-          .where((item) => item.id.isNotEmpty && item.content.trim().isNotEmpty)
-          .toList(growable: false);
-      if (parsed.isNotEmpty && mounted) {
-        state = parsed;
+      if (raw != null && raw.trim().isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          final parsed = decoded
+              .whereType<Map>()
+              .map(
+                (item) => QuickReplyTemplate.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .where(
+                (item) => item.id.isNotEmpty && item.content.trim().isNotEmpty,
+              )
+              .toList(growable: false);
+          if (parsed.isNotEmpty && mounted) {
+            state = parsed;
+          }
+        }
       }
     } catch (_) {}
+    unawaited(_pullFromServer());
   }
 
-  Future<void> _persist(List<QuickReplyTemplate> next) async {
+  Future<void> _persist(
+    List<QuickReplyTemplate> next, {
+    bool syncToServer = true,
+  }) async {
     state = next;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -140,6 +231,15 @@ class DesktopQuickRepliesController
         jsonEncode(next.map((e) => e.toJson()).toList()),
       );
     } catch (_) {}
+    if (syncToServer) {
+      unawaited(_pushToServer(next));
+    }
+  }
+
+  @override
+  void dispose() {
+    _socketSub?.cancel();
+    super.dispose();
   }
 
   Future<void> addReply({
