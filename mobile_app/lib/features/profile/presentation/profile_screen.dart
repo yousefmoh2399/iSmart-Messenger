@@ -19,6 +19,7 @@ import '../../chat/presentation/conversation_screen.dart';
 import '../../chat/presentation/favorite_messages_screen.dart';
 import '../../chat/presentation/widgets/create_chat_folder_dialog.dart';
 import '../../chat/presentation/widgets/message_reminder_sheet.dart';
+import '../../chat/presentation/widgets/quick_replies_sheet.dart';
 import '../../files/presentation/my_files_screen.dart';
 import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
 import '../../printers/presentation/printer_monitoring_screen.dart';
@@ -908,6 +909,19 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => const FavoriteMessagesScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _AppleTile(
+                  icon: CupertinoIcons.bolt_horizontal_circle_fill,
+                  iconColor: const Color(0xFF007AFF),
+                  label: 'الردود السريعة والقوالب الجاهزة (/)',
+                  subtitle: 'إضافة وتخصيص ردودك الجاهزة التي تظهر عند كتابة / في الشات',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const QuickRepliesManagementScreen(),
                       ),
                     );
                   },

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/features/chat/models/chat_models.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/chat_audio_attachment_player.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/message_reminder_sheet.dart';
+import 'package:mobile_app/features/chat/presentation/widgets/quick_replies_sheet.dart';
 
 void main() {
   group('ChatMessageReminder', () {
@@ -99,6 +100,32 @@ void main() {
         ChatAudioPlaybackCoordinator.activePlayerNotifier.value,
         isNull,
       );
+    });
+  });
+
+  group('QuickReplyTemplate', () {
+    test('normalizes shortcut, serializes, and matches slash queries', () {
+      final template = QuickReplyTemplate(
+        id: 'qr_1',
+        shortcut: '/استلام',
+        content: 'تم الاستلام وجاري المراجعة',
+        createdAt: DateTime.utc(2026, 10, 31, 10, 0),
+        usageCount: 3,
+      );
+
+      expect(template.cleanShortcut, 'استلام');
+      expect(template.triggerCommand, '/استلام');
+      expect(template.matchesQuery(''), isTrue);
+      expect(template.matchesQuery('استلام'), isTrue);
+      expect(template.matchesQuery('/است'), isTrue);
+      expect(template.matchesQuery('المراجعة'), isTrue);
+      expect(template.matchesQuery('غير_موجود'), isFalse);
+
+      final restored = QuickReplyTemplate.fromJson(template.toJson());
+      expect(restored.id, 'qr_1');
+      expect(restored.cleanShortcut, 'استلام');
+      expect(restored.content, 'تم الاستلام وجاري المراجعة');
+      expect(restored.usageCount, 3);
     });
   });
 }

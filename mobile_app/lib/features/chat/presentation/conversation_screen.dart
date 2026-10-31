@@ -50,6 +50,7 @@ import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/gif_picker_panel.dart';
 import 'widgets/message_reminder_sheet.dart';
 import 'widgets/poll_creator_dialog.dart';
+import 'widgets/quick_replies_sheet.dart';
 import 'widgets/scheduled_messages_list.dart';
 import 'widgets/whatsapp_reaction_picker.dart';
 import 'widgets/chat_remote_search_sheet.dart';
@@ -188,6 +189,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   String? _mentionQuery;
   List<ChatDirectoryUser> _mentionResults = [];
+  String? _slashCommandQuery;
 
   ChatConversation get _data => _conversation ?? widget.conversation;
   bool get _selectionMode => _selectedMessageIds.isNotEmpty;
@@ -644,35 +646,44 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   void _onMessageTextChanged() {
-    if (_data.type != 'group' && _data.type != 'department') return;
     final text = _messageController.text;
     final selection = _messageController.selection;
-    if (selection.baseOffset >= 0 && selection.baseOffset <= text.length) {
-      final textBeforeCursor = text.substring(0, selection.baseOffset);
-      final match = RegExp(r'@(\S*)$').firstMatch(textBeforeCursor);
-      if (match != null) {
-        final query = match.group(1)!;
-        _updateMentionQuery(query);
-      } else {
-        if (_mentionQuery != null) {
-          setState(() => _mentionQuery = null);
-        }
+    final cursorOffset =
+        (selection.baseOffset >= 0 && selection.baseOffset <= text.length)
+            ? selection.baseOffset
+            : text.length;
+    final textBeforeCursor = text.substring(0, cursorOffset);
+
+    // 1. Slash command detection (works in all conversations: direct, group, department, broadcast)
+    final slashMatch = RegExp(r'(?:^|\s)/([^\s/]*)$').firstMatch(textBeforeCursor);
+    final nextSlashQuery = slashMatch?.group(1);
+
+    // 2. Mention detection (for group and department conversations)
+    String? nextMentionQuery;
+    var nextMentionResults = _mentionResults;
+    if (_data.type == 'group' || _data.type == 'department') {
+      final mentionMatch = RegExp(r'@(\S*)$').firstMatch(textBeforeCursor);
+      if (mentionMatch != null) {
+        final query = mentionMatch.group(1)!;
+        final lowerQuery = query.toLowerCase();
+        nextMentionQuery = query;
+        nextMentionResults = _data.members.where((m) {
+          return m.displayName.toLowerCase().contains(lowerQuery) ||
+              m.username.toLowerCase().contains(lowerQuery);
+        }).toList();
       }
     }
-  }
 
-  void _updateMentionQuery(String query) {
-    final lowerQuery = query.toLowerCase();
-    final allMembers = _data.members;
-    final filtered = allMembers.where((m) {
-      return m.displayName.toLowerCase().contains(lowerQuery) ||
-          m.username.toLowerCase().contains(lowerQuery);
-    }).toList();
-
-    setState(() {
-      _mentionQuery = query;
-      _mentionResults = filtered;
-    });
+    if (_slashCommandQuery != nextSlashQuery ||
+        _mentionQuery != nextMentionQuery) {
+      setState(() {
+        _slashCommandQuery = nextSlashQuery;
+        _mentionQuery = nextMentionQuery;
+        if (nextMentionQuery != null) {
+          _mentionResults = nextMentionResults;
+        }
+      });
+    }
   }
 
   Future<void> _sendSpecificFile(String path) async {
@@ -992,6 +1003,49 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         );
         _mentionQuery = null;
       });
+    }
+  }
+
+  void _applyQuickReplyTemplate(
+    QuickReplyTemplate template, {
+    bool sendImmediately = false,
+  }) {
+    unawaited(
+      ref.read(quickRepliesProvider.notifier).recordUsage(template.id),
+    );
+    final text = _messageController.text;
+    final selection = _messageController.selection;
+    final cursorOffset =
+        (selection.baseOffset >= 0 && selection.baseOffset <= text.length)
+            ? selection.baseOffset
+            : text.length;
+    final textBeforeCursor = text.substring(0, cursorOffset);
+    final textAfterCursor = text.substring(cursorOffset);
+
+    final slashIndex = textBeforeCursor.lastIndexOf('/');
+    final String updatedText;
+    final int newCursorOffset;
+
+    if (slashIndex >= 0) {
+      final prefix = textBeforeCursor.substring(0, slashIndex);
+      final inserted = template.content;
+      updatedText = '$prefix$inserted$textAfterCursor';
+      newCursorOffset = prefix.length + inserted.length;
+    } else {
+      updatedText = template.content;
+      newCursorOffset = updatedText.length;
+    }
+
+    setState(() {
+      _slashCommandQuery = null;
+      _messageController.value = TextEditingValue(
+        text: updatedText,
+        selection: TextSelection.collapsed(offset: newCursorOffset),
+      );
+    });
+
+    if (sendImmediately) {
+      unawaited(_sendText());
     }
   }
 
@@ -3640,6 +3694,28 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                       );
                                     },
                                   ),
+                                  _buildWhatsAppMenuDivider(isDark),
+                                  _buildWhatsAppContextMenuItem(
+                                    title: 'حفظ كرد سريع (/)',
+                                    icon: CupertinoIcons.bolt_horizontal_circle,
+                                    onTap: () async {
+                                      final saved = await showUpsertQuickReplySheet(
+                                        context: context,
+                                        ref: ref,
+                                        initialContent: message.content.trim(),
+                                      );
+                                      if (saved != null && mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'تمت إضافة الرد السريع (${saved.triggerCommand})',
+                                            ),
+                                            duration: const Duration(seconds: 3),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                  ),
                                 ],
                                 _buildWhatsAppMenuDivider(isDark),
                                 _buildWhatsAppContextMenuItem(
@@ -5116,6 +5192,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     _showMessageRemindersSheet();
                     return;
                   }
+                  if (value == 'quick_replies') {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const QuickRepliesManagementScreen(),
+                      ),
+                    );
+                    return;
+                  }
                   if (value == 'delete_self') {
                     await _deleteConversationForMe();
                     return;
@@ -5252,6 +5336,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         Icon(CupertinoIcons.alarm, size: 20),
                         SizedBox(width: 10),
                         Text('تذكيرات الرسائل'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'quick_replies',
+                    child: Row(
+                      children: [
+                        Icon(CupertinoIcons.bolt_horizontal_circle, size: 20),
+                        SizedBox(width: 10),
+                        Text('الردود السريعة (/)'),
                       ],
                     ),
                   ),
@@ -6788,6 +6882,47 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           text: typingIndicatorText,
                         ),
                 ),
+                if (_slashCommandQuery != null && !isReadOnly)
+                  Builder(
+                    builder: (context) {
+                      final allQuickReplies =
+                          ref.watch(quickRepliesProvider).valueOrNull ??
+                          const <QuickReplyTemplate>[];
+                      final filteredQuickReplies = allQuickReplies
+                          .where(
+                            (t) => t.matchesQuery(_slashCommandQuery!),
+                          )
+                          .toList(growable: false);
+                      return QuickRepliesSlashPopup(
+                        templates: filteredQuickReplies,
+                        query: _slashCommandQuery!,
+                        onSelectTemplate: (template) =>
+                            _applyQuickReplyTemplate(template),
+                        onSendTemplateImmediately: (template) =>
+                            _applyQuickReplyTemplate(
+                              template,
+                              sendImmediately: true,
+                            ),
+                        onAddQuickTemplate: () async {
+                          final added = await showUpsertQuickReplySheet(
+                            context: context,
+                            ref: ref,
+                          );
+                          if (added != null && mounted) {
+                            _applyQuickReplyTemplate(added);
+                          }
+                        },
+                        onManageTemplates: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  const QuickRepliesManagementScreen(),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
                 if (_mentionQuery != null && _mentionResults.isNotEmpty)
                   Container(
                     constraints: const BoxConstraints(maxHeight: 180),
