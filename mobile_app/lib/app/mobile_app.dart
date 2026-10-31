@@ -677,6 +677,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       }
 
       ref.read(activeConversationIdProvider.notifier).state = conversation.id;
+      ref
+          .read(localNotificationServiceProvider)
+          .cancelConversationNotifications(conversation.id);
       await Navigator.of(context, rootNavigator: true).push(
         CupertinoPageRoute(
           builder: (_) => ConversationScreen(conversation: conversation!),
@@ -701,20 +704,10 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   ) async {
     if (conversationId.isEmpty || replyText.trim().isEmpty) return;
     try {
-      await ref
-          .read(
-            conversationMessagesControllerProvider(
-              conversationId,
-            ).notifier,
-          )
-          .sendMessage(content: replyText.trim());
-
-      if (notificationId != null) {
-        final id = int.tryParse(notificationId.toString());
-        if (id != null) {
-          ref.read(localNotificationServiceProvider).cancel(id);
-        }
-      }
+      await ref.read(chatRepositoryProvider).sendTextMessage(
+            conversationId: conversationId,
+            content: replyText.trim(),
+          );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -727,6 +720,25 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       }
     } catch (e) {
       debugPrint('[NotificationReply] Error sending direct reply: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر إرسال الرد: $e'),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (notificationId != null) {
+        final id = int.tryParse(notificationId.toString());
+        if (id != null) {
+          ref.read(localNotificationServiceProvider).cancel(id);
+        }
+      }
+      ref
+          .read(localNotificationServiceProvider)
+          .cancelConversationNotifications(conversationId);
     }
   }
 

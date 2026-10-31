@@ -29,40 +29,85 @@ Future<void> onDidReceiveBackgroundNotificationResponse(
   } catch (_) {
     return;
   }
-  final conversationId = payload['conversationId']?.toString();
+  final conversationId = payload['conversationId']?.toString().trim();
   if (conversationId == null || conversationId.isEmpty) return;
 
   try {
     final prefs = await SharedPreferences.getInstance();
-    final sessionStr = prefs.getString('auth_session');
-    if (sessionStr == null || sessionStr.isEmpty) return;
-    final sessionJson = jsonDecode(sessionStr) as Map<String, dynamic>;
-    final token = sessionJson['accessToken']?.toString();
+
+    // 1. Resolve Auth Token reliably
+    String? token;
+    final sessionV1 = prefs.getString('auth_session_v1');
+    if (sessionV1 != null && sessionV1.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(sessionV1);
+        if (decoded is Map) {
+          token = decoded['accessToken']?.toString();
+        }
+      } catch (_) {}
+    }
+    token ??= prefs.getString('auth_token');
+    if (token == null || token.isEmpty) {
+      final legacySession = prefs.getString('auth_session');
+      if (legacySession != null && legacySession.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(legacySession);
+          if (decoded is Map) {
+            token = decoded['accessToken']?.toString();
+          }
+        } catch (_) {}
+      }
+    }
     if (token == null || token.isEmpty) return;
 
-    var baseUrl = prefs.getString('api_base_url');
+    // 2. Resolve Base URL reliably
+    var baseUrl = prefs.getString('mobile_api_base_url_v2');
     if (baseUrl == null || baseUrl.isEmpty) {
-      baseUrl = prefs.getString('admin_default_base_url');
+      baseUrl = prefs.getString('mobile_api_base_url_override_v1');
+    }
+    if (baseUrl == null || baseUrl.isEmpty) {
+      baseUrl = prefs.getString('mobile_api_base_url_admin_default_v1');
+    }
+    if (baseUrl == null || baseUrl.isEmpty) {
+      baseUrl = prefs.getString('api_base_url');
     }
     if (baseUrl == null || baseUrl.isEmpty) {
       baseUrl = 'http://192.168.1.100:3000';
     }
     baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
 
+    // 3. Post message to backend with a 15-second timeout
     final uri = Uri.parse('$baseUrl/api/chat/messages');
-    final client = HttpClient();
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     final request = await client.postUrl(uri);
     request.headers.contentType = ContentType.json;
     request.headers.set('Authorization', 'Bearer $token');
+    final clientMsgId = 'bg_reply_${DateTime.now().millisecondsSinceEpoch}';
     request.write(jsonEncode({
       'conversationId': conversationId,
       'content': input,
       'messageType': 'text',
+      'clientMessageId': clientMsgId,
     }));
-    final res = await request.close();
-    await res.drain();
+    final res = await request.close().timeout(const Duration(seconds: 15));
+    await res.drain().timeout(const Duration(seconds: 5));
     client.close();
-  } catch (_) {}
+  } catch (_) {
+  } finally {
+    // Always dismiss notification and summary to stop Android's infinite progress spinner!
+    try {
+      final plugin = FlutterLocalNotificationsPlugin();
+      if (response.id != null) {
+        await plugin.cancel(response.id!);
+      }
+      final notifIdFromPayload = int.tryParse(payload['notificationId']?.toString() ?? '');
+      if (notifIdFromPayload != null && notifIdFromPayload != response.id) {
+        await plugin.cancel(notifIdFromPayload);
+      }
+      final summaryId = (conversationId.hashCode.abs() % 800000) + 1000000;
+      await plugin.cancel(summaryId);
+    } catch (_) {}
+  }
 }
 
 class LocalNotificationService {
