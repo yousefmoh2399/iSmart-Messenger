@@ -491,6 +491,190 @@ class AuthRepository {
 
   Future<bool> isRememberUsernameEnabled() =>
       _sessionStore.isRememberUsernameEnabled();
+
+  Future<ActiveSessionsOverview> fetchActiveSessions() async {
+    try {
+      final token = await getValidToken() ?? await getToken();
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
+      }
+      final deviceUid = await _loadOrCreateDeviceUid();
+      final meta = <String, String>{
+        'deviceUid': deviceUid,
+        'platform': 'windows',
+        'deviceName': 'كمبيوتر المكتب Windows',
+        'appVersion': '1.2.4',
+      };
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/auth/sessions',
+        queryParameters: meta,
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'x-device-uid': deviceUid,
+            'x-device-name': 'كمبيوتر المكتب Windows',
+            'x-device-platform': 'windows',
+            'x-app-version': '1.2.4',
+          },
+        ),
+      );
+      return ActiveSessionsOverview.fromJson(
+        response.data ?? const <String, dynamic>{},
+      );
+    } catch (error) {
+      throw _apiClient.mapError(error);
+    }
+  }
+
+  Future<void> revokeSession(String targetDeviceUid) async {
+    try {
+      final token = await getValidToken() ?? await getToken();
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
+      }
+      final currentDeviceUid = await _loadOrCreateDeviceUid();
+      await _apiClient.dio.delete<Map<String, dynamic>>(
+        '/api/auth/sessions/${Uri.encodeComponent(targetDeviceUid.trim())}',
+        queryParameters: {'currentDeviceUid': currentDeviceUid},
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'x-device-uid': currentDeviceUid,
+          },
+        ),
+      );
+    } catch (error) {
+      throw _apiClient.mapError(error);
+    }
+  }
+
+  Future<int> revokeOtherSessions() async {
+    try {
+      final token = await getValidToken() ?? await getToken();
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
+      }
+      final currentDeviceUid = await _loadOrCreateDeviceUid();
+      final response = await _apiClient.dio.post<Map<String, dynamic>>(
+        '/api/auth/sessions/revoke-others',
+        data: {'currentDeviceUid': currentDeviceUid},
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'x-device-uid': currentDeviceUid,
+          },
+        ),
+      );
+      return (response.data?['revokedCount'] as num?)?.toInt() ?? 0;
+    } catch (error) {
+      throw _apiClient.mapError(error);
+    }
+  }
+}
+
+class ActiveDeviceSession {
+  const ActiveDeviceSession({
+    required this.deviceUid,
+    required this.deviceName,
+    required this.platform,
+    this.appVersion,
+    this.ipAddress,
+    required this.isCurrent,
+    required this.isOnline,
+    required this.createdAt,
+    required this.lastUsedAt,
+  });
+
+  final String deviceUid;
+  final String deviceName;
+  final String platform;
+  final String? appVersion;
+  final String? ipAddress;
+  final bool isCurrent;
+  final bool isOnline;
+  final DateTime createdAt;
+  final DateTime lastUsedAt;
+
+  bool get isDesktop =>
+      platform == 'windows' || platform == 'macos' || platform == 'linux';
+
+  String get platformDisplayLabel {
+    switch (platform.toLowerCase()) {
+      case 'windows':
+        return 'Windows Desktop';
+      case 'android':
+        return 'Android Mobile';
+      case 'ios':
+        return 'iOS (iPhone / iPad)';
+      case 'macos':
+        return 'macOS Desktop';
+      case 'linux':
+        return 'Linux Desktop';
+      case 'web':
+        return 'متصفح الويب';
+      default:
+        return 'جهاز متصل';
+    }
+  }
+
+  factory ActiveDeviceSession.fromJson(Map<String, dynamic> json) {
+    final now = DateTime.now();
+    final createdRaw = json['createdAt']?.toString();
+    final lastUsedRaw = json['lastUsedAt']?.toString();
+    return ActiveDeviceSession(
+      deviceUid: (json['deviceUid'] ?? 'unknown').toString(),
+      deviceName: (json['deviceName'] ?? 'جهاز متصل').toString(),
+      platform: (json['platform'] ?? 'unknown').toString().toLowerCase(),
+      appVersion: json['appVersion']?.toString(),
+      ipAddress: json['ipAddress']?.toString(),
+      isCurrent: json['isCurrent'] == true,
+      isOnline: json['isOnline'] == true,
+      createdAt: createdRaw != null
+          ? (DateTime.tryParse(createdRaw)?.toLocal() ?? now)
+          : now,
+      lastUsedAt: lastUsedRaw != null
+          ? (DateTime.tryParse(lastUsedRaw)?.toLocal() ?? now)
+          : now,
+    );
+  }
+}
+
+class ActiveSessionsOverview {
+  const ActiveSessionsOverview({
+    required this.currentDeviceUid,
+    required this.sessions,
+  });
+
+  final String? currentDeviceUid;
+  final List<ActiveDeviceSession> sessions;
+
+  ActiveDeviceSession? get currentSession {
+    for (final s in sessions) {
+      if (s.isCurrent) return s;
+    }
+    return sessions.isNotEmpty ? sessions.first : null;
+  }
+
+  List<ActiveDeviceSession> get otherSessions =>
+      sessions.where((s) => !s.isCurrent).toList();
+
+  factory ActiveSessionsOverview.fromJson(Map<String, dynamic> json) {
+    final rawList = json['sessions'];
+    final sessions = rawList is List
+        ? rawList
+              .whereType<Map>()
+              .map(
+                (item) => ActiveDeviceSession.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList()
+        : <ActiveDeviceSession>[];
+    return ActiveSessionsOverview(
+      currentDeviceUid: json['currentDeviceUid']?.toString(),
+      sessions: sessions,
+    );
+  }
 }
 
 class StaleLoginAttemptException implements Exception {

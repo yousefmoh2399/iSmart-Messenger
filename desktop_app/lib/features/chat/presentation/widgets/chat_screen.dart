@@ -35,8 +35,11 @@ import 'chat_forward_dialog.dart';
 import 'broadcast_target_picker_dialog.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_animated_reaction_picker.dart';
+import 'chat_audio_attachment_player.dart';
 import 'chat_input.dart';
 import 'chat_ui_helpers.dart';
+import 'desktop_message_actions_dialogs.dart';
+import 'desktop_quick_replies.dart';
 import 'gif_picker_panel.dart';
 import 'message_bubble.dart';
 import 'poll_creator_dialog.dart';
@@ -88,6 +91,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   final Map<String, GlobalKey> _messageKeys = <String, GlobalKey>{};
   String? _mentionQuery;
   List<ChatDirectoryUser> _mentionResults = [];
+  String? _slashReplyQuery;
   late final ProviderContainer _container;
 
   ChatMessage? _replyingTo;
@@ -342,11 +346,25 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _onMessageTextChanged() {
+    final text = _messageController.text;
+    final trimmedLeft = text.trimLeft();
+    if (trimmedLeft.startsWith('/')) {
+      final afterSlash = trimmedLeft.substring(1);
+      if (!afterSlash.contains('\n')) {
+        if (_slashReplyQuery != afterSlash) {
+          setState(() => _slashReplyQuery = afterSlash);
+        }
+      } else if (_slashReplyQuery != null) {
+        setState(() => _slashReplyQuery = null);
+      }
+    } else if (_slashReplyQuery != null) {
+      setState(() => _slashReplyQuery = null);
+    }
+
     if (widget.conversation.type != 'group' &&
         widget.conversation.type != 'department') {
       return;
     }
-    final text = _messageController.text;
     final selection = _messageController.selection;
     if (selection.baseOffset >= 0 && selection.baseOffset <= text.length) {
       final textBeforeCursor = text.substring(0, selection.baseOffset);
@@ -4108,6 +4126,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
 
+    ref.watch(desktopMessageRemindersProvider);
     final chatPreferences =
         widget.currentUser?.chatPreferences ?? ChatPreferences.defaults;
     final appearance = ChatAppearanceCatalog.resolveAppearance(
@@ -4173,6 +4192,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 isDark: isDark,
                 appearance: appearance,
               ),
+
+              const GlobalDesktopMiniAudioPlayerBar(),
 
               if (liveConversation.pinnedMessage?.content.trim().isNotEmpty ==
                   true)
@@ -4570,6 +4591,36 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                            _toggleMessageSelection(message.id),
                                        onForward: () =>
                                            _forwardSingleMessage(message),
+                                       onRemindMessage: !message.isDeleted
+                                           ? () =>
+                                                 showDesktopMessageReminderDialog(
+                                                   context,
+                                                   conversationId:
+                                                       _conversationId,
+                                                   conversationTitle:
+                                                       liveConversation
+                                                           .displayTitle(
+                                                             widget.currentUser
+                                                                     ?.id ??
+                                                                 '',
+                                                           ),
+                                                   message: message,
+                                                 )
+                                           : null,
+                                       onConvertToTicket: !message.isDeleted
+                                           ? () =>
+                                                 showDesktopMessageToTicketDialog(
+                                                   context,
+                                                   conversationTitle:
+                                                       liveConversation
+                                                           .displayTitle(
+                                                             widget.currentUser
+                                                                     ?.id ??
+                                                                 '',
+                                                           ),
+                                                   message: message,
+                                                 )
+                                           : null,
                                        onReply: () {
                                         if (_selectionMode) return;
                                         if (isReadOnly) return;
@@ -4839,6 +4890,38 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                   fileName: _downloadingFileName ?? 'مرفق',
                   progress: _downloadProgress,
                   isDark: isDark,
+                ),
+
+              if (_slashReplyQuery != null && !isReadOnly)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: DesktopQuickRepliesSlashPopup(
+                    query: _slashReplyQuery!,
+                    onSelectReply: (reply) {
+                      setState(() {
+                        _messageController.text = reply.content;
+                        _messageController.selection = TextSelection.collapsed(
+                          offset: reply.content.length,
+                        );
+                        _slashReplyQuery = null;
+                      });
+                    },
+                    onManageTap: () => showDesktopQuickRepliesDialog(
+                      context,
+                      onInsertReply: (reply) {
+                        if (!mounted) return;
+                        setState(() {
+                          _messageController.text = reply.content;
+                          _messageController.selection =
+                              TextSelection.collapsed(
+                                offset: reply.content.length,
+                              );
+                          _slashReplyQuery = null;
+                        });
+                      },
+                    ),
+                    onClose: () => setState(() => _slashReplyQuery = null),
+                  ),
                 ),
 
               if (_mentionQuery != null && _mentionResults.isNotEmpty)

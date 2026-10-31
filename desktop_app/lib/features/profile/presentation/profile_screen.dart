@@ -19,7 +19,11 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/safe_network_avatar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
+import '../../chat/presentation/widgets/desktop_message_actions_dialogs.dart';
+import '../../chat/presentation/widgets/desktop_quick_replies.dart';
+import '../../chat/presentation/widgets/instant_clipboard_sync_dialog.dart';
 import '../../updates/presentation/update_center_screen.dart';
+import 'active_sessions_dialog.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key, this.isWrapped = false});
@@ -661,6 +665,149 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                             .setNotificationDisplayMode(value);
                                       }
                                     },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+
+                            // Smart Chat Tools & Security
+                            _InsetGroup(
+                              title: 'الأمان والأدوات الذكية للشات',
+                              children: [
+                                ListTile(
+                                  leading: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0EA5E9).withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.devices_rounded,
+                                      color: Color(0xFF0EA5E9),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'إدارة الجلسات والأجهزة المتصلة',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'عرض الأجهزة المسجل الدخول منها حالياً وتسجيل الخروج من الأجهزة الأخرى',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  trailing: FilledButton.tonal(
+                                    onPressed: () => showDesktopActiveSessionsDialog(context),
+                                    child: const Text('إدارة الجلسات'),
+                                  ),
+                                ),
+                                const Divider(height: 0.5, indent: 52),
+                                ListTile(
+                                  leading: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF2563EB).withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.bolt_rounded,
+                                      color: Color(0xFF2563EB),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'الردود السريعة والقوالب الجاهزة (/)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'إضافة وتخصيص الردود الجاهزة التي تظهر عند كتابة / في صندوق الرسائل',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  trailing: FilledButton.tonal(
+                                    onPressed: () => showDesktopQuickRepliesDialog(context),
+                                    child: const Text('تخصيص الردود'),
+                                  ),
+                                ),
+                                const Divider(height: 0.5, indent: 52),
+                                ListTile(
+                                  leading: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.content_paste_go_rounded,
+                                      color: Color(0xFF10B981),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'إرسال واستقبال النصوص والروابط والأكواد لحظياً بين الكمبيوتر والموبايل',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  trailing: FilledButton.tonal(
+                                    onPressed: () => showDesktopInstantClipboardSyncDialog(context, ref),
+                                    child: const Text('فتح الحافظة'),
+                                  ),
+                                ),
+                                const Divider(height: 0.5, indent: 52),
+                                ListTile(
+                                  leading: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(
+                                      Icons.notifications_active_rounded,
+                                      color: Color(0xFFF59E0B),
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'تذكيرات الرسائل المجدولة',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'استعراض وإدارة التذكيرات التي ضبطتها للرسائل المهمة',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  trailing: FilledButton.tonal(
+                                    onPressed: () => showDesktopRemindersListDialog(context),
+                                    child: const Text('عرض التذكيرات'),
                                   ),
                                 ),
                               ],

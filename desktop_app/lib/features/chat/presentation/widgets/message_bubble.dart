@@ -66,6 +66,8 @@ class MessageBubble extends StatefulWidget {
     this.onOpenAlbum,
     this.onRetry,
     this.onForward,
+    this.onRemindMessage,
+    this.onConvertToTicket,
   });
 
   final ChatMessage message;
@@ -104,6 +106,8 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<ChatMessage>? onOpenAlbum;
   final VoidCallback? onRetry;
   final VoidCallback? onForward;
+  final VoidCallback? onRemindMessage;
+  final VoidCallback? onConvertToTicket;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -160,6 +164,12 @@ class _MessageBubbleState extends State<MessageBubble> {
         break;
       case _BubbleMenuAction.details:
         widget.onShowDetails?.call();
+        break;
+      case _BubbleMenuAction.remind:
+        widget.onRemindMessage?.call();
+        break;
+      case _BubbleMenuAction.convertToTicket:
+        widget.onConvertToTicket?.call();
         break;
     }
   }
@@ -258,6 +268,24 @@ class _MessageBubbleState extends State<MessageBubble> {
                   color: Color(0xFF708499),
                 ),
               ),
+              if (widget.onRemindMessage != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.remind,
+                  child: _PopupActionRow(
+                    icon: Icons.alarm_add_rounded,
+                    label: 'تذكيرني بهذه الرسالة',
+                    color: Color(0xFFF59E0B),
+                  ),
+                ),
+              if (widget.onConvertToTicket != null)
+                const PopupMenuItem(
+                  value: _BubbleMenuAction.convertToTicket,
+                  child: _PopupActionRow(
+                    icon: Icons.support_agent_rounded,
+                    label: 'تحويل إلى تذكرة دعم أو مهمة',
+                    color: Color(0xFF2563EB),
+                  ),
+                ),
               if (widget.message.hasAttachment && widget.message.attachmentDownloadAllowed)
                 const PopupMenuItem(
                   value: _BubbleMenuAction.openAttachment,
@@ -1701,6 +1729,8 @@ enum _BubbleMenuAction {
   pin,
   retry,
   details,
+  remind,
+  convertToTicket,
 }
 
 class _PopupActionRow extends StatelessWidget {
