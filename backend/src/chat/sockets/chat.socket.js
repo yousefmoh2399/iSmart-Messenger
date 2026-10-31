@@ -30,6 +30,7 @@ const { getChatTransferForUser } = require("../services/chat-transfer.service");
 const {
   sendChatPushNotifications,
   sendTicketPushNotifications,
+  sendReminderPushNotifications,
 } = require("../../services/push-notification.service");
 
 const typingState = new Map();
@@ -592,11 +593,11 @@ function initializeChatSocketServer(httpServer) {
               const body = due.note
                 ? `${due.note} — "${due.messagePreview || ""}"`
                 : due.messagePreview || "لديك تذكير برسالة مجدولة";
-              sendTicketPushNotifications({
+              sendReminderPushNotifications({
                 recipientUserIds: [normalizedUid],
+                reminder: due,
                 title,
                 body,
-                action: "message_reminder",
               }).catch(() => {});
             }
           }
@@ -609,7 +610,10 @@ function initializeChatSocketServer(httpServer) {
   };
 
   // On server startup/restart, re-arm all pending message reminders across all users
-  User.find({ "messageReminders.isNotified": false }, "_id")
+  User.find(
+    { messageReminders: { $elemMatch: { isNotified: { $ne: true } } } },
+    "_id",
+  )
     .lean()
     .then((usersWithReminders) => {
       for (const u of usersWithReminders || []) {

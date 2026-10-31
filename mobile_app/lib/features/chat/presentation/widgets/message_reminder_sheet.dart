@@ -25,6 +25,7 @@ class ChatMessageReminder {
     required this.remindAt,
     required this.createdAt,
     this.note,
+    this.isNotified = false,
   });
 
   final String id;
@@ -37,11 +38,13 @@ class ChatMessageReminder {
   final DateTime remindAt;
   final DateTime createdAt;
   final String? note;
+  final bool isNotified;
 
   ChatMessageReminder copyWith({
     String? userId,
     DateTime? remindAt,
     String? note,
+    bool? isNotified,
   }) {
     return ChatMessageReminder(
       id: id,
@@ -54,6 +57,7 @@ class ChatMessageReminder {
       remindAt: remindAt ?? this.remindAt,
       createdAt: createdAt,
       note: note ?? this.note,
+      isNotified: isNotified ?? this.isNotified,
     );
   }
 
@@ -68,6 +72,7 @@ class ChatMessageReminder {
         'messagePreview': contentPreview,
         'remindAt': remindAt.toIso8601String(),
         'createdAt': createdAt.toIso8601String(),
+        'isNotified': isNotified,
         if (note != null && note!.trim().isNotEmpty) 'note': note!.trim(),
       };
 
@@ -87,6 +92,7 @@ class ChatMessageReminder {
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '')?.toLocal() ??
           DateTime.now(),
       note: json['note']?.toString(),
+      isNotified: json['isNotified'] == true,
     );
   }
 }
@@ -109,6 +115,7 @@ class ChatMessageRemindersController
 
   @override
   Future<List<ChatMessageReminder>> build() async {
+    ref.keepAlive();
     final authUser = ref.watch(currentUserProvider);
     final userId = authUser?.id ?? '';
     if (userId.isEmpty) {
@@ -314,9 +321,10 @@ class ChatMessageRemindersController
         title: '⏰ تذكير: ${reminder.senderName} (${reminder.conversationTitle})',
         body: bodyText,
         payload: <String, dynamic>{
-          'type': 'chat',
+          'type': 'chat_reminder',
           'conversationId': reminder.conversationId,
           'messageId': reminder.messageId,
+          'reminderId': reminder.id,
         },
       );
     } catch (_) {}

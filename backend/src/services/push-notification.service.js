@@ -686,10 +686,102 @@ async function unregisterPushDevice(actor, payload = {}) {
   return true;
 }
 
+async function sendReminderPushNotifications({
+  recipientUserIds = [],
+  reminder = null,
+  title = "⏰ تذكير برسالة",
+  body = "",
+} = {}) {
+  const messaging = getMessaging();
+  if (!messaging) {
+    return { enabled: false, sentCount: 0, skippedCount: recipientUserIds.length };
+  }
+
+  const userIds = normalizeUserIds(recipientUserIds);
+  if (userIds.length === 0) {
+    return { enabled: true, sentCount: 0, skippedCount: 0 };
+  }
+
+  const devices = await PushDevice.find(
+    {
+      userId: { $in: userIds },
+      isActive: true,
+      isLoggedOut: { $ne: true },
+      token: { $ne: null },
+    },
+    "userId token platform notificationToneId"
+  ).lean();
+
+  const deviceGroups = groupPushDevicesByAndroidChannel(devices);
+  const uniqueTokens = [
+    ...new Set(devices.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
+  ];
+  if (uniqueTokens.length === 0) {
+    return { enabled: true, sentCount: 0, skippedCount: userIds.length };
+  }
+
+  const conversationId = String(reminder?.conversationId || "").trim();
+  const messageId = String(reminder?.messageId || "").trim();
+
+  for (const deviceGroup of deviceGroups) {
+    const groupTokens = [
+      ...new Set(deviceGroup.map((entry) => String(entry.token || "").trim()).filter(Boolean)),
+    ];
+    const firstDevice = deviceGroup[0] || {};
+    const androidChannelId =
+      normalizePlatform(firstDevice.platform) === "android"
+        ? androidChannelIdForToneId(firstDevice.notificationToneId)
+        : null;
+
+    for (let index = 0; index < groupTokens.length; index += 500) {
+      const batch = groupTokens.slice(index, index + 500);
+      try {
+        await messaging.sendEachForMulticast({
+          tokens: batch,
+          notification: {
+            title: String(title).slice(0, 120),
+            body: String(body).slice(0, 160),
+          },
+          data: {
+            type: "chat_reminder",
+            conversationId,
+            messageId,
+            reminderId: String(reminder?.id || "").trim(),
+            title: String(title).slice(0, 120),
+            body: String(body).slice(0, 160),
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: androidChannelId || "chat_messages_default_v1",
+              priority: "high",
+              tag: `reminder_${messageId || conversationId}`,
+            },
+          },
+          apns: {
+            headers: {
+              "apns-priority": "10",
+            },
+            payload: {
+              aps: {
+                sound: "default",
+                contentAvailable: true,
+              },
+            },
+          },
+        });
+      } catch (_) {}
+    }
+  }
+
+  return { enabled: true, sentCount: uniqueTokens.length, skippedCount: 0 };
+}
+
 module.exports = {
   registerPushDevice,
   unregisterPushDevice,
   sendChatPushNotifications,
   sendChatReactionPushNotifications,
   sendTicketPushNotifications,
+  sendReminderPushNotifications,
 };

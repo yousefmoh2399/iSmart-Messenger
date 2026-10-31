@@ -22,6 +22,7 @@ import '../features/chat/presentation/chat_home_screen.dart';
 import '../features/chat/presentation/conversation_screen.dart';
 import '../features/chat/models/chat_models.dart';
 import '../features/chat/presentation/widgets/share_target_picker_sheet.dart';
+import '../features/chat/presentation/widgets/message_reminder_sheet.dart';
 import '../features/tickets/presentation/tickets_screen.dart';
 import '../shared/models/update_models.dart';
 import '../shared/providers/providers.dart';
@@ -1362,10 +1363,20 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       case AuthStatus.initializing:
         if (_lastPresenceUserId != null) {
           ref.watch(chatRealtimeControllerProvider);
-          return const Stack(
+          ref.watch(chatMessageRemindersProvider);
+          return Stack(
             children: [
-              ChatHomeScreen(),
-              GlobalAnnouncementOverlay(),
+              const ChatHomeScreen(),
+              const GlobalAnnouncementOverlay(),
+              _MobileReminderAlertBanner(
+                onOpenMessage: (convId, msgId) {
+                  _queueNotificationNavigation({
+                    'type': 'chat',
+                    'conversationId': convId,
+                    'messageId': msgId,
+                  });
+                },
+              ),
             ],
           );
         }
@@ -1379,10 +1390,20 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               const [],
         );
         ref.watch(chatRealtimeControllerProvider);
-        return const Stack(
+        ref.watch(chatMessageRemindersProvider);
+        return Stack(
           children: [
-            ChatHomeScreen(),
-            GlobalAnnouncementOverlay(),
+            const ChatHomeScreen(),
+            const GlobalAnnouncementOverlay(),
+            _MobileReminderAlertBanner(
+              onOpenMessage: (convId, msgId) {
+                _queueNotificationNavigation({
+                  'type': 'chat',
+                  'conversationId': convId,
+                  'messageId': msgId,
+                });
+              },
+            ),
           ],
         );
     }
@@ -1911,6 +1932,149 @@ class _ChangeServerBaseUrlDialogState
           child: const Text('حفظ ومحاولة الاتصال'),
         ),
       ],
+    );
+  }
+}
+
+class _MobileReminderAlertBanner extends StatelessWidget {
+  const _MobileReminderAlertBanner({required this.onOpenMessage});
+
+  final void Function(String conversationId, String messageId) onOpenMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ValueListenableBuilder<ChatMessageReminder?>(
+      valueListenable: ChatMessageRemindersController.dueReminderAlertNotifier,
+      builder: (context, reminder, _) {
+        if (reminder == null) return const SizedBox.shrink();
+        final noteText = reminder.note?.trim() ?? '';
+        final hasNote = noteText.isNotEmpty;
+        final preview = reminder.contentPreview.trim();
+        return Positioned(
+          top: MediaQuery.of(context).padding.top + 8,
+          left: 12,
+          right: 12,
+          child: Material(
+            elevation: 10,
+            borderRadius: BorderRadius.circular(16),
+            color: isDark ? const Color(0xFF2E2000) : const Color(0xFFFFFBEB),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.6),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.alarm_on_rounded,
+                          color: Color(0xFFD97706),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '⏰ تذكير: ${reminder.senderName} (${reminder.conversationTitle})',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: isDark
+                                    ? const Color(0xFFFDE68A)
+                                    : const Color(0xFF92400E),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              hasNote ? '$noteText — "$preview"' : preview,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF78350F),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () {
+                          ChatMessageRemindersController.dueReminderAlertNotifier.value = null;
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () {
+                          ChatMessageRemindersController.dueReminderAlertNotifier.value = null;
+                        },
+                        child: const Text('إغلاق'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFF59E0B),
+                          foregroundColor: Colors.black,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () {
+                          final convId = reminder.conversationId;
+                          final msgId = reminder.messageId;
+                          ChatMessageRemindersController.dueReminderAlertNotifier.value = null;
+                          onOpenMessage(convId, msgId);
+                        },
+                        icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                        label: const Text(
+                          'الانتقال للرسالة',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -2,10 +2,13 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/config/api_base_url_store.dart';
 import '../../core/settings/user_preferences.dart';
 import '../../core/settings/user_preferences_store.dart';
 import 'permission_request_coordinator.dart';
@@ -14,28 +17,43 @@ import 'permission_request_coordinator.dart';
 Future<void> onDidReceiveBackgroundNotificationResponse(
   NotificationResponse response,
 ) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   final input = response.input?.trim();
-  if (response.actionId != 'reply_action' || input == null || input.isEmpty) {
+  final actionId = response.actionId;
+  debugPrint('[BgNotificationReply] Received notification action: $actionId, input: "$input"');
+
+  if (actionId != 'reply_action' || input == null || input.isEmpty) {
+    debugPrint('[BgNotificationReply] Ignored: not a valid reply action or empty input');
     return;
   }
   final payloadStr = response.payload;
-  if (payloadStr == null || payloadStr.isEmpty) return;
+  if (payloadStr == null || payloadStr.isEmpty) {
+    debugPrint('[BgNotificationReply] Aborting: payload is empty');
+    return;
+  }
+
   Map<String, dynamic> payload = {};
   try {
     final decoded = jsonDecode(payloadStr);
     if (decoded is Map) {
       payload = Map<String, dynamic>.from(decoded);
     }
-  } catch (_) {
+  } catch (e) {
+    debugPrint('[BgNotificationReply] Failed to decode payload JSON: $e');
     return;
   }
+
   final conversationId = payload['conversationId']?.toString().trim();
-  if (conversationId == null || conversationId.isEmpty) return;
+  if (conversationId == null || conversationId.isEmpty) {
+    debugPrint('[BgNotificationReply] Aborting: conversationId missing in payload');
+    return;
+  }
 
   try {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. Resolve Auth Token reliably
+    // 1. Resolve Auth Token reliably across SharedPreferences and FlutterSecureStorage
     String? token;
     final sessionV1 = prefs.getString('auth_session_v1');
     if (sessionV1 != null && sessionV1.isNotEmpty) {
@@ -58,41 +76,58 @@ Future<void> onDidReceiveBackgroundNotificationResponse(
         } catch (_) {}
       }
     }
-    if (token == null || token.isEmpty) return;
+    if (token == null || token.isEmpty) {
+      try {
+        const secureStorage = FlutterSecureStorage();
+        final secureSession = await secureStorage.read(key: 'auth_session_v1');
+        if (secureSession != null && secureSession.isNotEmpty) {
+          final decoded = jsonDecode(secureSession);
+          if (decoded is Map) {
+            token = decoded['accessToken']?.toString();
+          }
+        }
+        token ??= await secureStorage.read(key: 'auth_token');
+      } catch (e) {
+        debugPrint('[BgNotificationReply] FlutterSecureStorage error: $e');
+      }
+    }
+    if (token == null || token.isEmpty) {
+      debugPrint('[BgNotificationReply] Aborting: no authenticated token found');
+      return;
+    }
 
-    // 2. Resolve Base URL reliably
-    var baseUrl = prefs.getString('mobile_api_base_url_v2');
-    if (baseUrl == null || baseUrl.isEmpty) {
-      baseUrl = prefs.getString('mobile_api_base_url_override_v1');
-    }
-    if (baseUrl == null || baseUrl.isEmpty) {
-      baseUrl = prefs.getString('mobile_api_base_url_admin_default_v1');
-    }
-    if (baseUrl == null || baseUrl.isEmpty) {
-      baseUrl = prefs.getString('api_base_url');
-    }
-    if (baseUrl == null || baseUrl.isEmpty) {
-      baseUrl = 'http://192.168.1.100:3000';
-    }
-    baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
+    // 2. Resolve Base URL reliably using ApiBaseUrlStore
+    final baseUrl = await ApiBaseUrlStore().load();
+    debugPrint('[BgNotificationReply] Base URL: $baseUrl | Posting for conv: $conversationId');
 
-    // 3. Post message to backend with a 15-second timeout
-    final uri = Uri.parse('$baseUrl/api/chat/messages');
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    // 3. Post message to backend with badCertificateCallback and timeouts
+    final uri = Uri.parse('${baseUrl.replaceAll(RegExp(r'/+$'), '')}/api/chat/messages');
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+
     final request = await client.postUrl(uri);
     request.headers.contentType = ContentType.json;
     request.headers.set('Authorization', 'Bearer $token');
     final clientMsgId = 'bg_reply_${DateTime.now().millisecondsSinceEpoch}';
-    request.write(jsonEncode({
+    final requestBody = <String, dynamic>{
       'conversationId': conversationId,
       'content': input,
       'messageType': 'text',
       'clientMessageId': clientMsgId,
-    }));
+    };
+    final replyToMessageId = payload['messageId']?.toString().trim();
+    if (replyToMessageId != null && replyToMessageId.isNotEmpty) {
+      requestBody['replyToMessageId'] = replyToMessageId;
+    }
+
+    request.write(jsonEncode(requestBody));
     final res = await request.close().timeout(const Duration(seconds: 15));
-    await res.drain().timeout(const Duration(seconds: 5));
+    final resBody = await utf8.decodeStream(res).timeout(const Duration(seconds: 5));
+    debugPrint('[BgNotificationReply] Server HTTP ${res.statusCode}: $resBody');
     client.close();
-  } catch (_) {
+  } catch (e, stack) {
+    debugPrint('[BgNotificationReply] Exception during send: $e\n$stack');
   } finally {
     // Always dismiss notification and summary to stop Android's infinite progress spinner!
     try {
@@ -106,7 +141,10 @@ Future<void> onDidReceiveBackgroundNotificationResponse(
       }
       final summaryId = (conversationId.hashCode.abs() % 800000) + 1000000;
       await plugin.cancel(summaryId);
-    } catch (_) {}
+      debugPrint('[BgNotificationReply] Cancelled notification IDs successfully');
+    } catch (e) {
+      debugPrint('[BgNotificationReply] Error cancelling notifications: $e');
+    }
   }
 }
 
@@ -246,16 +284,17 @@ class LocalNotificationService {
       return;
     }
 
-    final isChat = payload == null ||
-        payload.isEmpty ||
-        payload['type'] == 'chat' ||
-        payload['type'] == 'chat_reaction' ||
-        payload['conversationId'] != null;
-
+    final isReminder = payload?['type'] == 'chat_reminder' || payload?['type'] == 'reminder';
     final isReaction = payload?['type'] == 'chat_reaction';
     final isTicket = payload?['type'] == 'ticket';
     final isGroup = payload?['isGroup'] == true ||
         payload?['conversationType'] == 'group';
+
+    final isChat = (payload == null ||
+        payload.isEmpty ||
+        payload['type'] == 'chat' ||
+        payload['type'] == 'chat_reaction' ||
+        payload['conversationId'] != null) && !isReminder;
 
     if (isReaction && !preferences.reactionNotifications && !isTestNotification) {
       return;
@@ -274,7 +313,7 @@ class LocalNotificationService {
     final showPreview = isGroup ? preferences.groupPreview : preferences.messagePreview;
     String effectiveTitle = title.trim();
     String effectiveBody = body.trim();
-    if (!showPreview && !isTicket && !isTestNotification) {
+    if (!showPreview && !isTicket && !isReminder && !isTestNotification) {
       effectiveTitle = isGroup ? 'مجموعة iSmart' : 'رسالة جديدة';
       effectiveBody = isGroup ? 'لديك رسالة جديدة في المجموعة' : 'لديك رسالة جديدة';
     }
@@ -345,6 +384,7 @@ class LocalNotificationService {
                       ),
                     ],
                     allowGeneratedReplies: true,
+                    cancelNotification: false,
                   ),
                 ]
               : null,
@@ -428,6 +468,7 @@ class LocalNotificationService {
                       ),
                     ],
                     allowGeneratedReplies: true,
+                    cancelNotification: false,
                   ),
                 ]
               : null,

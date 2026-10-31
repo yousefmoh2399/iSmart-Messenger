@@ -868,7 +868,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
-                      'v1.2.4',
+                      'v1.2.5',
                       style:
                           TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                     ),
