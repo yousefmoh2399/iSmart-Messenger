@@ -37,6 +37,26 @@ class ChatRepository {
       <String, Future<Uint8List>>{};
   final Map<String, Future<String>> _downloadAttachmentInFlight =
       <String, Future<String>>{};
+  static const int _maxPreviewMemoryEntries = 250;
+  final LinkedHashMap<String, Uint8List> _previewMemoryCache =
+      LinkedHashMap<String, Uint8List>();
+
+  Uint8List? getCachedPreviewMemory(String messageId) {
+    final value = _previewMemoryCache.remove(messageId);
+    if (value != null) {
+      _previewMemoryCache[messageId] = value;
+    }
+    return value;
+  }
+
+  void _putPreviewMemory(String messageId, Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    _previewMemoryCache.remove(messageId);
+    if (_previewMemoryCache.length >= _maxPreviewMemoryEntries) {
+      _previewMemoryCache.remove(_previewMemoryCache.keys.first);
+    }
+    _previewMemoryCache[messageId] = bytes;
+  }
 
   final ApiClient _apiClient;
   final LocalMediaStorageService _localStorage;
@@ -985,13 +1005,23 @@ class ChatRepository {
   }
 
   Future<Uint8List> fetchAttachmentPreviewBytes(ChatMessage message) async {
+    final cachedInMemory = getCachedPreviewMemory(message.id);
+    if (cachedInMemory != null && cachedInMemory.isNotEmpty) {
+      return cachedInMemory;
+    }
+
     final localBytes = await _readLocalAttachmentBytes(message);
     if (localBytes != null) {
+      _putPreviewMemory(message.id, localBytes);
       return localBytes;
     }
     final cacheFile = await _previewAttachmentCacheFile(message);
     if (await cacheFile.exists()) {
-      return cacheFile.readAsBytes();
+      final diskBytes = await cacheFile.readAsBytes();
+      if (diskBytes.isNotEmpty) {
+        _putPreviewMemory(message.id, diskBytes);
+      }
+      return diskBytes;
     }
 
     final previewUrl = _inlineUrlFor(message.fileUrl!);
@@ -1010,7 +1040,11 @@ class ChatRepository {
     );
     _attachmentPreviewInFlight[cacheKey] = future;
     try {
-      return await future;
+      final downloadedBytes = await future;
+      if (downloadedBytes.isNotEmpty) {
+        _putPreviewMemory(message.id, downloadedBytes);
+      }
+      return downloadedBytes;
     } finally {
       _attachmentPreviewInFlight.remove(cacheKey);
     }

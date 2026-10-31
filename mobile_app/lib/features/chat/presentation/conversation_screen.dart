@@ -5766,7 +5766,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         physics: const BouncingScrollPhysics(
                           parent: AlwaysScrollableScrollPhysics(),
                         ),
-                        cacheExtent: 600,
+                        cacheExtent: 1500,
                         reverse: true,
                         padding: EdgeInsets.fromLTRB(
                           16,
@@ -6361,10 +6361,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                               borderRadius: BorderRadius.circular(
                                                                                 14,
                                                                               ),
-                                                                              child: Image.network(
-                                                                                message.fileUrl ??
-                                                                                    '',
+                                                                              child: CachedNetworkImage(
+                                                                                imageUrl: message.fileUrl ?? '',
                                                                                 fit: BoxFit.cover,
+                                                                                placeholder: (_, __) => const AppMediaLoadingPlaceholder(
+                                                                                  height: 180,
+                                                                                  width: 180,
+                                                                                  borderRadius: 14,
+                                                                                ),
+                                                                                errorWidget: (_, __, ___) => const Icon(Icons.broken_image_outlined),
                                                                               ),
                                                                             )
                                                                           else if (message
@@ -7184,13 +7189,23 @@ class _ChatAttachmentImage extends ConsumerStatefulWidget {
       _ChatAttachmentImageState();
 }
 
-class _ChatAttachmentImageState extends ConsumerState<_ChatAttachmentImage> {
+class _ChatAttachmentImageState extends ConsumerState<_ChatAttachmentImage>
+    with AutomaticKeepAliveClientMixin {
   late Future<Uint8List> _bytesFuture;
+  Uint8List? _cachedBytes;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _bytesFuture = _loadBytes();
+    _cachedBytes = ref
+        .read(chatRepositoryProvider)
+        .getCachedPreviewMemory(widget.message.id);
+    _bytesFuture = _cachedBytes != null && _cachedBytes!.isNotEmpty
+        ? Future.value(_cachedBytes!)
+        : _loadBytes();
   }
 
   @override
@@ -7198,18 +7213,30 @@ class _ChatAttachmentImageState extends ConsumerState<_ChatAttachmentImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.message.id != widget.message.id ||
         oldWidget.message.updatedAt != widget.message.updatedAt) {
-      _bytesFuture = _loadBytes();
+      _cachedBytes = ref
+          .read(chatRepositoryProvider)
+          .getCachedPreviewMemory(widget.message.id);
+      _bytesFuture = _cachedBytes != null && _cachedBytes!.isNotEmpty
+          ? Future.value(_cachedBytes!)
+          : _loadBytes();
     }
   }
 
-  Future<Uint8List> _loadBytes() {
-    return ref
+  Future<Uint8List> _loadBytes() async {
+    final bytes = await ref
         .read(chatRepositoryProvider)
         .fetchAttachmentPreviewBytes(widget.message);
+    if (mounted && bytes.isNotEmpty) {
+      setState(() {
+        _cachedBytes = bytes;
+      });
+    }
+    return bytes;
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final colorScheme = Theme.of(context).colorScheme;
 
     Widget errorWidget() => Container(
@@ -7220,18 +7247,44 @@ class _ChatAttachmentImageState extends ConsumerState<_ChatAttachmentImage> {
       child: const Icon(Icons.broken_image_outlined, size: 30),
     );
 
+    final memBytes = _cachedBytes ??
+        ref
+            .read(chatRepositoryProvider)
+            .getCachedPreviewMemory(widget.message.id);
+
+    // If already available in memory, display immediately with zero waiting/shimmer!
+    if (memBytes != null && memBytes.isNotEmpty) {
+      if (_isSvgMessage(widget.message, memBytes)) {
+        return SvgPicture.memory(
+          memBytes,
+          fit: widget.fit,
+          width: widget.width,
+          height: widget.height,
+        );
+      }
+      return Image.memory(
+        memBytes,
+        fit: widget.fit,
+        width: widget.width,
+        height: widget.height,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => errorWidget(),
+      );
+    }
+
     return FutureBuilder<Uint8List>(
       future: _bytesFuture,
+      initialData: memBytes,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return AppMediaLoadingPlaceholder(
-            height: widget.height ?? 200,
-            width: widget.width ?? double.infinity,
-            borderRadius: 16,
-          );
-        }
-        final bytes = snapshot.data;
+        final bytes = snapshot.data ?? memBytes;
         if (bytes == null || bytes.isEmpty) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return AppMediaLoadingPlaceholder(
+              height: widget.height ?? 200,
+              width: widget.width ?? double.infinity,
+              borderRadius: 16,
+            );
+          }
           return errorWidget();
         }
         if (_isSvgMessage(widget.message, bytes)) {
