@@ -16,6 +16,7 @@ import '../../models/chat_models.dart';
 class ChatMessageReminder {
   const ChatMessageReminder({
     required this.id,
+    this.userId = '',
     required this.messageId,
     required this.conversationId,
     required this.conversationTitle,
@@ -27,6 +28,7 @@ class ChatMessageReminder {
   });
 
   final String id;
+  final String userId;
   final String messageId;
   final String conversationId;
   final String conversationTitle;
@@ -37,11 +39,13 @@ class ChatMessageReminder {
   final String? note;
 
   ChatMessageReminder copyWith({
+    String? userId,
     DateTime? remindAt,
     String? note,
   }) {
     return ChatMessageReminder(
       id: id,
+      userId: userId ?? this.userId,
       messageId: messageId,
       conversationId: conversationId,
       conversationTitle: conversationTitle,
@@ -55,6 +59,7 @@ class ChatMessageReminder {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'userId': userId,
         'messageId': messageId,
         'conversationId': conversationId,
         'conversationTitle': conversationTitle,
@@ -71,6 +76,7 @@ class ChatMessageReminder {
         .toString();
     return ChatMessageReminder(
       id: json['id']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
       messageId: json['messageId']?.toString() ?? '',
       conversationId: json['conversationId']?.toString() ?? '',
       conversationTitle: json['conversationTitle']?.toString() ?? 'محادثة',
@@ -90,7 +96,8 @@ class ChatMessageReminder {
 /// + in-app alerts when due.
 class ChatMessageRemindersController
     extends AsyncNotifier<List<ChatMessageReminder>> {
-  static const String _storageKey = 'chat_message_reminders_v1';
+  static String _storageKey(String userId) =>
+      'chat_message_reminders_v2_$userId';
 
   /// Broadcasts the most recently triggered reminder for in-app toast/banner display.
   static final ValueNotifier<ChatMessageReminder?> dueReminderAlertNotifier =
@@ -102,22 +109,30 @@ class ChatMessageRemindersController
 
   @override
   Future<List<ChatMessageReminder>> build() async {
+    final authUser = ref.watch(currentUserProvider);
+    final userId = authUser?.id ?? '';
+    if (userId.isEmpty) {
+      _nextReminderTimer?.cancel();
+      _socketSub?.cancel();
+      return const <ChatMessageReminder>[];
+    }
+
     ref.onDispose(() {
       _nextReminderTimer?.cancel();
       _socketSub?.cancel();
     });
     _nextReminderTimer?.cancel();
-    _listenToSocketSync();
+    _listenToSocketSync(userId);
 
-    final loaded = await _loadFromStorage();
-    _scheduleNextDueTimer(loaded);
-    unawaited(_pullFromServer(loaded));
+    final loaded = await _loadFromStorage(userId);
+    _scheduleNextDueTimer(userId, loaded);
+    unawaited(_pullFromServer(userId));
     // Run an immediate check in case any reminder became due while the app was closed
-    unawaited(Future<void>.microtask(_checkDueReminders));
+    unawaited(Future<void>.microtask(() => _checkDueReminders(userId)));
     return loaded;
   }
 
-  void _listenToSocketSync() {
+  void _listenToSocketSync(String userId) {
     _socketSub?.cancel();
     final socketService = ref.read(chatSocketServiceProvider);
     _socketSub = socketService.events.listen((event) {
@@ -128,7 +143,8 @@ class ChatMessageRemindersController
             final dueRem = ChatMessageReminder.fromJson(
               Map<String, dynamic>.from(item),
             );
-            if (dueRem.id.isNotEmpty) {
+            if (dueRem.id.isNotEmpty &&
+                (dueRem.userId.isEmpty || dueRem.userId == userId)) {
               unawaited(_notifyDueReminder(dueRem));
             }
           }
@@ -143,20 +159,21 @@ class ChatMessageRemindersController
                     ChatMessageReminder.fromJson(Map<String, dynamic>.from(e)),
               )
               .where((r) => r.messageId.isNotEmpty)
+              .map((r) => r.userId.isEmpty ? r.copyWith(userId: userId) : r)
+              .where((r) => r.userId == userId)
               .toList()
             ..sort((a, b) => a.remindAt.compareTo(b.remindAt));
           state = AsyncData(parsed);
-          _scheduleNextDueTimer(parsed);
-          unawaited(_saveToStorage(parsed, syncToServer: false));
+          _scheduleNextDueTimer(userId, parsed);
+          unawaited(_saveToStorage(userId, parsed, syncToServer: false));
         }
       } else if (event.type == 'socket_connected') {
-        final current = state.valueOrNull ?? const <ChatMessageReminder>[];
-        unawaited(_pullFromServer(current));
+        unawaited(_pullFromServer(userId));
       }
     });
   }
 
-  Future<void> _pullFromServer(List<ChatMessageReminder> fallbackLocal) async {
+  Future<void> _pullFromServer(String userId) async {
     try {
       final sock = ref.read(chatSocketServiceProvider).socket;
       if (sock == null || !sock.connected) return;
@@ -164,7 +181,7 @@ class ChatMessageRemindersController
         try {
           if (res is Map && res['ok'] == true && res['data'] is Map) {
             final raw = (res['data'] as Map)['reminders'];
-            if (raw is List && raw.isNotEmpty) {
+            if (raw is List) {
               final remoteList = raw
                   .whereType<Map>()
                   .where((m) => m['isNotified'] != true)
@@ -174,14 +191,13 @@ class ChatMessageRemindersController
                     ),
                   )
                   .where((r) => r.messageId.isNotEmpty)
+                  .map((r) => r.userId.isEmpty ? r.copyWith(userId: userId) : r)
+                  .where((r) => r.userId == userId)
                   .toList()
                 ..sort((a, b) => a.remindAt.compareTo(b.remindAt));
               state = AsyncData(remoteList);
-              _scheduleNextDueTimer(remoteList);
-              unawaited(_saveToStorage(remoteList, syncToServer: false));
-              return;
-            } else if (fallbackLocal.isNotEmpty) {
-              unawaited(_pushToServer(fallbackLocal));
+              _scheduleNextDueTimer(userId, remoteList);
+              unawaited(_saveToStorage(userId, remoteList, syncToServer: false));
             }
           }
         } catch (_) {}
@@ -199,7 +215,7 @@ class ChatMessageRemindersController
     } catch (_) {}
   }
 
-  void _scheduleNextDueTimer(List<ChatMessageReminder> items) {
+  void _scheduleNextDueTimer(String userId, List<ChatMessageReminder> items) {
     _nextReminderTimer?.cancel();
     if (items.isEmpty) return;
 
@@ -216,13 +232,13 @@ class ChatMessageRemindersController
     final effectiveDelay = delay.isNegative
         ? const Duration(milliseconds: 200)
         : delay + const Duration(milliseconds: 250);
-    _nextReminderTimer = Timer(effectiveDelay, _checkDueReminders);
+    _nextReminderTimer = Timer(effectiveDelay, () => _checkDueReminders(userId));
   }
 
-  Future<List<ChatMessageReminder>> _loadFromStorage() async {
+  Future<List<ChatMessageReminder>> _loadFromStorage(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_storageKey);
+      final raw = prefs.getString(_storageKey(userId));
       if (raw == null || raw.isEmpty) return const [];
       final decoded = jsonDecode(raw);
       if (decoded is! List) return const [];
@@ -230,6 +246,8 @@ class ChatMessageRemindersController
           .whereType<Map>()
           .map((e) => ChatMessageReminder.fromJson(Map<String, dynamic>.from(e)))
           .where((r) => r.messageId.isNotEmpty)
+          .map((r) => r.userId.isEmpty ? r.copyWith(userId: userId) : r)
+          .where((r) => r.userId == userId)
           .toList()
         ..sort((a, b) => a.remindAt.compareTo(b.remindAt));
       return items;
@@ -239,20 +257,22 @@ class ChatMessageRemindersController
   }
 
   Future<void> _saveToStorage(
+    String userId,
     List<ChatMessageReminder> items, {
     bool syncToServer = true,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final encoded = jsonEncode(items.map((e) => e.toJson()).toList());
-      await prefs.setString(_storageKey, encoded);
+      final scopedItems = items.map((r) => r.userId.isEmpty ? r.copyWith(userId: userId) : r).toList();
+      final encoded = jsonEncode(scopedItems.map((e) => e.toJson()).toList());
+      await prefs.setString(_storageKey(userId), encoded);
     } catch (_) {}
     if (syncToServer) {
       unawaited(_pushToServer(items));
     }
   }
 
-  Future<void> _checkDueReminders() async {
+  Future<void> _checkDueReminders(String userId) async {
     final current = state.valueOrNull;
     if (current == null || current.isEmpty) return;
 
@@ -272,8 +292,8 @@ class ChatMessageRemindersController
 
     remaining.sort((a, b) => a.remindAt.compareTo(b.remindAt));
     state = AsyncData(remaining);
-    await _saveToStorage(remaining);
-    _scheduleNextDueTimer(remaining);
+    await _saveToStorage(userId, remaining);
+    _scheduleNextDueTimer(userId, remaining);
 
     for (final reminder in due) {
       await _notifyDueReminder(reminder);
@@ -309,6 +329,7 @@ class ChatMessageRemindersController
     required DateTime remindAt,
     String? note,
   }) async {
+    final currentUserId = ref.read(currentUserProvider)?.id ?? '';
     final current = List<ChatMessageReminder>.from(state.valueOrNull ?? const []);
     current.removeWhere((r) => r.messageId == message.id);
 
@@ -323,6 +344,7 @@ class ChatMessageRemindersController
 
     final reminder = ChatMessageReminder(
       id: 'rem_${message.id}_${DateTime.now().millisecondsSinceEpoch}',
+      userId: currentUserId,
       messageId: message.id,
       conversationId: message.conversationId,
       conversationTitle: conversationTitle,
@@ -336,13 +358,14 @@ class ChatMessageRemindersController
     current.add(reminder);
     current.sort((a, b) => a.remindAt.compareTo(b.remindAt));
     state = AsyncData(current);
-    await _saveToStorage(current);
-    _scheduleNextDueTimer(current);
+    await _saveToStorage(currentUserId, current);
+    _scheduleNextDueTimer(currentUserId, current);
     return reminder;
   }
 
   /// Snoozes an existing reminder by [duration].
   Future<void> snoozeReminder(String reminderId, Duration duration) async {
+    final currentUserId = ref.read(currentUserProvider)?.id ?? '';
     final current = List<ChatMessageReminder>.from(state.valueOrNull ?? const []);
     final idx = current.indexWhere((r) => r.id == reminderId);
     if (idx < 0) return;
@@ -351,25 +374,27 @@ class ChatMessageRemindersController
     );
     current.sort((a, b) => a.remindAt.compareTo(b.remindAt));
     state = AsyncData(current);
-    await _saveToStorage(current);
-    _scheduleNextDueTimer(current);
+    await _saveToStorage(currentUserId, current);
+    _scheduleNextDueTimer(currentUserId, current);
   }
 
   /// Removes a reminder by its ID or message ID.
   Future<void> removeReminderByMessageId(String messageId) async {
+    final currentUserId = ref.read(currentUserProvider)?.id ?? '';
     final current = List<ChatMessageReminder>.from(state.valueOrNull ?? const []);
     current.removeWhere((r) => r.messageId == messageId);
     state = AsyncData(current);
-    await _saveToStorage(current);
-    _scheduleNextDueTimer(current);
+    await _saveToStorage(currentUserId, current);
+    _scheduleNextDueTimer(currentUserId, current);
   }
 
   Future<void> removeReminderById(String reminderId) async {
+    final currentUserId = ref.read(currentUserProvider)?.id ?? '';
     final current = List<ChatMessageReminder>.from(state.valueOrNull ?? const []);
     current.removeWhere((r) => r.id == reminderId);
     state = AsyncData(current);
-    await _saveToStorage(current);
-    _scheduleNextDueTimer(current);
+    await _saveToStorage(currentUserId, current);
+    _scheduleNextDueTimer(currentUserId, current);
   }
 }
 
@@ -808,11 +833,15 @@ class MessageRemindersSheet extends ConsumerWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
     final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+    final currentUserId = ref.watch(currentUserProvider)?.id ?? '';
     final allReminders =
         ref.watch(chatMessageRemindersProvider).valueOrNull ?? const [];
+    final userReminders = allReminders
+        .where((r) => r.userId.isEmpty || r.userId == currentUserId)
+        .toList();
     final reminders = conversationId == null
-        ? allReminders
-        : allReminders
+        ? userReminders
+        : userReminders
             .where((r) => r.conversationId == conversationId)
             .toList();
 

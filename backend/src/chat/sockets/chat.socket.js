@@ -418,6 +418,22 @@ async function emitConversationToUsers(io, conversationId, userIds = []) {
   );
 }
 
+async function emitConversationToMembers(io, conversationId) {
+  try {
+    const conv = await getConversationById(conversationId).catch(() => null);
+    if (!conv || !Array.isArray(conv.members)) return;
+    const memberIds = conv.members.map((m) =>
+      m?._id ? m._id.toString() : m?.toString?.(),
+    ).filter(Boolean);
+    return await emitConversationToUsers(io, conversationId, memberIds);
+  } catch (err) {
+    logger.warn("chat.conversation_members_emit_failed", {
+      conversationId: String(conversationId),
+      error: err?.message,
+    });
+  }
+}
+
 async function emitUnreadCount(io, userId, conversationId) {
   const unreadMap = await getUnreadCountsForUser(userId);
   io.to(`user:${userId}`).emit("unread_count_updated", {
@@ -796,6 +812,23 @@ function initializeChatSocketServer(httpServer) {
           });
         const result = await createMessage(currentUser, payload, null);
         if (result.alreadyExists) {
+          socketAck(ack, {
+            ok: true,
+            success: true,
+            data: {
+              message: result.message,
+              conversation: result.conversation,
+            },
+          });
+          return;
+        }
+
+        const isScheduledFuture =
+          result.message.isScheduled &&
+          result.message.scheduledFor &&
+          new Date(result.message.scheduledFor) > new Date();
+
+        if (isScheduledFuture) {
           socketAck(ack, {
             ok: true,
             success: true,
@@ -1208,10 +1241,16 @@ function initializeChatSocketServer(httpServer) {
           currentUser.id,
           "messageReminders",
         ).lean();
+        const userReminders = (userDoc?.messageReminders || [])
+          .filter((item) => !item.userId || String(item.userId) === String(currentUser.id))
+          .map((item) => ({
+            ...item,
+            userId: String(currentUser.id),
+          }));
         socketAck(ack, {
           ok: true,
           success: true,
-          data: { reminders: userDoc?.messageReminders || [] },
+          data: { reminders: userReminders },
         });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
@@ -1226,6 +1265,7 @@ function initializeChatSocketServer(httpServer) {
           .slice(0, 200)
           .map((item) => ({
             id: String(item.id || `rem_${Date.now()}`).trim().slice(0, 80),
+            userId: String(currentUser.id),
             conversationId: String(item.conversationId || "").trim().slice(0, 80),
             conversationTitle: String(item.conversationTitle || "")
               .trim()
@@ -2046,4 +2086,7 @@ module.exports = {
   getLiveSocketMetrics,
   getUserConnectedSocketsSnapshot,
   forceLogoutUserDevices,
+  emitMessageToRecipients,
+  emitConversationToUsers,
+  emitConversationToMembers,
 };

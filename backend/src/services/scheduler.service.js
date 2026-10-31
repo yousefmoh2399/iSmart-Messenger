@@ -114,12 +114,15 @@ async function processSingleScheduledMessage(msgData, io) {
     io.to(`conversation:${message.conversationId}`).emit("scheduled_message_sent", {
       conversationId: String(message.conversationId),
       messageId: String(message._id),
+      message: serializedMessage,
     });
     if (senderId) {
       io.to(`user:${senderId}`).emit("scheduled_message_sent", {
         conversationId: String(message.conversationId),
         messageId: String(message._id),
+        message: serializedMessage,
       });
+      io.to(`user:${senderId}`).emit("receive_message", serializedMessage);
     }
 
     let audienceIds = [];

@@ -4982,11 +4982,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final messagesState = ref.watch(
       conversationMessagesControllerProvider(widget.conversation.id),
     );
+    final currentUserId = ref.read(currentUserProvider)?.id ?? '';
     final allReminders =
         ref.watch(chatMessageRemindersProvider).valueOrNull ??
         const <ChatMessageReminder>[];
     final conversationReminders = allReminders
-        .where((r) => r.conversationId == widget.conversation.id)
+        .where((r) =>
+            (r.userId.isEmpty || r.userId == currentUserId) &&
+            r.conversationId == widget.conversation.id)
         .toList(growable: false);
     final remindedMessageIds = {
       for (final r in conversationReminders) r.messageId,

@@ -203,6 +203,7 @@ const userSchema = new mongoose.Schema(
         new mongoose.Schema(
           {
             id: { type: String, required: true },
+            userId: { type: String, default: "" },
             conversationId: { type: String, required: true },
             conversationTitle: { type: String, default: "" },
             messageId: { type: String, required: true },

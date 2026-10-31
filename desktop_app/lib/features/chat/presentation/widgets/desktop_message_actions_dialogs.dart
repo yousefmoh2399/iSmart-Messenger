@@ -22,6 +22,7 @@ class AppColors {
 class DesktopMessageReminder {
   const DesktopMessageReminder({
     required this.id,
+    this.userId = '',
     required this.conversationId,
     required this.conversationTitle,
     required this.messageId,
@@ -34,6 +35,7 @@ class DesktopMessageReminder {
   });
 
   final String id;
+  final String userId;
   final String conversationId;
   final String conversationTitle;
   final String messageId;
@@ -44,9 +46,10 @@ class DesktopMessageReminder {
   final String note;
   final bool isNotified;
 
-  DesktopMessageReminder copyWith({bool? isNotified}) {
+  DesktopMessageReminder copyWith({bool? isNotified, String? userId}) {
     return DesktopMessageReminder(
       id: id,
+      userId: userId ?? this.userId,
       conversationId: conversationId,
       conversationTitle: conversationTitle,
       messageId: messageId,
@@ -61,6 +64,7 @@ class DesktopMessageReminder {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    'userId': userId,
     'conversationId': conversationId,
     'conversationTitle': conversationTitle,
     'messageId': messageId,
@@ -76,6 +80,7 @@ class DesktopMessageReminder {
   factory DesktopMessageReminder.fromJson(Map<String, dynamic> json) {
     return DesktopMessageReminder(
       id: (json['id'] ?? '').toString(),
+      userId: (json['userId'] ?? '').toString(),
       conversationId: (json['conversationId'] ?? '').toString(),
       conversationTitle: (json['conversationTitle'] ?? '').toString(),
       messageId: (json['messageId'] ?? '').toString(),
@@ -105,20 +110,27 @@ final desktopMessageRemindersProvider =
     StateNotifierProvider<
       DesktopMessageRemindersController,
       List<DesktopMessageReminder>
-    >((ref) => DesktopMessageRemindersController(ref));
+    >((ref) {
+  final user = ref.watch(currentUserProvider);
+  return DesktopMessageRemindersController(ref, user?.id);
+});
 
 class DesktopMessageRemindersController
     extends StateNotifier<List<DesktopMessageReminder>> {
-  DesktopMessageRemindersController(this._ref) : super(const []) {
-    _listenToSocketSync();
-    _load();
+  DesktopMessageRemindersController(this._ref, this._userId) : super(const []) {
+    if (_userId != null && _userId.isNotEmpty) {
+      _listenToSocketSync();
+      _load();
+    }
   }
 
   final Ref _ref;
+  final String? _userId;
   Timer? _nextDueTimer;
   StreamSubscription<ChatSocketEvent>? _socketSub;
   final Set<String> _alertedIds = <String>{};
-  static const _storageKey = 'ismart_desktop_message_reminders_v1';
+  String get _storageKey =>
+      'ismart_desktop_message_reminders_v2_${_userId ?? ""}';
 
   void _listenToSocketSync() {
     _socketSub?.cancel();
@@ -132,7 +144,8 @@ class DesktopMessageRemindersController
             final dueRem = DesktopMessageReminder.fromJson(
               Map<String, dynamic>.from(item),
             );
-            if (dueRem.id.isNotEmpty) {
+            if (dueRem.id.isNotEmpty &&
+                (dueRem.userId.isEmpty || dueRem.userId == _userId)) {
               unawaited(_notifyDueReminder(dueRem));
             }
           }
@@ -147,6 +160,8 @@ class DesktopMessageRemindersController
                 ),
               )
               .where((e) => e.id.isNotEmpty)
+              .map((e) => e.userId.isEmpty ? e.copyWith(userId: _userId) : e)
+              .where((e) => _userId == null || e.userId == _userId)
               .toList(growable: false);
           unawaited(_save(parsed, syncToServer: false));
         }
@@ -165,7 +180,7 @@ class DesktopMessageRemindersController
         try {
           if (res is Map && res['ok'] == true && res['data'] is Map) {
             final raw = (res['data'] as Map)['reminders'];
-            if (raw is List && raw.isNotEmpty) {
+            if (raw is List) {
               final remoteList = raw
                   .whereType<Map>()
                   .map(
@@ -174,11 +189,11 @@ class DesktopMessageRemindersController
                     ),
                   )
                   .where((e) => e.id.isNotEmpty)
+                  .map((e) => e.userId.isEmpty ? e.copyWith(userId: _userId) : e)
+                  .where((e) => _userId == null || e.userId == _userId)
                   .toList(growable: false);
               unawaited(_save(remoteList, syncToServer: false));
               return;
-            } else if (state.isNotEmpty) {
-              unawaited(_pushToServer(state));
             }
           }
         } catch (_) {}
@@ -211,6 +226,8 @@ class DesktopMessageRemindersController
                 ),
               )
               .where((e) => e.id.isNotEmpty)
+              .map((e) => e.userId.isEmpty ? e.copyWith(userId: _userId) : e)
+              .where((e) => _userId == null || e.userId == _userId)
               .toList(growable: false);
           if (mounted) {
             state = list;
@@ -308,6 +325,7 @@ class DesktopMessageRemindersController
         : (message.hasAttachment ? '📎 مرفق في المحادثة' : 'رسالة');
     final item = DesktopMessageReminder(
       id: 'rem_${DateTime.now().millisecondsSinceEpoch}',
+      userId: _userId ?? '',
       conversationId: conversationId,
       conversationTitle: conversationTitle,
       messageId: message.id,
@@ -710,7 +728,11 @@ class _DesktopRemindersListDialog extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final reminders = ref.watch(desktopMessageRemindersProvider);
+    final currentUserId = ref.watch(currentUserProvider)?.id ?? '';
+    final allReminders = ref.watch(desktopMessageRemindersProvider);
+    final reminders = allReminders
+        .where((r) => r.userId.isEmpty || r.userId == currentUserId)
+        .toList();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Directionality(

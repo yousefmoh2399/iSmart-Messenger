@@ -1576,6 +1576,9 @@ async function listMessagesForConversation(
     isScheduled: isScheduled ? true : { $ne: true },
   };
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
+  if (isScheduled) {
+    query.senderId = currentUserId;
+  }
   if (
     conversation.type === "broadcast" &&
     !canUserViewAllBroadcastMessages(currentUser, conversation)
