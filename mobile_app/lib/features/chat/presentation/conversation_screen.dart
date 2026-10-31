@@ -49,6 +49,7 @@ import 'widgets/chat_poll_bubble.dart';
 import 'widgets/chat_text_field_paste_menu.dart';
 import 'widgets/gif_picker_panel.dart';
 import 'widgets/message_reminder_sheet.dart';
+import 'widgets/message_to_task_ticket_sheet.dart';
 import 'widgets/poll_creator_dialog.dart';
 import 'widgets/quick_replies_sheet.dart';
 import 'widgets/scheduled_messages_list.dart';
@@ -3717,6 +3718,35 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     },
                                   ),
                                 ],
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
+                                  title: 'تحويل إلى تذكرة دعم IT',
+                                  icon: CupertinoIcons.ticket,
+                                  onTap: () {
+                                    openMessageToTicketFlow(
+                                      context: context,
+                                      message: message,
+                                      conversationTitle: _data.displayTitle(
+                                        authUser?.id ?? '',
+                                      ),
+                                    );
+                                  },
+                                ),
+                                _buildWhatsAppMenuDivider(isDark),
+                                _buildWhatsAppContextMenuItem(
+                                  title: 'إضافة إلى مهامي في مساحة العمل',
+                                  icon: CupertinoIcons.checkmark_rectangle,
+                                  onTap: () {
+                                    showAddMessageToWorkspaceTaskSheet(
+                                      context: context,
+                                      ref: ref,
+                                      message: message,
+                                      conversationTitle: _data.displayTitle(
+                                        authUser?.id ?? '',
+                                      ),
+                                    );
+                                  },
+                                ),
                                 _buildWhatsAppMenuDivider(isDark),
                                 _buildWhatsAppContextMenuItem(
                                   title: 'تذكير بهذه الرسالة',

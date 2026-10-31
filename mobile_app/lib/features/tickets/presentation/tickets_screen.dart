@@ -13,9 +13,24 @@ import 'tickets_ui_kit.dart';
 typedef _TicketDateFormatter = String Function(DateTime value);
 
 class TicketsScreen extends ConsumerStatefulWidget {
-  const TicketsScreen({super.key, this.embedded = false});
+  const TicketsScreen({
+    super.key,
+    this.embedded = false,
+    this.initialTab = TicketTab.tickets,
+    this.autoOpenCreateDialog = false,
+    this.initialDraftTitle,
+    this.initialDraftDescription,
+    this.initialDraftPriority = 'normal',
+    this.initialAttachmentInfo,
+  });
 
   final bool embedded;
+  final TicketTab initialTab;
+  final bool autoOpenCreateDialog;
+  final String? initialDraftTitle;
+  final String? initialDraftDescription;
+  final String initialDraftPriority;
+  final String? initialAttachmentInfo;
 
   @override
   ConsumerState<TicketsScreen> createState() => _TicketsScreenState();
@@ -33,7 +48,26 @@ extension TicketTabLabel on TicketTab {
 
 class _TicketsScreenState extends ConsumerState<TicketsScreen> {
   final _searchController = TextEditingController();
-  TicketTab _activeTab = TicketTab.tickets;
+  late TicketTab _activeTab;
+  bool _didAutoOpenDraft = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeTab = widget.initialTab;
+    if (widget.autoOpenCreateDialog) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _didAutoOpenDraft) return;
+        _didAutoOpenDraft = true;
+        _showCreateTicketDialog(
+          initialTitle: widget.initialDraftTitle,
+          initialDescription: widget.initialDraftDescription,
+          initialPriority: widget.initialDraftPriority,
+          attachmentInfo: widget.initialAttachmentInfo,
+        );
+      });
+    }
+  }
 
   double _dialogWidth(BuildContext context, double preferredWidth) {
     final availableWidth = MediaQuery.sizeOf(context).width - 32;
@@ -50,10 +84,17 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
     super.dispose();
   }
 
-  Future<void> _showCreateTicketDialog() async {
-    final titleController = TextEditingController();
-    final descriptionController = TextEditingController();
-    String priority = 'normal';
+  Future<void> _showCreateTicketDialog({
+    String? initialTitle,
+    String? initialDescription,
+    String initialPriority = 'normal',
+    String? attachmentInfo,
+  }) async {
+    final titleController = TextEditingController(text: initialTitle ?? '');
+    final descriptionController = TextEditingController(
+      text: initialDescription ?? '',
+    );
+    String priority = initialPriority;
     String? selectedDepartmentId;
     List<dynamic> departments = [];
     var isSaving = false;
@@ -68,9 +109,23 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
               as List<dynamic>?) ??
           const <dynamic>[];
       if (departments.isNotEmpty) {
+        Map<String, dynamic>? preferredItDept;
+        for (final raw in departments) {
+          if (raw is Map) {
+            final name = (raw['name']?.toString() ?? '').toLowerCase();
+            if (name.contains('it') ||
+                name.contains('دعم') ||
+                name.contains('تقني') ||
+                name.contains('معلومات') ||
+                name.contains('صيانة')) {
+              preferredItDept = Map<String, dynamic>.from(raw);
+              break;
+            }
+          }
+        }
+        final targetDept = preferredItDept ?? departments.first;
         selectedDepartmentId =
-            departments.first['id']?.toString() ??
-            departments.first['_id']?.toString();
+            targetDept['id']?.toString() ?? targetDept['_id']?.toString();
       }
     } catch (e) {
       errorText = e.toString();
@@ -190,6 +245,45 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            if (attachmentInfo != null &&
+                                attachmentInfo.trim().isNotEmpty) ...[
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 9,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: themeColor.withValues(alpha: 0.09),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: themeColor.withValues(alpha: 0.28),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.attachment_rounded,
+                                      size: 18,
+                                      color: themeColor,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'مرفق مُضمّن من المحادثة: $attachmentInfo',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: themeColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             // Title
                             const Text('عنوان الطلب *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                             const SizedBox(height: 6),

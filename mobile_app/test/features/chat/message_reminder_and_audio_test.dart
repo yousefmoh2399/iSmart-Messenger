@@ -1,10 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:mobile_app/features/chat/models/chat_models.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/chat_audio_attachment_player.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/message_reminder_sheet.dart';
+import 'package:mobile_app/features/chat/presentation/widgets/message_to_task_ticket_sheet.dart';
 import 'package:mobile_app/features/chat/presentation/widgets/quick_replies_sheet.dart';
 
 void main() {
+  setUpAll(() async {
+    await initializeDateFormatting('ar');
+  });
   group('ChatMessageReminder', () {
     test('serializes and deserializes accurately', () {
       final remindAt = DateTime.utc(2026, 11, 1, 9, 0);
@@ -126,6 +131,43 @@ void main() {
       expect(restored.cleanShortcut, 'استلام');
       expect(restored.content, 'تم الاستلام وجاري المراجعة');
       expect(restored.usageCount, 3);
+    });
+  });
+
+  group('ChatMessageActionDraft (Message to Ticket / Task)', () {
+    test('builds prefilled ticket title, description, and attachment info', () {
+      final msg = ChatMessage(
+        id: 'm_issue_1',
+        conversationId: 'conv_it',
+        senderId: 'u_9',
+        sender: null,
+        content: 'الطابعة في الدور الثاني متوقفة وتظهر رسالة خطأ Paper Jam',
+        messageType: 'image',
+        fileName: 'printer_error.jpg',
+        fileUrl: '/uploads/chat/printer_error.jpg',
+        mimeType: 'image/jpeg',
+        fileSize: 204800,
+        replyToMessageId: null,
+        metadata: const <String, dynamic>{},
+        isDeleted: false,
+        deliveredTo: const [],
+        seenBy: const [],
+        createdAt: DateTime.utc(2026, 10, 31, 9, 30),
+        updatedAt: DateTime.utc(2026, 10, 31, 9, 30),
+      );
+
+      final draft = ChatMessageActionDraft.fromMessage(
+        message: msg,
+        conversationTitle: 'فرع المهندسين',
+      );
+
+      expect(draft.suggestedTitle, contains('الطابعة في الدور الثاني'));
+      expect(draft.detailedDescription, contains('Paper Jam'));
+      expect(draft.detailedDescription, contains('فرع المهندسين'));
+      expect(draft.detailedDescription, contains('printer_error.jpg'));
+      expect(draft.attachmentLabel, isNotNull);
+      expect(draft.attachmentLabel, contains('printer_error.jpg'));
+      expect(draft.taskContent, contains('الطابعة في الدور الثاني'));
     });
   });
 }
