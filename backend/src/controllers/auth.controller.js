@@ -18,12 +18,22 @@ function resolveRequestIp(req) {
   );
 }
 
+function decodeHeaderVal(val) {
+  if (!val || typeof val !== "string") return val;
+  try {
+    return decodeURIComponent(val);
+  } catch (_) {
+    return val;
+  }
+}
+
 const login = asyncHandler(async (req, res) => {
   const result = await loginUser({
     username: req.body.username,
     password: req.body.password,
     deviceUid: req.body.deviceUid || req.headers["x-device-uid"],
-    deviceName: req.body.deviceName || req.headers["x-device-name"],
+    deviceName:
+      req.body.deviceName || decodeHeaderVal(req.headers["x-device-name"]),
     platform: req.body.platform || req.headers["x-device-platform"],
     appVersion: req.body.appVersion || req.headers["x-app-version"],
     ipAddress: resolveRequestIp(req),
@@ -42,7 +52,8 @@ const me = asyncHandler(async (req, res) => {
 const refresh = asyncHandler(async (req, res) => {
   const result = await refreshAccessToken(req.body.refreshToken, {
     deviceUid: req.body.deviceUid || req.headers["x-device-uid"],
-    deviceName: req.body.deviceName || req.headers["x-device-name"],
+    deviceName:
+      req.body.deviceName || decodeHeaderVal(req.headers["x-device-name"]),
     platform: req.body.platform || req.headers["x-device-platform"],
     appVersion: req.body.appVersion || req.headers["x-app-version"],
     ipAddress: resolveRequestIp(req),
@@ -66,9 +77,11 @@ const getSessions = asyncHandler(async (req, res) => {
     req.headers["x-device-uid"] ||
     req.user.deviceUid ||
     null;
+  const rawDeviceName =
+    req.query.deviceName || decodeHeaderVal(req.headers["x-device-name"]);
   const result = await listUserActiveSessions(req.user.id, {
     currentDeviceUid,
-    deviceName: req.query.deviceName || req.headers["x-device-name"],
+    deviceName: rawDeviceName,
     platform: req.query.platform || req.headers["x-device-platform"],
     appVersion: req.query.appVersion || req.headers["x-app-version"],
     ipAddress: resolveRequestIp(req),

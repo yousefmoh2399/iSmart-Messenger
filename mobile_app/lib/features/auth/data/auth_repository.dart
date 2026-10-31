@@ -768,6 +768,7 @@ class AuthRepository {
         throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
       }
       final meta = await _buildDeviceMetadata();
+      final deviceName = meta['deviceName'] ?? '';
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
         '/api/auth/sessions',
         queryParameters: meta,
@@ -775,7 +776,8 @@ class AuthRepository {
           headers: {
             'Authorization': 'Bearer $token',
             'x-device-uid': meta['deviceUid'],
-            'x-device-name': meta['deviceName'],
+            if (deviceName.isNotEmpty)
+              'x-device-name': Uri.encodeComponent(deviceName),
             'x-device-platform': meta['platform'],
             'x-app-version': meta['appVersion'],
           },

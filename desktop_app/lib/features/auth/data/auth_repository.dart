@@ -505,6 +505,7 @@ class AuthRepository {
         'deviceName': 'كمبيوتر المكتب Windows',
         'appVersion': '1.2.4',
       };
+      final deviceName = meta['deviceName'] ?? 'Desktop Windows';
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
         '/api/auth/sessions',
         queryParameters: meta,
@@ -512,7 +513,8 @@ class AuthRepository {
           headers: {
             'Authorization': 'Bearer $token',
             'x-device-uid': deviceUid,
-            'x-device-name': 'كمبيوتر المكتب Windows',
+            if (deviceName.isNotEmpty)
+              'x-device-name': Uri.encodeComponent(deviceName),
             'x-device-platform': 'windows',
             'x-app-version': '1.2.4',
           },
