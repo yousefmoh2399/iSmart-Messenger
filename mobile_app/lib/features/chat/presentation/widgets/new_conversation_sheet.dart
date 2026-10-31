@@ -405,7 +405,6 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
     return Container(
       height: MediaQuery.sizeOf(context).height * 0.90,
       decoration: BoxDecoration(
-        color: sheetBg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
@@ -415,48 +414,53 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          // Drag Handle
-          Center(
-            child: Container(
-              margin: const EdgeInsets.only(top: 10, bottom: 6),
-              width: 38,
-              height: 4.5,
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white24 : Colors.black12,
-                borderRadius: BorderRadius.circular(10),
+      child: Material(
+        color: sheetBg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            // Drag Handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 38,
+                height: 4.5,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
-          ),
 
-          // Header Navigation Bar
-          _buildHeader(theme, isDark),
+            // Header Navigation Bar
+            _buildHeader(theme, isDark),
 
-          const Divider(height: 1, thickness: 0.8),
+            const Divider(height: 1, thickness: 0.8),
 
-          // Body Content (Switching between Direct, Group Step 1/2, Dept, Broadcast)
-          Expanded(
-            child: _buildBody(
-              allUsers: allUsers,
-              departmentUsers: departmentUsers,
-              filteredUsers: filteredUsers,
-              departments: overview.departments,
-              canCreateRooms: canCreateRooms,
-              canSendBroadcast: canSendBroadcast,
-              cardBg: cardBg,
-              borderColor: borderColor,
-              isDark: isDark,
+            // Body Content (Switching between Direct, Group Step 1/2, Dept, Broadcast)
+            Expanded(
+              child: _buildBody(
+                allUsers: allUsers,
+                departmentUsers: departmentUsers,
+                filteredUsers: filteredUsers,
+                departments: overview.departments,
+                canCreateRooms: canCreateRooms,
+                canSendBroadcast: canSendBroadcast,
+                cardBg: cardBg,
+                borderColor: borderColor,
+                isDark: isDark,
+              ),
             ),
-          ),
 
-          // Bottom Bar for Group/Broadcast modes
-          if (_mode == _NewChatMode.group && _groupStep == 1)
-            _buildGroupSelectionBottomBar(isDark),
+            // Bottom Bar for Group/Broadcast modes
+            if (_mode == _NewChatMode.group && _groupStep == 1)
+              _buildGroupSelectionBottomBar(isDark),
 
-          if (_mode == _NewChatMode.broadcast)
-            _buildBroadcastBottomBar(isDark),
-        ],
+            if (_mode == _NewChatMode.broadcast)
+              _buildBroadcastBottomBar(isDark),
+          ],
+        ),
       ),
     );
   }
@@ -1394,12 +1398,13 @@ class _ContactListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tileColor = isSelected
+        ? const Color(0xFF00A884).withValues(alpha: isDark ? 0.16 : 0.08)
+        : (isDark ? const Color(0xFF1E2632) : Colors.white);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: isSelected
-            ? const Color(0xFF00A884).withValues(alpha: isDark ? 0.16 : 0.08)
-            : (isDark ? const Color(0xFF1E2632) : Colors.white),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isSelected
@@ -1408,7 +1413,11 @@ class _ContactListItem extends StatelessWidget {
           width: isSelected ? 1.4 : 0.8,
         ),
       ),
-      child: ListTile(
+      child: Material(
+        color: tileColor,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
         onTap: onTap,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         leading: Stack(
@@ -1544,7 +1553,8 @@ class _ContactListItem extends StatelessWidget {
                 color: Color(0xFF00A884),
               ),
       ),
-    );
+    ),
+  );
   }
 }
 
@@ -1570,30 +1580,33 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: iconBg.withValues(alpha: isDark ? 0.20 : 0.12),
-          borderRadius: BorderRadius.circular(12),
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: iconBg.withValues(alpha: isDark ? 0.20 : 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: iconBg, size: 22),
         ),
-        child: Icon(icon, color: iconBg, size: 22),
-      ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(
-          fontSize: 11.5,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
         ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(
+            fontSize: 11.5,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
       ),
-      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
     );
   }
 }

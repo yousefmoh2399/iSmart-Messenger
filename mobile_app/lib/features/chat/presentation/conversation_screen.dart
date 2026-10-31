@@ -3969,17 +3969,20 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w400,
-                  decoration: TextDecoration.none,
-                  color: isDestructive
-                      ? CupertinoColors.systemRed
-                      : (isDark ? Colors.white : Colors.black87),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                    decoration: TextDecoration.none,
+                    color: isDestructive
+                        ? CupertinoColors.systemRed
+                        : (isDark ? Colors.white : Colors.black87),
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
               Icon(
                 icon,
                 size: 20,
