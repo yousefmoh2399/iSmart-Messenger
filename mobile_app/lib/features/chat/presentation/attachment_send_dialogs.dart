@@ -178,6 +178,198 @@ class _MarkupTextAnnotation {
   double fontSize = 16.0;
 }
 
+class _MarkupTextAnnotationDialogResult {
+  final String text;
+  final Color color;
+  final bool hasBackground;
+
+  const _MarkupTextAnnotationDialogResult({
+    required this.text,
+    required this.color,
+    required this.hasBackground,
+  });
+}
+
+class _MarkupTextAnnotationDialog extends StatefulWidget {
+  const _MarkupTextAnnotationDialog({
+    required this.initialText,
+    required this.initialColor,
+    required this.initialHasBackground,
+    required this.palette,
+    required this.isEditing,
+  });
+
+  final String initialText;
+  final Color initialColor;
+  final bool initialHasBackground;
+  final List<Color> palette;
+  final bool isEditing;
+
+  @override
+  State<_MarkupTextAnnotationDialog> createState() =>
+      _MarkupTextAnnotationDialogState();
+}
+
+class _MarkupTextAnnotationDialogState
+    extends State<_MarkupTextAnnotationDialog> {
+  late final TextEditingController _controller;
+  late Color _textColor;
+  late bool _hasBg;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+    _textColor = widget.initialColor;
+    _hasBg = widget.initialHasBackground;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AlertDialog(
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: Row(
+        children: [
+          const Icon(
+            Icons.text_fields_rounded,
+            color: Color(0xFF007AFF),
+            size: 24,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            widget.isEditing ? 'تعديل النص' : 'إضافة نص توضيحي',
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              maxLines: 3,
+              minLines: 1,
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+              decoration: InputDecoration(
+                hintText: 'اكتب ملاحظتك التوضيحية هنا...',
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white38 : Colors.black38,
+                ),
+                filled: true,
+                fillColor: isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : const Color(0xFFF1F5F9),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'لون النص:',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: widget.palette.map((c) {
+                  final isSel = _textColor == c;
+                  return GestureDetector(
+                    onTap: () => setState(() => _textColor = c),
+                    child: Container(
+                      margin: const EdgeInsets.only(left: 6),
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: c,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSel
+                              ? const Color(0xFF007AFF)
+                              : Colors.black26,
+                          width: isSel ? 3 : 1,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text(
+                  'خلفية داكنة لسهولة القراءة:',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const Spacer(),
+                CupertinoSwitch(
+                  value: _hasBg,
+                  onChanged: (val) => setState(() => _hasBg = val),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final text = _controller.text.trim();
+            if (text.isNotEmpty) {
+              Navigator.pop(
+                context,
+                _MarkupTextAnnotationDialogResult(
+                  text: text,
+                  color: _textColor,
+                  hasBackground: _hasBg,
+                ),
+              );
+            }
+          },
+          child: const Text('حفظ'),
+        ),
+      ],
+    );
+  }
+}
+
 enum _MarkupActionType {
   stroke,
   shape,
@@ -711,158 +903,28 @@ class _WhatsAppMediaEditorDialogState
     _MarkupTextAnnotation? existing,
   }) async {
     HapticFeedback.selectionClick();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final controller = TextEditingController(text: existing?.text ?? '');
-    Color textColor = existing?.color ?? _activeTextColor;
-    bool hasBg = existing?.hasBackground ?? _activeTextHasBackground;
 
-    final res = await showDialog<bool>(
+    final result = await showDialog<_MarkupTextAnnotationDialogResult>(
       context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDlgState) {
-            return AlertDialog(
-              backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: Row(
-                children: [
-                  const Icon(
-                    Icons.text_fields_rounded,
-                    color: Color(0xFF007AFF),
-                    size: 24,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    existing == null ? 'إضافة نص توضيحي' : 'تعديل النص',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: controller,
-                      autofocus: true,
-                      maxLines: 3,
-                      minLines: 1,
-                      style: TextStyle(
-                        color: isDark ? Colors.white : Colors.black87,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'اكتب ملاحظتك التوضيحية هنا...',
-                        hintStyle: TextStyle(
-                          color: isDark ? Colors.white38 : Colors.black38,
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : const Color(0xFFF1F5F9),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'لون النص:',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: _palette.map((c) {
-                          final isSel = textColor == c;
-                          return GestureDetector(
-                            onTap: () => setDlgState(() => textColor = c),
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 6),
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: c,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: isSel
-                                      ? const Color(0xFF007AFF)
-                                      : Colors.black26,
-                                  width: isSel ? 3 : 1,
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Text(
-                          'خلفية داكنة لسهولة القراءة:',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const Spacer(),
-                        CupertinoSwitch(
-                          value: hasBg,
-                          onChanged: (val) => setDlgState(() => hasBg = val),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('إلغاء'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    if (controller.text.trim().isNotEmpty) {
-                      Navigator.pop(ctx, true);
-                    }
-                  },
-                  child: const Text('حفظ'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (ctx) => _MarkupTextAnnotationDialog(
+        initialText: existing?.text ?? '',
+        initialColor: existing?.color ?? _activeTextColor,
+        initialHasBackground:
+            existing?.hasBackground ?? _activeTextHasBackground,
+        palette: _palette,
+        isEditing: existing != null,
+      ),
     );
-    final enteredText = controller.text.trim();
-    controller.dispose();
 
-    if (res == true && enteredText.isNotEmpty) {
+    if (result != null && result.text.isNotEmpty) {
       setState(() {
-        _activeTextColor = textColor;
-        _activeTextHasBackground = hasBg;
+        _activeTextColor = result.color;
+        _activeTextHasBackground = result.hasBackground;
 
         if (existing != null) {
-          existing.text = enteredText;
-          existing.color = textColor;
-          existing.hasBackground = hasBg;
+          existing.text = result.text;
+          existing.color = result.color;
+          existing.hasBackground = result.hasBackground;
         } else {
           final newId = DateTime.now().microsecondsSinceEpoch.toString();
           final defaultPos = position ??
@@ -872,10 +934,10 @@ class _WhatsAppMediaEditorDialogState
               );
           final ann = _MarkupTextAnnotation(
             id: newId,
-            text: enteredText,
+            text: result.text,
             position: defaultPos,
-            color: textColor,
-            hasBackground: hasBg,
+            color: result.color,
+            hasBackground: result.hasBackground,
           );
           _textAnnotations.add(ann);
           _actionHistory.add(_MarkupAction(_MarkupActionType.text, newId));
