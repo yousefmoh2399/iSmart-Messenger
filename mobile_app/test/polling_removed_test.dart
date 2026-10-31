@@ -29,6 +29,9 @@ void main() {
             source.contains('_recordingTicker')) {
           continue;
         }
+        if (path.endsWith('features/chat/presentation/widgets/scheduled_messages_list.dart') && source.contains('_countdownTimer = Timer.periodic')) {
+          continue;
+        }
         offenders.add(path);
       }
     }

@@ -5,22 +5,44 @@ import '../models/chat_models.dart';
 class ChatLocalCache {
   ChatLocalCache();
 
+  static const String _keyPrefix = 'chat_cache_';
+
   Future<void> saveRawJson(String key, Map<String, dynamic> data) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('chat_cache_$key', jsonEncode(data));
+      await prefs.setString('$_keyPrefix$key', jsonEncode(data));
     } catch (_) {}
   }
 
   Future<Map<String, dynamic>?> loadRawJson(String key) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonStr = prefs.getString('chat_cache_$key');
+      final jsonStr = prefs.getString('$_keyPrefix$key');
       if (jsonStr == null) return null;
       return jsonDecode(jsonStr) as Map<String, dynamic>;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Removes a single key from the cache.
+  Future<void> deleteRawJson(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('$_keyPrefix$key');
+    } catch (_) {}
+  }
+
+  /// Removes every key that starts with [_keyPrefix] from SharedPreferences.
+  Future<void> clearAll() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keysToRemove =
+          prefs.getKeys().where((k) => k.startsWith(_keyPrefix)).toList();
+      for (final k in keysToRemove) {
+        await prefs.remove(k);
+      }
+    } catch (_) {}
   }
 
   Future<void> saveConversations(List<ChatConversation> conversations) async {
@@ -76,5 +98,19 @@ class ChatLocalCache {
       hasMore: meta['hasMore'] == true,
       limit: (meta['limit'] as num?)?.toInt() ?? 40,
     );
+  }
+
+  Future<void> clearConversationMessages(String conversationId) async {
+    await deleteRawJson('messages_$conversationId');
+  }
+
+  Future<void> removeConversation(String conversationId) async {
+    await clearConversationMessages(conversationId);
+    final conversations = await loadConversations();
+    if (conversations != null) {
+      final updated =
+          conversations.where((c) => c.id != conversationId).toList();
+      await saveConversations(updated);
+    }
   }
 }

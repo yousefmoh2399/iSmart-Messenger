@@ -1,7 +1,14 @@
+import 'chat_realtime_controller.dart';
+import '../../workspace/presentation/workspace_home_screen.dart';
 import 'dart:async';
 
-import 'package:animations/animations.dart';
+import 'dart:ui';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../files/presentation/pending_uploads_screen.dart';
+import '../../printers/presentation/printer_monitoring_screen.dart';
+import '../../scanner/presentation/scanner_session_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -12,9 +19,10 @@ import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/my_files_screen.dart';
 import '../../home/presentation/home_screen.dart';
 import '../../it_assets/presentation/mobile_it_asset_scanner_screen.dart';
+import '../../profile/presentation/notification_settings_screen.dart';
 import '../../profile/presentation/profile_screen.dart';
+import '../../profile/presentation/storage_management_screen.dart';
 import '../../tickets/presentation/tickets_screen.dart';
-import '../../updates/presentation/update_center_screen.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
 import '../providers/chat_folders_provider.dart';
@@ -27,7 +35,13 @@ import 'departments_screen.dart';
 import 'favorite_messages_screen.dart';
 import 'rooms_screen.dart';
 import 'widgets/chat_avatar.dart';
+import 'widgets/chat_audio_attachment_player.dart';
+import 'widgets/instant_clipboard_sync_sheet.dart';
+import 'widgets/message_reminder_sheet.dart';
+import 'widgets/new_conversation_sheet.dart';
 import 'widgets/chat_folder_inline_item.dart';
+import 'widgets/create_chat_folder_dialog.dart';
+import 'widgets/chat_mute_duration_sheet.dart';
 
 class ChatHomeScreen extends ConsumerStatefulWidget {
   const ChatHomeScreen({super.key});
@@ -42,7 +56,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   final Map<String, Map<String, String>> _typingByConversationId =
       <String, Map<String, String>>{};
   StreamSubscription<ChatSocketEvent>? _chatEventsSubscription;
-  bool _isSearchExpanded = false;
+  int _selectedNavIndex = 0;
 
   @override
   void initState() {
@@ -143,332 +157,14 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   }
 
   Future<void> _showCreateDialog(AppUser user) async {
-    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-    if (overview == null) {
-      return;
-    }
-
-    final nameController = TextEditingController();
-    final searchController = TextEditingController();
-    final selectedMembers = <String>{};
-    final selectedAdmins = <String>{};
-    var availableUsers = <ChatDirectoryUser>[];
-    var usersPage = 0;
-    var hasMoreUsers = true;
-    var isLoadingUsers = false;
-    var userSearch = '';
-    String? filterDepartmentId = user.departmentId;
-    final canCreateRooms = user.role == 'admin' || user.can('canCreateRooms');
-    final canSendBroadcast =
-        user.role == 'admin' || user.can('canSendBroadcast');
-    final types = <String>[
-      'group',
-      if (canCreateRooms) 'department',
-      if (canSendBroadcast) 'broadcast',
-    ];
-    var type = types.first;
-    String? departmentId = user.departmentId;
-
-    Future<void> loadUsers(
-      StateSetter setLocalState, {
-      bool reset = false,
-    }) async {
-      if (isLoadingUsers || (!hasMoreUsers && !reset)) return;
-      setLocalState(() {
-        isLoadingUsers = true;
-        if (reset) {
-          usersPage = 0;
-          hasMoreUsers = true;
-          availableUsers = [];
-        }
-      });
-      try {
-        final page = await ref
-            .read(chatRepositoryProvider)
-            .fetchUsersPage(
-              search: userSearch,
-              departmentId: filterDepartmentId,
-              page: usersPage + 1,
-              limit: 30,
-            );
-        setLocalState(() {
-          usersPage = page.page;
-          hasMoreUsers = page.hasMore;
-          final byId = <String, ChatDirectoryUser>{
-            for (final entry in availableUsers) entry.id: entry,
-            for (final entry in page.users)
-              if (entry.id != user.id) entry.id: entry,
-          };
-          availableUsers = byId.values.toList()
-            ..sort((a, b) => a.displayName.compareTo(b.displayName));
-        });
-      } finally {
-        setLocalState(() => isLoadingUsers = false);
-      }
-    }
-
-    final created = await showModalBottomSheet<ChatConversation>(
-      isScrollControlled: true,
-      context: context,
-      showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setLocalState) {
-          if (usersPage == 0 && !isLoadingUsers) {
-            Future<void>.microtask(() => loadUsers(setLocalState, reset: true));
-          }
-          return SafeArea(
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
-              ),
-              child: SizedBox(
-                height: MediaQuery.sizeOf(context).height * 0.86,
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'محادثة جديدة',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                      ],
-                    ),
-                    Expanded(
-                      child: ListView(
-                        children: [
-                          DropdownButtonFormField<String>(
-                            initialValue: type,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'النوع',
-                            ),
-                            items: types
-                                .map(
-                                  (entry) => DropdownMenuItem<String>(
-                                    value: entry,
-                                    child: Text(switch (entry) {
-                                      'department' => 'غرفة قسم',
-                                      'broadcast' => 'إعلان عام',
-                                      _ => 'مجموعة',
-                                    }),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              setLocalState(() {
-                                type = value ?? type;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: nameController,
-                            decoration: const InputDecoration(
-                              labelText: 'الاسم',
-                            ),
-                          ),
-                          if (type == 'department') ...[
-                            const SizedBox(height: 12),
-                            DropdownButtonFormField<String>(
-                              initialValue: departmentId,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'القسم',
-                              ),
-                              items: overview.departments
-                                  .map(
-                                    (department) => DropdownMenuItem<String>(
-                                      value: department.id,
-                                      child: Text(department.name),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (value) {
-                                setLocalState(() {
-                                  departmentId = value;
-                                });
-                              },
-                            ),
-                          ],
-                          if (type == 'group' || type == 'broadcast') ...[
-                            const SizedBox(height: 12),
-                            DropdownButtonFormField<String?>(
-                              initialValue: filterDepartmentId,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'فلترة حسب القسم',
-                              ),
-                              items: [
-                                const DropdownMenuItem<String?>(
-                                  value: null,
-                                  child: Text('كل الأقسام'),
-                                ),
-                                ...overview.departments.map(
-                                  (department) => DropdownMenuItem<String?>(
-                                    value: department.id,
-                                    child: Text(department.name),
-                                  ),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                filterDepartmentId = value;
-                                loadUsers(setLocalState, reset: true);
-                              },
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: searchController,
-                              decoration: const InputDecoration(
-                                prefixIcon: Icon(Icons.search_rounded),
-                                labelText: 'بحث بالاسم أو اسم المستخدم',
-                              ),
-                              onChanged: (value) {
-                                userSearch = value.trim();
-                                loadUsers(setLocalState, reset: true);
-                              },
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              height: 320,
-                              child: NotificationListener<ScrollNotification>(
-                                onNotification: (notification) {
-                                  if (notification.metrics.extentAfter < 240) {
-                                    loadUsers(setLocalState);
-                                  }
-                                  return false;
-                                },
-                                child: availableUsers.isEmpty && !isLoadingUsers
-                                    ? const Center(
-                                        child: Text('لا يوجد مستخدمون مطابقون'),
-                                      )
-                                    : ListView.builder(
-                                        itemCount:
-                                            availableUsers.length +
-                                            (isLoadingUsers ? 1 : 0),
-                                        itemBuilder: (context, index) {
-                                          if (index >= availableUsers.length) {
-                                            return const Padding(
-                                              padding: EdgeInsets.all(16),
-                                              child: Center(
-                                                child:
-                                                    CircularProgressIndicator(),
-                                              ),
-                                            );
-                                          }
-                                          final entry = availableUsers[index];
-                                          return CheckboxListTile(
-                                            value: selectedMembers.contains(
-                                              entry.id,
-                                            ),
-                                            contentPadding: EdgeInsets.zero,
-                                            title: Text(entry.displayName),
-                                            subtitle: Text(entry.username),
-                                            onChanged: (value) {
-                                              setLocalState(() {
-                                                if (value == true) {
-                                                  selectedMembers.add(entry.id);
-                                                } else {
-                                                  selectedMembers.remove(
-                                                    entry.id,
-                                                  );
-                                                  selectedAdmins.remove(
-                                                    entry.id,
-                                                  );
-                                                }
-                                              });
-                                            },
-                                          );
-                                        },
-                                      ),
-                              ),
-                            ),
-                            if (type == 'broadcast') ...[
-                              const SizedBox(height: 12),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  'المشرفون داخل البث',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              ...availableUsers
-                                  .where(
-                                    (entry) =>
-                                        selectedMembers.contains(entry.id),
-                                  )
-                                  .map(
-                                    (entry) => CheckboxListTile(
-                                      value: selectedAdmins.contains(entry.id),
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(entry.displayName),
-                                      subtitle: Text(entry.username),
-                                      onChanged: (value) {
-                                        setLocalState(() {
-                                          if (value == true) {
-                                            selectedAdmins.add(entry.id);
-                                          } else {
-                                            selectedAdmins.remove(entry.id);
-                                          }
-                                        });
-                                      },
-                                    ),
-                                  ),
-                            ],
-                          ],
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              onPressed: () async {
-                                final conversation = await ref
-                                    .read(
-                                      chatOverviewControllerProvider.notifier,
-                                    )
-                                    .createConversation(
-                                      type: type,
-                                      name: nameController.text.trim(),
-                                      memberIds: selectedMembers.toList(),
-                                      adminIds: selectedAdmins.toList(),
-                                      departmentId: departmentId,
-                                    );
-                                if (context.mounted) {
-                                  Navigator.pop(context, conversation);
-                                }
-                              },
-                              icon: const Icon(Icons.add_rounded),
-                              label: const Text('إنشاء'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+    final created = await NewConversationSheet.show(
+      context,
+      currentUser: user,
     );
-
-    // Do not dispose these immediately after the sheet completes; Android can
-    // still deliver a final TextField rebuild while the route is closing.
 
     if (created != null && mounted) {
       Navigator.of(context).push(
-        MaterialPageRoute(
+        CupertinoPageRoute(
           builder: (_) => ConversationScreen(conversation: created),
         ),
       );
@@ -512,6 +208,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   Future<void> _updateConversationPreferences(
     ChatConversation conversation, {
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isArchived,
     bool? isPinned,
     bool? isFavorite,
@@ -522,6 +220,8 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           .updateConversationPreferences(
             conversationId: conversation.id,
             isMuted: isMuted,
+            mutedUntil: mutedUntil,
+            clearMutedUntil: clearMutedUntil,
             isArchived: isArchived,
             isPinned: isPinned,
             isFavorite: isFavorite,
@@ -547,10 +247,55 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     }
   }
 
+  Future<void> _handleMuteToggle(ChatConversation conversation) async {
+    if (conversation.isEffectivelyMuted) {
+      await _updateConversationPreferences(
+        conversation,
+        isMuted: false,
+        clearMutedUntil: true,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم إلغاء كتم الإشعارات'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    final currentUserId = authUser?.id ?? '';
+    final result = await showSmartMuteDurationSheet(
+      context: context,
+      conversation: conversation,
+      currentUserId: currentUserId,
+    );
+
+    if (result != null && mounted) {
+      await _updateConversationPreferences(
+        conversation,
+        isMuted: true,
+        mutedUntil: result.toMutedUntil(),
+        clearMutedUntil: result.isAlways,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم كتم إشعارات المحادثة'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _deleteConversation(ChatConversation conversation) async {
     final authUser = ref.read(authControllerProvider).valueOrNull;
-    final canDeleteForEveryone =
-        authUser?.role == 'admin' || conversation.createdBy == authUser?.id;
+    final canDeleteForEveryone = authUser?.role == 'admin' ||
+        conversation.createdBy == authUser?.id ||
+        conversation.type == 'direct';
 
     final action = await showModalBottomSheet<String>(
       isScrollControlled: true,
@@ -561,10 +306,24 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.layers_clear_outlined),
-              title: const Text('مسح المحادثة عندي'),
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: Color(0xFFB91C1C),
+              ),
+              title: const Text(
+                'حذف المحادثة من قائمتي',
+                style: TextStyle(color: Color(0xFFB91C1C)),
+              ),
               subtitle: const Text(
-                'تظل المحادثة موجودة لكن بدون الرسائل القديمة',
+                'إزالة المحادثة ومسح رسائلها من جهازك',
+              ),
+              onTap: () => Navigator.of(context).pop('self'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.layers_clear_outlined),
+              title: const Text('مسح الرسائل فقط'),
+              subtitle: const Text(
+                'تظل المحادثة في القائمة لكن بدون الرسائل القديمة',
               ),
               onTap: () => Navigator.of(context).pop('clear'),
             ),
@@ -580,12 +339,14 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                   Icons.delete_forever_rounded,
                   color: Color(0xFFB91C1C),
                 ),
-                title: const Text(
-                  'حذف نهائي للجميع',
-                  style: TextStyle(color: Color(0xFFB91C1C)),
+                title: Text(
+                  conversation.type == 'direct'
+                      ? 'حذف نهائي للطرفين'
+                      : 'حذف نهائي للجميع',
+                  style: const TextStyle(color: Color(0xFFB91C1C)),
                 ),
                 subtitle: const Text(
-                  'سيتم حذف كل الرسائل نهائيًا من كل الأطراف',
+                  'سيتم حذف كل الرسائل والمحادثة نهائيًا من كل الأطراف',
                 ),
                 onTap: () => Navigator.of(context).pop('global'),
               ),
@@ -599,14 +360,46 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     }
 
     try {
-      if (action == 'clear') {
+      if (action == 'self') {
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('حذف المحادثة'),
+            content: const Text('هل أنت متأكد من حذف هذه المحادثة من قائمتك؟'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB91C1C),
+                ),
+                child: const Text('حذف'),
+              ),
+            ],
+          ),
+        );
+        if (confirm != true || !mounted) return;
         await ref
             .read(chatOverviewControllerProvider.notifier)
             .deleteConversation(conversation.id);
         if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم حذف المحادثة من قائمتك')),
+          );
+        }
+        return;
+      }
+      if (action == 'clear') {
+        await ref
+            .read(chatOverviewControllerProvider.notifier)
+            .clearConversationMessages(conversation.id);
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(const SnackBar(content: Text('تم مسح المحادثة عندك')));
+          ).showSnackBar(const SnackBar(content: Text('تم مسح الرسائل بنجاح')));
         }
         return;
       }
@@ -625,8 +418,16 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
         final shouldDeleteGlobal = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('تأكيد الحذف النهائي'),
-            content: const Text('سيتم حذف المحادثة نهائيًا للجميع.'),
+            title: Text(
+              conversation.type == 'direct'
+                  ? 'تأكيد الحذف النهائي للطرفين'
+                  : 'تأكيد الحذف النهائي للجميع',
+            ),
+            content: Text(
+              conversation.type == 'direct'
+                  ? 'سيتم حذف المحادثة ورسائلها نهائيًا عندك وعند الطرف الآخر.'
+                  : 'سيتم حذف المحادثة ورسائلها نهائيًا للجميع.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
@@ -634,17 +435,25 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB91C1C),
+                ),
                 child: const Text('حذف نهائي'),
               ),
             ],
           ),
         );
-        if (shouldDeleteGlobal != true) {
+        if (shouldDeleteGlobal != true || !mounted) {
           return;
         }
         await ref
             .read(chatOverviewControllerProvider.notifier)
             .deleteConversation(conversation.id, deleteForEveryone: true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم الحذف النهائي بنجاح')),
+          );
+        }
       }
     } catch (error) {
       if (!mounted) {
@@ -656,13 +465,19 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     }
   }
 
-  Future<void> _openConversation(ChatConversation conversation) async {
+  Future<void> _openConversation(
+    ChatConversation conversation, {
+    String? initialMessageId,
+  }) async {
     if (!mounted) {
       return;
     }
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ConversationScreen(conversation: conversation),
+      CupertinoPageRoute(
+        builder: (_) => ConversationScreen(
+          conversation: conversation,
+          initialMessageId: initialMessageId,
+        ),
       ),
     );
   }
@@ -696,28 +511,40 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
     await _openConversation(conversation);
   }
 
-  void _toggleSearch() {
-    setState(() {
-      _isSearchExpanded = !_isSearchExpanded;
-      if (!_isSearchExpanded) {
-        _searchController.clear();
+  Future<void> _openSavedMessagesDirect() async {
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    if (authUser == null) return;
+    try {
+      final conv = await ref
+          .read(chatOverviewControllerProvider.notifier)
+          .openOrCreateSavedMessages(authUser.id);
+      if (mounted) {
+        _openConversation(conv);
       }
-    });
-    if (_isSearchExpanded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _searchFocusNode.requestFocus();
-        }
-      });
-    } else {
-      _searchFocusNode.unfocus();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر فتح الرسائل المحفوظة: $e')),
+        );
+      }
     }
   }
 
   void _handleWorkspaceAction(String value) {
     switch (value) {
+      case 'clipboardSync':
+        showInstantClipboardSyncSheet(context, ref);
+        break;
+      case 'savedMessages':
+        _openSavedMessagesDirect();
+        break;
       case 'chat':
         Navigator.of(context).popUntil((route) => route.isFirst);
+        break;
+      case 'workspace':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const WorkspaceHomeScreen()),
+        );
         break;
       case 'chatFolders':
         _showCreateFolderDialog();
@@ -748,12 +575,17 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       case 'profile':
         Navigator.of(
           context,
-        ).push(MaterialPageRoute(builder: (_) => const ProfileScreen()));
+        ).push(CupertinoPageRoute(builder: (_) => const ProfileScreen()));
         break;
-      case 'updates':
-        Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const UpdateCenterScreen()));
+      case 'notifications':
+        Navigator.of(context).push(
+          CupertinoPageRoute(builder: (_) => const NotificationSettingsScreen()),
+        );
+        break;
+      case 'storage':
+        Navigator.of(context).push(
+          CupertinoPageRoute(builder: (_) => const StorageManagementScreen()),
+        );
         break;
       case 'favoriteMessages':
         Navigator.of(context).push(
@@ -773,6 +605,21 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
           context,
         ).push(MaterialPageRoute(builder: (_) => const ChatAppearanceScreen()));
         break;
+      case 'localFiles':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const PendingUploadsScreen()),
+        );
+        break;
+      case 'scanner':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ScannerSessionScreen()),
+        );
+        break;
+      case 'printers':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const MobilePrinterMonitoringScreen()),
+        );
+        break;
       case 'tickets':
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -787,12 +634,13 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   }
 
   Future<void> _showCreateFolderDialog() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const _CreateFolderDialog(),
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    await showCreateOrEditChatFolderDialog(
+      context,
+      availableConversations: overview?.conversations ?? const [],
+      currentUserId: authUser?.id,
     );
-    if (!mounted || name == null || name.isEmpty) return;
-    await ref.read(chatFoldersProvider.notifier).createFolder(name);
   }
 
   Future<void> _confirmLogout() async {
@@ -857,6 +705,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   Widget build(BuildContext context) {
     final authUser = ref.watch(authControllerProvider).valueOrNull;
     final overviewState = ref.watch(chatOverviewControllerProvider);
+    ref.watch(chatMessageRemindersProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -869,399 +718,418 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
       colorScheme: colorScheme,
     );
     final shellBackground = isDark ? Colors.black : const Color(0xFFF2F2F7);
-    return DefaultTabController(
-      length: 8,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'iSmart Messenger',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          leading: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: _HeaderIconButton(
-              tooltip: _isSearchExpanded ? 'إغلاق البحث' : 'بحث',
-              icon: _isSearchExpanded
-                  ? Icons.close_rounded
-                  : Icons.search_rounded,
-              appearance: appearance,
-              isDark: isDark,
-              onPressed: _toggleSearch,
-            ),
-          ),
-          centerTitle: true,
 
-          // leading: _HeaderIconButton(
-          //   tooltip: 'تحديث',
-          //   icon: Icons.refresh_rounded,
-          //   appearance: appearance,
-          //   isDark: isDark,
-          //   onPressed: () =>
-          //       ref.read(chatOverviewControllerProvider.notifier).refresh(),
-          // ),
-          actions: [
-            Builder(
-              builder: (context) => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: _HeaderIconButton(
-                  tooltip: 'القائمة',
-                  icon: Icons.menu_rounded,
-                  appearance: appearance,
-                  isDark: isDark,
-                  onPressed: () => Scaffold.of(context).openEndDrawer(),
-                ),
+    return Scaffold(
+      backgroundColor: shellBackground,
+      appBar: _selectedNavIndex >= 2
+          ? null
+          : AppBar(
+              backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
+              surfaceTintColor: Colors.transparent,
+              scrolledUnderElevation: 0,
+              elevation: 0,
+              title: Builder(
+                builder: (context) {
+                  final realtime = ref.watch(chatRealtimeControllerProvider);
+                  final String? statusText = _selectedNavIndex == 0
+                      ? switch (realtime.status) {
+                          ChatConnectionStatus.connecting => 'جارٍ الاتصال...',
+                          ChatConnectionStatus.reconnecting => 'جارٍ الاتصال...',
+                          ChatConnectionStatus.disconnected => 'في انتظار الشبكة...',
+                          _ => null,
+                        }
+                      : null;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        switch (_selectedNavIndex) {
+                          0 => 'المحادثات',
+                          1 => 'دليل الموظفين',
+                          _ => '',
+                        },
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 19,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      if (statusText != null)
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: appearance.accent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
-            ),
-          ],
-        ),
-        backgroundColor: shellBackground,
-        endDrawer: _ChatWorkspaceDrawer(
-          user: authUser,
-          appearance: appearance,
-          isDark: isDark,
-          onSelected: _handleWorkspaceAction,
-          showAdmin:
-              authUser?.can('canCreateUsers') == true ||
-              authUser?.can('canCreateDepartments') == true,
-          themeMode: themeMode,
-        ),
-        floatingActionButton: authUser == null
-            ? null
-            : FloatingActionButton.extended(
-                onPressed: () => _showCreateDialog(authUser),
-                backgroundColor: appearance.accent,
-                foregroundColor: appearance.outgoingTextColor,
-                icon: const Icon(Icons.add_comment_outlined),
-                label: const Text('محادثة جديدة'),
-              ),
-        body: SafeArea(
-          child: overviewState.when(
-            loading: () => ListView(
-              padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
-              children: const [
-                ShimmerSkeleton(height: 56, borderRadius: 20),
-                SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ShimmerSkeleton(height: 36, borderRadius: 12),
+              centerTitle: true,
+              leading: _selectedNavIndex == 0
+                  ? Builder(
+                      builder: (ctx) => Center(
+                        child: _HeaderIconButton(
+                          tooltip: 'القائمة الرئيسية ومساحة العمل',
+                          icon: Icons.menu_rounded,
+                          appearance: appearance,
+                          isDark: isDark,
+                          onPressed: () => Scaffold.of(ctx).openEndDrawer(),
+                        ),
+                      ),
+                    )
+                  : null,
+              actions: [
+                if (_selectedNavIndex == 0 && authUser != null) ...[
+                  Center(
+                    child: _HeaderIconButton(
+                      tooltip: 'محادثة جديدة',
+                      icon: CupertinoIcons.square_pencil,
+                      appearance: appearance,
+                      isDark: isDark,
+                      onPressed: () => _showCreateDialog(authUser),
                     ),
-                    SizedBox(width: 8),
-                    ShimmerSkeleton(width: 72, height: 36, borderRadius: 12),
-                  ],
-                ),
-                SizedBox(height: 12),
-                ShimmerSkeleton(height: 98, borderRadius: 22),
-                SizedBox(height: 8),
-                ShimmerSkeleton(height: 98, borderRadius: 22),
-                SizedBox(height: 8),
-                ShimmerSkeleton(height: 98, borderRadius: 22),
-                SizedBox(height: 10),
-                SizedBox(
-                  width: 160,
-                  child: ShimmerSkeleton(height: 14, borderRadius: 8),
-                ),
-                SizedBox(height: 12),
-                ShimmerSkeleton(height: 126, borderRadius: 24),
-                SizedBox(height: 10),
-                ShimmerSkeleton(height: 126, borderRadius: 24),
+                  ),
+                  const SizedBox(width: 8),
+                  Center(
+                    child: _HeaderMoreButton(
+                      appearance: appearance,
+                      isDark: isDark,
+                      onSelected: _handleWorkspaceAction,
+                      showAdmin: authUser.can('canCreateUsers') == true ||
+                          authUser.can('canCreateDepartments') == true,
+                      themeMode: themeMode,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                ],
               ],
             ),
-            error: (error, _) => Center(child: Text(error.toString())),
-            data: (overview) {
-              final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
-              final folderConversationIds = folders
-                  .expand((f) => f.conversationIds)
-                  .toSet();
-              final currentUserId = authUser?.id ?? '';
-              final searchQuery = _searchController.text.trim().toLowerCase();
-              final totalUnread = overview.totalUnread;
-              final displayName =
-                  (authUser?.fullName.trim().isNotEmpty ?? false)
-                  ? authUser!.fullName.trim()
-                  : (authUser?.username ?? 'المحادثات');
-              final conversations = _filterConversations(
-                overview.conversations,
-                currentUserId,
-              );
-              final ungroupedConversations = conversations
-                  .where(
-                    (conversation) =>
-                        !folderConversationIds.contains(conversation.id),
-                  )
-                  .toList();
-              final favoriteConversations = conversations
-                  .where((conversation) => conversation.isFavorite)
-                  .toList();
-              final archivedConversations = conversations
-                  .where((conversation) => conversation.isArchived)
-                  .toList();
-              final groupedSpaces = overview.conversations
-                  .where(
-                    (conversation) =>
-                        conversation.type != 'direct' &&
-                        _matchesConversationQuery(
-                          conversation,
-                          currentUserId,
-                          searchQuery,
-                        ),
-                  )
-                  .toList();
-              final departmentById = {
-                for (final department in overview.departments)
-                  department.id: department,
-              };
-              final branchById = {
-                for (final branch in overview.branches) branch.id: branch,
-              };
-              final usersByDepartment =
-                  <DepartmentSummary?, List<ChatDirectoryUser>>{};
-              final usersByBranch = <BranchSummary?, List<ChatDirectoryUser>>{};
-              for (final user in overview.users) {
-                if (user.id == currentUserId) {
-                  continue;
-                }
-                final department = departmentById[user.departmentId];
-                final branch = branchById[user.branchId];
-                if (!_matchesUserQuery(user, department, searchQuery)) {
-                  final branchName = branch?.name.toLowerCase() ?? '';
-                  final displayName = user.displayName.toLowerCase();
-                  final username = user.username.toLowerCase();
-                  final matchesBranch =
-                      searchQuery.isEmpty ||
-                      displayName.contains(searchQuery) ||
-                      username.contains(searchQuery) ||
-                      branchName.contains(searchQuery);
-                  if (!matchesBranch) {
-                    continue;
+      endDrawer: _ChatWorkspaceDrawer(
+        user: authUser,
+        appearance: appearance,
+        isDark: isDark,
+        onSelected: _handleWorkspaceAction,
+        showAdmin:
+            authUser?.can('canCreateUsers') == true ||
+            authUser?.can('canCreateDepartments') == true,
+        themeMode: themeMode,
+      ),
+      bottomNavigationBar: _AppleBottomNavigationBar(
+        currentIndex: _selectedNavIndex,
+        onTap: (index) => setState(() => _selectedNavIndex = index),
+        totalUnread: overviewState.valueOrNull?.totalUnread ?? 0,
+        accentColor: appearance.accent,
+        isDark: isDark,
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            GlobalMiniAudioPlayerBar(
+              onTapSession: (session) {
+                final overview = overviewState.valueOrNull;
+                if (overview == null) return;
+                for (final conv in overview.conversations) {
+                  if (conv.id == session.conversationId) {
+                    _openConversation(
+                      conv,
+                      initialMessageId: session.message.id,
+                    );
+                    break;
                   }
                 }
-                usersByDepartment
-                    .putIfAbsent(department, () => <ChatDirectoryUser>[])
-                    .add(user);
-                usersByBranch
-                    .putIfAbsent(branch, () => <ChatDirectoryUser>[])
-                    .add(user);
-              }
-              final orderedDepartmentEntries = [
-                for (final department in overview.departments)
-                  if (usersByDepartment[department]?.isNotEmpty == true)
-                    MapEntry(department, usersByDepartment[department]!),
-                if (usersByDepartment[null]?.isNotEmpty == true)
-                  MapEntry<DepartmentSummary?, List<ChatDirectoryUser>>(
-                    null,
-                    usersByDepartment[null]!,
-                  ),
-              ];
-              final orderedBranchEntries = [
-                for (final branch in overview.branches)
-                  if (usersByBranch[branch]?.isNotEmpty == true)
-                    MapEntry(branch, usersByBranch[branch]!),
-                if (usersByBranch[null]?.isNotEmpty == true)
-                  MapEntry<BranchSummary?, List<ChatDirectoryUser>>(
-                    null,
-                    usersByBranch[null]!,
-                  ),
-              ];
-
-              return Column(
+              },
+            ),
+            Expanded(
+              child: _selectedNavIndex == 2
+                  ? const HomeScreen()
+                  : _selectedNavIndex == 3
+                      ? const ProfileScreen(isEmbeddedInTab: true)
+                      : overviewState.when(
+          skipLoadingOnReload: true,
+          skipLoadingOnRefresh: true,
+          skipError: true,
+          loading: () => ListView(
+            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+            children: const [
+              ShimmerSkeleton(height: 56, borderRadius: 20),
+              SizedBox(height: 10),
+              Row(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                        borderRadius: BorderRadius.circular(16),
+                  Expanded(
+                    child: ShimmerSkeleton(height: 36, borderRadius: 12),
+                  ),
+                  SizedBox(width: 8),
+                  ShimmerSkeleton(width: 72, height: 36, borderRadius: 12),
+                ],
+              ),
+              SizedBox(height: 12),
+              ShimmerSkeleton(height: 98, borderRadius: 22),
+              SizedBox(height: 8),
+              ShimmerSkeleton(height: 98, borderRadius: 22),
+            ],
+          ),
+          error: (error, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'تعذر تحميل المحادثات',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: () => ref
+                        .read(chatOverviewControllerProvider.notifier)
+                        .refresh(),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('إعادة المحاولة'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          data: (overview) {
+            final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
+            final folderConversationIds = folders
+                .expand((f) => f.conversationIds)
+                .toSet();
+            final currentUserId = authUser?.id ?? '';
+            final searchQuery = _searchController.text.trim().toLowerCase();
+            final totalUnread = overview.totalUnread;
+            final displayName =
+                (authUser?.fullName.trim().isNotEmpty ?? false)
+                ? authUser!.fullName.trim()
+                : (authUser?.username ?? 'المحادثات');
+            final conversations = _filterConversations(
+              overview.conversations,
+              currentUserId,
+            );
+            final ungroupedConversations = conversations
+                .where(
+                  (conversation) =>
+                      !conversation.isArchived &&
+                      !folderConversationIds.contains(conversation.id),
+                )
+                .toList();
+            final directConversations = conversations
+                .where(
+                  (conversation) =>
+                      conversation.type == 'direct' &&
+                      !conversation.isArchived,
+                )
+                .toList();
+            final favoriteConversations = conversations
+                .where((conversation) => conversation.isFavorite)
+                .toList();
+            final archivedConversations = conversations
+                .where((conversation) => conversation.isArchived)
+                .toList();
+            final groupedSpaces = overview.conversations
+                .where(
+                  (conversation) =>
+                      conversation.type != 'direct' &&
+                      _matchesConversationQuery(
+                        conversation,
+                        currentUserId,
+                        searchQuery,
                       ),
-                      child: Row(
+                )
+                .toList();
+            final departmentById = {
+              for (final department in overview.departments)
+                department.id: department,
+            };
+            final branchById = {
+              for (final branch in overview.branches) branch.id: branch,
+            };
+            final usersByDepartment =
+                <DepartmentSummary?, List<ChatDirectoryUser>>{};
+            final usersByBranch = <BranchSummary?, List<ChatDirectoryUser>>{};
+            for (final user in overview.users) {
+              if (user.id == currentUserId) {
+                continue;
+              }
+              final department = departmentById[user.departmentId];
+              final branch = branchById[user.branchId];
+              if (!_matchesUserQuery(user, department, searchQuery)) {
+                final branchName = branch?.name.toLowerCase() ?? '';
+                final displayName = user.displayName.toLowerCase();
+                final username = user.username.toLowerCase();
+                final matchesBranch =
+                    searchQuery.isEmpty ||
+                    displayName.contains(searchQuery) ||
+                    username.contains(searchQuery) ||
+                    branchName.contains(searchQuery);
+                if (!matchesBranch) {
+                  continue;
+                }
+              }
+              usersByDepartment
+                  .putIfAbsent(department, () => <ChatDirectoryUser>[])
+                  .add(user);
+              usersByBranch
+                  .putIfAbsent(branch, () => <ChatDirectoryUser>[])
+                  .add(user);
+            }
+            final orderedDepartmentEntries = [
+              for (final department in overview.departments)
+                if (usersByDepartment[department]?.isNotEmpty == true)
+                  MapEntry(department, usersByDepartment[department]!),
+              if (usersByDepartment[null]?.isNotEmpty == true)
+                MapEntry<DepartmentSummary?, List<ChatDirectoryUser>>(
+                  null,
+                  usersByDepartment[null]!,
+                ),
+            ];
+            final orderedBranchEntries = [
+              for (final branch in overview.branches)
+                if (usersByBranch[branch]?.isNotEmpty == true)
+                  MapEntry(branch, usersByBranch[branch]!),
+              if (usersByBranch[null]?.isNotEmpty == true)
+                MapEntry<BranchSummary?, List<ChatDirectoryUser>>(
+                  null,
+                  usersByBranch[null]!,
+                ),
+            ];
+
+            if (_selectedNavIndex == 1) {
+              // ── Tab 1: Directory ──
+              return DefaultTabController(
+                key: const ValueKey('chat_home_directory_tab_controller'),
+                length: 3,
+                child: Column(
+                  children: [
+                    _buildSearchBar(
+                      isDark: isDark,
+                      colorScheme: colorScheme,
+                      hintText: 'ابحث في الأقسام والفروع والأفراد...',
+                    ),
+                    _buildPillTabBar(['الأقسام', 'الفروع', 'الأفراد'], appearance, isDark),
+                    Expanded(
+                      child: TabBarView(
                         children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: appearance.accent.withValues(alpha: 0.4),
-                                width: 2,
-                              ),
+                          DepartmentsScreen(
+                            currentUser: authUser,
+                            conversations: _filterConversations(
+                              overview.departmentConversations,
+                              currentUserId,
                             ),
-                            padding: const EdgeInsets.all(2),
-                            child: ChatAvatar(
-                              radius: 20,
-                              backgroundColor: appearance.accent.withValues(
-                                alpha: isDark ? 0.18 : 0.14,
-                              ),
-                              avatarUrl: authUser?.avatarUrl,
-                              fallback: Text(
-                                _avatarLabel(displayName),
-                                style: TextStyle(
-                                  color: appearance.accent,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 14,
-                                ),
-                              ),
+                            departments: overview.departments,
+                            users: overview.users,
+                            onUserTap: (user) => _openOrStartDirectConversation(
+                              user,
+                              overview,
+                              currentUserId,
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          RefreshIndicator(
+                            onRefresh: () => ref
+                                .read(chatOverviewControllerProvider.notifier)
+                                .refresh(),
+                            child: ListView(
+                              padding: const EdgeInsets.fromLTRB(0, 8, 0, 100),
                               children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      displayName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w900,
-                                            color: isDark
-                                                ? Colors.white
-                                                : const Color(0xFF0F172A),
-                                            fontSize: 16,
-                                          ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF22C55E),
-                                        shape: BoxShape.circle,
+                                if (orderedBranchEntries.isEmpty)
+                                  _InlineEmptyState(
+                                    label:
+                                        'لا يوجد أشخاص مطابقون لنتيجة البحث الحالية.',
+                                    appearance: appearance,
+                                    isDark: isDark,
+                                  )
+                                else
+                                  ...orderedBranchEntries.map((entry) {
+                                    final branch = entry.key;
+                                    final users = [...entry.value]
+                                      ..sort(
+                                        (a, b) => a.displayName.compareTo(
+                                          b.displayName,
+                                        ),
+                                      );
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 10),
+                                      child: _DepartmentDirectorySection(
+                                        title: branch?.name ?? 'بدون فرع',
+                                        subtitle: branch == null
+                                            ? 'أشخاص غير مرتبطين بفرع محدد'
+                                            : (branch.description.isEmpty
+                                                  ? 'فرع ${branch.code}'
+                                                  : branch.description),
+                                        accent: _branchAccent(branch),
+                                        appearance: appearance,
+                                        isDark: isDark,
+                                        users: users,
+                                        icon: Icons.account_tree_rounded,
+                                        conversationForUser: (user) {
+                                          for (final conversation
+                                              in overview.directConversations) {
+                                            final hasPeer = conversation.members
+                                                .any(
+                                                  (member) =>
+                                                      member.id == user.id,
+                                                );
+                                            final hasCurrent = conversation
+                                                .members
+                                                .any(
+                                                  (member) =>
+                                                      member.id == currentUserId,
+                                                );
+                                            if (hasPeer && hasCurrent) {
+                                              return conversation;
+                                            }
+                                          }
+                                          return null;
+                                        },
+                                        onUserTap: (user) =>
+                                            _openOrStartDirectConversation(
+                                              user,
+                                              overview,
+                                              currentUserId,
+                                            ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  totalUnread > 0
-                                      ? '${overview.conversations.length} محادثة • $totalUnread غير مقروءة'
-                                      : '${overview.conversations.length} محادثة',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(
-                                        color: isDark
-                                            ? Colors.white60
-                                            : const Color(0xFF64748B),
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                ),
+                                    );
+                                  }),
                               ],
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          _HeaderMoreButton(
-                            appearance: appearance,
-                            isDark: isDark,
-                            onSelected: _handleWorkspaceAction,
-                            showAdmin:
-                                authUser?.can('canCreateUsers') == true ||
-                                authUser?.can('canCreateDepartments') == true,
-                            themeMode: themeMode,
+                          ContactsScreen(
+                            currentUser: authUser,
+                            users: overview.users,
+                            departments: overview.departments,
+                            onStartDirectConversation: ref
+                                .read(chatOverviewControllerProvider.notifier)
+                                .createDirectConversation,
                           ),
                         ],
                       ),
                     ),
+                  ],
+                ),
+              );
+            }
+
+            // ── Tab 0: Chats ──
+            return DefaultTabController(
+              key: const ValueKey('chat_home_chats_tab_controller'),
+              length: 5,
+              child: Column(
+                children: [
+                  _buildSearchBar(
+                    isDark: isDark,
+                    colorScheme: colorScheme,
+                    hintText: 'ابحث في المحادثات...',
                   ),
-                  AnimatedSize(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    child: _isSearchExpanded
-                        ? Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? const Color(0xFF1C1C1E)
-                                    : Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: TextField(
-                                controller: _searchController,
-                                focusNode: _searchFocusNode,
-                                onChanged: (_) => setState(() {}),
-                                decoration: InputDecoration(
-                                  hintText: 'ابحث في المحادثات والأشخاص',
-                                  hintStyle: TextStyle(
-                                    color: isDark
-                                        ? Colors.white54
-                                        : colorScheme.onSurfaceVariant,
-                                  ),
-                                  prefixIcon: Icon(
-                                    Icons.search_rounded,
-                                    color: appearance.accent,
-                                  ),
-                                  suffixIcon:
-                                      _searchController.text.trim().isEmpty
-                                      ? null
-                                      : IconButton(
-                                          tooltip: 'مسح البحث',
-                                          onPressed: () {
-                                            _searchController.clear();
-                                            setState(() {});
-                                          },
-                                          icon: Icon(
-                                            Icons.close_rounded,
-                                            color: colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                  border: InputBorder.none,
-                                  enabledBorder: InputBorder.none,
-                                  focusedBorder: InputBorder.none,
-                                ),
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    child: TabBar(
-                      isScrollable: true,
-                      tabAlignment: TabAlignment.start,
-                      indicatorAnimation: TabIndicatorAnimation.elastic,
-                      indicatorSize: TabBarIndicatorSize.tab,
-                      splashFactory: NoSplash.splashFactory,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: isDark
-                          ? Colors.white70
-                          : const Color(0xFF64748B),
-                      indicator: BoxDecoration(
-                        color: appearance.accent,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      dividerColor: Colors.transparent,
-                      labelStyle: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13.5,
-                      ),
-                      unselectedLabelStyle: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13.5,
-                      ),
-                      labelPadding: const EdgeInsets.symmetric(horizontal: 16),
-                      tabs: const [
-                        Tab(text: 'المحادثات'),
-                        Tab(text: 'المفضلة'),
-                        Tab(text: 'المجموعات'),
-                        Tab(text: 'المؤرشفة'),
-                        Tab(text: 'التذاكر'),
-                        Tab(text: 'الأقسام'),
-                        Tab(text: 'الفروع'),
-                        Tab(text: 'الأفراد'),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
+                  _buildPillTabBar(['الكل', 'مباشر', 'المجموعات', 'المفضلة', 'المؤرشفة'], appearance, isDark),
                   Expanded(
                     child: TabBarView(
                       children: [
@@ -1275,7 +1143,10 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 .refresh();
                           },
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
                               if (folders.isNotEmpty)
                                 ...folders.map(
@@ -1335,11 +1206,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                                 c,
                                                 isPinned: !c.isPinned,
                                               ),
-                                          onToggleMute: () =>
-                                              _updateConversationPreferences(
-                                                c,
-                                                isMuted: !c.isMuted,
-                                              ),
+                                          onToggleMute: () => _handleMuteToggle(c),
                                           onToggleFavorite: () =>
                                               _updateConversationPreferences(
                                                 c,
@@ -1354,16 +1221,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                 ),
                               const ChatFolderDropZone(),
                               if (ungroupedConversations.isNotEmpty) ...[
-                                _HomeSectionHeader(
-                                  title: 'أحدث المحادثات',
-                                  subtitle:
-                                      'آخر المحادثات المباشرة والنشطة الخاصة بك.',
-                                  appearance: appearance,
-                                  isDark: isDark,
-                                ),
-                                const SizedBox(height: 8),
                                 ...ungroupedConversations
-                                    .take(6)
                                     .map(
                                       (conversation) => Padding(
                                         padding: EdgeInsets.zero,
@@ -1384,10 +1242,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                                     !conversation.isPinned,
                                               ),
                                           onToggleMute: () =>
-                                              _updateConversationPreferences(
-                                                conversation,
-                                                isMuted: !conversation.isMuted,
-                                              ),
+                                              _handleMuteToggle(conversation),
                                           onToggleFavorite: () =>
                                               _updateConversationPreferences(
                                                 conversation,
@@ -1401,24 +1256,41 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                     ),
                                 const SizedBox(height: 14),
                               ],
-                              _HomeSectionHeader(
-                                title: 'مجموعاتي',
-                                subtitle: groupedSpaces.isEmpty
-                                    ? 'لا توجد مجموعات أو غرف مطابقة حاليًا.'
-                                    : '${groupedSpaces.length} مجموعة وغرفة وإعلان تظهر لك مباشرة.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              if (groupedSpaces.isEmpty)
+                              if (ungroupedConversations.isEmpty && folders.isEmpty)
+                                _InlineEmptyState(
+                                  label: 'لا توجد محادثات نشطة بعد.\nيمكنك بدء محادثة جديدة عبر زر الإنشاء بالأعلى.',
+                                  appearance: appearance,
+                                  isDark: isDark,
+                                  icon: Icons.chat_bubble_outline_rounded,
+                                ),
+                            ],
+                          ),
+                        ),
+                        // ── Tab 1: Direct Chats ──
+                        RefreshIndicator(
+                          onRefresh: () async {
+                            await ref
+                                .read(chatOverviewControllerProvider.notifier)
+                                .refresh();
+                            await ref
+                                .read(chatFoldersProvider.notifier)
+                                .refresh();
+                          },
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
+                            children: [
+                              if (directConversations.isEmpty)
                                 _InlineEmptyState(
                                   label:
-                                      'لا توجد مجموعات أو غرف ضمن نتائج البحث الحالية.',
+                                      'لا توجد محادثات مباشرة حاليًا. يمكنك بدء محادثة جديدة من الدليل.',
                                   appearance: appearance,
                                   isDark: isDark,
                                 )
                               else
-                                ...groupedSpaces.map(
+                                ...directConversations.map(
                                   (conversation) => Padding(
                                     padding: EdgeInsets.zero,
                                     child: _ConversationCard(
@@ -1434,13 +1306,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                       onTogglePin: () =>
                                           _updateConversationPreferences(
                                             conversation,
-                                            isPinned: !conversation.isPinned,
+                                            isPinned:
+                                                !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
-                                          _updateConversationPreferences(
-                                            conversation,
-                                            isMuted: !conversation.isMuted,
-                                          ),
+                                          _handleMuteToggle(conversation),
                                       onToggleFavorite: () =>
                                           _updateConversationPreferences(
                                             conversation,
@@ -1452,86 +1322,14 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                     ),
                                   ),
                                 ),
-                              const SizedBox(height: 16),
-                              _HomeSectionHeader(
-                                title: 'الدليل حسب الأقسام',
-                                subtitle:
-                                    'كل الموظفين ظاهرون حتى لو لم تبدأ محادثة معهم بعد.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              if (orderedDepartmentEntries.isEmpty)
-                                _InlineEmptyState(
-                                  label:
-                                      'لا يوجد أشخاص مطابقون لنتيجة البحث الحالية.',
-                                  appearance: appearance,
-                                  isDark: isDark,
-                                )
-                              else
-                                ...orderedDepartmentEntries.map((entry) {
-                                  final department = entry.key;
-                                  final users = [...entry.value]
-                                    ..sort(
-                                      (a, b) => a.displayName.compareTo(
-                                        b.displayName,
-                                      ),
-                                    );
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _DepartmentDirectorySection(
-                                      title: department?.name ?? 'بدون قسم',
-                                      subtitle: department == null
-                                          ? 'أشخاص غير مرتبطين بقسم محدد'
-                                          : (department.description.isEmpty
-                                                ? 'قسم ${department.code}'
-                                                : department.description),
-                                      accent: _departmentAccent(department),
-                                      appearance: appearance,
-                                      isDark: isDark,
-                                      users: users,
-                                      conversationForUser: (user) {
-                                        for (final conversation
-                                            in overview.directConversations) {
-                                          final hasPeer = conversation.members
-                                              .any(
-                                                (member) =>
-                                                    member.id == user.id,
-                                              );
-                                          final hasCurrent = conversation
-                                              .members
-                                              .any(
-                                                (member) =>
-                                                    member.id == currentUserId,
-                                              );
-                                          if (hasPeer && hasCurrent) {
-                                            return conversation;
-                                          }
-                                        }
-                                        return null;
-                                      },
-                                      onUserTap: (user) =>
-                                          _openOrStartDirectConversation(
-                                            user,
-                                            overview,
-                                            currentUserId,
-                                          ),
-                                    ),
-                                  );
-                                }),
-                              if (conversations.isEmpty &&
-                                  groupedSpaces.isEmpty &&
-                                  orderedDepartmentEntries.isEmpty)
-                                Padding(
-                                  padding: EdgeInsets.only(top: 14),
-                                  child: _InlineEmptyState(
-                                    label:
-                                        'لا توجد محادثات أو مجموعات أو أشخاص ظاهرون الآن.',
-                                    appearance: appearance,
-                                    isDark: isDark,
-                                  ),
-                                ),
                             ],
+                          ),
+                        ),
+                        RoomsScreen(
+                          currentUser: authUser,
+                          conversations: _filterConversations(
+                            overview.roomConversations,
+                            currentUserId,
                           ),
                         ),
                         RefreshIndicator(
@@ -1539,16 +1337,11 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                               .read(chatOverviewControllerProvider.notifier)
                               .refresh(),
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
-                              _HomeSectionHeader(
-                                title: 'المحادثات المفضلة',
-                                subtitle:
-                                    'كل المحادثات التي قمت بتعليمها كمفضلة.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
                               if (favoriteConversations.isEmpty)
                                 _InlineEmptyState(
                                   label:
@@ -1576,10 +1369,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                             isPinned: !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
-                                          _updateConversationPreferences(
-                                            conversation,
-                                            isMuted: !conversation.isMuted,
-                                          ),
+                                          _handleMuteToggle(conversation),
                                       onToggleFavorite: () =>
                                           _updateConversationPreferences(
                                             conversation,
@@ -1594,28 +1384,16 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                             ],
                           ),
                         ),
-                        RoomsScreen(
-                          currentUser: authUser,
-                          conversations: _filterConversations(
-                            overview.roomConversations,
-                            currentUserId,
-                          ),
-                        ),
                         RefreshIndicator(
                           onRefresh: () => ref
                               .read(chatOverviewControllerProvider.notifier)
                               .refresh(),
                           child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(0, 6, 0, 80),
                             children: [
-                              _HomeSectionHeader(
-                                title: 'المحادثات المؤرشفة',
-                                subtitle:
-                                    'كل المحادثات التي أخفيتها من القائمة الرئيسية.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
                               if (archivedConversations.isEmpty)
                                 _InlineEmptyState(
                                   label: 'لا توجد محادثات مؤرشفة حاليًا.',
@@ -1642,10 +1420,7 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                                             isPinned: !conversation.isPinned,
                                           ),
                                       onToggleMute: () =>
-                                          _updateConversationPreferences(
-                                            conversation,
-                                            isMuted: !conversation.isMuted,
-                                          ),
+                                          _handleMuteToggle(conversation),
                                       onToggleFavorite: () =>
                                           _updateConversationPreferences(
                                             conversation,
@@ -1660,113 +1435,130 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
                             ],
                           ),
                         ),
-                        const TicketsScreen(embedded: true),
-                        DepartmentsScreen(
-                          currentUser: authUser,
-                          conversations: _filterConversations(
-                            overview.departmentConversations,
-                            currentUserId,
-                          ),
-                          departments: overview.departments,
-                          users: overview.users,
-                          onUserTap: (user) => _openOrStartDirectConversation(
-                            user,
-                            overview,
-                            currentUserId,
-                          ),
-                        ),
-                        RefreshIndicator(
-                          onRefresh: () => ref
-                              .read(chatOverviewControllerProvider.notifier)
-                              .refresh(),
-                          child: ListView(
-                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 100),
-                            children: [
-                              _HomeSectionHeader(
-                                title: 'الدليل حسب الفروع',
-                                subtitle:
-                                    'كل الموظفين ظاهرون هنا حسب الفروع التي ينشئها الأدمن.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              if (orderedBranchEntries.isEmpty)
-                                _InlineEmptyState(
-                                  label:
-                                      'لا يوجد أشخاص مطابقون لنتيجة البحث الحالية.',
-                                  appearance: appearance,
-                                  isDark: isDark,
-                                )
-                              else
-                                ...orderedBranchEntries.map((entry) {
-                                  final branch = entry.key;
-                                  final users = [...entry.value]
-                                    ..sort(
-                                      (a, b) => a.displayName.compareTo(
-                                        b.displayName,
-                                      ),
-                                    );
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: _DepartmentDirectorySection(
-                                      title: branch?.name ?? 'بدون فرع',
-                                      subtitle: branch == null
-                                          ? 'أشخاص غير مرتبطين بفرع محدد'
-                                          : (branch.description.isEmpty
-                                                ? 'فرع ${branch.code}'
-                                                : branch.description),
-                                      accent: _branchAccent(branch),
-                                      appearance: appearance,
-                                      isDark: isDark,
-                                      users: users,
-                                      icon: Icons.account_tree_rounded,
-                                      conversationForUser: (user) {
-                                        for (final conversation
-                                            in overview.directConversations) {
-                                          final hasPeer = conversation.members
-                                              .any(
-                                                (member) =>
-                                                    member.id == user.id,
-                                              );
-                                          final hasCurrent = conversation
-                                              .members
-                                              .any(
-                                                (member) =>
-                                                    member.id == currentUserId,
-                                              );
-                                          if (hasPeer && hasCurrent) {
-                                            return conversation;
-                                          }
-                                        }
-                                        return null;
-                                      },
-                                      onUserTap: (user) =>
-                                          _openOrStartDirectConversation(
-                                            user,
-                                            overview,
-                                            currentUserId,
-                                          ),
-                                    ),
-                                  );
-                                }),
-                            ],
-                          ),
-                        ),
-
-                        ContactsScreen(
-                          currentUser: authUser,
-                          users: overview.users,
-                          departments: overview.departments,
-                          onStartDirectConversation: ref
-                              .read(chatOverviewControllerProvider.notifier)
-                              .createDirectConversation,
-                        ),
                       ],
                     ),
                   ),
                 ],
-              );
-            },
+              ),
+            );
+          },
+        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPillTabBar(
+    List<String> tabTitles,
+    ChatResolvedAppearance appearance,
+    bool isDark,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.all(3.5),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE5E5EA),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: TabBar(
+          isScrollable: tabTitles.length > 4,
+          tabAlignment: tabTitles.length > 4 ? TabAlignment.start : null,
+          labelPadding: tabTitles.length > 4
+              ? const EdgeInsets.symmetric(horizontal: 16)
+              : null,
+          indicatorAnimation: TabIndicatorAnimation.linear,
+          indicatorSize: TabBarIndicatorSize.tab,
+          splashFactory: NoSplash.splashFactory,
+          labelColor: isDark ? Colors.white : const Color(0xFF0F172A),
+          unselectedLabelColor:
+              isDark ? const Color(0xFF98989F) : const Color(0xFF64748B),
+          indicator: BoxDecoration(
+            color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+            borderRadius: BorderRadius.circular(17),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.07),
+                blurRadius: 5,
+                offset: const Offset(0, 1.5),
+              ),
+            ],
+          ),
+          dividerColor: Colors.transparent,
+          labelStyle: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+            letterSpacing: -0.1,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w500,
+            fontSize: 13,
+            letterSpacing: -0.1,
+          ),
+          tabs: [
+            for (final title in tabTitles) Tab(text: title),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar({
+    required bool isDark,
+    required ColorScheme colorScheme,
+    required String hintText,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+      child: Container(
+        height: 38,
+        decoration: BoxDecoration(
+          color: isDark
+              ? const Color(0xFF1C1C1E)
+              : const Color(0xFFE5E5EA).withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: TextField(
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          style: TextStyle(
+            fontSize: 14.5,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            hintText: hintText,
+            hintStyle: TextStyle(
+              fontSize: 14,
+              color: isDark
+                  ? Colors.white38
+                  : colorScheme.onSurfaceVariant,
+            ),
+            prefixIcon: const Icon(
+              Icons.search_rounded,
+              size: 20,
+              color: Color(0xFF8E8E93),
+            ),
+            suffixIcon: _searchController.text.trim().isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'مسح البحث',
+                    icon: const Icon(
+                      Icons.cancel_rounded,
+                      size: 18,
+                      color: Color(0xFF8E8E93),
+                    ),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() {});
+                    },
+                  ),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 9),
+            isDense: true,
           ),
         ),
       ),
@@ -1774,46 +1566,226 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
   }
 }
 
-class _CreateFolderDialog extends StatefulWidget {
-  const _CreateFolderDialog();
+// ─────────────────────────────────────────────────────────────────────────────
+// Apple Minimalist Navigation & Menu Components
+// ─────────────────────────────────────────────────────────────────────────────
 
-  @override
-  State<_CreateFolderDialog> createState() => _CreateFolderDialogState();
-}
+class _AppleBottomNavigationBar extends StatelessWidget {
+  const _AppleBottomNavigationBar({
+    required this.currentIndex,
+    required this.onTap,
+    required this.totalUnread,
+    required this.accentColor,
+    required this.isDark,
+  });
 
-class _CreateFolderDialogState extends State<_CreateFolderDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    Navigator.of(context).pop(_controller.text.trim());
-  }
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  final int totalUnread;
+  final Color accentColor;
+  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('مجلد جديد'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: 'اسم المجلد'),
-        onSubmitted: (_) => _submit(),
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final items = [
+      _NavTabItem(
+        label: 'المحادثات',
+        icon: Icons.chat_bubble_outline_rounded,
+        activeIcon: Icons.chat_bubble_rounded,
+        badgeCount: totalUnread,
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('إلغاء'),
+      const _NavTabItem(
+        label: 'الدليل',
+        icon: Icons.people_alt_outlined,
+        activeIcon: Icons.people_alt_rounded,
+      ),
+      const _NavTabItem(
+        label: 'المستندات',
+        icon: Icons.folder_copy_outlined,
+        activeIcon: Icons.folder_copy_rounded,
+      ),
+      const _NavTabItem(
+        label: 'الإعدادات',
+        icon: Icons.settings_outlined,
+        activeIcon: Icons.settings_rounded,
+      ),
+    ];
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF141416).withValues(alpha: 0.88)
+                : Colors.white.withValues(alpha: 0.92),
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.06),
+                width: 0.5,
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+                blurRadius: 16,
+                offset: const Offset(0, -3),
+              ),
+            ],
+          ),
+          padding: EdgeInsets.only(
+            bottom: bottomPadding > 0 ? bottomPadding : 8,
+            top: 7,
+          ),
+          child: Row(
+            children: List.generate(items.length, (index) {
+              final item = items[index];
+              final isSelected = currentIndex == index;
+              final activeColor = accentColor;
+              final inactiveColor =
+                  isDark ? const Color(0xFF98989F) : const Color(0xFF64748B);
+
+              return Expanded(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      if (!isSelected) {
+                        HapticFeedback.lightImpact();
+                        onTap(index);
+                      }
+                    },
+                    splashColor: Colors.transparent,
+                    highlightColor: Colors.transparent,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Stack(
+                            clipBehavior: Clip.none,
+                            alignment: Alignment.center,
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 240),
+                                curve: Curves.easeOutCubic,
+                                height: 32,
+                                padding: const EdgeInsets.symmetric(horizontal: 18),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? activeColor.withValues(
+                                          alpha: isDark ? 0.22 : 0.13,
+                                        )
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: AnimatedScale(
+                                  duration: const Duration(milliseconds: 200),
+                                  scale: isSelected ? 1.06 : 1.0,
+                                  curve: Curves.easeOutBack,
+                                  child: Icon(
+                                    isSelected ? item.activeIcon : item.icon,
+                                    size: 23,
+                                    color: isSelected ? activeColor : inactiveColor,
+                                  ),
+                                ),
+                              ),
+                              if (item.badgeCount > 0)
+                                PositionedDirectional(
+                                  top: -3,
+                                  end: 6,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 5,
+                                      vertical: 1.5,
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 18,
+                                      minHeight: 18,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF3B30),
+                                      borderRadius: BorderRadius.circular(9),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? const Color(0xFF141416)
+                                            : Colors.white,
+                                        width: 1.8,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFFFF3B30).withValues(
+                                            alpha: 0.35,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      item.badgeCount > 99
+                                          ? '99+'
+                                          : '${item.badgeCount}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.05,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          AnimatedDefaultTextStyle(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutCubic,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  isSelected ? FontWeight.w700 : FontWeight.w500,
+                              color: isSelected ? activeColor : inactiveColor,
+                              letterSpacing: -0.15,
+                              height: 1.2,
+                            ),
+                            child: Text(item.label),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
         ),
-        FilledButton(onPressed: _submit, child: const Text('إنشاء')),
-      ],
+      ),
     );
   }
 }
+
+class _NavTabItem {
+  const _NavTabItem({
+    required this.label,
+    required this.icon,
+    required this.activeIcon,
+    this.badgeCount = 0,
+  });
+
+  final String label;
+  final IconData icon;
+  final IconData activeIcon;
+  final int badgeCount;
+}
+
+
 
 class _HomeSectionHeader extends StatelessWidget {
   const _HomeSectionHeader({
@@ -1871,27 +1843,48 @@ class _InlineEmptyState extends StatelessWidget {
     required this.label,
     required this.appearance,
     required this.isDark,
+    this.icon,
   });
 
   final String label;
   final ChatResolvedAppearance appearance;
   final bool isDark;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: appearance.accent.withValues(alpha: 0.14),
-            child: Icon(Icons.info_outline_rounded, color: appearance.accent),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label)),
-        ],
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: appearance.accent.withValues(alpha: isDark ? 0.16 : 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon ?? Icons.chat_bubble_outline_rounded,
+                size: 26,
+                color: appearance.accent,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2010,28 +2003,12 @@ class _DirectoryUserTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final hasConversation = existingConversation != null;
 
-    return OpenContainer(
-      transitionType: ContainerTransitionType.fade,
-      transitionDuration: const Duration(milliseconds: 280),
-      closedColor: Colors.transparent,
-      openColor: colorScheme.surface,
-      closedElevation: 0,
-      openElevation: 0,
-      openBuilder: (context, _) {
-        // If there's an existing conversation, open it directly.
-        // Otherwise, open an empty one (requires backend creation, so let the caller handle it).
-        // Wait, OpenBuilder requires returning a widget synchronously!
-        // We can't await. So if existingConversation == null, we CANNOT use OpenContainer easily!
-        return hasConversation
-            ? ConversationScreen(conversation: existingConversation!)
-            : const SizedBox();
-      },
-      closedBuilder: (context, openContainer) => Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(22),
-          onTap: hasConversation ? openContainer : onTap,
-          child: Ink(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Ink(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: isDark ? colorScheme.surfaceContainer : Colors.white,
@@ -2133,12 +2110,11 @@ class _DirectoryUserTile extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
-class _ConversationCard extends StatelessWidget {
+class _ConversationCard extends ConsumerStatefulWidget {
   const _ConversationCard({
     required this.conversation,
     required this.currentUserId,
@@ -2163,6 +2139,14 @@ class _ConversationCard extends StatelessWidget {
   final VoidCallback onToggleFavorite;
   final VoidCallback onDeleteConversation;
 
+  @override
+  ConsumerState<_ConversationCard> createState() => _ConversationCardState();
+}
+
+class _ConversationCardState extends ConsumerState<_ConversationCard> {
+  bool _didDragMove = false;
+  Offset? _dragStartPos;
+
   String _directPeerName(ChatDirectoryUser user) {
     if (user.fullName.trim().isNotEmpty) return user.fullName.trim();
     return user.username;
@@ -2174,7 +2158,9 @@ class _ConversationCard extends StatelessWidget {
   }
 
   ChatDirectoryUser? _directPeer() {
-    return conversation.members.where((m) => m.id != currentUserId).firstOrNull;
+    return widget.conversation.members
+        .where((m) => m.id != widget.currentUserId)
+        .firstOrNull;
   }
 
   Color _presenceColor(String status) {
@@ -2192,17 +2178,121 @@ class _ConversationCard extends StatelessWidget {
 
   String _conversationPreview(ChatConversation conversation) {
     final last = conversation.lastMessage;
-    if (last == null) return 'لا توجد رسائل';
-    final type = last.messageType;
-    if (type == 'image') return '📷 صورة';
-    if (type == 'file') return '📎 ملف';
-    if (type == 'audio') return '🎤 صوت';
-    if (type == 'video') return '🎥 فيديو';
-    if (type == 'poll') return '📊 استطلاع رأي';
-    return last.content.isEmpty ? '...' : last.content;
+    if (last == null) {
+      if (conversation.isSelfChat(widget.currentUserId)) {
+        return 'الملاحظات، الروابط، والمستندات المحفوظة';
+      }
+      return 'ابدأ المحادثة الآن';
+    }
+    final body = last.content.isNotEmpty
+        ? last.content
+        : switch (last.messageType) {
+            'poll' => '📊 استطلاع رأي',
+            'checklist' => '✅ قائمة مهام',
+            'image' => '📷 صورة',
+            'pdf' => '📄 ملف PDF',
+            'audio' => '🎙 ملاحظة صوتية',
+            'file' => '📎 ملف مرفق',
+            'gif' => '🎞 GIF',
+            'system' => 'رسالة النظام',
+            _ => 'رسالة',
+          };
+    final isMe = last.senderId != null && last.senderId == widget.currentUserId;
+    if (conversation.type == 'direct' ||
+        last.senderName.trim().isEmpty ||
+        isMe) {
+      return body;
+    }
+    return '${last.senderName}: $body';
+  }
+
+  Widget? _buildStatusIcon() {
+    if (widget.typingPreviewText != null) return null;
+    final last = widget.conversation.lastMessage;
+    if (last == null) return null;
+
+    final myId = widget.currentUserId.trim().isNotEmpty
+        ? widget.currentUserId.trim()
+        : (ref.read(authControllerProvider).valueOrNull?.id.trim() ??
+            ref.read(currentUserProvider)?.id.trim() ??
+            '');
+
+    bool isMine = false;
+    if (widget.conversation.isSelfChat(myId)) {
+      isMine = true;
+    } else if (last.status == 'pending' ||
+        (last.id != null && last.id!.startsWith('temp_'))) {
+      isMine = true;
+    } else {
+      final senderId = (last.senderId ?? '').trim();
+      if (myId.isNotEmpty && senderId.isNotEmpty && senderId == myId) {
+        isMine = true;
+      } else if (widget.conversation.type == 'direct') {
+        final others = widget.conversation.members
+            .where((m) => m.id.trim() != myId)
+            .toList();
+        if (others.length == 1) {
+          final peerId = others.first.id.trim();
+          if (peerId.isNotEmpty && senderId.isNotEmpty) {
+            isMine = senderId != peerId;
+          }
+        }
+      }
+    }
+
+    if (!isMine) {
+      return null;
+    }
+
+    // 1. Pending (in outbox or waiting for network) -> Clock icon
+    if (last.status == 'pending' ||
+        (last.id != null && last.id!.startsWith('temp_'))) {
+      return const Icon(
+        Icons.access_time_rounded,
+        size: 13.5,
+        color: Color(0xFF8696A0), // Pending Clock (WhatsApp slate grey)
+      );
+    }
+
+    // 2. Failed -> Error icon
+    if (last.status == 'failed') {
+      return const Icon(
+        Icons.error_outline_rounded,
+        size: 14.5,
+        color: Color(0xFFEF4444), // Failed Vivid Red
+      );
+    }
+
+    // 3. Seen / Read -> WhatsApp / Telegram Iconic Sky Blue Double Check
+    if (last.isSeenByAny(myId) || widget.conversation.isSelfChat(myId)) {
+      return const Icon(
+        Icons.done_all_rounded,
+        size: 16.0,
+        color: Color(0xFF53BDEB), // WhatsApp Sky Blue Double Check
+      );
+    }
+
+    // 4. Delivered -> WhatsApp Grey Double Check
+    if (last.isDeliveredToAny(myId)) {
+      return const Icon(
+        Icons.done_all_rounded,
+        size: 16.0,
+        color: Color(0xFF8696A0), // Delivered Grey Double Check
+      );
+    }
+
+    // 5. Sent -> Single Grey Check
+    return const Icon(
+      Icons.done_rounded,
+      size: 16.0,
+      color: Color(0xFF8696A0), // Single Grey Check
+    );
   }
 
   Color _conversationAccent(String type) {
+    if (widget.conversation.isSelfChat(widget.currentUserId)) {
+      return const Color(0xFF5856D6);
+    }
     switch (type) {
       case 'direct':
         return const Color(0xFF3B82F6);
@@ -2219,52 +2309,376 @@ class _ConversationCard extends StatelessWidget {
     }
   }
 
+  void _showActionMenu(BuildContext context) {
+    final folders = ref.read(chatFoldersProvider).value ?? [];
+    final inFolders = folders
+        .where((f) => f.conversationIds.contains(widget.conversation.id))
+        .toList();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                widget.conversation.isPinned
+                    ? Icons.push_pin_rounded
+                    : Icons.push_pin_outlined,
+              ),
+              title: Text(
+                widget.conversation.isPinned ? 'إلغاء التثبيت' : 'تثبيت المحادثة',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onTogglePin();
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: Icon(
+                widget.conversation.isEffectivelyMuted
+                    ? Icons.volume_off_rounded
+                    : Icons.volume_up_outlined,
+              ),
+              title: Text(
+                widget.conversation.isEffectivelyMuted
+                    ? 'إلغاء كتم الصوت'
+                    : 'كتم المحادثة...',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onToggleMute();
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: Icon(
+                widget.conversation.isFavorite
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                color: widget.conversation.isFavorite
+                    ? const Color(0xFFFFB020)
+                    : null,
+              ),
+              title: Text(
+                widget.conversation.isFavorite
+                    ? 'إزالة من المفضلة'
+                    : 'إضافة إلى المفضلة',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onToggleFavorite();
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.folder_outlined,
+                color: Color(0xFF007AFF),
+              ),
+              title: Text(
+                inFolders.isNotEmpty ? 'إدارة المجلدات' : 'نقل إلى مجلد...',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: inFolders.isNotEmpty
+                  ? Text(
+                      'في: ${inFolders.map((f) => f.name).join('، ')}',
+                      style: const TextStyle(fontSize: 12),
+                    )
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                _showMoveToFolderSheet(context);
+              },
+            ),
+            Divider(
+              height: 0.5,
+              thickness: 0.5,
+              indent: 56,
+              color: Theme.of(context)
+                  .colorScheme
+                  .outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+              title: const Text(
+                'مسح/مغادرة',
+                style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onDeleteConversation();
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  }
+
+  void _showMoveToFolderSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => Consumer(
+        builder: (context, ref, _) {
+          final folders = ref.watch(chatFoldersProvider).value ?? [];
+
+          return Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'اختر مجلداً للمحادثة',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(sheetContext),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (folders.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                    child: Center(
+                      child: Text(
+                        'لا توجد مجلدات حالياً.\nيمكنك إنشاء مجلد جديد من القائمة أو زر (+).',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                else
+                  ...folders.map((folder) {
+                    final isMember =
+                        folder.conversationIds.contains(widget.conversation.id);
+                    return ListTile(
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.folder_rounded,
+                          color: Color(0xFF007AFF),
+                        ),
+                      ),
+                      title: Text(
+                        folder.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      trailing: isMember
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF34C759),
+                            )
+                          : const Icon(
+                              Icons.radio_button_unchecked_rounded,
+                              color: Colors.grey,
+                            ),
+                      onTap: () async {
+                        await ref
+                            .read(chatFoldersProvider.notifier)
+                            .updateFolderMembership(
+                              folderId: folder.id,
+                              conversationId: widget.conversation.id,
+                              add: !isMember,
+                            );
+                        HapticFeedback.lightImpact();
+                      },
+                    );
+                  }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final peer = conversation.type == 'direct' ? _directPeer() : null;
-    final title = conversation.displayTitle(currentUserId);
-    final preview = typingPreviewText ?? _conversationPreview(conversation);
-    final accent = _conversationAccent(conversation.type);
+    final peer = widget.conversation.type == 'direct' ? _directPeer() : null;
+    final title = widget.conversation.displayTitle(widget.currentUserId);
+    final String tooltipMessage = (peer?.jobTitle.trim().isNotEmpty == true)
+        ? '$title\n💼 ${peer!.jobTitle.trim()}'
+        : (peer != null && peer.branchCode.isNotEmpty
+            ? '$title • فرع ${peer.branchCode}'
+            : title);
+    final preview =
+        widget.typingPreviewText ?? _conversationPreview(widget.conversation);
+    final accent = _conversationAccent(widget.conversation.type);
     final colorScheme = Theme.of(context).colorScheme;
-    final isTypingPreview = typingPreviewText != null;
-    final hasUnread = conversation.unreadCount > 0;
+    final isTypingPreview = widget.typingPreviewText != null;
+    final hasUnread = widget.conversation.unreadCount > 0;
 
     return LongPressDraggable<ChatConversation>(
-      data: conversation,
+      data: widget.conversation,
+      delay: const Duration(milliseconds: 240),
+      onDragStarted: () {
+        HapticFeedback.mediumImpact();
+        setState(() {
+          _didDragMove = false;
+          _dragStartPos = null;
+        });
+      },
+      onDragUpdate: (details) {
+        _dragStartPos ??= details.globalPosition;
+        if ((details.globalPosition - _dragStartPos!).distance > 12) {
+          _didDragMove = true;
+        }
+      },
+      onDragCompleted: () {
+        HapticFeedback.lightImpact();
+      },
+      onDraggableCanceled: (velocity, offset) {
+        if (!_didDragMove && mounted) {
+          _showActionMenu(context);
+        }
+      },
       feedback: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(12),
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          width: 300,
+          width: MediaQuery.of(context).size.width * 0.85,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+            ),
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                backgroundColor: accent.withValues(alpha: 0.2),
-                child: Icon(Icons.forum, color: accent),
-              ),
+              if (widget.conversation.isSelfChat(widget.currentUserId))
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.bookmark_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                )
+              else
+                ChatAvatar(
+                  radius: 22,
+                  backgroundColor: accent.withValues(alpha: 0.14),
+                  avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
+                  fallback: Text(
+                    peer != null
+                        ? _avatarLabel(peer.displayName)
+                        : _avatarLabel(title),
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      preview,
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
+              Icon(Icons.drive_file_move_rounded, color: accent, size: 22),
             ],
           ),
         ),
       ),
       childWhenDragging: Opacity(
-        opacity: 0.4,
+        opacity: 0.35,
         child: _buildItem(
           context,
           peer,
@@ -2276,111 +2690,28 @@ class _ConversationCard extends StatelessWidget {
           hasUnread,
         ),
       ),
-      child: OpenContainer(
-        transitionType: ContainerTransitionType.fade,
-        transitionDuration: const Duration(milliseconds: 280),
-        closedColor: Colors.transparent,
-        openColor: colorScheme.surface,
-        closedElevation: 0,
-        openElevation: 0,
-        openBuilder: (context, _) =>
-            ConversationScreen(conversation: conversation),
-        closedBuilder: (context, openContainer) => Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: openContainer,
-            onLongPress: () {
-              _showActionMenu(context);
-            },
-            child: _buildItem(
-              context,
-              peer,
-              title,
-              preview,
-              accent,
-              colorScheme,
-              isTypingPreview,
-              hasUnread,
-            ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.onTap,
+          splashColor: widget.appearance.accent.withValues(alpha: 0.08),
+          highlightColor: widget.appearance.accent.withValues(alpha: 0.04),
+          child: _buildItem(
+            context,
+            peer,
+            title,
+            preview,
+            accent,
+            colorScheme,
+            isTypingPreview,
+            hasUnread,
           ),
         ),
       ),
     );
   }
 
-  void _showActionMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        margin: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(
-                conversation.isPinned
-                    ? Icons.push_pin
-                    : Icons.push_pin_outlined,
-              ),
-              title: Text(
-                conversation.isPinned ? 'إلغاء التثبيت' : 'تثبيت المحادثة',
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onTogglePin();
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                conversation.isMuted
-                    ? Icons.volume_off
-                    : Icons.volume_up_outlined,
-              ),
-              title: Text(
-                conversation.isMuted ? 'إلغاء كتم الصوت' : 'كتم المحادثة',
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onToggleMute();
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                conversation.isFavorite ? Icons.star : Icons.star_outline,
-              ),
-              title: Text(
-                conversation.isFavorite
-                    ? 'إزالة من المفضلة'
-                    : 'إضافة إلى المفضلة',
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onToggleFavorite();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text(
-                'مسح/مغادرة',
-                style: TextStyle(color: Colors.red),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                onDeleteConversation();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildItem(
+    Widget _buildItem(
     BuildContext context,
     ChatDirectoryUser? peer,
     String title,
@@ -2390,168 +2721,208 @@ class _ConversationCard extends StatelessWidget {
     bool isTypingPreview,
     bool hasUnread,
   ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
+    final statusIcon = _buildStatusIcon();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              ChatAvatar(
-                radius: 26,
-                backgroundColor: accent.withValues(alpha: 0.14),
-                avatarUrl: peer?.avatarUrl,
-                fallback: Text(
-                  peer != null
-                      ? _avatarLabel(peer.displayName)
-                      : _avatarLabel(title),
-                  style: TextStyle(
-                    color: accent,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 20,
-                  ),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (widget.conversation.isSelfChat(widget.currentUserId))
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [Color(0xFF5856D6), Color(0xFF007AFF)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.bookmark_rounded,
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                    )
+                  else
+                    ChatAvatar(
+                      radius: 26,
+                      backgroundColor: accent.withValues(alpha: 0.14),
+                      avatarUrl: (widget.conversation.type == 'direct' ? peer?.avatarUrl : widget.conversation.avatarUrl) ?? widget.conversation.avatarUrl ?? peer?.avatarUrl,
+                      fallback: Text(
+                        peer != null
+                            ? _avatarLabel(peer.displayName)
+                            : _avatarLabel(title),
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                        ),
+                      ),
+                    ),
+                  if (peer != null && !widget.conversation.isSelfChat(widget.currentUserId))
+                    PositionedDirectional(
+                      end: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: _presenceColor(peer.presenceStatus),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: colorScheme.surface,
+                            width: 2.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15.5,
+                                  color: colorScheme.onSurface,
+                                ),
+                          ),
+                        ),
+                        if (widget.conversation.isPinned) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.push_pin_rounded,
+                            size: 14,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                        if (widget.conversation.isFavorite) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 14,
+                            color: Color(0xFFFFB020),
+                          ),
+                        ],
+                        if (widget.conversation.isEffectivelyMuted) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.volume_off_rounded,
+                            size: 14,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.conversation.lastMessage?.createdAt != null
+                              ? formatEgyptTime(
+                                  widget.conversation.lastMessage!.createdAt!,
+                                )
+                              : DateFormat(
+                                  'dd/MM',
+                                ).format(widget.conversation.updatedAt.toLocal()),
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: hasUnread
+                                ? widget.appearance.accent
+                                : colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                            fontWeight: hasUnread
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (statusIcon != null) ...[
+                          statusIcon,
+                          const SizedBox(width: 4),
+                        ],
+                        Expanded(
+                          child: Text(
+                            preview,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: isTypingPreview
+                                  ? widget.appearance.accent
+                                  : colorScheme.onSurfaceVariant,
+                              fontWeight: hasUnread || isTypingPreview
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              fontSize: 13.5,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                        if (hasUnread) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 20,
+                              minHeight: 20,
+                            ),
+                            decoration: BoxDecoration(
+                              color: widget.appearance.accent,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              "${widget.conversation.unreadCount}",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                height: 1.1,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              if (peer != null)
-                PositionedDirectional(
-                  end: 2,
-                  bottom: 2,
-                  child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: _presenceColor(peer.presenceStatus),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: colorScheme.surface,
-                        width: 2.5,
-                      ),
-                    ),
-                  ),
-                ),
             ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
-                              color: colorScheme.onSurface,
-                            ),
-                      ),
-                    ),
-                    if (conversation.isPinned) ...[
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.push_pin_rounded,
-                        size: 14,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ],
-                    if (conversation.isFavorite) ...[
-                      const SizedBox(width: 4),
-                      const Icon(
-                        Icons.star_rounded,
-                        size: 14,
-                        color: Color(0xFFFFB020),
-                      ),
-                    ],
-                    if (conversation.isMuted) ...[
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.volume_off_rounded,
-                        size: 14,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ],
-                    const SizedBox(width: 8),
-                    Text(
-                      conversation.lastMessage?.createdAt != null
-                          ? formatEgyptTime(
-                              conversation.lastMessage!.createdAt!,
-                            )
-                          : DateFormat(
-                              'dd/MM',
-                            ).format(conversation.updatedAt.toLocal()),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: hasUnread
-                            ? appearance.accent
-                            : colorScheme.onSurfaceVariant,
-                        fontWeight: hasUnread
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        preview,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: isTypingPreview
-                              ? appearance.accent
-                              : colorScheme.onSurfaceVariant,
-                          fontWeight: hasUnread || isTypingPreview
-                              ? FontWeight.w700
-                              : FontWeight.w400,
-                        ),
-                      ),
-                    ),
-                    if (hasUnread) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 22,
-                          minHeight: 22,
-                        ),
-                        decoration: BoxDecoration(
-                          color: appearance.accent,
-                          borderRadius: BorderRadius.circular(11),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          "${conversation.unreadCount}",
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            height: 1.1,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
+        ),
+        Padding(
+          padding: const EdgeInsetsDirectional.only(start: 78.0),
+          child: Divider(
+            height: 0.5,
+            thickness: 0.5,
+            color: colorScheme.outlineVariant.withValues(alpha: 0.35),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -2605,73 +2976,109 @@ class _HeaderMoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      tooltip: 'المزيد',
+      tooltip: 'المزيد من الخيارات',
       onSelected: onSelected,
-      color: isDark
-          ? Theme.of(context).colorScheme.surfaceContainer
-          : Colors.white,
+      color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+      elevation: 6,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
       itemBuilder: (context) => [
         const PopupMenuItem(
+          value: 'clipboardSync',
+          child: Row(
+            children: [
+              Icon(CupertinoIcons.doc_on_clipboard, size: 20),
+              SizedBox(width: 12),
+              Text('الحافظة الفورية (موبايل ⇄ كمبيوتر)'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'workspace',
+          child: Row(
+            children: [
+              Icon(CupertinoIcons.briefcase, size: 20),
+              SizedBox(width: 12),
+              Text('مساحة العمل والملاحظات'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'chatFolders',
+          child: Row(
+            children: [
+              Icon(CupertinoIcons.folder_badge_plus, size: 20),
+              SizedBox(width: 12),
+              Text('مجلدات المحادثات'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'favoriteMessages',
+          child: Row(
+            children: [
+              Icon(CupertinoIcons.star, size: 20),
+              SizedBox(width: 12),
+              Text('الرسائل المفضلة'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
           value: 'appearance',
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.format_paint_outlined),
-            title: Text('مظهر المحادثات'),
+          child: Row(
+            children: [
+              Icon(CupertinoIcons.paintbrush, size: 20),
+              SizedBox(width: 12),
+              Text('مظهر المحادثات'),
+            ],
           ),
         ),
         PopupMenuItem(
           value: 'theme',
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(switch (themeMode) {
-              ThemeMode.dark => Icons.dark_mode_outlined,
-              ThemeMode.system => Icons.light_mode_outlined,
-              ThemeMode.light => Icons.light_mode_outlined,
-            }),
-            title: const Text('تبديل الثيم'),
+          child: Row(
+            children: [
+              Icon(
+                switch (themeMode) {
+                  ThemeMode.dark => Icons.dark_mode_outlined,
+                  ThemeMode.system => Icons.brightness_auto_outlined,
+                  ThemeMode.light => Icons.light_mode_outlined,
+                },
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              const Text('تبديل الثيم'),
+            ],
           ),
         ),
-        if (showAdmin)
+        if (showAdmin) ...[
+          const PopupMenuDivider(),
           const PopupMenuItem(
             value: 'admin',
-            child: ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.admin_panel_settings_outlined),
-              title: Text('إدارة الشات'),
+            child: Row(
+              children: [
+                Icon(CupertinoIcons.shield, size: 20),
+                SizedBox(width: 12),
+                Text('إدارة الشات'),
+              ],
             ),
           ),
-        const PopupMenuItem(
-          value: 'favoriteMessages',
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.star_outline_rounded),
-            title: Text('الرسائل المفضلة'),
-          ),
-        ),
-        const PopupMenuItem(
-          value: 'updates',
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.system_update_alt_rounded),
-            title: Text('التحديثات'),
-          ),
-        ),
+        ],
         const PopupMenuDivider(),
         const PopupMenuItem(
           value: 'logout',
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.logout_rounded, color: Color(0xFFB91C1C)),
-            title: Text(
-              'تسجيل الخروج',
-              style: TextStyle(color: Color(0xFFB91C1C)),
-            ),
+          child: Row(
+            children: [
+              Icon(Icons.logout_rounded, size: 20, color: Color(0xFFEF4444)),
+              SizedBox(width: 12),
+              Text(
+                'تسجيل الخروج',
+                style: TextStyle(
+                  color: Color(0xFFEF4444),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -2838,6 +3245,12 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                     dividerColor: dividerColor,
                     items: [
                       _MenuItem(
+                        icon: Icons.bookmark_rounded,
+                        label: 'الرسائل المحفوظة',
+                        onTap: () => onSelected('savedMessages'),
+                        iconColor: const Color(0xFF5856D6), // Purple-blue
+                      ),
+                      _MenuItem(
                         icon: Icons.person_outline_rounded,
                         label: 'الملف الشخصي',
                         onTap: () => onSelected('profile'),
@@ -2848,6 +3261,12 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                         label: 'الرسائل المفضلة',
                         onTap: () => onSelected('favoriteMessages'),
                         iconColor: const Color(0xFFFFCC00), // Yellow
+                      ),
+                      _MenuItem(
+                        icon: Icons.edit_note_rounded,
+                        label: 'مساحة العمل والملاحظات',
+                        onTap: () => onSelected('workspace'),
+                        iconColor: const Color(0xFF5856D6),
                       ),
                       _MenuItem(
                         icon: Icons.create_new_folder_outlined,
@@ -2870,12 +3289,6 @@ class _ChatWorkspaceDrawer extends StatelessWidget {
                     cardColor: cardColor,
                     dividerColor: dividerColor,
                     items: [
-                      _MenuItem(
-                        icon: Icons.system_update_alt_rounded,
-                        label: 'التحديثات',
-                        onTap: () => onSelected('updates'),
-                        iconColor: const Color(0xFF007AFF),
-                      ),
                       _MenuItem(
                         icon: Icons.color_lens_outlined,
                         label: 'مظهر المحادثات',

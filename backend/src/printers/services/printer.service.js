@@ -123,21 +123,22 @@ function updateActiveFullSyncProgress(patch) {
   };
 }
 
-function buildPaperConsumptionMetrics(totalPages) {
+function buildPaperConsumptionMetrics(totalPages, sheetsPerClient = SHEETS_PER_CLIENT) {
   const pages = Math.max(0, Number(totalPages || 0));
+  const clientRatio = Number(sheetsPerClient) > 0 ? Number(sheetsPerClient) : SHEETS_PER_CLIENT;
   return {
     sheetsPerReam: SHEETS_PER_REAM,
-    sheetsPerClient: SHEETS_PER_CLIENT,
+    sheetsPerClient: clientRatio,
     exactReams: pages / SHEETS_PER_REAM,
     fullReams: Math.floor(pages / SHEETS_PER_REAM),
     remainingSheets: pages % SHEETS_PER_REAM,
     requiredReams: pages === 0 ? 0 : Math.ceil(pages / SHEETS_PER_REAM),
-    estimatedClientsExact: pages / SHEETS_PER_CLIENT,
-    estimatedClientsCeil: pages === 0 ? 0 : Math.ceil(pages / SHEETS_PER_CLIENT),
+    estimatedClientsExact: pages / clientRatio,
+    estimatedClientsCeil: pages === 0 ? 0 : Math.ceil(pages / clientRatio),
   };
 }
 
-function mergePrinterConsumption(target, source) {
+function mergePrinterConsumption(target, source, sheetsPerClient = SHEETS_PER_CLIENT) {
   target.totalPages += Number(source.totalPages || 0);
   target.monoPages += Number(source.monoPages || 0);
   target.colorPages += Number(source.colorPages || 0);
@@ -150,22 +151,22 @@ function mergePrinterConsumption(target, source) {
   );
   target.firstSnapshotAt = target.firstSnapshotAt || source.firstSnapshotAt || null;
   target.lastSnapshotAt = source.lastSnapshotAt || target.lastSnapshotAt || null;
-  target.paper = buildPaperConsumptionMetrics(target.totalPages);
+  target.paper = buildPaperConsumptionMetrics(target.totalPages, sheetsPerClient);
 }
 
-function cloneBranchConsumption(branchConsumption) {
+function cloneBranchConsumption(branchConsumption, sheetsPerClient = SHEETS_PER_CLIENT) {
   const printerMap = new Map();
   for (const printer of branchConsumption.printers || []) {
     printerMap.set(printer.printerId, {
       ...printer,
-      paper: buildPaperConsumptionMetrics(printer.totalPages),
+      paper: buildPaperConsumptionMetrics(printer.totalPages, sheetsPerClient),
     });
   }
   return {
     ...branchConsumption,
     printers: Array.from(printerMap.values()),
     printersCount: printerMap.size,
-    paper: buildPaperConsumptionMetrics(branchConsumption.totalPages),
+    paper: buildPaperConsumptionMetrics(branchConsumption.totalPages, sheetsPerClient),
     _printerMap: printerMap,
   };
 }
@@ -856,8 +857,8 @@ async function syncBranchRegisteredPrinters(actor, branch, options = {}) {
   );
   const probeOptions = {
     skipWebDetails: options.skipWebDetails !== false,
-    snmpTimeoutMs: Number(process.env.PRINTER_REGISTERED_SYNC_TIMEOUT_MS || 1500),
-    snmpRetries: Number(process.env.PRINTER_REGISTERED_SYNC_RETRIES || 0),
+    snmpTimeoutMs: Number(process.env.PRINTER_REGISTERED_SYNC_TIMEOUT_MS || 2500),
+    snmpRetries: Number(process.env.PRINTER_REGISTERED_SYNC_RETRIES || 1),
     snmpOperationTimeoutMs: Number(
       process.env.PRINTER_REGISTERED_SYNC_OPERATION_TIMEOUT_MS || 2000,
     ),
@@ -1433,7 +1434,8 @@ async function listSyncLogs() {
   }));
 }
 
-async function calculateMonthlyConsumption({ branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null }) {
+async function calculateMonthlyConsumption({ branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null, sheetsPerClient = SHEETS_PER_CLIENT }) {
+  const clientRatio = Number(sheetsPerClient) > 0 ? Number(sheetsPerClient) : SHEETS_PER_CLIENT;
   const now = new Date();
   
   if (month !== null || year !== null) {
@@ -1477,10 +1479,11 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
         snapshotAt: { $gte: startDate, $lt: endDate }
       }).sort({ snapshotAt: 1 }).lean();
 
-      // No 32-days restriction. 
-      // The baseline is strictly the last snapshot BEFORE the month starts.
-      // This ensures any un-synced pages are naturally attributed to the month they are finally synced in, 
-      // without losing any pages and without overlapping.
+      const isCurrentOngoingMonth =
+        now.getFullYear() === currentYear && (now.getMonth() + 1) === currentMonth;
+
+      // Reliable Baseline: Never discard baselineSnapshot based on arbitrary hours!
+      // If the branch closed on Friday Sept 28, that snapshot is the accurate baseline for October!
       const baselineSnapshot = await DailySnapshot.findOne({
         printerId: printer._id,
         snapshotAt: { $lt: startDate }
@@ -1489,15 +1492,14 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
       const baselineAgeMs = baselineSnapshot
         ? startDate.getTime() - new Date(baselineSnapshot.snapshotAt).getTime()
         : null;
-      const hasFreshBaseline =
-        baselineAgeMs !== null && baselineAgeMs >= 0 && baselineAgeMs <= MAX_BASELINE_AGE_MS;
+      const hasBaselineSnapshot = Boolean(baselineSnapshot);
 
       let startTotal = 0;
       let startMono = 0;
       let startColor = 0;
       let startScan = 0;
 
-      if (hasFreshBaseline) {
+      if (hasBaselineSnapshot) {
         startTotal = baselineSnapshot.lifetimeCounters?.totalPages || baselineSnapshot.counters?.totalPages || 0;
         startMono = baselineSnapshot.lifetimeCounters?.monoPages || baselineSnapshot.counters?.monoPages || 0;
         startColor = baselineSnapshot.lifetimeCounters?.colorPages || baselineSnapshot.counters?.colorPages || 0;
@@ -1522,6 +1524,23 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
         endScan = lastSnapshot.lifetimeCounters?.scanPages || lastSnapshot.counters?.scanPages || 0;
       }
 
+      // If this is the current ongoing month, check live printer counters:
+      // If the printer printed pages since the last snapshot (or if snapshots were missed while printer was off at midnight),
+      // incorporate live counters so branch employees are never reported as having 0 consumption!
+      if (isCurrentOngoingMonth) {
+        const liveTotal = printer.lifetimeCounters?.totalPages || printer.counters?.totalPages || 0;
+        const liveMono = printer.lifetimeCounters?.monoPages || printer.counters?.monoPages || 0;
+        const liveColor = printer.lifetimeCounters?.colorPages || printer.counters?.colorPages || 0;
+        const liveScan = printer.lifetimeCounters?.scanPages || printer.counters?.scanPages || 0;
+
+        if (liveTotal > endTotal) {
+          endTotal = liveTotal;
+          endMono = Math.max(endMono, liveMono);
+          endColor = Math.max(endColor, liveColor);
+          endScan = Math.max(endScan, liveScan);
+        }
+      }
+
       const usage = sanitizeMonthlyCounterUsage({
         totalPages: endTotal - startTotal,
         monoPages: endMono - startMono,
@@ -1532,9 +1551,8 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
 
       const firstSnapshot = monthlySnapshots[0] || null;
       const lastSnapshot = monthlySnapshots[monthlySnapshots.length - 1] || null;
-      const hasBaselineSnapshot = Boolean(hasFreshBaseline);
-      const hasStaleBaseline = Boolean(baselineSnapshot && !hasFreshBaseline);
-      const hasPartialData = monthlySnapshots.length === 0 || !hasFreshBaseline || hasStaleBaseline;
+      const hasStaleBaseline = false;
+      const hasPartialData = monthlySnapshots.length === 0 || !hasBaselineSnapshot;
       const hasSuspiciousConsumption = usage.excludedFromTotals;
 
       if (totalPages > 0 || usage.rawTotalPages > 0 || printerId || branchId || monthlySnapshots.length > 0) {
@@ -1555,7 +1573,7 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
           excludedFromTotals: usage.excludedFromTotals,
           identityConfidence: printer.identityConfidence || "weak",
           anomalyFlags: printer.anomalyFlags || [],
-          paper: buildPaperConsumptionMetrics(totalPages),
+          paper: buildPaperConsumptionMetrics(totalPages, clientRatio),
           hasBaselineSnapshot,
           hasStaleBaseline,
           hasSuspiciousConsumption,
@@ -1598,7 +1616,7 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
       grouped[bId].hasPartialData = grouped[bId].hasPartialData || item.hasPartialData;
       grouped[bId].hasSuspiciousConsumption = grouped[bId].hasSuspiciousConsumption || item.hasSuspiciousConsumption;
       if ((item.anomalyFlags || []).length > 0) grouped[bId].hasCounterAnomalies = true;
-      grouped[bId].paper = buildPaperConsumptionMetrics(grouped[bId].totalPages);
+      grouped[bId].paper = buildPaperConsumptionMetrics(grouped[bId].totalPages, clientRatio);
       grouped[bId].printers.push(item);
     }
 
@@ -1621,7 +1639,7 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
     for (const c of r.consumption) {
       const bId = c.branchId;
       if (!flatGrouped[bId]) {
-        flatGrouped[bId] = cloneBranchConsumption(c);
+        flatGrouped[bId] = cloneBranchConsumption(c, clientRatio);
       } else {
         flatGrouped[bId].totalPages += c.totalPages;
         flatGrouped[bId].monoPages += c.monoPages;
@@ -1631,13 +1649,13 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
         flatGrouped[bId].hasPartialData = Boolean(flatGrouped[bId].hasPartialData || c.hasPartialData);
         flatGrouped[bId].hasSuspiciousConsumption = Boolean(flatGrouped[bId].hasSuspiciousConsumption || c.hasSuspiciousConsumption);
         flatGrouped[bId].hasCounterAnomalies = Boolean(flatGrouped[bId].hasCounterAnomalies || c.hasCounterAnomalies);
-        flatGrouped[bId].paper = buildPaperConsumptionMetrics(flatGrouped[bId].totalPages);
+        flatGrouped[bId].paper = buildPaperConsumptionMetrics(flatGrouped[bId].totalPages, clientRatio);
 
         for (const printer of c.printers || []) {
           const printerMap = flatGrouped[bId]._printerMap;
           const existing = printerMap.get(printer.printerId);
           if (existing) {
-            mergePrinterConsumption(existing, printer);
+            mergePrinterConsumption(existing, printer, clientRatio);
           } else {
             printerMap.set(printer.printerId, {
               ...printer,
@@ -1693,7 +1711,7 @@ async function ensurePrinterReplacementIndexes() {
   return printerIndexMigrationPromise;
 }
 
-async function exportReport(actor, { type = "global", format = "pdf", branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null }) {
+async function exportReport(actor, { type = "global", format = "pdf", branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null, templateId = null, sheetsPerClient = SHEETS_PER_CLIENT }) {
   if (type === "printer") {
     const printer = await Printer.findOne({ _id: printerId, deletedAt: null })
       .populate("branchId", "name code")
@@ -1706,9 +1724,9 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
 
     let monthlyConsumption = null;
     if (fromMonth && fromYear) {
-      monthlyConsumption = await calculateMonthlyConsumption({ printerId, fromMonth, fromYear, toMonth, toYear, month, year });
+      monthlyConsumption = await calculateMonthlyConsumption({ printerId, fromMonth, fromYear, toMonth, toYear, month, year, sheetsPerClient });
     } else if (month && year) {
-      monthlyConsumption = await calculateMonthlyConsumption({ printerId, month, year });
+      monthlyConsumption = await calculateMonthlyConsumption({ printerId, month, year, sheetsPerClient });
     }
 
     return buildPrinterPdfReport({ printer, snapshots, actor, month, year, fromMonth, fromYear, toMonth, toYear, monthlyConsumption });
@@ -1723,14 +1741,14 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
 
   let monthlyConsumption = null;
   if (fromMonth && fromYear) {
-    monthlyConsumption = await calculateMonthlyConsumption({ branchId, fromMonth, fromYear, toMonth, toYear, month, year });
+    monthlyConsumption = await calculateMonthlyConsumption({ branchId, fromMonth, fromYear, toMonth, toYear, month, year, sheetsPerClient });
   } else if (month && year) {
-    monthlyConsumption = await calculateMonthlyConsumption({ branchId, month, year });
+    monthlyConsumption = await calculateMonthlyConsumption({ branchId, month, year, sheetsPerClient });
   }
 
   if (type === "global" || type === "branch") {
     const { exportCustomReport } = require("./printer-custom-reports.service");
-    return exportCustomReport(actor, { type, format, branchId, month, year });
+    return exportCustomReport(actor, { type, format, branchId, month, year, templateId, sheetsPerClient });
   }
 
   const [branches, printers, snapshots, waste] = await Promise.all([

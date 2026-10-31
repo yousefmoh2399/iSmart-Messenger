@@ -1,7 +1,7 @@
 name: desktop_app
 description: Workplace document manager desktop app
 publish_to: "none"
-version: 1.1.15+2
+version: 1.1.20+2
 
 environment:
   sdk: ^3.9.2
@@ -56,6 +56,7 @@ flutter:
   assets:
     - assets/images/
     - assets/json/
+    - assets/emojis/
     - assets/notification_sounds/default_tone.wav
     - assets/notification_sounds/chime_tone.wav
     - assets/notification_sounds/alert_tone.wav
@@ -84,3 +85,7 @@ flutter:
           weight: 400
         - asset: assets/fonts/NotoSansArabic-Bold.ttf
           weight: 700
+    - family: Segoe UI Emoji
+      fonts:
+        - asset: assets/fonts/seguiemj.ttf
+

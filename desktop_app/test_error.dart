@@ -1,0 +1,1 @@
+import 'dart:io'; void main() { final d = Directory('C:/Users/Yousef/AppData/Local/Pub/Cache/hosted/pub.dev/'); if(!d.existsSync()) return; for(var e in d.listSync(recursive: true)) { if(e is File && e.path.endsWith('.dart')) { final txt = e.readAsStringSync(); if(txt.contains('too large to save from memory')) { print(e.path); } } } }

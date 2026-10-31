@@ -5,6 +5,8 @@ import '../models/system_monitor_models.dart';
 
 class SystemMonitorState {
   const SystemMonitorState({
+    this.stats,
+    this.isLoadingStats = false,
     this.sessions = const [],
     this.errors = const [],
     this.isLoadingSessions = false,
@@ -23,6 +25,8 @@ class SystemMonitorState {
     this.resolvedFilter,
   });
 
+  final SystemTelemetryStats? stats;
+  final bool isLoadingStats;
   final List<DeviceSession> sessions;
   final List<ClientErrorLog> errors;
   final bool isLoadingSessions;
@@ -33,7 +37,7 @@ class SystemMonitorState {
   final bool errorsHasMore;
   final int sessionsTotal;
   final int errorsTotal;
-  
+
   final String statusFilter;
   final String clientTypeFilter;
   final String searchQuery;
@@ -43,6 +47,8 @@ class SystemMonitorState {
   final bool? resolvedFilter;
 
   SystemMonitorState copyWith({
+    SystemTelemetryStats? stats,
+    bool? isLoadingStats,
     List<DeviceSession>? sessions,
     List<ClientErrorLog>? errors,
     bool? isLoadingSessions,
@@ -61,6 +67,8 @@ class SystemMonitorState {
     bool? resolvedFilter,
   }) {
     return SystemMonitorState(
+      stats: stats ?? this.stats,
+      isLoadingStats: isLoadingStats ?? this.isLoadingStats,
       sessions: sessions ?? this.sessions,
       errors: errors ?? this.errors,
       isLoadingSessions: isLoadingSessions ?? this.isLoadingSessions,
@@ -74,9 +82,17 @@ class SystemMonitorState {
       statusFilter: statusFilter ?? this.statusFilter,
       clientTypeFilter: clientTypeFilter ?? this.clientTypeFilter,
       searchQuery: searchQuery ?? this.searchQuery,
-      selectedUserId: selectedUserId != null ? (selectedUserId == '' ? null : selectedUserId) : this.selectedUserId,
-      selectedSessionId: selectedSessionId != null ? (selectedSessionId == '' ? null : selectedSessionId) : this.selectedSessionId,
-      resolvedFilter: resolvedFilter != null ? (resolvedFilter == true ? true : (resolvedFilter == false ? false : null)) : this.resolvedFilter,
+      selectedUserId: selectedUserId != null
+          ? (selectedUserId == '' ? null : selectedUserId)
+          : this.selectedUserId,
+      selectedSessionId: selectedSessionId != null
+          ? (selectedSessionId == '' ? null : selectedSessionId)
+          : this.selectedSessionId,
+      resolvedFilter: resolvedFilter != null
+          ? (resolvedFilter == true
+              ? true
+              : (resolvedFilter == false ? false : null))
+          : this.resolvedFilter,
     );
   }
 }
@@ -84,8 +100,30 @@ class SystemMonitorState {
 class SystemMonitorController extends Notifier<SystemMonitorState> {
   @override
   SystemMonitorState build() {
-    Future.microtask(() => refreshSessions());
+    Future.microtask(() => refreshAll());
     return const SystemMonitorState();
+  }
+
+  Future<void> refreshAll() async {
+    await Future.wait([
+      refreshStats(),
+      refreshSessions(),
+      loadErrors(),
+    ]);
+  }
+
+  Future<void> refreshStats() async {
+    state = state.copyWith(isLoadingStats: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final stats = await repo.getSystemStats();
+      state = state.copyWith(
+        stats: stats,
+        isLoadingStats: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingStats: false);
+    }
   }
 
   Future<void> refreshSessions() async {
@@ -142,9 +180,13 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
     refreshSessions();
   }
 
-  Future<void> loadErrors({String? userId, String? sessionId, bool? resolved}) async {
+  Future<void> loadErrors({
+    String? userId,
+    String? sessionId,
+    bool? resolved,
+  }) async {
     state = state.copyWith(
-      isLoadingErrors: true, 
+      isLoadingErrors: true,
       errorsPage: 1,
       selectedUserId: userId ?? '',
       selectedSessionId: sessionId ?? '',
@@ -200,6 +242,7 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       state = state.copyWith(
         errors: state.errors.map((e) => e.id == id ? updated : e).toList(),
       );
+      refreshStats();
     } catch (_) {}
   }
 
@@ -208,6 +251,7 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       final repo = ref.read(systemMonitorRepositoryProvider);
       await repo.deleteAllErrors();
       state = state.copyWith(errors: []);
+      refreshStats();
     } catch (_) {}
   }
 }

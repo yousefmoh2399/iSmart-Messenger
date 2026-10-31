@@ -3,6 +3,7 @@ class AppUser {
     required this.id,
     required this.username,
     required this.fullName,
+    this.jobTitle = '',
     required this.role,
     required this.departmentId,
     required this.branchId,
@@ -21,6 +22,7 @@ class AppUser {
   final String id;
   final String username;
   final String fullName;
+  final String jobTitle;
   final String role;
   final String? departmentId;
   final String? branchId;
@@ -119,6 +121,7 @@ class AppUser {
       id: json['id'] as String,
       username: json['username'] as String,
       fullName: json['fullName'] as String? ?? '',
+      jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
       branchId: json['branchId'] as String?,
@@ -146,6 +149,7 @@ class AppUser {
       'id': id,
       'username': username,
       'fullName': fullName,
+      'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
       'branchId': branchId,
@@ -172,6 +176,7 @@ class ChatPreferences {
   static const defaults = ChatPreferences(
     themeId: 'system',
     wallpaperId: 'default',
+    doodles: true,
     customTheme: ChatCustomTheme.defaults,
     disableAnimatedEmojis: false,
   );
@@ -179,12 +184,14 @@ class ChatPreferences {
   const ChatPreferences({
     required this.themeId,
     required this.wallpaperId,
+    this.doodles = true,
     required this.customTheme,
     this.disableAnimatedEmojis = false,
   });
 
   final String themeId;
   final String wallpaperId;
+  final bool doodles;
   final ChatCustomTheme customTheme;
   final bool disableAnimatedEmojis;
 
@@ -196,6 +203,7 @@ class ChatPreferences {
       wallpaperId: (json?['wallpaperId'] as String?)?.trim().isNotEmpty == true
           ? (json!['wallpaperId'] as String).trim()
           : 'default',
+      doodles: json?['doodles'] is bool ? json!['doodles'] as bool : true,
       customTheme: ChatCustomTheme.fromJson(
         json?['customTheme'] as Map<String, dynamic>?,
       ),
@@ -206,12 +214,14 @@ class ChatPreferences {
   ChatPreferences copyWith({
     String? themeId,
     String? wallpaperId,
+    bool? doodles,
     ChatCustomTheme? customTheme,
     bool? disableAnimatedEmojis,
   }) {
     return ChatPreferences(
       themeId: themeId ?? this.themeId,
       wallpaperId: wallpaperId ?? this.wallpaperId,
+      doodles: doodles ?? this.doodles,
       customTheme: customTheme ?? this.customTheme,
       disableAnimatedEmojis: disableAnimatedEmojis ?? this.disableAnimatedEmojis,
     );
@@ -220,6 +230,7 @@ class ChatPreferences {
   Map<String, dynamic> toJson() => {
     'themeId': themeId,
     'wallpaperId': wallpaperId,
+    'doodles': doodles,
     'customTheme': customTheme.toJson(),
     'disableAnimatedEmojis': disableAnimatedEmojis,
   };

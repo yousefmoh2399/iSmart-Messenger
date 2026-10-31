@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,7 +21,7 @@ import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/presentation/chat_home_screen.dart';
 import '../features/chat/presentation/conversation_screen.dart';
 import '../features/chat/models/chat_models.dart';
-import '../features/chat/presentation/widgets/chat_avatar.dart';
+import '../features/chat/presentation/widgets/share_target_picker_sheet.dart';
 import '../features/tickets/presentation/tickets_screen.dart';
 import '../shared/models/update_models.dart';
 import '../shared/providers/providers.dart';
@@ -55,6 +56,8 @@ class WorkplaceMobileApp extends ConsumerWidget {
       themeAnimationDuration: const Duration(milliseconds: 300),
       themeAnimationCurve: Curves.easeInOutCubic,
       home: bootstrap.when(
+        skipLoadingOnReload: true,
+        skipLoadingOnRefresh: true,
         loading: () => const LoadingView(message: 'جارٍ تجهيز التطبيق...'),
         error: (error, stackTrace) =>
             LoadingView(message: error.toString(), isError: true),
@@ -97,6 +100,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   String? _lastServerBannerMessage;
   bool _serverRefreshInFlight = false;
   bool _hasConfirmedServerDisconnect = false;
+  int _serverFailureStreak = 0;
   bool _serverRestoreRefreshInFlight = false;
   StreamSubscription<AndroidSharedContent>? _androidShareSubscription;
   AndroidSharedContent? _pendingAndroidShare;
@@ -250,29 +254,45 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
     if (!result.isConnected) {
-      if (quiet || _isEstablishingConnection) {
+      if (quiet ||
+          _isEstablishingConnection ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
         return;
       }
-      _hasConfirmedServerDisconnect = true;
-      _showConnectionSnackBar(
-        _buildServerUnavailableMessage(result.message),
-        isError: true,
-      );
+      _serverFailureStreak++;
+      if (_serverFailureStreak >= 2) {
+        _hasConfirmedServerDisconnect = true;
+      }
       return;
     }
     // Connection confirmed — clear establishing flag immediately.
     _markConnectionEstablished();
+    _serverFailureStreak = 0;
     if (_hasConfirmedServerDisconnect || _lastServerBannerMessage != null) {
-      if (quiet || !refreshAfterRestore) {
-        _hasConfirmedServerDisconnect = false;
-        _lastServerBannerMessage = null;
-        return;
+      _hasConfirmedServerDisconnect = false;
+      _lastServerBannerMessage = null;
+      if (refreshAfterRestore) {
+        unawaited(_refreshDataAfterServerRestored());
       }
-      unawaited(_refreshDataAfterServerRestored());
-      _showConnectionSnackBar('تمت استعادة الاتصال بالخادم.', isError: false);
     }
     _hasConfirmedServerDisconnect = false;
     _lastServerBannerMessage = null;
+  }
+
+  Future<void> _ensureSocketConnected() async {
+    final socket = ref.read(chatSocketServiceProvider);
+    if (socket.isConnected) return;
+    try {
+      final token = await ref.read(authTokenProvider.future);
+      if (token == null || token.isEmpty) return;
+      final baseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ??
+          AppConfig.defaultApiBaseUrl;
+      await socket.connect(
+        baseUrl: baseUrl,
+        token: token,
+        clientType: 'mobile',
+      );
+    } catch (_) {}
   }
 
   Future<void> _refreshDataAfterServerRestored() async {
@@ -281,13 +301,25 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
-      ref.invalidate(chatSocketConnectionProvider);
-      try {
-        await ref.read(authControllerProvider.notifier).refreshCurrentUser();
-      } catch (_) {}
+      // Connect socket in background without delaying HTTP data refresh
+      unawaited(_ensureSocketConnected());
       if (!mounted) {
         return;
+      }
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref
+              .read(
+                conversationMessagesControllerProvider(
+                  activeConversationId,
+                ).notifier,
+              )
+              .refresh();
+        } catch (_) {}
       }
       ref.read(pushNotificationServiceProvider).registerForAuthenticatedUser();
       unawaited(_syncPendingUploadsInBackground());
@@ -297,29 +329,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   void _showConnectionSnackBar(String message, {required bool isError}) {
-    if (!mounted) {
-      return;
-    }
-    if (isError) {
-      if (_isEstablishingConnection) {
-        return;
-      }
-      if (_lastServerBannerMessage == message) {
-        return;
-      }
-      _lastServerBannerMessage = message;
-    } else {
-      _lastServerBannerMessage = null;
-    }
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          backgroundColor: isError ? const Color(0xFFB42318) : null,
-          content: Text(message),
-        ),
-      );
+    // Suppress intrusive disconnect SnackBars during normal mobile usage (WhatsApp style)
+    return;
   }
 
   String _buildServerUnavailableMessage(String details) {
@@ -345,37 +356,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final currentBaseUrl =
         ref.read(apiBaseUrlControllerProvider).valueOrNull ??
         AppConfig.defaultApiBaseUrl;
-    final controller = TextEditingController(text: currentBaseUrl);
     final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('تغيير رابط الخادم'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'API Base URL',
-            hintText: 'http://192.168.1.10:5000',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('__reset__'),
-            child: const Text('الافتراضي'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('حفظ ومحاولة الاتصال'),
-          ),
-        ],
+      builder: (dialogContext) => _ChangeServerBaseUrlDialog(
+        initialUrl: currentBaseUrl,
       ),
     );
-    controller.dispose();
     if (!mounted || result == null) {
       return;
     }
@@ -435,18 +421,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final auth = ref.read(authControllerProvider);
     if (auth.status != AuthStatus.authenticated) {
       Future<void>.delayed(const Duration(milliseconds: 600), () {
-        if (mounted && _pendingAndroidShare != null)
+        if (mounted && _pendingAndroidShare != null) {
           _presentIncomingShare(_pendingAndroidShare!);
+        }
       });
       return;
     }
-    final conversations =
-        ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
-        const [];
-    if (conversations.isEmpty) {
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    if (overview == null) {
       Future<void>.delayed(const Duration(milliseconds: 600), () {
-        if (mounted && _pendingAndroidShare != null)
+        if (mounted && _pendingAndroidShare != null) {
           _presentIncomingShare(_pendingAndroidShare!);
+        }
       });
       return;
     }
@@ -454,72 +440,67 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _pendingAndroidShare = null;
     final directConversation = content.conversationId == null
         ? null
-        : conversations
+        : overview.conversations
               .where((entry) => entry.id == content.conversationId)
               .firstOrNull;
     if (directConversation != null) {
       await _sendSharedContentToConversation(content, directConversation);
       _shareSheetOpen = false;
+      if (mounted) {
+        Navigator.of(context).push(
+          CupertinoPageRoute(
+            builder: (_) =>
+                ConversationScreen(conversation: directConversation),
+          ),
+        );
+      }
       return;
     }
 
     final currentUserId = ref.read(currentUserProvider)?.id ?? '';
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _ShareBottomSheet(
-        content: content,
-        conversations: conversations,
-        currentUserId: currentUserId,
-        onSelected: (conversation) async {
-          Navigator.pop(sheetContext);
-          await _sendSharedContentToConversation(content, conversation);
-        },
-      ),
+    final resolved = await ShareTargetPickerSheet.show(
+      context,
+      content: content,
+      currentUserId: currentUserId,
     );
     _shareSheetOpen = false;
-  }
 
-  // ── Share-sheet helpers ────────────────────────────────────────────────────
-
-  static String _getConversationTitle(
-    ChatConversation conversation,
-    String currentUserId,
-  ) => conversation.displayTitle(currentUserId);
-
-  static String? _getConversationAvatarUrl(
-    ChatConversation conversation,
-    String currentUserId,
-  ) {
-    if (conversation.type == 'direct') {
-      final other = conversation.members
-          .where((m) => m.id != currentUserId)
-          .firstOrNull;
-      return other?.avatarUrl;
+    if (resolved != null && resolved.isNotEmpty && mounted) {
+      if (resolved.length == 1) {
+        Navigator.of(context).push(
+          CupertinoPageRoute(
+            builder: (_) =>
+                ConversationScreen(conversation: resolved.first),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF25D366),
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'تمت مشاركة المحتوى مع ${resolved.length} محادثات بنجاح',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
     }
-    return null;
-  }
-
-  static String _avatarLetter(
-    ChatConversation conversation,
-    String currentUserId,
-  ) {
-    final title = conversation.displayTitle(currentUserId);
-    return title.trim().isEmpty
-        ? '?'
-        : title.trim().characters.first.toUpperCase();
-  }
-
-  static String _getConversationSubtitle(ChatConversation conversation) {
-    final last = conversation.lastMessage;
-    if (last == null) return 'لا توجد رسائل';
-    final type = last.messageType;
-    if (type == 'image') return '🖼️ صورة';
-    if (type == 'file') return '📎 مرفق';
-    final text = last.content.trim();
-    return text.isEmpty ? '...' : text;
   }
 
   Future<void> _sendSharedContentToConversation(
@@ -532,11 +513,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final mediaGroupId = content.paths.length > 1
         ? 'album_${DateTime.now().microsecondsSinceEpoch}'
         : null;
-    if (content.text.trim().isNotEmpty)
-      await controller.sendMessage(content: content.text.trim());
-    for (final path in content.paths) {
+    final caption = content.text.trim();
+    if (content.paths.isEmpty) {
+      if (caption.isNotEmpty) {
+        await controller.sendMessage(content: caption);
+      }
+      return;
+    }
+    for (var i = 0; i < content.paths.length; i++) {
+      final path = content.paths[i];
       await controller.sendFile(
         path,
+        content: (i == 0 && caption.isNotEmpty) ? caption : null,
         metadata: mediaGroupId == null
             ? null
             : {
@@ -570,6 +558,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
     final localNotifications = ref.read(localNotificationServiceProvider);
     final pushNotifications = ref.read(pushNotificationServiceProvider);
+
+    // Initialize local notifications early to catch cold-start launch details
+    unawaited(localNotifications.initialize().then((_) {
+      if (!mounted) return;
+      final pendingLocalPayload = localNotifications.takePendingLaunchPayload();
+      if (pendingLocalPayload != null) {
+        _queueNotificationNavigation(pendingLocalPayload);
+      }
+    }));
 
     _notificationTapSubscription = localNotifications.tapEvents.listen(
       _queueNotificationNavigation,
@@ -605,40 +602,87 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final type = payload['type']?.toString().trim() ?? '';
     final conversationId = payload['conversationId']?.toString().trim() ?? '';
     final ticketId = payload['ticketId']?.toString().trim() ?? '';
-    if ((type == 'chat' || type == 'chat_reaction') && conversationId.isEmpty) {
+    final isChatNotification =
+        type == 'chat' || type == 'chat_reaction' || conversationId.isNotEmpty;
+
+    if (!isChatNotification && type != 'ticket') {
       return;
     }
-    if (type == 'ticket' && ticketId.isEmpty) {
-      return;
-    }
-    if (type != 'chat' && type != 'chat_reaction' && type != 'ticket') {
+
+    // Direct inline reply from notification
+    final replyText = payload['replyText']?.toString().trim();
+    if (replyText != null && replyText.isNotEmpty && conversationId.isNotEmpty) {
+      _pendingNotificationPayload = null;
+      unawaited(_handleDirectNotificationReply(
+        conversationId,
+        replyText,
+        payload['notificationId'],
+      ));
       return;
     }
 
     _pendingNotificationPayload = null;
     _isHandlingNotificationNavigation = true;
     try {
-      if (type == 'ticket') {
+      if (type == 'ticket' && ticketId.isNotEmpty && conversationId.isEmpty) {
         if (!mounted) {
           return;
         }
-        await Navigator.of(context).push(
+        await Navigator.of(context, rootNavigator: true).push(
           MaterialPageRoute(
             builder: (_) => TicketDetailsScreen(ticketId: ticketId),
           ),
         );
         return;
       }
-      final conversation = await ref
+
+      if (conversationId.isEmpty) {
+        return;
+      }
+
+      // If user is already looking at this conversation, just refresh messages
+      final currentActiveId = ref.read(activeConversationIdProvider);
+      if (currentActiveId == conversationId) {
+        try {
+          ref
+              .read(
+                conversationMessagesControllerProvider(
+                  conversationId,
+                ).notifier,
+              )
+              .refresh();
+        } catch (_) {}
+        return;
+      }
+
+      // 1. Instant open: check if conversation is already in memory overview
+      ChatConversation? conversation;
+      final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+      if (overview != null) {
+        for (final item in overview.conversations) {
+          if (item.id == conversationId) {
+            conversation = item;
+            break;
+          }
+        }
+      }
+
+      // 2. If not found in memory overview, fetch via repository
+      conversation ??= await ref
           .read(chatRepositoryProvider)
           .fetchConversation(conversationId);
+
       if (!mounted) {
         return;
       }
+
       ref.read(activeConversationIdProvider.notifier).state = conversation.id;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ConversationScreen(conversation: conversation),
+      ref
+          .read(localNotificationServiceProvider)
+          .cancelConversationNotifications(conversation.id);
+      await Navigator.of(context, rootNavigator: true).push(
+        CupertinoPageRoute(
+          builder: (_) => ConversationScreen(conversation: conversation!),
         ),
       );
     } catch (error) {
@@ -646,10 +690,55 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر فتح الإشعار: ${error.toString()}')),
+        SnackBar(content: Text('تعذر فتح المحادثة: ${error.toString()}')),
       );
     } finally {
       _isHandlingNotificationNavigation = false;
+    }
+  }
+
+  Future<void> _handleDirectNotificationReply(
+    String conversationId,
+    String replyText,
+    dynamic notificationId,
+  ) async {
+    if (conversationId.isEmpty || replyText.trim().isEmpty) return;
+    try {
+      await ref.read(chatRepositoryProvider).sendTextMessage(
+            conversationId: conversationId,
+            content: replyText.trim(),
+          );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم إرسال الرد: ${replyText.trim()}'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[NotificationReply] Error sending direct reply: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر إرسال الرد: $e'),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (notificationId != null) {
+        final id = int.tryParse(notificationId.toString());
+        if (id != null) {
+          ref.read(localNotificationServiceProvider).cancel(id);
+        }
+      }
+      ref
+          .read(localNotificationServiceProvider)
+          .cancelConversationNotifications(conversationId);
     }
   }
 
@@ -676,6 +765,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         unawaited(
           _refreshServerConnectionState(quiet: true, refreshAfterRestore: true),
         );
+        unawaited(_drainChatOutbox());
         return;
       }
       if (event.type == 'announcements_updated') {
@@ -689,11 +779,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.type == 'socket_error' || event.type == 'socket_disconnected') {
-        // Ignore while still establishing — socket will retry on its own.
-        if (_isEstablishingConnection) {
+        // Ignore while still establishing or when app is in background/screen locked.
+        if (_isEstablishingConnection ||
+            WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
           return;
         }
-        unawaited(_refreshServerConnectionState());
+        unawaited(_refreshServerConnectionState(quiet: true));
       }
     });
   }
@@ -739,26 +830,64 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         (entry) => entry != ConnectivityResult.none,
       );
       if (hasConnection) {
-        ref
-            .read(syncBannerStateProvider.notifier)
-            .state = const SyncBannerState(
-          isOffline: false,
-          isSyncing: false,
-          message: 'تم استعادة الاتصال. سيتم مزامنة أي ملفات معلقة تلقائيًا.',
-        );
-        unawaited(_refreshServerConnectionState());
+        unawaited(_refreshServerConnectionState(quiet: true));
         unawaited(_syncPendingUploadsInBackground());
-      } else {
-        ref
-            .read(syncBannerStateProvider.notifier)
-            .state = const SyncBannerState(
-          isOffline: true,
-          isSyncing: false,
-          message:
-              'أنت الآن بدون إنترنت. سنحفظ العمل محليًا ونزامنه تلقائيًا عند عودة الاتصال.',
-        );
+        unawaited(_drainChatOutbox());
+        try {
+          ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+        } catch (_) {}
       }
     });
+  }
+
+  Future<void> _drainChatOutbox() async {
+    try {
+      final outbox = ref.read(chatOutboxServiceProvider);
+      final repo = ref.read(chatRepositoryProvider);
+      await outbox.drainQueue(
+        repository: repo,
+        onConfirmed: (item, confirmed) {
+          if (!mounted) return;
+          try {
+            ref
+                .read(chatOverviewControllerProvider.notifier)
+                .applyConfirmedOutboxMessage(
+                  item.conversationId,
+                  item.tempMessageId,
+                  confirmed,
+                );
+          } catch (_) {}
+          try {
+            final activeId = ref.read(activeConversationIdProvider);
+            if (activeId == item.conversationId) {
+              ref
+                  .read(conversationMessagesControllerProvider(item.conversationId).notifier)
+                  .applyConfirmedOutboxMessage(item.tempMessageId, confirmed);
+            }
+          } catch (_) {}
+        },
+        onFailed: (item, error) {
+          if (!mounted) return;
+          try {
+            ref
+                .read(chatOverviewControllerProvider.notifier)
+                .applyFailedOutboxMessage(
+                  item.conversationId,
+                  item.tempMessageId,
+                  error.toString(),
+                );
+          } catch (_) {}
+          try {
+            final activeId = ref.read(activeConversationIdProvider);
+            if (activeId == item.conversationId) {
+              ref
+                  .read(conversationMessagesControllerProvider(item.conversationId).notifier)
+                  .applyFailedOutboxMessage(item.tempMessageId, error.toString());
+            }
+          } catch (_) {}
+        },
+      );
+    } catch (_) {}
   }
 
   Future<void> _handleIncomingFileRequest(Map<String, dynamic> payload) async {
@@ -1198,13 +1327,30 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _refreshSessionAndSocketAfterResume() async {
+    // 1. Instantly trigger fresh message retrieval over HTTP without blocking on WebSocket or token
     try {
-      await ref.read(authRepositoryProvider).getValidToken();
+      ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
     } catch (_) {}
-    if (!mounted) {
-      return;
+    final activeId = ref.read(activeConversationIdProvider);
+    if (activeId != null && activeId.isNotEmpty) {
+      try {
+        ref.read(conversationMessagesControllerProvider(activeId).notifier).refresh();
+      } catch (_) {}
     }
-    ref.invalidate(chatSocketConnectionProvider);
+
+    // 2. Refresh token, reconnect socket, and drain outbox concurrently in the background
+    unawaited(() async {
+      try {
+        await ref.read(authRepositoryProvider).getValidToken();
+      } catch (_) {}
+      if (!mounted) {
+        return;
+      }
+      try {
+        await _ensureSocketConnected();
+      } catch (_) {}
+      unawaited(_drainChatOutbox());
+    }());
   }
 
   @override
@@ -1214,6 +1360,15 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final serverState = ref.watch(serverConnectionControllerProvider);
     switch (authState.status) {
       case AuthStatus.initializing:
+        if (_lastPresenceUserId != null) {
+          ref.watch(chatRealtimeControllerProvider);
+          return const Stack(
+            children: [
+              ChatHomeScreen(),
+              GlobalAnnouncementOverlay(),
+            ],
+          );
+        }
         return const LoadingView(message: 'جارٍ التحقق من الجلسة...');
       case AuthStatus.unauthenticated:
         return const LoginScreen();
@@ -1223,52 +1378,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           ref.read(chatOverviewControllerProvider).valueOrNull?.conversations ??
               const [],
         );
-        ref.watch(chatSocketConnectionProvider);
         ref.watch(chatRealtimeControllerProvider);
-        final serverConnection = serverState.valueOrNull;
-        final serverBannerMessage =
-            !_isEstablishingConnection &&
-                serverConnection != null &&
-                !serverConnection.isConnected
-            ? _buildServerUnavailableMessage(serverConnection.message)
-            : null;
-        final topBanner = syncBanner.isOffline
-            ? const _ConnectionAlertBanner(
-                message:
-                    'أنت الآن بدون إنترنت. سيتم حفظ العمل محليًا حتى عودة الاتصال.',
-                color: Color(0xFFB42318),
-                icon: Icons.wifi_off_rounded,
-              )
-            : serverBannerMessage != null
-            ? _ConnectionAlertBanner(
-                message: serverBannerMessage,
-                color: const Color(0xFFDC6803),
-                icon: Icons.cloud_off_rounded,
-              )
-            : null;
-        return Stack(
+        return const Stack(
           children: [
-            const ChatHomeScreen(),
-            const GlobalAnnouncementOverlay(),
-            if (topBanner != null)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                    child: topBanner,
-                  ),
-                ),
-              ),
-            if (serverBannerMessage != null)
-              _ServerRecoveryBar(
-                message: serverBannerMessage,
-                onRetry: _retryServerConnection,
-                onChangeServer: _changeServerBaseUrl,
-              ),
+            ChatHomeScreen(),
+            GlobalAnnouncementOverlay(),
           ],
         );
     }
@@ -1743,253 +1857,60 @@ class _GlobalAnnouncementOverlayState
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Telegram-style share bottom sheet
-// ─────────────────────────────────────────────────────────────────────────────
 
-class _ShareBottomSheet extends StatefulWidget {
-  const _ShareBottomSheet({
-    required this.content,
-    required this.conversations,
-    required this.currentUserId,
-    required this.onSelected,
-  });
+class _ChangeServerBaseUrlDialog extends StatefulWidget {
+  const _ChangeServerBaseUrlDialog({required this.initialUrl});
 
-  final AndroidSharedContent content;
-  final List<ChatConversation> conversations;
-  final String currentUserId;
-  final Future<void> Function(ChatConversation) onSelected;
+  final String initialUrl;
 
   @override
-  State<_ShareBottomSheet> createState() => _ShareBottomSheetState();
+  State<_ChangeServerBaseUrlDialog> createState() =>
+      _ChangeServerBaseUrlDialogState();
 }
 
-class _ShareBottomSheetState extends State<_ShareBottomSheet> {
-  String _query = '';
+class _ChangeServerBaseUrlDialogState
+    extends State<_ChangeServerBaseUrlDialog> {
+  late final TextEditingController _controller;
 
-  List<ChatConversation> get _filtered {
-    if (_query.trim().isEmpty) return widget.conversations;
-    final q = _query.toLowerCase();
-    return widget.conversations
-        .where(
-          (c) =>
-              c.displayTitle(widget.currentUserId).toLowerCase().contains(q),
-        )
-        .toList();
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    final handleColor =
-        isDark ? Colors.white24 : Colors.black.withOpacity(0.12);
-
-    final paths = widget.content.paths;
-    final hasImages = paths.isNotEmpty;
-    final titleText = hasImages
-        ? 'إرسال ${paths.length} ${paths.length == 1 ? 'صورة' : 'صور'}'
-        : 'إرسال نص';
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: surfaceColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // ── Drag handle ────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: handleColor,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-
-              // ── Header ─────────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      titleText,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w700, fontSize: 17),
-                    ),
-
-                    // ── Image thumbnails ──────────────────────────────────────
-                    if (hasImages) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 80,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: paths.length > 4 ? 5 : paths.length,
-                          itemBuilder: (_, i) {
-                            if (i == 4 && paths.length > 4) {
-                              // Overflow badge
-                              return Padding(
-                                padding:
-                                    const EdgeInsetsDirectional.only(end: 8),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: Stack(
-                                    children: [
-                                      Image.file(
-                                        File(paths[i]),
-                                        width: 80,
-                                        height: 80,
-                                        fit: BoxFit.cover,
-                                      ),
-                                      Positioned.fill(
-                                        child: Container(
-                                          color: Colors.black54,
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            '+${paths.length - 4}',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 18,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-                            return Padding(
-                              padding:
-                                  const EdgeInsetsDirectional.only(end: 8),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: Image.file(
-                                  File(paths[i]),
-                                  width: 80,
-                                  height: 80,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-
-                    // ── Search bar ────────────────────────────────────────────
-                    const SizedBox(height: 12),
-                    TextField(
-                      onChanged: (v) => setState(() => _query = v),
-                      style: const TextStyle(fontSize: 15),
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(
-                          Icons.search_rounded,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        hintText: 'البحث عن محادثة...',
-                        hintStyle: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          fontSize: 15,
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : Colors.black.withOpacity(0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // ── Conversation list ───────────────────────────────────────────
-              Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: _filtered.length,
-                  itemBuilder: (_, index) {
-                    final conv = _filtered[index];
-                    final avatarUrl = _AuthGateState._getConversationAvatarUrl(
-                      conv,
-                      widget.currentUserId,
-                    );
-                    final letter = _AuthGateState._avatarLetter(
-                      conv,
-                      widget.currentUserId,
-                    );
-                    final title = _AuthGateState._getConversationTitle(
-                      conv,
-                      widget.currentUserId,
-                    );
-                    final subtitle =
-                        _AuthGateState._getConversationSubtitle(conv);
-
-                    return ListTile(
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      leading: ChatAvatar(
-                        radius: 24,
-                        backgroundColor: colorScheme.primaryContainer,
-                        avatarUrl: avatarUrl,
-                        fallback: Text(
-                          letter,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            color: colorScheme.onPrimaryContainer,
-                          ),
-                        ),
-                      ),
-                      title: Text(
-                        title,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        subtitle,
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 13,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      onTap: () => widget.onSelected(conv),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    return AlertDialog(
+      title: const Text('تغيير رابط الخادم'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(
+          labelText: 'API Base URL',
+          hintText: 'http://192.168.1.10:5000',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('__reset__'),
+          child: const Text('الافتراضي'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('حفظ ومحاولة الاتصال'),
+        ),
+      ],
     );
   }
 }

@@ -105,6 +105,22 @@ class UpdateManagementRepository {
     final resolvedArtifactName = artifactFileName?.trim().isNotEmpty == true
         ? artifactFileName!.trim()
         : (artifactFilePath == null ? null : path.basename(artifactFilePath));
+    final isExeOrMsi = resolvedArtifactName != null &&
+        (resolvedArtifactName.toLowerCase().endsWith('.exe') ||
+            resolvedArtifactName.toLowerCase().endsWith('.msi'));
+    final effectivePackageLayout =
+        isExeOrMsi ? 'installer' : packageLayout.trim();
+    final effectiveInstallerKind = resolvedArtifactName != null &&
+            resolvedArtifactName.toLowerCase().endsWith('.exe')
+        ? 'exe'
+        : (resolvedArtifactName != null &&
+                resolvedArtifactName.toLowerCase().endsWith('.msi')
+            ? 'msi'
+            : (resolvedArtifactName != null &&
+                    resolvedArtifactName.toLowerCase().endsWith('.apk')
+                ? 'apk'
+                : 'zip'));
+
     final formData = FormData.fromMap({
       'version': version.trim(),
       if (buildNumber != null && buildNumber.trim().isNotEmpty)
@@ -114,8 +130,9 @@ class UpdateManagementRepository {
       'notes': notes.trim(),
       'mandatory': mandatory,
       'isEnabled': isEnabled,
+      'installerKind': effectiveInstallerKind,
       'packageType': packageType.trim(),
-      'packageLayout': packageLayout.trim(),
+      'packageLayout': effectivePackageLayout,
       'entryExecutable': entryExecutable.trim(),
       if (minSupportedVersion != null && minSupportedVersion.trim().isNotEmpty)
         'minSupportedVersion': minSupportedVersion.trim(),
@@ -255,6 +272,7 @@ class UpdateManagementRepository {
     required String connectionStatus,
     required bool autoUpdateEnabled,
     required bool silentInstallEnabled,
+    String platform = 'desktop_windows',
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/updates/devices/heartbeat',
@@ -266,6 +284,7 @@ class UpdateManagementRepository {
           'localIp': localIp.trim(),
         'branchCode': branchCode,
         'channel': channel,
+        'platform': platform,
         'appVersion': appVersion,
         'osName': osName,
         'osVersion': osVersion,
@@ -362,7 +381,8 @@ class UpdateManagementRepository {
         final existingBytes = await _existingFileLength(partialDestination);
         client = HttpClient()
           ..connectionTimeout = const Duration(minutes: 5)
-          ..idleTimeout = const Duration(minutes: 5);
+          ..idleTimeout = const Duration(minutes: 5)
+          ..badCertificateCallback = (cert, host, port) => true;
         final request = await client
             .getUrl(targetUri)
             .timeout(const Duration(minutes: 5));
@@ -454,10 +474,16 @@ class UpdateManagementRepository {
   Uri _resolveDownloadUri(String target) {
     final trimmed = target.trim();
     final asUri = Uri.parse(trimmed);
+    final baseUri = Uri.parse(baseUrl);
     if (asUri.hasScheme) {
+      if (asUri.path.startsWith('/api/')) {
+        return baseUri.replace(
+          path: asUri.path,
+          query: asUri.hasQuery ? asUri.query : null,
+        );
+      }
       return asUri;
     }
-    final baseUri = Uri.parse(baseUrl);
     return baseUri.resolve(trimmed);
   }
 

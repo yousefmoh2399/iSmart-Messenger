@@ -8,6 +8,8 @@ import '../../../shared/widgets/button_loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../chat/models/chat_models.dart';
 import '../models/ticket_models.dart';
+import '../../reports/presentation/custom_report_export_dialog.dart';
+import '../../reports/presentation/report_templates_screen.dart';
 import 'tickets_ui_kit.dart';
 
 class _TicketsUi {
@@ -173,7 +175,7 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
     }
   }
 
-  Future<void> _exportTicketsReport({String format = 'xlsx'}) async {
+  Future<void> _exportTicketsReport({String format = 'xlsx', String? templateId}) async {
     try {
       final status = widget.closedOnly
           ? 'closed'
@@ -198,12 +200,27 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
             priority: priority,
             q: _searchController.text.trim(),
             format: format,
+            templateId: templateId,
           );
       if (!mounted) return;
       _showMessage('تم تصدير تقرير التذاكر.');
     } catch (error) {
       if (!mounted) return;
       _showMessage(error.toString(), isError: true);
+    }
+  }
+
+  Future<void> _showCustomExportDialog() async {
+    final result = await CustomReportExportDialog.show(
+      context: context,
+      reportType: 'tickets',
+      title: 'تصدير تقرير ${_activeTab.label}',
+    );
+    if (result != null) {
+      await _exportTicketsReport(
+        format: result.format,
+        templateId: result.templateId,
+      );
     }
   }
 
@@ -481,35 +498,22 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
               if (data.settings.canExportTicketReport ||
                   data.settings.canExportComplaintReport ||
                   data.settings.canExportSuggestionReport)
-                PopupMenuButton<String>(
-                  onSelected: (format) => _exportTicketsReport(format: format),
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'pdf',
-                      child: Row(
-                        children: [
-                          Icon(Icons.picture_as_pdf, color: Colors.red),
-                          SizedBox(width: 8),
-                          Text('تصدير كـ PDF'),
-                        ],
+                FilledButton.tonalIcon(
+                  onPressed: _showCustomExportDialog,
+                  icon: const Icon(Icons.file_download_outlined),
+                  label: const Text('تصدير التقرير'),
+                ),
+              if (authUser?.role == 'admin')
+                IconButton(
+                  tooltip: 'تخصيص قوالب التقارير',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ReportTemplatesScreen(
+                        initialReportType: 'tickets',
                       ),
                     ),
-                    const PopupMenuItem(
-                      value: 'xlsx',
-                      child: Row(
-                        children: [
-                          Icon(Icons.table_chart, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text('تصدير كـ Excel'),
-                        ],
-                      ),
-                    ),
-                  ],
-                  child: TextButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.file_download_outlined),
-                    label: const Text('تصدير'),
                   ),
+                  icon: const Icon(Icons.tune_rounded),
                 ),
             ],
           ),
@@ -681,13 +685,15 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
       ),
     );
 
-    if (selected == null || selected == details.ticket.status) return;
+    if (selected == null || selected == details.ticket.status || !mounted) return;
 
     try {
-      await ref
-          .read(ticketDetailsControllerProvider(widget.ticketId).notifier)
-          .updateStatus(selected);
-      await ref.read(ticketsControllerProvider.notifier).refresh();
+      final detailsCtrl = ref.read(
+        ticketDetailsControllerProvider(widget.ticketId).notifier,
+      );
+      final ticketsCtrl = ref.read(ticketsControllerProvider.notifier);
+      await detailsCtrl.updateStatus(selected);
+      await ticketsCtrl.refresh();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -769,11 +775,16 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
       }
     }
 
-    final selected = await showModalBottomSheet<String?>(
+    final selected = await showDialog<String?>(
       context: context,
-      showDragHandle: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+          final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+          final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
+          final brandColor = const Color(0xFF2563EB);
+
           final useHandlers = departmentHandlers.isNotEmpty;
           final filteredCandidates = candidateUsers.where((candidate) {
             if (searchQuery.trim().isEmpty) return true;
@@ -787,102 +798,257 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
             return name.contains(query) || username.contains(query);
           }).toList();
 
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (departmentId != null && departmentId.isNotEmpty) ...[
-                        Text(
-                          'قسم التذكرة: ${departmentName ?? 'غير محدد'}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
-                      TextField(
-                        decoration: const InputDecoration(
-                          labelText: 'بحث باسم المستخدم أو الاسم',
-                          prefixIcon: Icon(Icons.search_rounded),
+          return Dialog(
+            backgroundColor: surfaceColor,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+              side: BorderSide(color: borderColor, width: 1),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 480,
+                maxHeight: 580,
+              ),
+              child: SizedBox(
+                width: 480,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: brandColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(Icons.person_pin_circle_rounded, color: brandColor, size: 24),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'تعيين مسؤول للتذكرة',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  departmentName != null && departmentName.isNotEmpty
+                                      ? 'قسم التذكرة: $departmentName'
+                                      : 'حدد الموظف الذي سيتولى معالجة هذه التذكرة',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 20),
+                            onPressed: () => Navigator.pop(context, currentAssignedId),
+                            style: IconButton.styleFrom(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    Divider(height: 1, thickness: 1, color: borderColor),
+
+                    // Search field
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: 'بحث باسم المستخدم أو الاسم...',
+                          prefixIcon: Icon(Icons.search_rounded, size: 20, color: brandColor),
+                          filled: true,
+                          fillColor: fieldFillColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: brandColor, width: 1.5),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         ),
                         onChanged: (value) => setModalState(() {
                           searchQuery = value;
                         }),
                       ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      ListTile(
-                        leading: const Icon(Icons.person_off_outlined),
-                        title: const Text('بدون إسناد'),
-                        trailing: currentAssignedId == null
-                            ? const Icon(Icons.check_rounded)
-                            : null,
-                        onTap: () => Navigator.pop(context, null),
-                      ),
-                      if (departmentId != null &&
-                          departmentId.isNotEmpty &&
-                          useHandlers)
-                        const ListTile(title: Text('مسؤولو هذا القسم')),
-                      if (departmentId != null &&
-                          departmentId.isNotEmpty &&
-                          !useHandlers)
-                        const ListTile(
-                          title: Text('لا يوجد مسؤولي دعم مخصصين لهذا القسم.'),
-                        ),
-                      if ((departmentId == null || departmentId.isEmpty) &&
-                          branchId != null &&
-                          branchId.isNotEmpty)
-                        const ListTile(
-                          title: Text('المستخدمون داخل الفرع المختار'),
-                        ),
-                      if (filteredCandidates.isEmpty)
-                        const ListTile(title: Text('لا توجد نتائج.'))
-                      else
-                        ...filteredCandidates.map((candidate) {
-                          final candidateData = candidate as dynamic;
-                          final id = candidateData.id as String;
-                          final name = candidateData.displayName as String;
-                          final username = candidateData.username as String;
-                          return ListTile(
-                            leading: const CircleAvatar(
-                              child: Icon(Icons.person_outline_rounded),
+                    ),
+
+                    // Candidates list
+                    Expanded(
+                      child: Scrollbar(
+                        child: ListView(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                          children: [
+                            // "بدون إسناد" tile
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              decoration: BoxDecoration(
+                                color: currentAssignedId == null
+                                    ? brandColor.withValues(alpha: 0.08)
+                                    : (isDark ? const Color(0xFF222226) : const Color(0xFFF8FAFC)),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: currentAssignedId == null
+                                      ? brandColor.withValues(alpha: 0.3)
+                                      : borderColor,
+                                ),
+                              ),
+                              child: ListTile(
+                                dense: true,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                leading: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF2E2E32) : const Color(0xFFE2E8F0),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    Icons.person_off_outlined,
+                                    size: 18,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                                title: const Text('بدون إسناد (إلغاء التعيين)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                                trailing: currentAssignedId == null
+                                    ? Icon(Icons.check_circle_rounded, color: brandColor, size: 20)
+                                    : null,
+                                onTap: () => Navigator.pop(context, null),
+                              ),
                             ),
-                            title: Text(name),
-                            subtitle: Text(username),
-                            trailing: currentAssignedId == id
-                                ? const Icon(Icons.check_rounded)
-                                : null,
-                            onTap: () => Navigator.pop(context, id),
-                          );
-                        }),
-                    ],
-                  ),
+
+                            if (departmentId != null && departmentId.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                                child: Text(
+                                  useHandlers ? 'مسؤولو هذا القسم المعينون:' : 'لا يوجد مسؤولو دعم مخصصين لهذا القسم',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ),
+
+                            if (filteredCandidates.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 24),
+                                child: Center(
+                                  child: Text(
+                                    'لا توجد نتائج مطابقة لبحثك.',
+                                    style: TextStyle(
+                                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              ...filteredCandidates.map((candidate) {
+                                final candidateData = candidate as dynamic;
+                                final id = candidateData.id as String;
+                                final name = candidateData.displayName as String;
+                                final username = candidateData.username as String;
+                                final isSelected = currentAssignedId == id;
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 6),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? brandColor.withValues(alpha: 0.08)
+                                        : (isDark ? const Color(0xFF222226) : const Color(0xFFF8FAFC)),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? brandColor.withValues(alpha: 0.3)
+                                          : borderColor,
+                                    ),
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    leading: CircleAvatar(
+                                      radius: 17,
+                                      backgroundColor: brandColor.withValues(alpha: 0.15),
+                                      child: Text(
+                                        name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: brandColor,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                                    subtitle: Text('@' + username, style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+                                    trailing: isSelected
+                                        ? Icon(Icons.check_circle_rounded, color: brandColor, size: 20)
+                                        : null,
+                                    onTap: () => Navigator.pop(context, id),
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    Divider(height: 1, thickness: 1, color: borderColor),
+
+                    // Close action
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context, currentAssignedId),
+                          style: TextButton.styleFrom(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text('إلغاء'),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           );
         },
       ),
     );
 
-    if (selected == currentAssignedId) return;
+    if (selected == currentAssignedId || !mounted) return;
 
     try {
-      await ref
-          .read(ticketDetailsControllerProvider(widget.ticketId).notifier)
-          .assignTo(selected);
-      await ref.read(ticketsControllerProvider.notifier).refresh();
+      final detailsCtrl = ref.read(
+        ticketDetailsControllerProvider(widget.ticketId).notifier,
+      );
+      final ticketsCtrl = ref.read(ticketsControllerProvider.notifier);
+      await detailsCtrl.assignTo(selected);
+      await ticketsCtrl.refresh();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -923,6 +1089,276 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
     }
   }
 
+  Widget _buildBottomInputArea(
+    BuildContext context,
+    TicketItem ticket,
+    TicketDetailsData details,
+    bool ticketClosed,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
+          ),
+        ),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.03),
+                  blurRadius: 10,
+                  offset: const Offset(0, -3),
+                ),
+              ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (ticketClosed)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF2C241D)
+                    : const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.lock_outline_rounded,
+                    color: Color(0xFFD97706),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'هذا الطلب مغلق حالياً، لا يمكن إرسال تحديثات أو ردود جديدة إلا بعد إعادة فتحه.',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? const Color(0xFFFDE68A)
+                            : const Color(0xFFB45309),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            if (details.canManage)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => setState(() => _internalNote = false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: !_internalNote
+                              ? TicketsPalette.brand.withValues(alpha: 0.12)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: !_internalNote
+                                ? TicketsPalette.brand.withValues(alpha: 0.4)
+                                : theme.colorScheme.outlineVariant.withValues(
+                                    alpha: 0.3,
+                                  ),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.chat_bubble_outline_rounded,
+                              size: 14,
+                              color: !_internalNote
+                                  ? TicketsPalette.brand
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'رد عام للعميل / الموظف',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: !_internalNote
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                color: !_internalNote
+                                    ? TicketsPalette.brand
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => setState(() => _internalNote = true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _internalNote
+                              ? TicketsPalette.suggestion.withValues(alpha: 0.14)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: _internalNote
+                                ? TicketsPalette.suggestion
+                                    .withValues(alpha: 0.45)
+                                : theme.colorScheme.outlineVariant.withValues(
+                                    alpha: 0.3,
+                                  ),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.lock_rounded,
+                              size: 14,
+                              color: _internalNote
+                                  ? TicketsPalette.suggestion
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'ملاحظة داخلية خاصة',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: _internalNote
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                color: _internalNote
+                                    ? TicketsPalette.suggestion
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (_internalNote)
+                      Text(
+                        '🔒 مرئية لفريق الدعم فقط',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: TicketsPalette.suggestion,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF2C2C2E)
+                          : const Color(0xFFF4F4F6),
+                      borderRadius: BorderRadius.circular(16),
+                      border: _internalNote
+                          ? Border.all(
+                              color: TicketsPalette.suggestion
+                                  .withValues(alpha: 0.4),
+                            )
+                          : null,
+                    ),
+                    child: TextField(
+                      controller: _messageController,
+                      enabled: !ticketClosed,
+                      minLines: 1,
+                      maxLines: 5,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: _internalNote
+                            ? 'اكتب ملاحظة داخلية خاصة بفريق العمل...'
+                            : 'اكتب رداً أو تعليقاً على الطلب...',
+                        hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
+                        ),
+                        prefixIcon: Icon(
+                          _internalNote
+                              ? Icons.lock_outline_rounded
+                              : Icons.edit_note_rounded,
+                          color: _internalNote
+                              ? TicketsPalette.suggestion
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _internalNote
+                        ? TicketsPalette.suggestion
+                        : TicketsPalette.brand,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 15,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: ticketClosed ? null : () => _sendComment(details),
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: const Text(
+                    'إرسال',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailsState = ref.watch(
@@ -931,8 +1367,16 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
     final dateFormat = formatEgyptDateTime;
 
     return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
       appBar: AppBar(
-        title: const Text('تفاصيل التذكرة'),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(
+          widget.initialTicket != null &&
+                  widget.initialTicket!.ticketNumber.isNotEmpty
+              ? 'طلب #${widget.initialTicket!.ticketNumber}'
+              : 'تفاصيل الطلب',
+        ),
         actions: [
           IconButton(
             tooltip: 'تحديث',
@@ -946,19 +1390,16 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
       body: detailsState.when(
         loading: () {
           if (widget.initialTicket != null) {
-            return Column(
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                  child: TicketDetailsHeaderCard(
-                    ticket: widget.initialTicket!,
-                    dateFormat: dateFormat,
-                    canManage: false,
-                  ),
+                TicketDetailsHeaderCard(
+                  ticket: widget.initialTicket!,
+                  dateFormat: dateFormat,
+                  canManage: false,
                 ),
-                const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
-                ),
+                const SizedBox(height: 32),
+                const Center(child: CircularProgressIndicator()),
               ],
             );
           }
@@ -980,120 +1421,112 @@ class _TicketDetailsScreenState extends ConsumerState<TicketDetailsScreen> {
             canManage: details.canManage,
           );
           final ticketClosed = displayTicket.status == 'closed';
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          final accent = TicketsPalette.typeColor(displayTicket.ticketType);
 
           return Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                child: TicketDetailsHeaderCard(
-                  ticket: displayTicket,
-                  dateFormat: dateFormat,
-                  canManage: viewData.canManage,
-                  onChangeStatus: viewData.canManage
-                      ? () => _changeStatus(viewData)
-                      : null,
-                  onAssign: viewData.canManage
-                      ? () => _assignTicket(viewData)
-                      : null,
-                ),
-              ),
               Expanded(
-                child: details.updates.isEmpty
-                    ? const _TimelineEmptyView()
-                    : ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        itemCount: details.updates.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final update = details.updates[index];
-                          return TicketTimelineTile(
-                            label: _kindLabel(update.kind),
-                            message: _ticketUpdateDisplayMessage(update),
-                            actor: update.createdBy.displayName,
-                            visibilityLabel: _visibilityLabel(
-                              update.visibility,
-                            ),
-                            timestamp: dateFormat(update.createdAt),
-                            accent: _timelineAccent(update),
-                            isInternal: update.visibility == 'internal',
-                          );
-                        },
-                      ),
-              ),
-              Container(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  border: Border(
-                    top: BorderSide(
-                      color: Theme.of(context).colorScheme.outlineVariant,
-                    ),
-                  ),
-                ),
-                child: Column(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                   children: [
-                    if (ticketClosed)
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          // color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFCBD5E1)),
-                        ),
-                        child: const Text(
-                          'التذكرة مغلقة، لا يمكن إرسال تحديثات جديدة.',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black,
-                          ),
-                        ),
-                      ),
-                    if (details.canManage)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: SwitchListTile.adaptive(
-                          contentPadding: EdgeInsets.zero,
-                          value: _internalNote,
-                          onChanged: ticketClosed
-                              ? null
-                              : (value) =>
-                                    setState(() => _internalNote = value),
-
-                          title: const Text('إرسال ملاحظة داخلية'),
-                        ),
-                      ),
+                    TicketDetailsHeaderCard(
+                      ticket: displayTicket,
+                      dateFormat: dateFormat,
+                      canManage: viewData.canManage,
+                      onChangeStatus: viewData.canManage
+                          ? () => _changeStatus(viewData)
+                          : null,
+                      onAssign: viewData.canManage
+                          ? () => _assignTicket(viewData)
+                          : null,
+                    ),
+                    const SizedBox(height: 24),
+                    // Timeline Section Header
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _messageController,
-                            enabled: !ticketClosed,
-                            minLines: 1,
-                            maxLines: 5,
-                            decoration: const InputDecoration(
-                              hintText: 'اكتب تحديثًا واضحًا للتذكرة...',
-                              prefixIcon: Icon(Icons.edit_note_rounded),
-                            ),
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.history_rounded,
+                            size: 18,
+                            color: accent,
                           ),
                         ),
                         const SizedBox(width: 10),
-                        FilledButton.icon(
-                          onPressed: ticketClosed
-                              ? null
-                              : () => _sendComment(details),
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text('إرسال'),
+                        Text(
+                          'سجل التحديثات والنشاط',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF2C2C2E)
+                                : const Color(0xFFE5E5EA),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${details.updates.length}',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'مرتب من الأقدم إلى الأحدث',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 14),
+                    if (details.updates.isEmpty)
+                      const _TimelineEmptyView()
+                    else
+                      for (int i = 0; i < details.updates.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: TicketTimelineTile(
+                            label: _kindLabel(details.updates[i].kind),
+                            message: _ticketUpdateDisplayMessage(
+                              details.updates[i],
+                            ),
+                            actor: details.updates[i].createdBy.displayName,
+                            visibilityLabel: _visibilityLabel(
+                              details.updates[i].visibility,
+                            ),
+                            timestamp: dateFormat(
+                              details.updates[i].createdAt,
+                            ),
+                            accent: _timelineAccent(details.updates[i]),
+                            isInternal:
+                                details.updates[i].visibility == 'internal',
+                            isFirst: i == 0,
+                            isLast: i == details.updates.length - 1,
+                          ),
+                        ),
                   ],
                 ),
+              ),
+              _buildBottomInputArea(
+                context,
+                displayTicket,
+                details,
+                ticketClosed,
               ),
             ],
           );
@@ -1212,128 +1645,414 @@ class _CreateTicketDialogState extends ConsumerState<_CreateTicketDialog> {
     }
   }
 
+  Color get _themeColor => switch (widget.ticketType) {
+    TicketTypeTab.ticket => const Color(0xFF2563EB),
+    TicketTypeTab.complaint => const Color(0xFFEA580C),
+    TicketTypeTab.suggestion => const Color(0xFF7C3AED),
+  };
+
+  IconData get _typeIcon => switch (widget.ticketType) {
+    TicketTypeTab.ticket => Icons.support_agent_rounded,
+    TicketTypeTab.complaint => Icons.report_problem_rounded,
+    TicketTypeTab.suggestion => Icons.lightbulb_rounded,
+  };
+
+  String get _titleLabel => switch (widget.ticketType) {
+    TicketTypeTab.ticket => 'إنشاء تذكرة دعم جديدة',
+    TicketTypeTab.complaint => 'تقديم شكوى جديدة',
+    TicketTypeTab.suggestion => 'تقديم مقترح جديد',
+  };
+
+  String get _subtitleLabel => switch (widget.ticketType) {
+    TicketTypeTab.ticket => 'تواصل مع فريق الدعم الفني لحل مشكلة أو استفسار بنظام العمل',
+    TicketTypeTab.complaint => 'أرسل شكواك إلى القسم المعني لمتابعتها وحلها بأسرع وقت',
+    TicketTypeTab.suggestion => 'شاركنا أفكارك ومقترحاتك لتطوير بيئة العمل وتحسين الخدمات',
+  };
+
   @override
   Widget build(BuildContext context) {
-    final dialogWidth = (MediaQuery.sizeOf(context).width - 48).clamp(
-      320.0,
-      _TicketsUi.dialogWidth,
-    );
-    final dialogHeight = MediaQuery.sizeOf(context).height * 0.8;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dialogWidth = (MediaQuery.sizeOf(context).width - 48).clamp(320.0, 560.0);
+    final dialogHeight = MediaQuery.sizeOf(context).height * 0.86;
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      title: Text(switch (widget.ticketType) {
-        TicketTypeTab.ticket => 'إنشاء تذكرة جديدة',
-        TicketTypeTab.complaint => 'تقديم شكوى جديدة',
-        TicketTypeTab.suggestion => 'تقديم مقترح جديد',
-      }),
-      content: ConstrainedBox(
+    final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
+
+    return Dialog(
+      backgroundColor: surfaceColor,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: borderColor, width: 1),
+      ),
+      child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: dialogWidth.toDouble(),
+          maxWidth: dialogWidth,
           maxHeight: dialogHeight,
         ),
         child: SizedBox(
-          width: dialogWidth.toDouble(),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _titleController,
-                  enabled: !_isSaving,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'العنوان',
-                    prefixIcon: Icon(Icons.title_rounded),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _descriptionController,
-                  enabled: !_isSaving,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'وصف المشكلة',
-                    alignLabelWithHint: true,
-                    prefixIcon: Icon(Icons.description_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _isLoadingDepartments
-                    ? const Center(child: CircularProgressIndicator())
-                    : DropdownButtonFormField<String>(
-                        value: _selectedDepartmentId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'قسم الدعم',
-                          prefixIcon: Icon(Icons.account_tree_outlined),
-                        ),
-                        items: _departments
-                            .map(
-                              (dept) => DropdownMenuItem(
-                                value: dept['id'],
-                                child: Text(dept['name'] ?? ''),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: _isSaving
-                            ? null
-                            : (value) => setState(() {
-                                _selectedDepartmentId = value;
-                              }),
+          width: dialogWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: _themeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _priority,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'الأولوية',
-                    prefixIcon: Icon(Icons.low_priority_rounded),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'low', child: Text('منخفضة')),
-                    DropdownMenuItem(value: 'normal', child: Text('عادية')),
-                    DropdownMenuItem(value: 'high', child: Text('عالية')),
-                    DropdownMenuItem(value: 'critical', child: Text('حرجة')),
-                  ],
-                  onChanged: _isSaving
-                      ? null
-                      : (value) =>
-                            setState(() => _priority = value ?? _priority),
-                ),
-                if (_errorText != null) ...[
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      _errorText!,
-                      style: const TextStyle(color: _TicketsUi.danger),
+                      child: Icon(_typeIcon, color: _themeColor, size: 24),
                     ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _titleLabel,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _subtitleLabel,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      tooltip: 'إغلاق',
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Form content
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Title
+                      _buildFieldLabel('عنوان الطلب', isRequired: true),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _titleController,
+                        enabled: !_isSaving,
+                        textInputAction: TextInputAction.next,
+                        decoration: InputDecoration(
+                          hintText: switch (widget.ticketType) {
+                            TicketTypeTab.ticket => 'مثال: عطل في طابعة الفرع الرئيسي',
+                            TicketTypeTab.complaint => 'مثال: تأخر في استلام البضائع الأسبوعية',
+                            TicketTypeTab.suggestion => 'مثال: اقتراح نظام إلكتروني للأرشفة',
+                          },
+                          prefixIcon: Icon(Icons.title_rounded, color: _themeColor, size: 20),
+                          filled: true,
+                          fillColor: fieldFillColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: _themeColor, width: 1.5),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Target Department
+                      _buildFieldLabel('القسم الموجه إليه', isRequired: true),
+                      const SizedBox(height: 6),
+                      if (_isLoadingDepartments)
+                        Container(
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: fieldFillColor,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: borderColor),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: const Row(
+                            children: [
+                              SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              SizedBox(width: 12),
+                              Text('جارٍ تحميل الأقسام...', style: TextStyle(fontSize: 13)),
+                            ],
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          value: _selectedDepartmentId,
+                          isExpanded: true,
+                          dropdownColor: surfaceColor,
+                          decoration: InputDecoration(
+                            prefixIcon: Icon(Icons.apartment_rounded, color: _themeColor, size: 20),
+                            filled: true,
+                            fillColor: fieldFillColor,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide(color: _themeColor, width: 1.5),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          ),
+                          items: _departments
+                              .map(
+                                (dept) => DropdownMenuItem(
+                                  value: dept['id'],
+                                  child: Text(
+                                    dept['name'] ?? '',
+                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _isSaving
+                              ? null
+                              : (value) => setState(() {
+                                  _selectedDepartmentId = value;
+                                }),
+                        ),
+
+                      const SizedBox(height: 16),
+
+                      // Priority
+                      _buildFieldLabel('مستوى الأولوية'),
+                      const SizedBox(height: 8),
+                      _buildPrioritySelector(isDark),
+
+                      const SizedBox(height: 16),
+
+                      // Description
+                      _buildFieldLabel('التفاصيل والوصف', isRequired: true),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _descriptionController,
+                        enabled: !_isSaving,
+                        minLines: 4,
+                        maxLines: 7,
+                        decoration: InputDecoration(
+                          hintText: 'يرجى كتابة التفاصيل بوضوح لمساعدة الفريق المختص في المتابعة والإنجاز...',
+                          alignLabelWithHint: true,
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.only(bottom: 50),
+                            child: Icon(Icons.description_outlined, color: _themeColor, size: 20),
+                          ),
+                          filled: true,
+                          fillColor: fieldFillColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: borderColor),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: _themeColor, width: 1.5),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                        ),
+                      ),
+
+                      if (_errorText != null) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDC2626).withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _errorText!,
+                                  style: const TextStyle(
+                                    color: Color(0xFFDC2626),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
-              ],
-            ),
+                ),
+              ),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Footer
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                      child: const Text('إلغاء', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: _isSaving ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _themeColor,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      icon: _isSaving
+                          ? const ButtonLoadingIndicator(radius: 8)
+                          : const Icon(Icons.send_rounded, size: 18),
+                      label: Text(
+                        _isSaving ? 'جارٍ الإنشاء...' : 'إرسال الآن',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
-          child: const Text('إلغاء'),
+    );
+  }
+
+  Widget _buildFieldLabel(String label, {bool isRequired = false}) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
         ),
-        FilledButton.icon(
-          onPressed: _isSaving ? null : _submit,
-          icon: _isSaving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: ButtonLoadingIndicator(),
-                )
-              : const Icon(Icons.add_task_rounded),
-          label: Text(_isSaving ? 'جارٍ الإنشاء...' : 'إنشاء'),
-        ),
+        if (isRequired) ...[
+          const SizedBox(width: 4),
+          const Text('*', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w800)),
+        ],
       ],
+    );
+  }
+
+  Widget _buildPrioritySelector(bool isDark) {
+    final priorities = [
+      {'key': 'low', 'label': 'منخفضة', 'color': const Color(0xFF0D9488), 'icon': Icons.arrow_downward_rounded},
+      {'key': 'normal', 'label': 'عادية', 'color': const Color(0xFF2563EB), 'icon': Icons.remove_rounded},
+      {'key': 'high', 'label': 'عالية', 'color': const Color(0xFFEA580C), 'icon': Icons.arrow_upward_rounded},
+      {'key': 'critical', 'label': 'حرجة', 'color': const Color(0xFFDC2626), 'icon': Icons.warning_amber_rounded},
+    ];
+
+    return Row(
+      children: priorities.map((prio) {
+        final key = prio['key'] as String;
+        final label = prio['label'] as String;
+        final color = prio['color'] as Color;
+        final icon = prio['icon'] as IconData;
+        final isSelected = _priority == key;
+
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: InkWell(
+              onTap: _isSaving ? null : () => setState(() => _priority = key),
+              borderRadius: BorderRadius.circular(12),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? color.withValues(alpha: 0.12)
+                      : (isDark ? const Color(0xFF242428) : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isSelected ? color : Colors.transparent,
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 15,
+                      color: isSelected
+                          ? color
+                          : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                        color: isSelected
+                            ? color
+                            : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -1356,7 +2075,7 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
   String? _selectedDepartmentId;
   List<DepartmentSummary> _departments = [];
   List<dynamic> _allUsers = [];
-  String? _searchText;
+  String _searchText = '';
   String? _errorText;
 
   @override
@@ -1379,17 +2098,14 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
     });
 
     try {
-      final departments = await ref
-          .read(chatRepositoryProvider)
-          .fetchDepartments();
-      final users = await ref.read(chatRepositoryProvider).fetchUsers();
+      final chatRepo = ref.read(chatRepositoryProvider);
+      final departments = await chatRepo.fetchDepartments();
+      final users = await chatRepo.fetchUsers();
       if (!mounted) return;
       setState(() {
         _departments = departments;
         _allUsers = users;
-        _selectedDepartmentId = departments.isNotEmpty
-            ? departments.first.id
-            : null;
+        _selectedDepartmentId = null; // Default to all departments
         _isLoadingDepartments = false;
         _isLoadingUsers = false;
       });
@@ -1429,12 +2145,38 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
     }
   }
 
+  String _departmentName(String? id) {
+    if (id == null || id.isEmpty) return 'بدون قسم';
+    final dept = _departments.firstWhere(
+      (department) => department.id == id,
+      orElse: () => DepartmentSummary(
+        id: id,
+        name: id,
+        code: '',
+        description: '',
+        managers: const [],
+        membersCount: 0,
+        defaultConversationId: null,
+      ),
+    );
+    return dept.name.isNotEmpty ? dept.name : (dept.code.isNotEmpty ? dept.code : id);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dialogWidth = (MediaQuery.sizeOf(context).width - 48).clamp(320.0, 640.0);
+    final dialogHeight = MediaQuery.sizeOf(context).height * 0.88;
+
+    final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
+    final brandColor = const Color(0xFF2563EB);
+
     final users = _allUsers.isNotEmpty
         ? _allUsers
         : (widget.data.users as List<dynamic>);
-    final query = _searchText?.trim().toLowerCase() ?? '';
+    final query = _searchText.trim().toLowerCase();
     final filteredUsers = users.where((user) {
       final dynamic userData = user;
       if (_selectedDepartmentId != null && _selectedDepartmentId!.isNotEmpty) {
@@ -1448,201 +2190,398 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
       return displayName.contains(query) || username.contains(query);
     }).toList();
 
-    String departmentName(String? id) {
-      final dept = _departments.firstWhere(
-        (department) => department.id == id,
-        orElse: () => DepartmentSummary(
-          id: id ?? '',
-          name: id ?? 'بدون قسم',
-          code: '',
-          description: '',
-          managers: const [],
-          membersCount: 0,
-          defaultConversationId: null,
+    return Dialog(
+      backgroundColor: surfaceColor,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: borderColor, width: 1),
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: dialogWidth,
+          maxHeight: dialogHeight,
         ),
-      );
-      return dept.name;
-    }
-
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      title: const Text('إعداد فريق الدعم'),
-      content: SizedBox(
-        width: _TicketsUi.dialogWidth,
-        height: 600,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_isLoadingDepartments || _isLoadingUsers)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else ...[
-              DropdownButtonFormField<String?>(
-                value: _selectedDepartmentId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'القسم',
-                  prefixIcon: Icon(Icons.account_tree_outlined),
-                ),
-                items: _departments
-                    .map(
-                      (dept) => DropdownMenuItem<String?>(
-                        value: dept.id,
-                        child: Text(
-                          dept.name.isNotEmpty ? dept.name : dept.code,
-                        ),
+        child: SizedBox(
+          width: dialogWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: brandColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                    )
-                    .toList(),
-                onChanged: _isSaving
-                    ? null
-                    : (value) => setState(() {
-                        _selectedDepartmentId = value;
-                      }),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                decoration: const InputDecoration(
-                  hintText: 'بحث في المستخدمين',
-                  prefixIcon: Icon(Icons.search_rounded),
+                      child: Icon(Icons.admin_panel_settings_rounded, color: brandColor, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'إعداد فريق الدعم والصلاحيات',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'عيّن موظفي الدعم الفني وحدّد صلاحيات تصدير تذاكر وشكاوى ومقترحات النظام',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      tooltip: 'إغلاق',
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
                 ),
-                onChanged: (value) => setState(() => _searchText = value),
               ),
-              const SizedBox(height: 16),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Search & Filter Bar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        // Search bar
+                        Expanded(
+                          flex: 3,
+                          child: TextField(
+                            decoration: InputDecoration(
+                              hintText: 'بحث باسم المستخدم أو الاسم...',
+                              prefixIcon: Icon(Icons.search_rounded, size: 20, color: brandColor),
+                              suffixIcon: _searchText.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear_rounded, size: 18),
+                                      onPressed: () => setState(() => _searchText = ''),
+                                    )
+                                  : null,
+                              filled: true,
+                              fillColor: fieldFillColor,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: brandColor, width: 1.5),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            ),
+                            onChanged: (value) => setState(() => _searchText = value),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        // Department Filter Dropdown
+                        Expanded(
+                          flex: 2,
+                          child: DropdownButtonFormField<String?>(
+                            value: _selectedDepartmentId,
+                            isExpanded: true,
+                            dropdownColor: surfaceColor,
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(Icons.apartment_rounded, size: 20, color: brandColor),
+                              filled: true,
+                              fillColor: fieldFillColor,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: brandColor, width: 1.5),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('جميع الأقسام', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                              ),
+                              ..._departments.map(
+                                (dept) => DropdownMenuItem<String?>(
+                                  value: dept.id,
+                                  child: Text(
+                                    dept.name.isNotEmpty ? dept.name : dept.code,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: _isSaving
+                                ? null
+                                : (value) => setState(() {
+                                    _selectedDepartmentId = value;
+                                  }),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Summary status capsule
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: brandColor.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_rounded, size: 14, color: brandColor),
+                              const SizedBox(width: 5),
+                              Text(
+                                'تم تحديد ${_selectedIds.length} كأعضاء دعم فني',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: brandColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${filteredUsers.length} مستخدم',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Users List (Apple Inset Style)
               Expanded(
-                child: filteredUsers.isEmpty
+                child: _isLoadingDepartments || _isLoadingUsers
+                    ? const Center(child: CircularProgressIndicator())
+                    : filteredUsers.isEmpty
                     ? Center(
                         child: Text(
-                          users.isEmpty
-                              ? 'لا يوجد مستخدمين بعد.'
-                              : 'لا توجد نتائج مطابقة.',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
+                          users.isEmpty ? 'لا يوجد مستخدمون بالنظام.' : 'لا توجد نتائج مطابقة لبحثك.',
+                          style: TextStyle(
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            fontSize: 14,
+                          ),
                         ),
                       )
                     : Scrollbar(
                         child: ListView.separated(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           itemCount: filteredUsers.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final user = filteredUsers[index];
-                            final exportTypes =
-                                _exportPermissionsByUserId[user.id] ??
-                                <String>{};
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 8,
-                                horizontal: 4,
+                            final isSelected = _selectedIds.contains(user.id);
+                            final exportTypes = _exportPermissionsByUserId[user.id] ?? <String>{};
+
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? brandColor.withValues(alpha: 0.05)
+                                    : (isDark ? const Color(0xFF222226) : const Color(0xFFF8FAFC)),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? brandColor.withValues(alpha: 0.35)
+                                      : borderColor,
+                                  width: 1,
+                                ),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  CheckboxListTile(
-                                    value: _selectedIds.contains(user.id),
-                                    title: Text(user.displayName),
-                                    subtitle: Text(
-                                      '${user.username} • ${_roleLabel(user.role)} • ${departmentName(user.departmentId)}',
-                                    ),
-                                    controlAffinity:
-                                        ListTileControlAffinity.leading,
-                                    onChanged: _isSaving
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(16),
+                                    onTap: _isSaving
                                         ? null
-                                        : (value) {
+                                        : () {
                                             setState(() {
-                                              if (value == true) {
-                                                _selectedIds.add(user.id);
-                                              } else {
+                                              if (isSelected) {
                                                 _selectedIds.remove(user.id);
+                                              } else {
+                                                _selectedIds.add(user.id);
                                               }
                                             });
                                           },
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsetsDirectional.only(
-                                      start: 16,
-                                      end: 16,
-                                      bottom: 8,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                      child: Row(
+                                        children: [
+                                          // Checkbox / toggle
+                                          Container(
+                                            width: 22,
+                                            height: 22,
+                                            decoration: BoxDecoration(
+                                              color: isSelected ? brandColor : Colors.transparent,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: isSelected ? brandColor : (isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1)),
+                                                width: 1.5,
+                                              ),
+                                            ),
+                                            child: isSelected
+                                                ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+                                                : null,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          // Avatar
+                                          CircleAvatar(
+                                            radius: 18,
+                                            backgroundColor: brandColor.withValues(alpha: 0.15),
+                                            child: Text(
+                                              (user.displayName as String).isNotEmpty
+                                                  ? (user.displayName as String)[0].toUpperCase()
+                                                  : '?',
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w700,
+                                                color: brandColor,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          // Info
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Text(
+                                                      user.displayName,
+                                                      style: const TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: isDark ? const Color(0xFF333338) : const Color(0xFFE2E8F0),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                      ),
+                                                      child: Text(
+                                                        _roleLabel(user.role),
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w600,
+                                                          color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  '@${user.username} • ${_departmentName(user.departmentId)}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        FilterChip(
-                                          label: const Text('تذاكر'),
-                                          selected: exportTypes.contains(
-                                            'ticket',
-                                          ),
-                                          onSelected: _isSaving
-                                              ? null
-                                              : (selected) {
-                                                  setState(() {
-                                                    if (selected) {
-                                                      exportTypes.add('ticket');
-                                                    } else {
-                                                      exportTypes.remove(
-                                                        'ticket',
-                                                      );
-                                                    }
-                                                    _exportPermissionsByUserId[user
-                                                            .id] =
-                                                        exportTypes;
-                                                  });
-                                                },
-                                        ),
-                                        FilterChip(
-                                          label: const Text('شكاوى'),
-                                          selected: exportTypes.contains(
-                                            'complaint',
-                                          ),
-                                          onSelected: _isSaving
-                                              ? null
-                                              : (selected) {
-                                                  setState(() {
-                                                    if (selected) {
-                                                      exportTypes.add(
-                                                        'complaint',
-                                                      );
-                                                    } else {
-                                                      exportTypes.remove(
-                                                        'complaint',
-                                                      );
-                                                    }
-                                                    _exportPermissionsByUserId[user
-                                                            .id] =
-                                                        exportTypes;
-                                                  });
-                                                },
-                                        ),
-                                        FilterChip(
-                                          label: const Text('مقترحات'),
-                                          selected: exportTypes.contains(
-                                            'suggestion',
-                                          ),
-                                          onSelected: _isSaving
-                                              ? null
-                                              : (selected) {
-                                                  setState(() {
-                                                    if (selected) {
-                                                      exportTypes.add(
-                                                        'suggestion',
-                                                      );
-                                                    } else {
-                                                      exportTypes.remove(
-                                                        'suggestion',
-                                                      );
-                                                    }
-                                                    _exportPermissionsByUserId[user
-                                                            .id] =
-                                                        exportTypes;
-                                                  });
-                                                },
-                                        ),
-                                      ],
-                                    ),
                                   ),
+
+                                  // Export permissions section
+                                  if (isSelected) ...[
+                                    Container(
+                                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+                                      decoration: BoxDecoration(
+                                        color: brandColor.withValues(alpha: 0.04),
+                                        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(15)),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.file_download_outlined, size: 16, color: brandColor),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            'صلاحيات التصدير:',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: brandColor,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Wrap(
+                                            spacing: 6,
+                                            children: [
+                                              _buildExportChip(
+                                                label: 'تذاكر',
+                                                type: 'ticket',
+                                                types: exportTypes,
+                                                userId: user.id,
+                                                color: const Color(0xFF2563EB),
+                                              ),
+                                              _buildExportChip(
+                                                label: 'شكاوى',
+                                                type: 'complaint',
+                                                types: exportTypes,
+                                                userId: user.id,
+                                                color: const Color(0xFFEA580C),
+                                              ),
+                                              _buildExportChip(
+                                                label: 'مقترحات',
+                                                type: 'suggestion',
+                                                types: exportTypes,
+                                                userId: user.id,
+                                                color: const Color(0xFF7C3AED),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             );
@@ -1650,27 +2589,113 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
                         ),
                       ),
               ),
-            ],
-            if (_errorText != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _errorText!,
-                style: const TextStyle(color: _TicketsUi.danger),
+
+              if (_errorText != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text(
+                    _errorText!,
+                    style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Actions Footer
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                      child: const Text('إلغاء', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: _isSaving ? null : _save,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: brandColor,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      icon: _isSaving
+                          ? const ButtonLoadingIndicator(radius: 8)
+                          : const Icon(Icons.check_rounded, size: 18),
+                      label: Text(
+                        _isSaving ? 'جارٍ الحفظ...' : 'حفظ التغييرات',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExportChip({
+    required String label,
+    required String type,
+    required Set<String> types,
+    required String userId,
+    required Color color,
+  }) {
+    final isSelected = types.contains(type);
+
+    return InkWell(
+      onTap: _isSaving
+          ? null
+          : () {
+              setState(() {
+                if (isSelected) {
+                  types.remove(type);
+                } else {
+                  types.add(type);
+                }
+                _exportPermissionsByUserId[userId] = types;
+              });
+            },
+      borderRadius: BorderRadius.circular(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withValues(alpha: 0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? color : color.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isSelected) ...[
+              Icon(Icons.check_rounded, size: 12, color: color),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? color : color.withValues(alpha: 0.7),
+              ),
+            ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
-          child: const Text('إلغاء'),
-        ),
-        FilledButton(
-          onPressed: _isSaving ? null : _save,
-          child: Text(_isSaving ? 'جارٍ الحفظ...' : 'حفظ'),
-        ),
-      ],
     );
   }
 }
@@ -1684,15 +2709,27 @@ class _DepartmentHandlersDialog extends ConsumerStatefulWidget {
   bool get isTicket => handlerType == 'ticket';
 
   String get dialogTitle => switch (handlerType) {
-    'suggestion' => 'مسؤولو المقترحات حسب القسم',
-    'ticket' => 'مسؤولو التذاكر حسب القسم',
-    _ => 'مسؤولو الشكاوى حسب القسم',
+    'suggestion' => 'مسؤولو الرد على المقترحات',
+    'ticket' => 'مسؤولو الرد على تذاكر الدعم',
+    _ => 'مسؤولو الرد على الشكاوى',
   };
 
   String get dialogSubtitle => switch (handlerType) {
-    'suggestion' => 'اختر القسم ثم حدّد من يدير المقترحات المرسلة إليه.',
-    'ticket' => 'اختر القسم ثم حدّد من يدير التذاكر المرسلة إليه (غير قسم IT).',
-    _ => 'اختر القسم ثم حدّد من يدير الشكاوى المرسلة إليه.',
+    'suggestion' => 'اختر القسم ثم حدّد الموظفين المسؤولين عن استلام والرد على مقترحات هذا القسم.',
+    'ticket' => 'اختر القسم ثم حدّد الموظفين المسؤولين عن استلام والرد على تذاكر هذا القسم.',
+    _ => 'اختر القسم ثم حدّد الموظفين المسؤولين عن استلام والرد على الشكاوى الموجهة لهذا القسم.',
+  };
+
+  Color get typeColor => switch (handlerType) {
+    'suggestion' => const Color(0xFF7C3AED),
+    'ticket' => const Color(0xFF2563EB),
+    _ => const Color(0xFFEA580C),
+  };
+
+  IconData get typeIcon => switch (handlerType) {
+    'suggestion' => Icons.lightbulb_rounded,
+    'ticket' => Icons.support_agent_rounded,
+    _ => Icons.report_problem_rounded,
   };
 
   @override
@@ -1707,7 +2744,7 @@ class _DepartmentHandlersDialogState
   bool _isLoadingUsers = false;
   bool _isSaving = false;
   String? _selectedDepartmentId;
-  String? _searchText;
+  String _searchText = '';
   List<dynamic> _departments = [];
   List<TicketSupportUser> _supportUsers = [];
   Map<String, List<Map<String, String>>> _handlerAssignmentsByUserId = {};
@@ -1793,11 +2830,12 @@ class _DepartmentHandlersDialogState
   }
 
   String _departmentName(String? id) {
+    if (id == null || id.isEmpty) return 'بدون قسم';
     final dept = _departments.firstWhere(
       (department) => department.id == id,
       orElse: () => DepartmentSummary(
-        id: id ?? '',
-        name: id ?? 'بدون قسم',
+        id: id,
+        name: id,
         code: '',
         description: '',
         managers: const [],
@@ -1805,7 +2843,7 @@ class _DepartmentHandlersDialogState
         defaultConversationId: null,
       ),
     );
-    return dept.name;
+    return dept.name.isNotEmpty ? dept.name : (dept.code.isNotEmpty ? dept.code : id);
   }
 
   Future<void> _saveHandlers() async {
@@ -1849,7 +2887,15 @@ class _DepartmentHandlersDialogState
 
   @override
   Widget build(BuildContext context) {
-    final query = _searchText?.trim().toLowerCase() ?? '';
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dialogWidth = (MediaQuery.sizeOf(context).width - 48).clamp(320.0, 640.0);
+    final dialogHeight = MediaQuery.sizeOf(context).height * 0.88;
+
+    final borderColor = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE2E8F0);
+    final surfaceColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final fieldFillColor = isDark ? const Color(0xFF242428) : const Color(0xFFF8FAFC);
+
+    final query = _searchText.trim().toLowerCase();
     final filteredUsers = _supportUsers.where((user) {
       if (query.isEmpty) return true;
       return user.displayName.toLowerCase().contains(query) ||
@@ -1857,132 +2903,447 @@ class _DepartmentHandlersDialogState
     }).toList();
     final hasContent = !_isLoadingDepartments && !_isLoadingUsers;
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      title: Text(widget.dialogTitle),
-      content: SizedBox(
-        width: _TicketsUi.dialogWidth,
-        height: 600,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (!hasContent)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else ...[
-              Text(
-                widget.dialogSubtitle,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _selectedDepartmentId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'القسم',
-                  prefixIcon: Icon(Icons.account_tree_outlined),
-                ),
-                items: _departments
-                    .map(
-                      (department) => DropdownMenuItem<String>(
-                        value: department.id?.toString(),
-                        child: Text(department.name?.toString() ?? ''),
+    return Dialog(
+      backgroundColor: surfaceColor,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: borderColor, width: 1),
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: dialogWidth,
+          maxHeight: dialogHeight,
+        ),
+        child: SizedBox(
+          width: dialogWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: widget.typeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                    )
-                    .toList(),
-                onChanged: _isSaving
-                    ? null
-                    : (value) async {
-                        if (value == null) return;
-                        setState(() {
-                          _selectedDepartmentId = value;
-                        });
-                        await _loadHandlers(value);
-                      },
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                decoration: const InputDecoration(
-                  hintText: 'بحث في المستخدمين',
-                  prefixIcon: Icon(Icons.search_rounded),
+                      child: Icon(widget.typeIcon, color: widget.typeColor, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.dialogTitle,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            widget.dialogSubtitle,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      tooltip: 'إغلاق',
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: IconButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
                 ),
-                onChanged: (value) => setState(() => _searchText = value),
               ),
-              const SizedBox(height: 16),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Department Selector Inset Card
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: fieldFillColor,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.apartment_rounded, size: 16, color: widget.typeColor),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'القسم المراد تعيين مسؤولي الرد له:',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: widget.typeColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'تم تعيين ${_selectedHandlerIds.length} مسؤول',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: widget.typeColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: _selectedDepartmentId,
+                            isExpanded: true,
+                            dropdownColor: surfaceColor,
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: true,
+                              fillColor: surfaceColor,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: borderColor),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: widget.typeColor, width: 1.5),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                            items: _departments
+                                .map(
+                                  (dept) => DropdownMenuItem<String>(
+                                    value: dept.id?.toString(),
+                                    child: Text(
+                                      dept.name?.toString() ?? '',
+                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _isSaving
+                                ? null
+                                : (value) async {
+                                    if (value == null) return;
+                                    setState(() {
+                                      _selectedDepartmentId = value;
+                                    });
+                                    await _loadHandlers(value);
+                                  },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Search bar
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'بحث في قائمة الموظفين...',
+                        prefixIcon: Icon(Icons.search_rounded, size: 20, color: widget.typeColor),
+                        suffixIcon: _searchText.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear_rounded, size: 18),
+                                onPressed: () => setState(() => _searchText = ''),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: fieldFillColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: widget.typeColor, width: 1.5),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      ),
+                      onChanged: (value) => setState(() => _searchText = value),
+                    ),
+                  ],
+                ),
+              ),
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Handlers List (Apple Inset Style)
               Expanded(
-                child: _isLoadingHandlers
+                child: !hasContent || _isLoadingHandlers
                     ? const Center(child: CircularProgressIndicator())
                     : filteredUsers.isEmpty
-                    ? const Center(child: Text('لا يوجد مستخدمين بعد.'))
+                    ? Center(
+                        child: Text(
+                          _supportUsers.isEmpty ? 'لا يوجد مستخدمون متاحون.' : 'لا توجد نتائج مطابقة لبحثك.',
+                          style: TextStyle(
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            fontSize: 14,
+                          ),
+                        ),
+                      )
                     : Scrollbar(
                         child: ListView.separated(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           itemCount: filteredUsers.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final user = filteredUsers[index];
+                            final isAssigned = _selectedHandlerIds.contains(user.id);
+
                             final otherDepartments =
-                                (_handlerAssignmentsByUserId[user.id] ??
-                                        const [])
+                                (_handlerAssignmentsByUserId[user.id] ?? const [])
                                     .where(
                                       (entry) =>
-                                          entry['departmentId'] !=
-                                          _selectedDepartmentId,
+                                          entry['departmentId'] != _selectedDepartmentId,
                                     )
                                     .map(
                                       (entry) => entry['departmentName'] ?? '',
                                     )
                                     .where((name) => name.isNotEmpty)
                                     .toList();
-                            final extraDepartmentsLabel =
-                                otherDepartments.isEmpty
-                                ? ''
-                                : '\nمسؤول أيضاً في: ${otherDepartments.join('، ')}';
-                            return CheckboxListTile(
-                              value: _selectedHandlerIds.contains(user.id),
-                              title: Text(user.displayName),
-                              subtitle: Text(
-                                '${user.username} • ${user.role} • ${_departmentName(user.departmentId)}$extraDepartmentsLabel',
+
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: isAssigned
+                                    ? widget.typeColor.withValues(alpha: 0.05)
+                                    : (isDark ? const Color(0xFF222226) : const Color(0xFFF8FAFC)),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isAssigned
+                                      ? widget.typeColor.withValues(alpha: 0.35)
+                                      : borderColor,
+                                  width: 1,
+                                ),
                               ),
-                              controlAffinity: ListTileControlAffinity.leading,
-                              onChanged: _isSaving
-                                  ? null
-                                  : (value) {
-                                      setState(() {
-                                        if (value == true) {
-                                          _selectedHandlerIds.add(user.id);
-                                        } else {
-                                          _selectedHandlerIds.remove(user.id);
-                                        }
-                                      });
-                                    },
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: _isSaving
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          if (isAssigned) {
+                                            _selectedHandlerIds.remove(user.id);
+                                          } else {
+                                            _selectedHandlerIds.add(user.id);
+                                          }
+                                        });
+                                      },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          // Checkbox indicator
+                                          Container(
+                                            width: 22,
+                                            height: 22,
+                                            decoration: BoxDecoration(
+                                              color: isAssigned ? widget.typeColor : Colors.transparent,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: isAssigned
+                                                    ? widget.typeColor
+                                                    : (isDark ? const Color(0xFF64748B) : const Color(0xFFCBD5E1)),
+                                                width: 1.5,
+                                              ),
+                                            ),
+                                            child: isAssigned
+                                                ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+                                                : null,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          // Avatar
+                                          CircleAvatar(
+                                            radius: 18,
+                                            backgroundColor: widget.typeColor.withValues(alpha: 0.15),
+                                            child: Text(
+                                              user.displayName.isNotEmpty
+                                                  ? user.displayName[0].toUpperCase()
+                                                  : '?',
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w700,
+                                                color: widget.typeColor,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          // Info
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Text(
+                                                      user.displayName,
+                                                      style: const TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: isDark ? const Color(0xFF333338) : const Color(0xFFE2E8F0),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                      ),
+                                                      child: Text(
+                                                        _roleLabel(user.role),
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w600,
+                                                          color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  '@${user.username} • ${_departmentName(user.departmentId)}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+
+                                      // Other department assignments warning/info badge
+                                      if (otherDepartments.isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        Container(
+                                          margin: const EdgeInsetsDirectional.only(start: 34),
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: isDark ? const Color(0xFF28282C) : const Color(0xFFF1F5F9),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(
+                                              color: isDark ? const Color(0xFF38383E) : const Color(0xFFE2E8F0),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.push_pin_outlined,
+                                                size: 13,
+                                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                              ),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                'مسؤول أيضاً في: ${otherDepartments.join('، ')}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
                             );
                           },
                         ),
                       ),
               ),
-            ],
-            if (_errorText != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _errorText!,
-                style: const TextStyle(color: _TicketsUi.danger),
+
+              if (_errorText != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text(
+                    _errorText!,
+                    style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+
+              Divider(height: 1, thickness: 1, color: borderColor),
+
+              // Actions Footer
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: _isSaving ? null : () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        foregroundColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                      child: const Text('إلغاء', style: TextStyle(fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: _isSaving ? null : _saveHandlers,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: widget.typeColor,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      icon: _isSaving
+                          ? const ButtonLoadingIndicator(radius: 8)
+                          : const Icon(Icons.check_rounded, size: 18),
+                      label: Text(
+                        _isSaving ? 'جارٍ الحفظ...' : 'حفظ التعيينات',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-          ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
-          child: const Text('إلغاء'),
-        ),
-        FilledButton(
-          onPressed: _isSaving ? null : _saveHandlers,
-          child: Text(_isSaving ? 'جارٍ الحفظ...' : 'حفظ'),
-        ),
-      ],
     );
   }
 }
@@ -2155,39 +3516,52 @@ class _TimelineEmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Center(
-      child: Padding(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 20),
         padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E20) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : const Color(0xFFE2E8F0),
+          ),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 82,
-              height: 82,
+              width: 60,
+              height: 60,
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(24),
+                color: TicketsPalette.brand.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: const Icon(
-                Icons.timeline_rounded,
-                size: 38,
-                color: Color(0xFF64748B),
+                Icons.chat_bubble_outline_rounded,
+                size: 28,
+                color: TicketsPalette.brand,
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             Text(
-              'لا توجد تذاكر مطابقة',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+              'لا توجد تحديثات حتى الآن',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
-              'جرّب تعديل البحث أو الفلاتر، أو أنشئ تذكرة جديدة من الأعلى.',
+              'لم يتم تسجيل أي ردود أو تغييرات في حالة هذا الطلب بعد.\nيمكنك كتابة أول تعليق أو ملاحظة باستخدام النموذج بالأسفل.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                height: 1.6,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.5,
               ),
             ),
           ],

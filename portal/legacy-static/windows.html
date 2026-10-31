@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>دليل برنامج الكمبيوتر (Windows) | iSmart Messenger</title>
+  <meta name="description" content="الدليل الإرشادي المعتمد لتثبيت وضبط برنامج iSmart Messenger على أجهزة الكمبيوتر المكتبية في فروع الشركة.">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/png" href="assets/images/logo.png">
+</head>
+<body>
+
+  <!-- Top Strip -->
+  <div class="top-strip">
+    <div class="container top-strip-inner">
+      <span>الدليل الإرشادي المعتمد لإدارة وتشغيل برنامج سطح المكتب</span>
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <header class="site-nav">
+    <div class="container nav-container">
+      <a href="index.html" class="nav-brand">
+        <img src="assets/images/logo.png" alt="iSmart Logo" onerror="this.src='assets/images/server-online.png'">
+        <div class="nav-brand-text">
+          <h1>iSmart Messenger</h1>
+          <span>نظام الاتصال الموحد للفروع</span>
+        </div>
+      </a>
+
+      <ul class="nav-links" id="navLinks">
+        <li class="nav-item"><a href="index.html">الرئيسية</a></li>
+        <li class="nav-item"><a href="windows.html" class="active">دليل الكمبيوتر</a></li>
+        <li class="nav-item"><a href="mobile.html">دليل الموبايل</a></li>
+        <li class="nav-item"><a href="index.html#videos-section">فيديوهات الشرح</a></li>
+        <li class="nav-item"><a href="faq.html">الدعم الفني</a></li>
+      </ul>
+
+      <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+        <a href="downloads/iSmart Messenger Setup 1.1.15.exe" class="nav-cta-btn" download>
+          <span>تنزيل EXE</span>
+        </a>
+        <button class="mobile-toggle" id="mobileToggle">&#9776;</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Doc Hero -->
+  <section class="doc-hero">
+    <div class="container">
+      <h2>دليل تثبيت وتشغيل برنامج الكمبيوتر (Windows)</h2>
+      <p>شرح تنفيذي خطوة بخطوة بالصور والفيديو لضبط البرنامج، وتفادي أخطاء الشبكة، وبدء المراسلات المؤسسية.</p>
+    </div>
+  </section>
+
+  <!-- Main Content -->
+  <main class="doc-layout">
+    <div class="container">
+
+      <!-- Specifications Table -->
+      <div class="step-card-apple" style="padding: 20px;">
+        <h4 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 12px;">📋 المتطلبات الفنية للتشغيل</h4>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>المعيار</th>
+              <th>الحد الأدنى المطلوب</th>
+              <th>الموصى به للعمل المؤسسي</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>نظام التشغيل</td>
+              <td>Windows 7 (32-bit)</td>
+              <td>Windows 7 (32-bit) أحدث تحديث</td>
+            </tr>
+            <tr>
+              <td>المعالج (CPU)</td>
+              <td>Intel / AMD ثنائي النواة 2.0 GHz</td>
+              <td>معالج رباعي النواة حديث أو أعلى</td>
+            </tr>
+            <tr>
+              <td>الذاكرة العشوائية (RAM)</td>
+              <td>2 GB RAM</td>
+              <td>4 GB RAM فما فوق</td>
+            </tr>
+            <tr>
+              <td>المساحة التخزينية</td>
+              <td>300 MB مساحة فارغة</td>
+              <td>1 GB مساحة فارغة (لحفظ الملفات المؤقتة والمستندات)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Embedded Video Tutorial -->
+      <div class="step-card-apple" style="padding: 20px;">
+        <div class="step-header">
+          <div class="step-num-pill">▶</div>
+          <h4>الفيديو العملي لشرح برنامج الكمبيوتر</h4>
+        </div>
+        <p>شاهد الفيديو لتتعلم خطوات تثبيت وضبط السيرفر في دقيقة ونصف:</p>
+        
+        <div class="video-screen" style="border-radius: var(--r-md); overflow: hidden; margin-bottom: 16px;">
+          <video id="vidWindowsGuide" controls preload="metadata" poster="assets/images/logo.png">
+            <source src="downloads/iSmart%20Messenger%20Windows.mp4" type="video/mp4">
+            متصفحك لا يدعم تشغيل الفيديو مباشرة.
+          </video>
+        </div>
+
+        <div class="chapter-pills">
+          <span class="chapter-btn" data-video="vidWindowsGuide" data-time="0">00:00 فتح ملف التثبيت</span>
+          <span class="chapter-btn" data-video="vidWindowsGuide" data-time="30">00:30 عنوان الخادم (Host)</span>
+          <span class="chapter-btn" data-video="vidWindowsGuide" data-time="65">01:05 تسجيل الدخول</span>
+          <span class="chapter-btn" data-video="vidWindowsGuide" data-time="120">02:00 إرسال الملفات</span>
+        </div>
+      </div>
+
+      <!-- Step 1 -->
+      <div class="step-card-apple">
+        <div class="step-header">
+          <div class="step-num-pill">1</div>
+          <h4>تشغيل ملف التثبيت المعتمد (Installation)</h4>
+        </div>
+        <p>
+          قم بالنقر المزدوج على ملف <code>iSmart Messenger Setup 1.1.15.exe</code>. ستبدأ عملية التثبيت الصامتة والسريعة، وسيتم إنشاء اختصار مباشر للبرنامج على سطح المكتب وفي قائمة Start.
+        </p>
+        <div class="callout-box warn">
+          ⚠️ <strong>تنبيه شاشة الأمان (Windows SmartScreen):</strong> في حال ظهرت لك نافذة زرقاء تذكر "Windows protected your PC"، اضغط على رابط <strong>More info</strong>، ثم اضغط على زر <strong>Run anyway</strong> للمتابعة.
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step-card-apple">
+        <div class="step-header">
+          <div class="step-num-pill">2</div>
+          <h4>ضبط عنوان خادم الشركة (Server Connection)</h4>
+        </div>
+        <p>
+          عند تشغيل البرنامج لأول مرة، تظهر نافذة ضبط الخادم. اكتب عنوان خادم المراسلات المعتمد لفرعك:
+        </p>
+        <div style="background: var(--bg-system); padding: 12px 18px; border-radius: 8px; display: inline-flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <code style="font-family: monospace; font-size: 1rem; color: var(--apple-blue); font-weight: 700;">http://172.17.100.253:5000</code>
+          <button class="btn-mini-copy" id="btnCopyIp2">نسخ العنوان</button>
+        </div>
+        <p>
+          ثم اضغط على زر <strong>الاتصال (Connect)</strong>. في حال ظهور علامة صح خضراء، يعني ذلك أن جهاز الفرع متصل بنجاح بالسيرفر الرئيسي.
+        </p>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step-card-apple">
+        <div class="step-header">
+          <div class="step-num-pill">3</div>
+          <h4>تسجيل الدخول وبدء العمل</h4>
+        </div>
+        <p>
+          أدخل اسم المستخدم (Username) وكلمة المرور المسلمة لك من إدارة الفرع أو قسم تكنولوجيا المعلومات، وضع علامة على <strong>Remember Me</strong> لحفظ الجلسة تلقائياً.
+        </p>
+      </div>
+
+      <!-- Shortcuts & Best Practices -->
+      <div class="step-card-apple">
+        <div class="step-header">
+          <div class="step-num-pill">⌨</div>
+          <h4>أهم اختصارات لوحة المفاتيح لتسريع العمل</h4>
+        </div>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>الاختصار</th>
+              <th>الوظيفة</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Enter</code></td>
+              <td>إرسال الرسالة المكتوبة فوراً</td>
+            </tr>
+            <tr>
+              <td><code>Shift + Enter</code></td>
+              <td>نزول سطر جديد دون إرسال الرسالة</td>
+            </tr>
+            <tr>
+              <td><code>Ctrl + F</code></td>
+              <td>البحث السريع في الرسائل أو جهات الاتصال</td>
+            </tr>
+            <tr>
+              <td><code>Ctrl + V</code></td>
+              <td>لصق صورة من الحافظة مباشرة في صندوق المحادثة لإرسالها</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Download Bottom Box -->
+      <div style="text-align: center; margin-top: 30px;">
+        <a href="downloads/iSmart Messenger Setup 1.1.15.exe" class="nav-cta-btn" style="padding: 12px 28px; font-size: 0.95rem;" download>
+          تحميل برنامج الكمبيوتر الآن (1.1.15 EXE)
+        </a>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer-apple">
+    <div class="container">
+      <ul class="footer-nav">
+        <li><a href="index.html">الرئيسية والتحميل</a></li>
+        <li><a href="windows.html">دليل الكمبيوتر</a></li>
+        <li><a href="mobile.html">دليل الموبايل</a></li>
+        <li><a href="faq.html">الدعم الفني</a></li>
+      </ul>
+      <p>جميع الحقوق محفوظة &copy; 2026 iSmart Messenger Network.</p>
+    </div>
+  </footer>
+
+  <div class="apple-toast" id="appleToast">تم نسخ عنوان السيرفر بنجاح!</div>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

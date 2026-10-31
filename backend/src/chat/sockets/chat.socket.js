@@ -29,10 +29,13 @@ const {
 const { getChatTransferForUser } = require("../services/chat-transfer.service");
 const {
   sendChatPushNotifications,
+  sendTicketPushNotifications,
 } = require("../../services/push-notification.service");
 
 const typingState = new Map();
 const typingTimeouts = new Map();
+const userReminderTimers = new Map();
+let activeIOInstance = null;
 const userSockets = new Map();
 const socketPresence = new Map();
 const socketClientType = new Map();
@@ -40,6 +43,7 @@ const publishedPresenceState = new Map();
 const printerCatalogByUser = new Map();
 const printJobOwnerById = new Map();
 const desktopStorageByUser = new Map();
+const clipboardHistoryByUser = new Map();
 const saveJobOwnerById = new Map();
 const receiveJobOwnerById = new Map();
 const SOCKET_MAX_PAYLOAD_BYTES =
@@ -95,7 +99,7 @@ function unregisterUserSocket(userId, socketId) {
 function hasLiveSocketId(io, socketId) {
   const registry = io?.sockets?.sockets;
   if (!registry) {
-    return true;
+    return false;
   }
   if (typeof registry.has === "function") {
     return registry.has(socketId);
@@ -106,7 +110,7 @@ function hasLiveSocketId(io, socketId) {
   if (typeof registry === "object") {
     return Boolean(registry[socketId]);
   }
-  return true;
+  return false;
 }
 
 function pruneUserSockets(io, userId) {
@@ -246,9 +250,8 @@ function getAggregatedPresence(io, userId) {
 async function publishAggregatedPresence(io, userId, extra = {}) {
   const aggregated = getAggregatedPresence(io, userId);
   const nextSignature = `${aggregated.isOnline ? "1" : "0"}:${aggregated.status}`;
-  const hasExtra = extra && Object.keys(extra).length > 0;
   const currentSignature = publishedPresenceState.get(userId);
-  if (!hasExtra && currentSignature === nextSignature) {
+  if (currentSignature === nextSignature) {
     return;
   }
   await setUserPresence(userId, {
@@ -304,13 +307,24 @@ async function resolveSocketUser(socket) {
   }
 
   const payload = jwt.verify(rawToken, jwtSecret);
-  const user = await User.findById(payload.sub).lean();
+  const user = await User.findById(payload.sub)
+    .select("+tokenVersion +refreshSessions")
+    .lean();
   if (!user || user.isActive === false) {
     throw new Error("User not found.");
   }
   if (
     resolveTokenVersion(user.tokenVersion) !==
     resolveTokenVersion(payload.tokenVersion)
+  ) {
+    throw new Error("Session expired. Please login again.");
+  }
+  if (
+    payload.did &&
+    payload.did !== "unknown" &&
+    Array.isArray(user.refreshSessions) &&
+    user.refreshSessions.length > 0 &&
+    !user.refreshSessions.some((s) => s && s.deviceUid === payload.did)
   ) {
     throw new Error("Session expired. Please login again.");
   }
@@ -322,7 +336,11 @@ async function resolveSocketUser(socket) {
     "unknown";
 
   const deviceInfo = socket.handshake.auth?.deviceInfo || {};
-  console.log("Extracted deviceInfo from auth:", deviceInfo);
+  const deviceUid =
+    payload.did ||
+    socket.handshake.auth?.deviceUid ||
+    socket.handshake.headers?.["x-device-uid"] ||
+    null;
   const ipAddress = socket.handshake.headers?.["x-forwarded-for"] || socket.handshake.address || null;
 
   return {
@@ -333,25 +351,40 @@ async function resolveSocketUser(socket) {
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     permissions: await getEffectivePermissionsForUser(user),
     clientType: normalizeClientType(clientType),
+    deviceUid: deviceUid ? String(deviceUid).trim() : null,
     deviceInfo,
     ipAddress,
   };
 }
 
-function emitMessageToRecipients(io, message) {
+function emitMessageToRecipients(io, message, recipientUserIds = []) {
   const recipients = new Set(
-    (message.deliveredTo || [])
-      .map((entry) => entry.userId?.toString?.() || entry.userId)
+    (recipientUserIds || [])
+      .concat(
+        (message.deliveredTo || []).map(
+          (entry) => entry.userId?.toString?.() || entry.userId,
+        ),
+      )
       .filter(Boolean),
   );
 
+  // Deduplicate across rooms using chained .to() so each socket receives receive_message exactly ONCE
+  let messageTarget = io.to(getConversationRoom(message.conversationId));
   if (message.senderId) {
-    io.to(`user:${message.senderId}`).emit("receive_message", message);
+    messageTarget = messageTarget.to(`user:${message.senderId}`);
   }
-
   for (const userId of recipients) {
-    io.to(`user:${userId}`).emit("receive_message", message);
-    io.to(`user:${userId}`).emit("message_delivered", {
+    messageTarget = messageTarget.to(`user:${userId}`);
+  }
+  messageTarget.emit("receive_message", message);
+
+  // Delivery receipts: sender needs to know when delivered!
+  for (const userId of recipients) {
+    let deliveryTarget = io.to(getConversationRoom(message.conversationId));
+    if (message.senderId) {
+      deliveryTarget = deliveryTarget.to(`user:${message.senderId}`);
+    }
+    deliveryTarget.emit("message_delivered", {
       conversationId: message.conversationId,
       messageId: message.id,
       userId,
@@ -383,6 +416,22 @@ async function emitConversationToUsers(io, conversationId, userIds = []) {
       }
     }),
   );
+}
+
+async function emitConversationToMembers(io, conversationId) {
+  try {
+    const conv = await getConversationById(conversationId).catch(() => null);
+    if (!conv || !Array.isArray(conv.members)) return;
+    const memberIds = conv.members.map((m) =>
+      m?._id ? m._id.toString() : m?.toString?.(),
+    ).filter(Boolean);
+    return await emitConversationToUsers(io, conversationId, memberIds);
+  } catch (err) {
+    logger.warn("chat.conversation_members_emit_failed", {
+      conversationId: String(conversationId),
+      error: err?.message,
+    });
+  }
 }
 
 async function emitUnreadCount(io, userId, conversationId) {
@@ -462,6 +511,7 @@ function initializeChatSocketServer(httpServer) {
       credentials: true,
     },
   });
+  activeIOInstance = io;
 
   // On server restart, clear stale online flags from previous process lifetime.
   User.updateMany(
@@ -479,6 +529,96 @@ function initializeChatSocketServer(httpServer) {
       },
     },
   ).catch(() => {});
+
+  const scheduleServerRemindersForUser = async (uid) => {
+    const normalizedUid = String(uid || "").trim();
+    if (!normalizedUid) return;
+    const prevTimer = userReminderTimers.get(normalizedUid);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      userReminderTimers.delete(normalizedUid);
+    }
+    try {
+      const u = await User.findById(normalizedUid, "messageReminders").lean();
+      const list = Array.isArray(u?.messageReminders) ? u.messageReminders : [];
+      const pending = list.filter((r) => !r.isNotified && r.remindAt);
+      if (!pending.length) return;
+
+      pending.sort(
+        (a, b) =>
+          new Date(a.remindAt).getTime() - new Date(b.remindAt).getTime(),
+      );
+      const nextItem = pending[0];
+      const delayMs = Math.max(
+        250,
+        new Date(nextItem.remindAt).getTime() - Date.now(),
+      );
+      const cappedDelay = Math.min(delayMs, 2147483647);
+
+      const timer = setTimeout(async () => {
+        userReminderTimers.delete(normalizedUid);
+        try {
+          const freshUser = await User.findById(
+            normalizedUid,
+            "messageReminders",
+          ).lean();
+          const currentReminders = Array.isArray(freshUser?.messageReminders)
+            ? freshUser.messageReminders
+            : [];
+          const now = Date.now();
+          let changed = false;
+          const dueItems = [];
+
+          const updatedReminders = currentReminders.map((rem) => {
+            if (!rem.isNotified && new Date(rem.remindAt).getTime() <= now) {
+              changed = true;
+              const notified = { ...rem, isNotified: true };
+              dueItems.push(notified);
+              return notified;
+            }
+            return rem;
+          });
+
+          if (changed) {
+            await User.findByIdAndUpdate(normalizedUid, {
+              $set: { messageReminders: updatedReminders },
+            });
+            io.to(`user:${normalizedUid}`).emit("reminders_updated", {
+              reminders: updatedReminders,
+              dueReminders: dueItems,
+            });
+            for (const due of dueItems) {
+              const title = `⏰ تذكير برسالة من ${due.senderName || "محادثة"}`;
+              const body = due.note
+                ? `${due.note} — "${due.messagePreview || ""}"`
+                : due.messagePreview || "لديك تذكير برسالة مجدولة";
+              sendTicketPushNotifications({
+                recipientUserIds: [normalizedUid],
+                title,
+                body,
+                action: "message_reminder",
+              }).catch(() => {});
+            }
+          }
+          await scheduleServerRemindersForUser(normalizedUid);
+        } catch (_) {}
+      }, cappedDelay);
+
+      userReminderTimers.set(normalizedUid, timer);
+    } catch (_) {}
+  };
+
+  // On server startup/restart, re-arm all pending message reminders across all users
+  User.find({ "messageReminders.isNotified": false }, "_id")
+    .lean()
+    .then((usersWithReminders) => {
+      for (const u of usersWithReminders || []) {
+        if (u?._id) {
+          scheduleServerRemindersForUser(u._id.toString()).catch(() => {});
+        }
+      }
+    })
+    .catch(() => {});
 
   const sweepInterval = setInterval(() => {
     for (const userId of [...userSockets.keys()]) {
@@ -576,10 +716,15 @@ function initializeChatSocketServer(httpServer) {
       });
       const pendingDeliveries = await markPendingDeliveriesForUser(currentUser);
       for (const entry of pendingDeliveries) {
-        io.to(getConversationRoom(entry.conversationId)).emit(
-          "message_delivered",
-          entry,
-        );
+        let deliveryTarget = io.to(getConversationRoom(entry.conversationId));
+        const conv = await getConversationById(entry.conversationId).catch(() => null);
+        if (conv?.members) {
+          for (const m of conv.members) {
+            const mId = m._id ? m._id.toString() : m.toString();
+            deliveryTarget = deliveryTarget.to(`user:${mId}`);
+          }
+        }
+        deliveryTarget.emit("message_delivered", entry);
       }
     } catch (error) {
       socket.emit("socket_error", {
@@ -677,6 +822,23 @@ function initializeChatSocketServer(httpServer) {
           });
           return;
         }
+
+        const isScheduledFuture =
+          result.message.isScheduled &&
+          result.message.scheduledFor &&
+          new Date(result.message.scheduledFor) > new Date();
+
+        if (isScheduledFuture) {
+          socketAck(ack, {
+            ok: true,
+            success: true,
+            data: {
+              message: result.message,
+              conversation: result.conversation,
+            },
+          });
+          return;
+        }
         emitMessageToRecipients(io, result.message);
         const audienceIds = [
           ...new Set(
@@ -691,15 +853,18 @@ function initializeChatSocketServer(httpServer) {
           );
         }
 
-        const deliveredUsers = [
+        const countRecipients = [
           ...new Set(
-            (result.message.deliveredTo || [])
-              .map((entry) => entry.userId?.toString?.() || entry.userId)
-              .filter(Boolean),
+            [
+              ...(result.recipientUserIds || []),
+              ...(result.message.deliveredTo || []).map(
+                (entry) => entry.userId?.toString?.() || entry.userId,
+              ),
+            ].filter(Boolean),
           ),
         ];
         await Promise.all(
-          deliveredUsers.map((userId) =>
+          countRecipients.map((userId) =>
             emitUnreadCount(io, userId, result.message.conversationId),
           ),
         );
@@ -764,14 +929,20 @@ function initializeChatSocketServer(httpServer) {
           currentUser,
           payload.conversationId,
         );
-        io.to(getConversationRoom(payload.conversationId)).emit(
-          "message_seen",
-          {
-            conversationId: payload.conversationId,
-            userId: currentUser.id,
-            messageIds,
-          },
+        const conversation = await getConversationById(payload.conversationId);
+        const memberIds = (conversation?.members || []).map((m) =>
+          m._id ? m._id.toString() : m.toString(),
         );
+
+        let seenTarget = io.to(getConversationRoom(payload.conversationId));
+        for (const mId of memberIds) {
+          seenTarget = seenTarget.to(`user:${mId}`);
+        }
+        seenTarget.emit("message_seen", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+          messageIds,
+        });
         await emitUnreadCount(io, currentUser.id, payload.conversationId);
         socketAck(ack, {
           ok: true,
@@ -909,6 +1080,265 @@ function initializeChatSocketServer(httpServer) {
           hasDesktop: getDesktopSocketIds(io, currentUser.id).length > 0,
         },
       });
+    });
+
+    socket.on("clipboard:sync", (payload = {}, ack) => {
+      const rawText = String(payload.text || "").trim();
+      if (!rawText) {
+        socketAck(ack, {
+          ok: false,
+          success: false,
+          error: "النص المراد مزامنته فارغ.",
+        });
+        return;
+      }
+      if (rawText.length > 50000) {
+        socketAck(ack, {
+          ok: false,
+          success: false,
+          error: "حجم النص يتجاوز الحد المسموح به للحافظة الفورية.",
+        });
+        return;
+      }
+
+      const sourceClientType =
+        socketClientType.get(socket.id) ||
+        currentUser.clientType ||
+        normalizeClientType(payload.sourceClientType);
+      const fallbackDeviceName =
+        sourceClientType === "desktop"
+          ? "كمبيوتر المكتب Windows"
+          : sourceClientType === "mobile"
+            ? "هاتف الموبايل"
+            : "جهاز متصل";
+      const sourceDeviceName =
+        String(payload.sourceDeviceName || "")
+          .trim()
+          .slice(0, 120) || fallbackDeviceName;
+
+      const clipItem = {
+        id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        text: rawText,
+        sourceClientType,
+        sourceDeviceName,
+        sourceDeviceUid: currentUser.deviceUid || null,
+        autoCopy: payload.autoCopy !== false,
+        createdAt: new Date().toISOString(),
+      };
+
+      const existingHistory = clipboardHistoryByUser.get(currentUser.id) || [];
+      const filteredHistory = existingHistory.filter(
+        (entry) => entry && entry.text !== rawText,
+      );
+      const updatedHistory = [clipItem, ...filteredHistory].slice(0, 20);
+      clipboardHistoryByUser.set(currentUser.id, updatedHistory);
+
+      // Emit to all OTHER sockets of the same user so they copy it immediately
+      socket.to(`user:${currentUser.id}`).emit("clipboard_synced", clipItem);
+      // Emit updated history to all sockets of the user
+      io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
+        history: updatedHistory,
+        latestItem: clipItem,
+      });
+
+      const deliveryCtx = getUserDeliveryContext(io, currentUser.id);
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: {
+          item: clipItem,
+          history: updatedHistory,
+          hasDesktop: deliveryCtx.hasDesktop,
+          hasMobile: deliveryCtx.hasMobile,
+        },
+      });
+    });
+
+    socket.on("clipboard:get_history", (payload = {}, ack) => {
+      const history = clipboardHistoryByUser.get(currentUser.id) || [];
+      const deliveryCtx = getUserDeliveryContext(io, currentUser.id);
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: {
+          history,
+          hasDesktop: deliveryCtx.hasDesktop,
+          hasMobile: deliveryCtx.hasMobile,
+        },
+      });
+    });
+
+    socket.on("clipboard:clear_history", (payload = {}, ack) => {
+      clipboardHistoryByUser.delete(currentUser.id);
+      io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
+        history: [],
+        latestItem: null,
+      });
+      socketAck(ack, {
+        ok: true,
+        success: true,
+        data: { history: [] },
+      });
+    });
+
+    // ── Quick Replies Cross-Device Sync (Mobile ⇄ Desktop) ─────────────────
+    socket.on("quick_replies:get", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(currentUser.id, "quickReplies").lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { quickReplies: userDoc?.quickReplies || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("quick_replies:sync", async (payload = {}, ack) => {
+      try {
+        const rawList = Array.isArray(payload.quickReplies)
+          ? payload.quickReplies
+          : [];
+        const sanitized = rawList
+          .filter((item) => item && typeof item === "object")
+          .slice(0, 150)
+          .map((item) => ({
+            id: String(item.id || `qr_${Date.now()}`).trim().slice(0, 80),
+            shortcut: String(item.shortcut || "رد").trim().slice(0, 60),
+            title: String(item.title || "رد سريع").trim().slice(0, 120),
+            content: String(item.content || "").trim().slice(0, 4000),
+            category: String(item.category || "عام").trim().slice(0, 60),
+          }))
+          .filter((item) => item.content.length > 0);
+
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { quickReplies: sanitized },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("quick_replies_updated", {
+          quickReplies: sanitized,
+          updatedAt: new Date().toISOString(),
+        });
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { quickReplies: sanitized },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    // ── Message Reminders Cross-Device Sync + Server Push ──────────────────
+    // Ensure server timer is armed when user connects
+    scheduleServerRemindersForUser(currentUser.id).catch(() => {});
+
+    socket.on("reminders:get", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(
+          currentUser.id,
+          "messageReminders",
+        ).lean();
+        const userReminders = (userDoc?.messageReminders || [])
+          .filter((item) => !item.userId || String(item.userId) === String(currentUser.id))
+          .map((item) => ({
+            ...item,
+            userId: String(currentUser.id),
+          }));
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { reminders: userReminders },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("reminders:sync", async (payload = {}, ack) => {
+      try {
+        const rawList = Array.isArray(payload.reminders) ? payload.reminders : [];
+        const sanitized = rawList
+          .filter((item) => item && typeof item === "object")
+          .slice(0, 200)
+          .map((item) => ({
+            id: String(item.id || `rem_${Date.now()}`).trim().slice(0, 80),
+            userId: String(currentUser.id),
+            conversationId: String(item.conversationId || "").trim().slice(0, 80),
+            conversationTitle: String(item.conversationTitle || "")
+              .trim()
+              .slice(0, 160),
+            messageId: String(item.messageId || "").trim().slice(0, 80),
+            senderName: String(item.senderName || "").trim().slice(0, 120),
+            messagePreview: String(item.messagePreview || "")
+              .trim()
+              .slice(0, 1000),
+            remindAt: item.remindAt ? new Date(item.remindAt) : new Date(),
+            createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+            note: String(item.note || "").trim().slice(0, 500),
+            isNotified: item.isNotified === true,
+          }))
+          .filter((item) => item.id && item.messageId);
+
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { messageReminders: sanitized },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("reminders_updated", {
+          reminders: sanitized,
+          updatedAt: new Date().toISOString(),
+        });
+
+        await scheduleServerRemindersForUser(currentUser.id);
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { reminders: sanitized },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    // ── Workspace Tasks / Docs Cross-Device Sync (Mobile ⇄ Desktop) ────────
+    socket.on("workspace:get_docs", async (_payload = {}, ack) => {
+      try {
+        const userDoc = await User.findById(currentUser.id, "workspaceDocs").lean();
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { docs: userDoc?.workspaceDocs || [] },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
+    });
+
+    socket.on("workspace:sync_docs", async (payload = {}, ack) => {
+      try {
+        const docs = Array.isArray(payload.docs)
+          ? payload.docs.slice(0, 300)
+          : [];
+        await User.findByIdAndUpdate(currentUser.id, {
+          $set: { workspaceDocs: docs },
+        });
+
+        io.to(`user:${currentUser.id}`).emit("workspace_docs_updated", {
+          docs,
+          updatedAt: new Date().toISOString(),
+        });
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { docs },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("print_request", (payload = {}, ack) => {
@@ -1524,7 +1954,139 @@ function initializeChatSocketServer(httpServer) {
   return io;
 }
 
+function getLiveSocketMetrics() {
+  const io = activeIOInstance;
+  let liveSocketCount = 0;
+  if (io?.sockets?.sockets) {
+    if (typeof io.sockets.sockets.size === "number") {
+      liveSocketCount = io.sockets.sockets.size;
+    } else if (typeof io.sockets.sockets === "object") {
+      liveSocketCount = Object.keys(io.sockets.sockets).length;
+    }
+  } else {
+    for (const sockets of userSockets.values()) {
+      liveSocketCount += sockets.size;
+    }
+  }
+
+  const liveUserCount = userSockets.size;
+
+  return {
+    liveSocketCount,
+    liveUserCount,
+    isSocketConnected(socketId) {
+      if (!socketId) return false;
+      return hasLiveSocketId(io, String(socketId));
+    },
+    isUserOnline(userId) {
+      if (!userId) return false;
+      const uid = String(userId._id || userId);
+      const sockets = userSockets.get(uid);
+      if (!sockets || !sockets.size) return false;
+      if (!io) return sockets.size > 0;
+      for (const sId of sockets) {
+        if (hasLiveSocketId(io, sId)) return true;
+      }
+      return false;
+    },
+  };
+}
+
+function getUserConnectedSocketsSnapshot(userId) {
+  const io = activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  if (!uid || !io?.sockets?.sockets) {
+    return [];
+  }
+  const socketIds = pruneUserSockets(io, uid);
+  const result = [];
+  for (const socketId of socketIds) {
+    const sock =
+      typeof io.sockets.sockets.get === "function"
+        ? io.sockets.sockets.get(socketId)
+        : io.sockets.sockets[socketId];
+    if (!sock) continue;
+    result.push({
+      socketId,
+      deviceUid: sock.user?.deviceUid || null,
+      clientType:
+        sock.user?.clientType || socketClientType.get(socketId) || "unknown",
+      ipAddress: sock.user?.ipAddress || null,
+      deviceInfo: sock.user?.deviceInfo || {},
+      presenceStatus: socketPresence.get(socketId) || "online",
+    });
+  }
+  return result;
+}
+
+function forceLogoutUserDevices(
+  ioInstance,
+  userId,
+  { targetDeviceUid = null, excludeDeviceUid = null, reason = "session_revoked" } = {},
+) {
+  const io = ioInstance || activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  if (!io || !uid) {
+    return 0;
+  }
+
+  const normalizedTarget = targetDeviceUid ? String(targetDeviceUid).trim() : null;
+  const normalizedExclude = excludeDeviceUid ? String(excludeDeviceUid).trim() : null;
+  const payload = {
+    reason,
+    targetDeviceUid: normalizedTarget,
+    excludeDeviceUid: normalizedExclude,
+    at: new Date().toISOString(),
+  };
+
+  // Emit to user room with targetDeviceUid / excludeDeviceUid filter metadata
+  io.to(`user:${uid}`).emit("force_logout", payload);
+
+  // Also explicitly disconnect matching live sockets when deviceUid is known on socket
+  let disconnectedCount = 0;
+  if (io.sockets?.sockets) {
+    const socketIds = pruneUserSockets(io, uid);
+    for (const socketId of socketIds) {
+      const sock =
+        typeof io.sockets.sockets.get === "function"
+          ? io.sockets.sockets.get(socketId)
+          : io.sockets.sockets[socketId];
+      if (!sock) continue;
+      const sockDeviceUid = sock.user?.deviceUid
+        ? String(sock.user.deviceUid).trim()
+        : null;
+      if (!sockDeviceUid) continue;
+
+      const shouldDisconnect = normalizedTarget
+        ? sockDeviceUid === normalizedTarget
+        : normalizedExclude
+          ? sockDeviceUid !== normalizedExclude
+          : true;
+
+      if (shouldDisconnect) {
+        disconnectedCount += 1;
+        try {
+          sock.emit("force_logout", payload);
+          setTimeout(() => {
+            try {
+              sock.disconnect(true);
+            } catch (_) {}
+          }, 120);
+        } catch (_) {}
+      }
+    }
+  }
+
+  return disconnectedCount;
+}
+
 module.exports = {
   initializeChatSocketServer,
   getUserDeliveryContext,
+  getLiveSocketMetrics,
+  getUserConnectedSocketsSnapshot,
+  forceLogoutUserDevices,
+  emitMessageToRecipients,
+  emitConversationToUsers,
+  emitConversationToMembers,
 };

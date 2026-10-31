@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
@@ -17,6 +18,7 @@ import '../features/auth/presentation/auth_controller.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/data/chat_socket_service.dart';
 import '../features/profile/presentation/profile_screen.dart';
+import '../features/updates/presentation/update_center_screen.dart';
 import '../shared/providers/providers.dart';
 import '../shared/services/desktop_update_agent.dart'
     if (dart.library.html) '../shared/services/desktop_update_agent_web.dart';
@@ -26,6 +28,18 @@ import '../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../shared/widgets/loading_indicator.dart';
 import 'desktop_workspace_shell.dart';
 
+
+class AppDesktopScrollBehavior extends MaterialScrollBehavior {
+  const AppDesktopScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+      };
+}
 
 class WorkplaceDesktopApp extends ConsumerWidget {
   const WorkplaceDesktopApp({super.key});
@@ -46,6 +60,7 @@ class WorkplaceDesktopApp extends ConsumerWidget {
     unawaited(web_bridge.setElectronWindowTheme(effectiveWindowTheme));
 
     return MaterialApp(
+      scrollBehavior: const AppDesktopScrollBehavior(),
       debugShowCheckedModeBanner: false,
       title: "iSmart Messenger",
       locale: const Locale('ar'),
@@ -259,6 +274,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _lastPresenceUserId = user.id;
         unawaited(_syncWindowVisibilityState());
       }
+      ref.read(desktopUpdateAgentProvider).attachUser(user);
       if (_updateAgentUserId != user.id) {
         _updateAgentUserId = user.id;
         if (_hasDesktopCapabilities) {
@@ -275,18 +291,21 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _syncAdminServerDefaults() async {
+    if (!mounted) return;
     try {
-      final defaults = await ref
-          .read(appSettingsServiceProvider)
-          .fetchDefaults();
+      final appSettingsService = ref.read(appSettingsServiceProvider);
+      final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
+      final serverConnCtrl = ref.read(
+        serverConnectionControllerProvider.notifier,
+      );
+      final defaults = await appSettingsService.fetchDefaults();
       final desktopUrl = defaults.desktopBaseUrl?.trim();
-      if (desktopUrl == null || desktopUrl.isEmpty) {
+      if (desktopUrl == null || desktopUrl.isEmpty || !mounted) {
         return;
       }
-      await ref
-          .read(apiBaseUrlControllerProvider.notifier)
-          .applyAdminDefault(desktopUrl);
-      await ref.read(serverConnectionControllerProvider.notifier).refresh();
+      await apiBaseUrlCtrl.applyAdminDefault(desktopUrl);
+      if (!mounted) return;
+      await serverConnCtrl.refresh();
     } catch (_) {}
   }
 
@@ -357,7 +376,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _lastConnectionErrorMessage = null;
       } else {
         unawaited(_refreshDataAfterServerRestored());
-        _showConnectionSnackBar('تمت استعادة الاتصال بالخادم.', isError: false);
       }
     } else if (_lastConnectionErrorMessage != null) {
       // A transient/minimized-window probe failed earlier. Clear the stale
@@ -371,18 +389,26 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _refreshDataAfterServerRestored() async {
-    if (_serverRestoreRefreshInFlight) {
+    if (_serverRestoreRefreshInFlight || !mounted) {
       return;
     }
     _serverRestoreRefreshInFlight = true;
     try {
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
       if (!mounted) {
         return;
+      }
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref.read(conversationMessagesControllerProvider(activeConversationId).notifier).refresh();
+        } catch (_) {}
       }
       unawaited(_ensureLanTransferServiceRunning());
     } finally {
@@ -425,13 +451,24 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _retryServerConnection() async {
+    if (!mounted) return;
     try {
       await ref.read(serverConnectionControllerProvider.notifier).refresh();
-      ref.read(serverRecoveryRevisionProvider.notifier).state++;
+      if (!mounted) return;
       ref.invalidate(chatSocketConnectionProvider);
       try {
         await ref.read(authControllerProvider.notifier).refreshCurrentUser();
       } catch (_) {}
+      if (!mounted) return;
+      try {
+        ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+      } catch (_) {}
+      final activeConversationId = ref.read(activeConversationIdProvider);
+      if (activeConversationId != null && activeConversationId.isNotEmpty) {
+        try {
+          ref.read(conversationMessagesControllerProvider(activeConversationId).notifier).refresh();
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 
@@ -439,40 +476,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     final currentBaseUrl =
         ref.read(apiBaseUrlControllerProvider).valueOrNull ??
         AppConfig.defaultApiBaseUrl;
-    final controller = TextEditingController(text: currentBaseUrl);
     final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('تغيير رابط الخادم'),
-        content: SizedBox(
-          width: 460,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'API Base URL',
-              hintText: 'http://192.168.1.10:5000',
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('__reset__'),
-            child: const Text('الافتراضي'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('حفظ ومحاولة الاتصال'),
-          ),
-        ],
+      builder: (dialogContext) => _DesktopChangeServerBaseUrlDialog(
+        initialUrl: currentBaseUrl,
       ),
     );
-    controller.dispose();
     if (!mounted || result == null) {
       return;
     }
@@ -485,7 +494,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return;
     }
 
+    if (!mounted) return;
     await ref.read(authRepositoryProvider).clearLocalSessionForServerChange();
+    if (!mounted) return;
     ref.read(serverRecoveryRevisionProvider.notifier).state++;
     ref.invalidate(authControllerProvider);
     ref.invalidate(documentsControllerProvider);
@@ -835,10 +846,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         _markConnectionEstablished();
         if (_hasConfirmedServerDisconnect && recoverOnSocketConnected) {
           unawaited(_refreshDataAfterServerRestored());
-          _showConnectionSnackBar(
-            'تمت استعادة الاتصال بالخادم.',
-            isError: false,
-          );
         } else if (_lastConnectionErrorMessage != null) {
           _lastConnectionErrorMessage = null;
         }
@@ -901,6 +908,38 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         .events
         .listen((event) {
           if (!mounted) {
+            return;
+          }
+          if (event.type == 'update_available') {
+            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              SnackBar(
+                backgroundColor: const Color(0xFF1E293B),
+                duration: const Duration(seconds: 10),
+                content: Row(
+                  children: [
+                    const Icon(Icons.system_update_rounded, color: Color(0xFF38BDF8), size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        event.message,
+                        style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'عرض التحديث',
+                  textColor: const Color(0xFF38BDF8),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const UpdateCenterScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
             return;
           }
           if (event.type == 'status') {
@@ -1024,9 +1063,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _ensureLanTransferServiceRunning() async {
+    if (!mounted) return;
     try {
-      await ref.read(lanFileTransferServiceProvider).start();
-      await ref.read(lanFileTransferServiceProvider).refreshLocalIpv4s();
+      final lanService = ref.read(lanFileTransferServiceProvider);
+      await lanService.start();
+      await lanService.refreshLocalIpv4s();
     } catch (error) {
       if (!mounted) {
         return;
@@ -1123,11 +1164,12 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _publishPrinterCatalog() async {
+    if (!mounted) return;
     try {
-      final catalog = await ref
-          .read(desktopPrintServiceProvider)
-          .getPrinterCatalog();
-      await ref.read(chatSocketServiceProvider).emitWithAck('printers:update', {
+      final printService = ref.read(desktopPrintServiceProvider);
+      final socketService = ref.read(chatSocketServiceProvider);
+      final catalog = await printService.getPrinterCatalog();
+      await socketService.emitWithAck('printers:update', {
         'printers': catalog.printers,
         'defaultPrinter': catalog.defaultPrinter,
       });
@@ -1135,6 +1177,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _publishDesktopStorageConfig() async {
+    if (!mounted) return;
     try {
       final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
       await ref.read(chatSocketServiceProvider).emitWithAck(
@@ -1145,6 +1188,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _handlePrintJob(Map<String, dynamic> payload) async {
+    if (!mounted) return;
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
     final processor = ref.read(printJobProcessorProvider);
     final result = await processor.process(
@@ -1173,7 +1217,9 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   }
 
   Future<void> _handleFileSaveJob(Map<String, dynamic> payload) async {
+    if (!mounted) return;
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
+    final socketService = ref.read(chatSocketServiceProvider);
     final preferredDirectoryPath = _preferredDirectoryForFileSave(
       payload,
       prefs,
@@ -1190,20 +1236,18 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                 required String message,
                 String? savedPath,
               }) {
-                ref
-                    .read(chatSocketServiceProvider)
-                    .emitEvent('file_save_progress', {
-                      'jobId': payload['jobId']?.toString(),
-                      'stage': stage,
-                      'progress': progress,
-                      'message': message,
-                      if (savedPath != null && savedPath.trim().isNotEmpty)
-                        'savedPath': savedPath,
-                    });
+                socketService.emitEvent('file_save_progress', {
+                  'jobId': payload['jobId']?.toString(),
+                  'stage': stage,
+                  'progress': progress,
+                  'message': message,
+                  if (savedPath != null && savedPath.trim().isNotEmpty)
+                    'savedPath': savedPath,
+                });
               },
         );
 
-    ref.read(chatSocketServiceProvider).emitEvent('file_save_result', {
+    socketService.emitEvent('file_save_result', {
       'jobId': payload['jobId']?.toString(),
       'success': result.success,
       'message': result.message,
@@ -1979,6 +2023,67 @@ class _GlobalAnnouncementOverlayState
           ),
         );
       },
+    );
+  }
+}
+
+
+class _DesktopChangeServerBaseUrlDialog extends StatefulWidget {
+  const _DesktopChangeServerBaseUrlDialog({required this.initialUrl});
+
+  final String initialUrl;
+
+  @override
+  State<_DesktopChangeServerBaseUrlDialog> createState() =>
+      _DesktopChangeServerBaseUrlDialogState();
+}
+
+class _DesktopChangeServerBaseUrlDialogState
+    extends State<_DesktopChangeServerBaseUrlDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('تغيير رابط الخادم'),
+      content: SizedBox(
+        width: 460,
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'API Base URL',
+            hintText: 'http://192.168.1.10:5000',
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('__reset__'),
+          child: const Text('الافتراضي'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('حفظ ومحاولة الاتصال'),
+        ),
+      ],
     );
   }
 }

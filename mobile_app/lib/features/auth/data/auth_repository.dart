@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -21,7 +24,14 @@ class AuthRepository {
   final ApiClient _apiClient;
   final VoidCallback? onSessionCredentialsChanged;
   final VoidCallback? onSessionCleared;
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
   Future<Map<String, String>>? _tokenRefreshFuture;
   DateTime? _lastSuccessfulRefreshAt;
   String? _lastSuccessfulRefreshAccessToken;
@@ -52,16 +62,27 @@ class AuthRepository {
         return _cachedSession;
       }
     } catch (error) {
-      if (error is FormatException) {
-        // Corrupted json
-      } else {
-        // PlatformException, Keystore locked, etc
-        throw ApiException(
-          'Keystore temporarily unavailable: $error',
-          statusCode: 503,
-        );
-      }
+      debugPrint('[AuthRepository] SecureStorage read error: $error');
     }
+
+    // Persistent backup fallback: check SharedPreferences if KeyStore lost state
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final backupVal = prefs.getString(_sessionKey);
+      if (backupVal != null && backupVal.isNotEmpty) {
+        final parsed = StoredAuthSession.fromJson(
+          jsonDecode(backupVal) as Map<String, dynamic>,
+        );
+        if (parsed.accessToken.isNotEmpty || parsed.refreshToken.isNotEmpty) {
+          _cachedSession = parsed;
+          _isSessionLoaded = true;
+          try {
+            await _storage.write(key: _sessionKey, value: backupVal);
+          } catch (_) {}
+          return _cachedSession;
+        }
+      }
+    } catch (_) {}
 
     try {
       final legacyAccess = await _storage.read(key: _tokenKey);
@@ -90,8 +111,20 @@ class AuthRepository {
   }
 
   Future<void> _writeSession(StoredAuthSession session) async {
+    _cachedSession = (session.accessToken.isNotEmpty || session.refreshToken.isNotEmpty)
+        ? session
+        : null;
+    _isSessionLoaded = true;
     final jsonStr = jsonEncode(session.toJson());
     await _storage.write(key: _sessionKey, value: jsonStr);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (session.accessToken.isNotEmpty || session.refreshToken.isNotEmpty) {
+        await prefs.setString(_sessionKey, jsonStr);
+      } else {
+        await prefs.remove(_sessionKey);
+      }
+    } catch (_) {}
     await _clearLegacyTokens();
   }
 
@@ -113,11 +146,74 @@ class AuthRepository {
     return created;
   }
 
+  Future<String> getDeviceUid() => _loadOrCreateDeviceUid();
+
+  Future<Map<String, String>> _buildDeviceMetadata() async {
+    final deviceUid = await _loadOrCreateDeviceUid();
+    String platform = 'android';
+    String deviceName = 'هاتف Android';
+    if (kIsWeb) {
+      platform = 'web';
+      deviceName = 'متصفح الويب';
+    } else {
+      try {
+        final os = Platform.operatingSystem.toLowerCase();
+        final host = Platform.localHostname.trim();
+        final cleanHost =
+            (host.isNotEmpty &&
+                host.toLowerCase() != 'localhost' &&
+                host.toLowerCase() != 'android')
+            ? host
+            : '';
+        if (os == 'android') {
+          platform = 'android';
+          deviceName = cleanHost.isNotEmpty
+              ? 'هاتف Android ($cleanHost)'
+              : 'هاتف Android';
+        } else if (os == 'ios') {
+          platform = 'ios';
+          deviceName = cleanHost.isNotEmpty
+              ? 'جهاز iPhone ($cleanHost)'
+              : 'جهاز iPhone / iPad';
+        } else if (os == 'windows') {
+          platform = 'windows';
+          deviceName = cleanHost.isNotEmpty
+              ? 'كمبيوتر Windows ($cleanHost)'
+              : 'كمبيوتر المكتب Windows';
+        } else if (os == 'macos') {
+          platform = 'macos';
+          deviceName = cleanHost.isNotEmpty ? 'جهاز Mac ($cleanHost)' : 'جهاز Mac';
+        } else if (os == 'linux') {
+          platform = 'linux';
+          deviceName = cleanHost.isNotEmpty
+              ? 'جهاز Linux ($cleanHost)'
+              : 'جهاز Linux';
+        }
+      } catch (_) {}
+    }
+
+    String appVersion = '1.2.4';
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (packageInfo.version.trim().isNotEmpty) {
+        appVersion = packageInfo.version.trim();
+      }
+    } catch (_) {}
+
+    return <String, String>{
+      'deviceUid': deviceUid,
+      'platform': platform,
+      'deviceName': deviceName,
+      'appVersion': appVersion,
+    };
+  }
+
   void _notifySessionCredentialsChanged() {
     onSessionCredentialsChanged?.call();
   }
 
   Future<void> _clearSession() async {
+    _cachedSession = null;
     await _writeSession(
       const StoredAuthSession(
         accessToken: '',
@@ -126,6 +222,10 @@ class AuthRepository {
         generation: 0,
       ),
     );
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_sessionKey);
+    } catch (_) {}
     await _clearCachedUser();
     _notifySessionCredentialsChanged();
     onSessionCleared?.call();
@@ -138,6 +238,37 @@ class AuthRepository {
     }
     final gen = await getGeneration();
     final cachedUser = await loadCachedUser();
+    if (cachedUser != null) {
+      // Offline-first: return cached user IMMEDIATELY for instant WhatsApp-like launch!
+      unawaited(() async {
+        try {
+          final user = await fetchCurrentUser(token: token, generation: gen);
+          await _saveCachedUser(user);
+        } catch (error) {
+          final mapped = _apiClient.mapError(error);
+          if (mapped.isUnauthorized) {
+            try {
+              final refreshed = await refreshToken();
+              final refreshedToken = refreshed['token'] ?? await getToken();
+              if (refreshedToken != null && refreshedToken.isNotEmpty) {
+                final newGen = await getGeneration();
+                final user = await fetchCurrentUser(
+                  token: refreshedToken,
+                  generation: newGen,
+                );
+                await _saveCachedUser(user);
+              }
+            } catch (refreshError) {
+              final refreshMapped = _apiClient.mapError(refreshError);
+              if (refreshMapped.isUnauthorized) {
+                await _clearSession();
+              }
+            }
+          }
+        }
+      }());
+      return cachedUser;
+    }
     try {
       final user = await fetchCurrentUser(token: token, generation: gen);
       await _saveCachedUser(user);
@@ -146,8 +277,8 @@ class AuthRepository {
       final mapped = _apiClient.mapError(error);
       if (mapped.isUnauthorized) {
         try {
-          await refreshToken();
-          final refreshedToken = await getToken();
+          final refreshed = await refreshToken();
+          final refreshedToken = refreshed['token'] ?? await getToken();
           if (refreshedToken != null && refreshedToken.isNotEmpty) {
             final newGen = await getGeneration();
             final user = await fetchCurrentUser(
@@ -169,6 +300,9 @@ class AuthRepository {
           return null;
         }
 
+        if (cachedUser != null) {
+          return cachedUser;
+        }
         await _clearSession();
         return null;
       }
@@ -187,13 +321,16 @@ class AuthRepository {
   }) async {
     final attemptId = ++_latestLoginAttemptId;
     try {
-      final deviceUid = await _loadOrCreateDeviceUid();
+      final meta = await _buildDeviceMetadata();
       final response = await _apiClient.dio.post<Map<String, dynamic>>(
         '/api/auth/login',
         data: {
           'username': username,
           'password': password,
-          'deviceUid': deviceUid,
+          'deviceUid': meta['deviceUid'],
+          'deviceName': meta['deviceName'],
+          'platform': meta['platform'],
+          'appVersion': meta['appVersion'],
         },
       );
 
@@ -296,6 +433,10 @@ class AuthRepository {
       if (!_isTokenFullyExpired(token)) {
         return token;
       }
+      final fallbackToken = await getToken();
+      if (fallbackToken != null && fallbackToken.isNotEmpty) {
+        return fallbackToken;
+      }
       rethrow;
     }
   }
@@ -336,10 +477,16 @@ class AuthRepository {
     }
 
     try {
-      final deviceUid = await _loadOrCreateDeviceUid();
+      final meta = await _buildDeviceMetadata();
       final response = await _apiClient.dio.post<Map<String, dynamic>>(
         '/api/auth/refresh',
-        data: {'refreshToken': rToken, 'deviceUid': deviceUid},
+        data: {
+          'refreshToken': rToken,
+          'deviceUid': meta['deviceUid'],
+          'deviceName': meta['deviceName'],
+          'platform': meta['platform'],
+          'appVersion': meta['appVersion'],
+        },
       );
 
       final newToken = response.data?['token'] as String?;
@@ -466,6 +613,7 @@ class AuthRepository {
 
   Future<AppUser> updateProfile({
     required String fullName,
+    String? jobTitle,
     String? password,
   }) async {
     final token = await getToken();
@@ -473,6 +621,7 @@ class AuthRepository {
       '/api/users/me',
       data: {
         'fullName': fullName,
+        if (jobTitle != null) 'jobTitle': jobTitle,
         if (password != null && password.trim().isNotEmpty)
           'password': password,
       },
@@ -610,6 +759,188 @@ class AuthRepository {
   Future<int> getGeneration() async {
     final session = await _readSession();
     return session?.generation ?? 0;
+  }
+
+  Future<ActiveSessionsOverview> fetchActiveSessions() async {
+    try {
+      final token = await getValidToken() ?? await getToken();
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
+      }
+      final meta = await _buildDeviceMetadata();
+      final deviceName = meta['deviceName'] ?? '';
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/auth/sessions',
+        queryParameters: meta,
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'x-device-uid': meta['deviceUid'],
+            if (deviceName.isNotEmpty)
+              'x-device-name': Uri.encodeComponent(deviceName),
+            'x-device-platform': meta['platform'],
+            'x-app-version': meta['appVersion'],
+          },
+        ),
+      );
+      return ActiveSessionsOverview.fromJson(
+        response.data ?? const <String, dynamic>{},
+      );
+    } catch (error) {
+      throw _apiClient.mapError(error);
+    }
+  }
+
+  Future<void> revokeSession(String targetDeviceUid) async {
+    try {
+      final token = await getValidToken() ?? await getToken();
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
+      }
+      final currentDeviceUid = await _loadOrCreateDeviceUid();
+      await _apiClient.dio.delete<Map<String, dynamic>>(
+        '/api/auth/sessions/${Uri.encodeComponent(targetDeviceUid.trim())}',
+        queryParameters: {'currentDeviceUid': currentDeviceUid},
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'x-device-uid': currentDeviceUid,
+          },
+        ),
+      );
+    } catch (error) {
+      throw _apiClient.mapError(error);
+    }
+  }
+
+  Future<int> revokeOtherSessions() async {
+    try {
+      final token = await getValidToken() ?? await getToken();
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
+      }
+      final currentDeviceUid = await _loadOrCreateDeviceUid();
+      final response = await _apiClient.dio.post<Map<String, dynamic>>(
+        '/api/auth/sessions/revoke-others',
+        data: {'currentDeviceUid': currentDeviceUid},
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'x-device-uid': currentDeviceUid,
+          },
+        ),
+      );
+      return (response.data?['revokedCount'] as num?)?.toInt() ?? 0;
+    } catch (error) {
+      throw _apiClient.mapError(error);
+    }
+  }
+}
+
+class ActiveDeviceSession {
+  const ActiveDeviceSession({
+    required this.deviceUid,
+    required this.deviceName,
+    required this.platform,
+    this.appVersion,
+    this.ipAddress,
+    required this.isCurrent,
+    required this.isOnline,
+    required this.createdAt,
+    required this.lastUsedAt,
+  });
+
+  final String deviceUid;
+  final String deviceName;
+  final String platform;
+  final String? appVersion;
+  final String? ipAddress;
+  final bool isCurrent;
+  final bool isOnline;
+  final DateTime createdAt;
+  final DateTime lastUsedAt;
+
+  bool get isDesktop =>
+      platform == 'windows' || platform == 'macos' || platform == 'linux';
+
+  bool get isIos => platform == 'ios';
+
+  String get platformDisplayLabel {
+    switch (platform.toLowerCase()) {
+      case 'windows':
+        return 'Windows Desktop';
+      case 'android':
+        return 'Android Mobile';
+      case 'ios':
+        return 'iOS (iPhone / iPad)';
+      case 'macos':
+        return 'macOS Desktop';
+      case 'linux':
+        return 'Linux Desktop';
+      case 'web':
+        return 'متصفح الويب';
+      default:
+        return 'جهاز متصل';
+    }
+  }
+
+  factory ActiveDeviceSession.fromJson(Map<String, dynamic> json) {
+    final now = DateTime.now();
+    final createdRaw = json['createdAt']?.toString();
+    final lastUsedRaw = json['lastUsedAt']?.toString();
+    return ActiveDeviceSession(
+      deviceUid: (json['deviceUid'] ?? 'unknown').toString(),
+      deviceName: (json['deviceName'] ?? 'جهاز متصل').toString(),
+      platform: (json['platform'] ?? 'unknown').toString().toLowerCase(),
+      appVersion: json['appVersion']?.toString(),
+      ipAddress: json['ipAddress']?.toString(),
+      isCurrent: json['isCurrent'] == true,
+      isOnline: json['isOnline'] == true,
+      createdAt: createdRaw != null
+          ? (DateTime.tryParse(createdRaw)?.toLocal() ?? now)
+          : now,
+      lastUsedAt: lastUsedRaw != null
+          ? (DateTime.tryParse(lastUsedRaw)?.toLocal() ?? now)
+          : now,
+    );
+  }
+}
+
+class ActiveSessionsOverview {
+  const ActiveSessionsOverview({
+    required this.currentDeviceUid,
+    required this.sessions,
+  });
+
+  final String? currentDeviceUid;
+  final List<ActiveDeviceSession> sessions;
+
+  ActiveDeviceSession? get currentSession {
+    for (final s in sessions) {
+      if (s.isCurrent) return s;
+    }
+    return sessions.isNotEmpty ? sessions.first : null;
+  }
+
+  List<ActiveDeviceSession> get otherSessions =>
+      sessions.where((s) => !s.isCurrent).toList();
+
+  factory ActiveSessionsOverview.fromJson(Map<String, dynamic> json) {
+    final rawList = json['sessions'];
+    final sessions = rawList is List
+        ? rawList
+              .whereType<Map>()
+              .map(
+                (item) => ActiveDeviceSession.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList()
+        : <ActiveDeviceSession>[];
+    return ActiveSessionsOverview(
+      currentDeviceUid: json['currentDeviceUid']?.toString(),
+      sessions: sessions,
+    );
   }
 }
 

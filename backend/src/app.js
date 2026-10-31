@@ -5,6 +5,7 @@ global.TextDecoder = TextDecoder;
 util.TextEncoder = TextEncoder;
 util.TextDecoder = TextDecoder;
 
+const path = require("path");
 const express = require("express");
 const compression = require("compression");
 const cors = require("cors");
@@ -94,14 +95,21 @@ app.use(
       ),
   }),
 );
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use(
   "/api",
   rateLimit({
     windowMs: 60 * 1000,
-    max: 600,
+    max: 3000,
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      if (auth && typeof auth === "string" && auth.startsWith("Bearer ")) {
+        return "user_" + auth.slice(-32);
+      }
+      return req.ip;
+    },
     skip: (req) =>
       req.method === "POST" &&
       /^\/api\/updates\/tasks\/[a-f0-9]{24}\/progress$/i.test(
@@ -138,6 +146,10 @@ app.get("/", (req, res) => {
     status: "ok",
     service: "workplace-document-backend",
   });
+});
+
+app.get("/privacy-policy", (req, res) => {
+  res.sendFile(path.join(__dirname, "assets", "privacy-policy.html"));
 });
 
 app.get("/health", (req, res) => {
@@ -185,6 +197,8 @@ app.use("/api/admin/tickets", ticketRoutes);
 app.use("/api/printers", printerRoutes);
 app.use("/api/admin/printers", printerRoutes);
 app.use("/api/purchase-requests", purchasingRoutes);
+app.use("/api/report-templates", require("./reports/routes/report-template.routes"));
+app.use("/api/admin/report-templates", require("./reports/routes/report-template.routes"));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -151,6 +151,7 @@ contextBridge.exposeInMainWorld("electronBridge", {
   initializeStorage: (payload) => ipcRenderer.invoke("files:initialize-storage", payload),
   appendErrorLog: (payload) => ipcRenderer.invoke("files:append-error-log", payload),
   archiveChatAttachment: (payload) => ipcRenderer.invoke("files:archive-chat-attachment", payload),
+  getChatAttachmentPath: (payload) => ipcRenderer.invoke("files:get-chat-attachment-path", payload),
   cacheChatAttachment: (payload) => ipcRenderer.invoke("files:cache-chat-attachment", payload),
   readChatAttachmentCache: (payload) => ipcRenderer.invoke("files:read-chat-attachment-cache", payload),
   readChatArchive: (payload) => ipcRenderer.invoke("files:read-chat-archive", payload),
@@ -172,10 +173,14 @@ contextBridge.exposeInMainWorld("electronBridge", {
   setStartup: (enabled) => ipcRenderer.invoke("startup:set", enabled),
   getStartup: () => ipcRenderer.invoke("startup:get"),
   startUpdate: (payload) => ipcRenderer.invoke("updater:start-update", payload),
-  applyUpdate: () => ipcRenderer.invoke("updater:apply-update"),
+  applyUpdate: (payload) => ipcRenderer.invoke("updater:apply-update", payload),
   listOpenWindows: () => ipcRenderer.invoke("window:list-open-windows"),
   captureWindow: (payload) => ipcRenderer.invoke("window:capture-window", payload),
   captureScreen: () => ipcRenderer.invoke("window:capture-screen"),
   openRdp: (payload) => ipcRenderer.invoke("shell:open-rdp", payload),
+  openPing: (payload) => ipcRenderer.invoke("shell:open-ping", payload),
+  getStorageBreakdown: (payload) => ipcRenderer.invoke("storage:get-breakdown", payload),
+  clearStorageCache: (payload) => ipcRenderer.invoke("storage:clear-cache", payload),
+  probePeerStatus: (payload) => ipcRenderer.invoke("net:probe-peer-status", payload),
 });
 console.log("[preload] electronBridge exposed");

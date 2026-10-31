@@ -156,8 +156,23 @@ class _ChatRichTextState extends State<ChatRichText> {
     return spans;
   }
 
+  List<InlineSpan> _cachedSpans = [];
+
   @override
-  Widget build(BuildContext context) {
+  void initState() {
+    super.initState();
+    _buildSpans();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatRichText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text || oldWidget.style != widget.style) {
+      _buildSpans();
+    }
+  }
+
+  void _buildSpans() {
     for (final r in _recognizers) {
       r.dispose();
     }
@@ -165,13 +180,8 @@ class _ChatRichTextState extends State<ChatRichText> {
 
     final matches = _linkPattern.allMatches(widget.text).toList();
     if (matches.isEmpty) {
-      return Text.rich(
-        TextSpan(
-          style: widget.style,
-          children: _parseEmojisAndMentions(widget.text, widget.style),
-        ),
-        textAlign: widget.textAlign,
-      );
+      _cachedSpans = _parseEmojisAndMentions(widget.text, widget.style);
+      return;
     }
 
     final linkStyle = widget.style.copyWith(
@@ -204,6 +214,9 @@ class _ChatRichTextState extends State<ChatRichText> {
           _open(rawLink);
         }
         ..onSecondaryTapDown = (details) {
+          // Note: using context here in a recognizer might be slightly risky if unmounted,
+          // but since it's only triggered when the user taps, we assume it's mounted.
+          if (!mounted) return;
           _showMenu(context, details.globalPosition, rawLink);
         };
 
@@ -227,9 +240,13 @@ class _ChatRichTextState extends State<ChatRichText> {
         _parseEmojisAndMentions(widget.text.substring(cursor), widget.style),
       );
     }
+    _cachedSpans = spans;
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return Text.rich(
-      TextSpan(style: widget.style, children: spans),
+      TextSpan(style: widget.style, children: _cachedSpans),
       textAlign: widget.textAlign,
     );
   }

@@ -54,7 +54,8 @@ class ManagedUser {
       permissions: permissionsJson.map(
         (key, value) => MapEntry(key, value == true),
       ),
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 }

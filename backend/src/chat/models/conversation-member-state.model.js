@@ -32,6 +32,10 @@ const conversationMemberStateSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    mutedUntil: {
+      type: Date,
+      default: null,
+    },
     isArchived: {
       type: Boolean,
       default: false,
@@ -45,6 +49,15 @@ const conversationMemberStateSchema = new mongoose.Schema(
       default: false,
     },
     clearHistoryAt: {
+      type: Date,
+      default: null,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
       type: Date,
       default: null,
     },

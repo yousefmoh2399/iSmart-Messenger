@@ -5,14 +5,20 @@ const { sendUploadFile } = require("../../utils/send-upload-file");
 const Conversation = require("../models/conversation.model");
 const User = require("../../models/user.model");
 const { listRoles } = require("../services/role.service");
+const { getUnreadCountsForUser } = require("../services/chat-member-state.service");
 const {
   getVisibleUsersForChat,
+  getConversationById,
+  getConversationRoom,
   listConversationsForUser,
   listManageableConversations,
   getConversationDetailsForUser,
   getConversationSnapshotForUserId,
   createConversation,
   updateConversation,
+  updateConversationAvatar,
+  removeConversationAvatar,
+  getConversationAvatarFilePath,
   updateConversationPreferences,
   setConversationPinnedMessage,
   clearConversationPinnedMessage,
@@ -48,6 +54,7 @@ const {
 } = require("../services/chat.service");
 const { listAuditLogs } = require("../services/audit.service");
 const { listSystemErrors } = require("../services/system-error.service");
+const { sendScheduledNow } = require("../../services/scheduler.service");
 const {
   createChatTransfer,
   getChatTransferForUser,
@@ -98,6 +105,17 @@ async function resolveConversationAudienceUserIds(conversationId) {
   return [...userIds];
 }
 
+async function emitUnreadCount(io, userId, conversationId) {
+  try {
+    const unreadMap = await getUnreadCountsForUser(userId);
+    io.to(`user:${userId}`).emit("unread_count_updated", {
+      conversationId,
+      unreadCount: unreadMap[conversationId] || 0,
+      unreadMap,
+    });
+  } catch (_) {}
+}
+
 function emitMessageToRecipients(io, message, recipientUserIds = []) {
   const deliveredUsers = new Set(
     (message.deliveredTo || [])
@@ -108,18 +126,59 @@ function emitMessageToRecipients(io, message, recipientUserIds = []) {
     deliveredUsers.add(String(userId));
   }
 
+  // Deduplicate across rooms using chained .to() so each socket receives receive_message exactly ONCE
+  let messageTarget = io.to(getConversationRoom(message.conversationId));
   if (message.senderId) {
-    io.to(`user:${message.senderId}`).emit("receive_message", message);
+    messageTarget = messageTarget.to(`user:${message.senderId}`);
   }
-
   for (const userId of deliveredUsers) {
-    io.to(`user:${userId}`).emit("receive_message", message);
-    io.to(`user:${userId}`).emit("message_delivered", {
+    messageTarget = messageTarget.to(`user:${userId}`);
+  }
+  messageTarget.emit("receive_message", message);
+
+  // Delivery receipts: sender needs to know when delivered!
+  for (const userId of deliveredUsers) {
+    let deliveryTarget = io.to(getConversationRoom(message.conversationId));
+    if (message.senderId) {
+      deliveryTarget = deliveryTarget.to(`user:${message.senderId}`);
+    }
+    deliveryTarget.emit("message_delivered", {
       conversationId: message.conversationId,
       messageId: message.id,
       userId,
     });
   }
+}
+
+
+async function emitMessageUpdated(io, message) {
+  if (!io || !message?.conversationId) return;
+  const audienceUserIds = await resolveConversationAudienceUserIds(
+    message.conversationId,
+  );
+  let target = io.to(getConversationRoom(message.conversationId));
+  if (message.senderId) {
+    target = target.to(`user:${message.senderId}`);
+  }
+  for (const userId of audienceUserIds) {
+    target = target.to(`user:${userId}`);
+  }
+  target.emit("message_updated", message);
+}
+
+async function emitMessageDeleted(io, conversationId, messageId) {
+  if (!io || !conversationId) return;
+  const audienceUserIds = await resolveConversationAudienceUserIds(
+    conversationId,
+  );
+  let target = io.to(getConversationRoom(conversationId));
+  for (const userId of audienceUserIds) {
+    target = target.to(`user:${userId}`);
+  }
+  target.emit("message_deleted", {
+    messageId,
+    conversationId,
+  });
 }
 
 async function emitConversationToUsers(io, conversationId, userIds = []) {
@@ -281,6 +340,48 @@ const updateChatConversation = asyncHandler(async (req, res) => {
   });
 });
 
+
+const uploadConversationAvatar = asyncHandler(async (req, res) => {
+  const conversation = await updateConversationAvatar(
+    req.user,
+    req.params.id,
+    req.file,
+  );
+  const io = req.app.get("io");
+  if (io) {
+    emitConversationToMembers(io, conversation.id);
+  }
+  sendChatResponse(res, {
+    data: { conversation },
+    legacy: { conversation },
+  });
+});
+
+const deleteConversationAvatar = asyncHandler(async (req, res) => {
+  const conversation = await removeConversationAvatar(
+    req.user,
+    req.params.id,
+  );
+  const io = req.app.get("io");
+  if (io) {
+    emitConversationToMembers(io, conversation.id);
+  }
+  sendChatResponse(res, {
+    data: { conversation },
+    legacy: { conversation },
+  });
+});
+
+const downloadConversationAvatar = asyncHandler(async (req, res) => {
+  const filePath = await getConversationAvatarFilePath(req.params.id);
+  await sendUploadFile(res, filePath, {
+    cacheControl: "private, max-age=300",
+    disposition: "inline",
+    notFoundMessage: "Avatar not found.",
+    logLabel: "conversation-avatar-download",
+  });
+});
+
 const updateChatConversationPreferences = asyncHandler(async (req, res) => {
   const conversation = await updateConversationPreferences(
     req.user,
@@ -345,6 +446,9 @@ const deleteChatConversation = asyncHandler(async (req, res) => {
       for (const userId of deleted.memberIds || []) {
         io.to(`user:${userId}`).emit("conversation_deleted", payload);
       }
+    } else if (deleted.mode === "self_deleted") {
+      const payload = { conversationId: deleted.conversationId };
+      io.to(`user:${req.user.id}`).emit("conversation_deleted", payload);
     } else if (deleted.mode === "self_cleared" && deleted.conversation) {
       io.to(`user:${req.user.id}`).emit(
         "conversation_updated",
@@ -354,12 +458,12 @@ const deleteChatConversation = asyncHandler(async (req, res) => {
   }
   sendChatResponse(res, {
     data: {
-      deleted: deleted.mode === "global_deleted",
+      deleted: deleted.mode === "global_deleted" || deleted.mode === "self_deleted",
       cleared: deleted.mode === "self_cleared",
       conversation: deleted.conversation || null,
     },
     legacy: {
-      deleted: deleted.mode === "global_deleted",
+      deleted: deleted.mode === "global_deleted" || deleted.mode === "self_deleted",
       cleared: deleted.mode === "self_cleared",
       conversation: deleted.conversation || null,
     },
@@ -634,10 +738,7 @@ const patchChatMessage = asyncHandler(async (req, res) => {
   const message = await updateMessage(req.user, req.params.id, req.body);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
     emitConversationToMembers(io, message.conversationId);
   }
   sendChatResponse(res, {
@@ -655,10 +756,8 @@ const reactToChatMessage = asyncHandler(async (req, res) => {
   const message = toggleResult.message;
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
+    emitConversationToMembers(io, message.conversationId);
     if (toggleResult.reactionAdded) {
       const senderId = String(message.senderId || "").trim();
       const reactorId = String(req.user.id);
@@ -709,7 +808,16 @@ const markSeen = asyncHandler(async (req, res) => {
   const messageIds = await markConversationSeen(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${req.params.id}`).emit("message_seen", {
+    const conversation = await getConversationById(req.params.id);
+    const memberIds = (conversation?.members || []).map((m) =>
+      m._id ? m._id.toString() : m.toString(),
+    );
+
+    let seenTarget = io.to(getConversationRoom(req.params.id));
+    for (const mId of memberIds) {
+      seenTarget = seenTarget.to(`user:${mId}`);
+    }
+    seenTarget.emit("message_seen", {
       conversationId: req.params.id,
       userId: req.user.id,
       messageIds,
@@ -737,12 +845,18 @@ const removeMessage = asyncHandler(async (req, res) => {
   const message = await deleteMessage(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit("message_deleted", {
-      messageId: message.id,
-      conversationId: message.conversationId,
-    });
+    await emitMessageDeleted(io, message.conversationId, message.id);
     emitConversationToMembers(io, message.conversationId);
   }
+  sendChatResponse(res, {
+    data: { message },
+    legacy: { message },
+  });
+});
+
+const sendScheduledMessage = asyncHandler(async (req, res) => {
+  const io = req.app.get("io");
+  const message = await sendScheduledNow(req.user, req.params.id, io);
   sendChatResponse(res, {
     data: { message },
     legacy: { message },
@@ -853,10 +967,7 @@ const restoreAttachment = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
   }
   sendChatResponse(res, {
     data: { message },
@@ -897,10 +1008,7 @@ const votePoll = asyncHandler(async (req, res) => {
 
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${result.message.conversationId}`).emit(
-      "message_updated",
-      result.message,
-    );
+    await emitMessageUpdated(io, result.message);
   }
 
   sendChatResponse(res, {
@@ -939,6 +1047,9 @@ module.exports = {
   getManageableConversations,
   createChatConversation,
   updateChatConversation,
+  uploadConversationAvatar,
+  deleteConversationAvatar,
+  downloadConversationAvatar,
   updateChatConversationPreferences,
   setGroupPinnedMessage,
   clearGroupPinnedMessage,
@@ -961,6 +1072,7 @@ module.exports = {
   markSeen,
   markSingleMessageSeen,
   removeMessage,
+  sendScheduledMessage,
   searchChatMessages,
   getFavoriteChatMessages,
   getPresence,

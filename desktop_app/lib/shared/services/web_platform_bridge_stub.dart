@@ -46,12 +46,18 @@ Future<void> archiveElectronChatAttachment({
   String? preferredDirectoryPath,
 }) async {}
 
-Future<void> cacheElectronChatAttachment({
+Future<String?> getElectronCachedAttachmentPath({
+  required String messageId,
+  required String fileName,
+  String? preferredDirectoryPath,
+}) async => null;
+
+Future<String?> cacheElectronChatAttachment({
   required String messageId,
   required String fileName,
   required Uint8List bytes,
   String? preferredDirectoryPath,
-}) async {}
+}) async => null;
 
 Future<Uint8List?> readElectronCachedChatAttachment({
   required String messageId,
@@ -160,6 +166,8 @@ bool isPageVisible() => false;
 
 Future<bool> isElectronWindowForegroundVisible() async => false;
 
+void showBrowserAttention(String title) {}
+
 void clearBrowserAttention() {}
 
 Future<void> playBrowserAudioAsset(String assetPath) async {}
@@ -254,11 +262,14 @@ Future<Map<String, dynamic>> startElectronUpdate({
   required String downloadUrl,
   String? token,
   String? checksumSha256,
+  String? fileName,
+  String? silentInstallArgs,
+  String? installerKind,
 }) async {
   throw UnsupportedError('Electron is not available on this platform.');
 }
 
-Future<Map<String, dynamic>> applyElectronUpdate() async {
+Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]) async {
   throw UnsupportedError('Electron is not available on this platform.');
 }
 
@@ -316,3 +327,17 @@ Future<String?> electronCaptureWindow(int windowId) async => null;
 Future<String?> electronCaptureScreen() async => null;
 
 Future<bool> electronOpenRdp(String ip) async => false;
+
+Future<bool> electronOpenPing(String ip) async => false;
+
+Future<Map<String, dynamic>> electronProbePeerStatus(String ip) async =>
+    const <String, dynamic>{
+      'success': false,
+      'message': 'Not supported on this platform.',
+    };
+
+Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}) async =>
+    const <String, dynamic>{'success': false};
+
+Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async =>
+    false;

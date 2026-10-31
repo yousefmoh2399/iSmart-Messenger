@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/providers/providers.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
+import 'widgets/instant_clipboard_sync_dialog.dart';
 
 enum ChatConnectionStatus { connecting, connected, reconnecting, disconnected }
 
@@ -110,11 +111,12 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               message.metadata?['mentions'] is List &&
               (message.metadata!['mentions'] as List).contains(authUser.id);
 
-          if (message.sender?.id == authUser.id) {
+          final senderId = message.sender?.id ?? message.senderId;
+          if (senderId == authUser.id) {
             break;
           }
 
-          if (targetConversation?.isMuted == true && !isMentioned) {
+          if (targetConversation?.isCurrentlyMuted == true && !isMentioned) {
             break;
           }
 
@@ -153,7 +155,7 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
               }
             }
           }
-          if (targetConversation?.isMuted == true) {
+          if (targetConversation?.isCurrentlyMuted == true) {
             break;
           }
           final isChatVisible = ref.read(chatSectionVisibleProvider);
@@ -234,7 +236,52 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
           break;
         case 'force_logout':
           try {
+            final targetUid = event.payload['targetDeviceUid']
+                ?.toString()
+                .trim();
+            final excludeUid = event.payload['excludeDeviceUid']
+                ?.toString()
+                .trim();
+            if ((targetUid != null && targetUid.isNotEmpty) ||
+                (excludeUid != null && excludeUid.isNotEmpty)) {
+              final myUid = await ref
+                  .read(authRepositoryProvider)
+                  .getDeviceUid();
+              if (excludeUid != null &&
+                  excludeUid.isNotEmpty &&
+                  myUid == excludeUid) {
+                break;
+              }
+              if (targetUid != null &&
+                  targetUid.isNotEmpty &&
+                  myUid != targetUid) {
+                break;
+              }
+            }
             await ref.read(authControllerProvider.notifier).logout();
+          } catch (_) {}
+          break;
+        case 'clipboard_synced':
+          try {
+            final item = await ref
+                .read(desktopClipboardSyncControllerProvider.notifier)
+                .handleIncomingSyncEvent(event.payload);
+            if (item != null && item.isFromMobile) {
+              final preview = item.text.length > 90
+                  ? '${item.text.substring(0, 90)}...'
+                  : item.text;
+              await notifications.showIncomingMessage(
+                title: '📋 تم نسخ نص من الموبايل إلى حافظة الكمبيوتر',
+                body: preview,
+              );
+            }
+          } catch (_) {}
+          break;
+        case 'clipboard_history_updated':
+          try {
+            await ref
+                .read(desktopClipboardSyncControllerProvider.notifier)
+                .handleHistoryUpdatedEvent(event.payload);
           } catch (_) {}
           break;
       }

@@ -1,5 +1,10 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+
 import '../../../core/network/api_client.dart';
 import '../../../shared/models/managed_user.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../auth/data/auth_repository.dart';
 
 class ManagedUsersPage {
@@ -29,7 +34,7 @@ class UserManagementRepository {
     String? role,
     String? status,
     int page = 1,
-    int limit = 50,
+    int limit = 100,
   }) async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/admin/users',
@@ -80,7 +85,7 @@ class UserManagementRepository {
     String? role,
     String? status,
     int page = 1,
-    int limit = 50,
+    int limit = 100,
   }) async {
     final result = await fetchUsersPage(
       search: search,
@@ -186,5 +191,129 @@ class UserManagementRepository {
 
   Future<void> forceLogoutAllDevices(String userId) async {
     await _apiClient.dio.post<void>('/api/admin/users/$userId/logout-all');
+  }
+  Future<void> exportUsers({
+    String format = 'xlsx',
+    String? branchId,
+    String? departmentId,
+    String? role,
+    String? status,
+    String? search,
+    String? branchName,
+  }) async {
+    final response = await _apiClient.dio.get<dynamic>(
+      '/api/admin/users/export',
+      queryParameters: {
+        'format': format,
+        if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
+        if (departmentId != null && departmentId.isNotEmpty)
+          'departmentId': departmentId,
+        if (role != null && role.isNotEmpty) 'role': role,
+        if (status != null && status.isNotEmpty) 'status': status,
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      },
+      options: Options(responseType: ResponseType.bytes),
+    );
+
+    final data = response.data;
+    if (data == null) return;
+    final bytes = data is Uint8List
+        ? data
+        : data is List<int>
+            ? Uint8List.fromList(data)
+            : Uint8List.fromList(const <int>[]);
+
+    final branchSuffix = branchName != null && branchName.trim().isNotEmpty
+        ? '-${branchName.trim().replaceAll(' ', '_')}'
+        : '';
+    final fileName =
+        'users-report$branchSuffix-${DateTime.now().millisecondsSinceEpoch}.$format';
+
+    await web_bridge.downloadBytes(
+      bytes: bytes,
+      fileName: fileName,
+      mimeType: format == 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'application/pdf',
+    );
+  }
+
+  Future<BatchGenerateResult> batchGenerateUsers({
+    required String branchId,
+    required String defaultPassword,
+    required List<BatchJobTitleConfig> items,
+  }) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/admin/users/batch-generate',
+      data: {
+        'branchId': branchId,
+        'defaultPassword': defaultPassword,
+        'items': items.map((e) => e.toJson()).toList(),
+      },
+    );
+
+    final body = response.data ?? const <String, dynamic>{};
+    final payload = (body['data'] is Map<String, dynamic>)
+        ? body['data'] as Map<String, dynamic>
+        : body;
+    return BatchGenerateResult.fromJson(payload);
+  }
+}
+
+class BatchJobTitleConfig {
+  const BatchJobTitleConfig({
+    required this.key,
+    required this.title,
+    required this.prefix,
+    required this.count,
+    this.departmentId,
+    this.allowUnnumberedFirst = false,
+  });
+
+  final String key;
+  final String title;
+  final String prefix;
+  final int count;
+  final String? departmentId;
+  final bool allowUnnumberedFirst;
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'title': title,
+    'prefix': prefix,
+    'count': count,
+    'departmentId': (departmentId != null && departmentId!.isNotEmpty) ? departmentId : null,
+    'allowUnnumberedFirst': allowUnnumberedFirst,
+  };
+}
+
+class BatchGenerateResult {
+  const BatchGenerateResult({
+    required this.success,
+    required this.branchName,
+    required this.branchCode,
+    required this.totalCreated,
+    required this.users,
+  });
+
+  final bool success;
+  final String branchName;
+  final String branchCode;
+  final int totalCreated;
+  final List<ManagedUser> users;
+
+  factory BatchGenerateResult.fromJson(Map<String, dynamic> json) {
+    final branchMap = json['branch'] as Map<String, dynamic>? ?? {};
+    final usersList = (json['users'] as List<dynamic>?) ?? [];
+    return BatchGenerateResult(
+      success: json['success'] == true,
+      branchName: branchMap['name']?.toString() ?? '',
+      branchCode: branchMap['code']?.toString() ?? '',
+      totalCreated: json['totalCreated'] as int? ?? usersList.length,
+      users: usersList
+          .whereType<Map<String, dynamic>>()
+          .map(ManagedUser.fromJson)
+          .toList(),
+    );
   }
 }

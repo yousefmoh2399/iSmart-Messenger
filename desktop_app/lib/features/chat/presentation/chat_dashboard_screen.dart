@@ -1,819 +1,3 @@
-// import 'package:flutter/material.dart';
-// import 'package:flutter/services.dart';
-// import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-// import '../../../shared/models/app_user.dart';
-// import '../../../shared/models/managed_user.dart';
-// import '../../../shared/providers/providers.dart';
-// import '../models/chat_models.dart';
-// import 'chat_admin_panel.dart';
-// import 'group_management_dialog.dart';
-// import 'widgets/chat_screen.dart';
-// import 'widgets/chat_sidebar.dart';
-// import 'widgets/chat_ui_helpers.dart';
-// import 'widgets/right_panel.dart';
-
-// class ChatDashboardScreen extends ConsumerStatefulWidget {
-//   const ChatDashboardScreen({super.key});
-
-//   @override
-//   ConsumerState<ChatDashboardScreen> createState() =>
-//       _ChatDashboardScreenState();
-// }
-
-// class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
-//   final TextEditingController _sidebarSearchController =
-//       TextEditingController();
-
-//   ChatSidebarFilter _sidebarFilter = ChatSidebarFilter.all;
-//   String? _selectedConversationId;
-//   bool _showRightPanel = false;
-//   bool _showAdminPanel = false;
-//   double _sidebarWidth = 300;
-//   double _rightPanelWidth = 320;
-//   int _searchSignal = 0;
-
-//   @override
-//   void initState() {
-//     super.initState();
-//     _sidebarSearchController.addListener(_onSearchChanged);
-//   }
-
-//   @override
-//   void dispose() {
-//     _sidebarSearchController
-//       ..removeListener(_onSearchChanged)
-//       ..dispose();
-//     super.dispose();
-//   }
-
-//   void _onSearchChanged() {
-//     if (mounted) {
-//       setState(() {});
-//     }
-//   }
-
-//   void _setActiveConversation(String? conversationId) {
-//     Future<void>.microtask(() {
-//       if (!mounted) {
-//         return;
-//       }
-//       ref.read(activeConversationIdProvider.notifier).state = conversationId;
-//     });
-//   }
-
-//   void _selectConversation(
-//     ChatConversation? conversation, {
-//     bool openInfoPanel = false,
-//   }) {
-//     setState(() {
-//       _selectedConversationId = conversation?.id;
-//       _showAdminPanel = false;
-//       if (conversation == null) {
-//         _showRightPanel = false;
-//       } else if (openInfoPanel) {
-//         _showRightPanel = true;
-//       }
-//     });
-//     _setActiveConversation(conversation?.id);
-//   }
-
-//   Future<void> _showCreateDialog({
-//     required AppUser currentUser,
-//     required ChatOverviewData overview,
-//   }) async {
-//     final nameController = TextEditingController();
-//     final descriptionController = TextEditingController();
-//     final selectedMembers = <String>{};
-//     String? selectedDirectUserId;
-//     String? departmentId = currentUser.departmentId;
-
-//     final availableTypes = <String>[
-//       'direct',
-//       'group',
-//       if (currentUser.can('canCreateRooms')) 'department',
-//       if (currentUser.can('canSendBroadcast')) 'broadcast',
-//     ];
-//     var selectedType = availableTypes.first;
-
-//     final createdConversation = await showDialog<ChatConversation>(
-//       context: context,
-//       builder: (context) => StatefulBuilder(
-//         builder: (context, setDialogState) => AlertDialog(
-//           title: const Text('New conversation'),
-//           content: SizedBox(
-//             width: 520,
-//             child: SingleChildScrollView(
-//               child: Column(
-//                 mainAxisSize: MainAxisSize.min,
-//                 crossAxisAlignment: CrossAxisAlignment.start,
-//                 children: [
-//                   DropdownButtonFormField<String>(
-//                     initialValue: selectedType,
-//                     decoration: const InputDecoration(labelText: 'Type'),
-//                     items: availableTypes
-//                         .map(
-//                           (type) => DropdownMenuItem<String>(
-//                             value: type,
-//                             child: Text(switch (type) {
-//                               'direct' => 'Direct',
-//                               'department' => 'Department room',
-//                               'broadcast' => 'Broadcast channel',
-//                               _ => 'Group',
-//                             }),
-//                           ),
-//                         )
-//                         .toList(),
-//                     onChanged: (value) {
-//                       setDialogState(() {
-//                         selectedType = value ?? selectedType;
-//                       });
-//                     },
-//                   ),
-//                   const SizedBox(height: 12),
-//                   if (selectedType == 'direct') ...[
-//                     DropdownButtonFormField<String>(
-//                       initialValue: selectedDirectUserId,
-//                       decoration: const InputDecoration(
-//                         labelText: 'Choose user',
-//                       ),
-//                       items: overview.users
-//                           .where((user) => user.id != currentUser.id)
-//                           .map(
-//                             (user) => DropdownMenuItem<String>(
-//                               value: user.id,
-//                               child: Text(user.displayName),
-//                             ),
-//                           )
-//                           .toList(),
-//                       onChanged: (value) {
-//                         setDialogState(() => selectedDirectUserId = value);
-//                       },
-//                     ),
-//                   ] else ...[
-//                     TextField(
-//                       controller: nameController,
-//                       decoration: const InputDecoration(
-//                         labelText: 'Conversation name',
-//                       ),
-//                     ),
-//                     const SizedBox(height: 12),
-//                     TextField(
-//                       controller: descriptionController,
-//                       minLines: 1,
-//                       maxLines: 3,
-//                       decoration: const InputDecoration(
-//                         labelText: 'Description (optional)',
-//                       ),
-//                     ),
-//                     if (selectedType == 'department') ...[
-//                       const SizedBox(height: 12),
-//                       DropdownButtonFormField<String>(
-//                         initialValue: departmentId,
-//                         decoration: const InputDecoration(
-//                           labelText: 'Department',
-//                         ),
-//                         items: overview.departments
-//                             .map(
-//                               (department) => DropdownMenuItem<String>(
-//                                 value: department.id,
-//                                 child: Text(department.name),
-//                               ),
-//                             )
-//                             .toList(),
-//                         onChanged: (value) {
-//                           setDialogState(() => departmentId = value);
-//                         },
-//                       ),
-//                     ],
-//                     if (selectedType == 'group') ...[
-//                       const SizedBox(height: 14),
-//                       Text(
-//                         'Members',
-//                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-//                           fontWeight: FontWeight.w700,
-//                         ),
-//                       ),
-//                       const SizedBox(height: 6),
-//                       ...overview.users
-//                           .where((user) => user.id != currentUser.id)
-//                           .map(
-//                             (user) => CheckboxListTile(
-//                               value: selectedMembers.contains(user.id),
-//                               contentPadding: EdgeInsets.zero,
-//                               title: Text(user.displayName),
-//                               subtitle: Text(user.username),
-//                               onChanged: (value) {
-//                                 setDialogState(() {
-//                                   if (value == true) {
-//                                     selectedMembers.add(user.id);
-//                                   } else {
-//                                     selectedMembers.remove(user.id);
-//                                   }
-//                                 });
-//                               },
-//                             ),
-//                           ),
-//                     ],
-//                   ],
-//                 ],
-//               ),
-//             ),
-//           ),
-//           actions: [
-//             TextButton(
-//               onPressed: () => Navigator.of(context).pop(),
-//               child: const Text('Cancel'),
-//             ),
-//             FilledButton(
-//               onPressed: () async {
-//                 final controller = ref.read(
-//                   chatOverviewControllerProvider.notifier,
-//                 );
-//                 ChatConversation conversation;
-//                 if (selectedType == 'direct') {
-//                   if (selectedDirectUserId == null ||
-//                       selectedDirectUserId!.isEmpty) {
-//                     return;
-//                   }
-//                   conversation = await controller.createDirectConversation(
-//                     selectedDirectUserId!,
-//                   );
-//                 } else {
-//                   conversation = await controller.createConversation(
-//                     type: selectedType,
-//                     name: nameController.text.trim(),
-//                     description: descriptionController.text.trim(),
-//                     memberIds: selectedMembers.toList(),
-//                     departmentId: departmentId,
-//                   );
-//                 }
-//                 if (!context.mounted) {
-//                   return;
-//                 }
-//                 Navigator.of(context).pop(conversation);
-//               },
-//               child: const Text('Create'),
-//             ),
-//           ],
-//         ),
-//       ),
-//     );
-
-//     if (createdConversation != null && mounted) {
-//       _selectConversation(createdConversation);
-//     }
-//   }
-
-//   Future<void> _updateConversationPreferences(
-//     ChatConversation conversation, {
-//     bool? isPinned,
-//     bool? isMuted,
-//     bool? isArchived,
-//   }) async {
-//     try {
-//       await ref
-//           .read(chatOverviewControllerProvider.notifier)
-//           .updateConversationPreferences(
-//             conversationId: conversation.id,
-//             isPinned: isPinned,
-//             isMuted: isMuted,
-//             isArchived: isArchived,
-//           );
-//     } catch (error) {
-//       if (!mounted) {
-//         return;
-//       }
-//       ScaffoldMessenger.of(
-//         context,
-//       ).showSnackBar(SnackBar(content: Text(error.toString())));
-//     }
-//   }
-
-//   Future<void> _deleteConversation(ChatConversation conversation) async {
-//     final shouldDelete = await showDialog<bool>(
-//       context: context,
-//       builder: (context) => AlertDialog(
-//         title: const Text('Delete conversation'),
-//         content: const Text(
-//           'This will permanently delete all messages in this conversation.',
-//         ),
-//         actions: [
-//           TextButton(
-//             onPressed: () => Navigator.of(context).pop(false),
-//             child: const Text('Cancel'),
-//           ),
-//           FilledButton(
-//             onPressed: () => Navigator.of(context).pop(true),
-//             child: const Text('Delete'),
-//           ),
-//         ],
-//       ),
-//     );
-
-//     if (shouldDelete != true) {
-//       return;
-//     }
-
-//     try {
-//       await ref
-//           .read(chatOverviewControllerProvider.notifier)
-//           .deleteConversation(conversation.id);
-//       if (!mounted) {
-//         return;
-//       }
-//       if (_selectedConversationId == conversation.id) {
-//         _selectConversation(null);
-//       }
-//     } catch (error) {
-//       if (!mounted) {
-//         return;
-//       }
-//       ScaffoldMessenger.of(
-//         context,
-//       ).showSnackBar(SnackBar(content: Text(error.toString())));
-//     }
-//   }
-
-//   Future<void> _openGroupManagement(ChatConversation conversation) async {
-//     final updatedConversation = await showDialog<ChatConversation>(
-//       context: context,
-//       builder: (context) => GroupManagementDialog(conversation: conversation),
-//     );
-//     if (updatedConversation == null || !mounted) {
-//       return;
-//     }
-//     await ref.read(chatOverviewControllerProvider.notifier).refresh();
-//     _selectConversation(updatedConversation, openInfoPanel: true);
-//   }
-
-//   List<ChatConversation> _visibleConversations(
-//     List<ChatConversation> source,
-//     String currentUserId,
-//   ) {
-//     final query = _sidebarSearchController.text.trim().toLowerCase();
-//     final filteredByType = source.where((conversation) {
-//       return switch (_sidebarFilter) {
-//         ChatSidebarFilter.all => true,
-//         ChatSidebarFilter.direct => conversation.type == 'direct',
-//         ChatSidebarFilter.departments => conversation.type == 'department',
-//         ChatSidebarFilter.rooms =>
-//           conversation.type == 'group' || conversation.type == 'broadcast',
-//       };
-//     }).toList();
-
-//     final searched = filteredByType.where((conversation) {
-//       if (query.isEmpty) {
-//         return true;
-//       }
-//       final title = conversation.displayTitle(currentUserId).toLowerCase();
-//       final preview = (conversation.lastMessage?.content ?? '').toLowerCase();
-//       return title.contains(query) || preview.contains(query);
-//     }).toList();
-
-//     return sortConversationsForSidebar(searched);
-//   }
-
-//   void _ensureSelection({
-//     required List<ChatConversation> allConversations,
-//     required List<ChatConversation> visibleConversations,
-//   }) {
-//     final selectedExists =
-//         _selectedConversationId != null &&
-//         allConversations.any(
-//           (conversation) => conversation.id == _selectedConversationId,
-//         );
-
-//     if (_selectedConversationId != null && !selectedExists) {
-//       WidgetsBinding.instance.addPostFrameCallback((_) {
-//         if (!mounted) {
-//           return;
-//         }
-//         _selectConversation(null);
-//       });
-//       return;
-//     }
-
-//     if (_showAdminPanel) {
-//       return;
-//     }
-
-//     if (_selectedConversationId == null && visibleConversations.isNotEmpty) {
-//       WidgetsBinding.instance.addPostFrameCallback((_) {
-//         if (!mounted || _selectedConversationId != null) {
-//           return;
-//         }
-//         _selectConversation(visibleConversations.first);
-//       });
-//     }
-//   }
-
-//   ChatConversation? _selectedConversation(
-//     List<ChatConversation> allConversations,
-//   ) {
-//     if (_selectedConversationId == null) {
-//       return null;
-//     }
-//     return allConversations
-//         .where((conversation) => conversation.id == _selectedConversationId)
-//         .firstOrNull;
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final authUser = ref.watch(authControllerProvider).valueOrNull;
-//     final authToken = ref.watch(authTokenProvider).valueOrNull;
-//     final usersState = ref.watch(usersControllerProvider);
-//     final chatState = ref.watch(chatOverviewControllerProvider);
-//     // final connectionState = ref.watch(chatRealtimeControllerProvider);
-//     final themeMode =
-//         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
-
-//     return Shortcuts(
-//       shortcuts: const <ShortcutActivator, Intent>{
-//         SingleActivator(LogicalKeyboardKey.keyF, control: true):
-//             _SearchIntent(),
-//         SingleActivator(LogicalKeyboardKey.keyN, control: true): _NewIntent(),
-//         SingleActivator(LogicalKeyboardKey.escape): _EscIntent(),
-//       },
-//       child: Actions(
-//         actions: <Type, Action<Intent>>{
-//           _SearchIntent: CallbackAction<_SearchIntent>(
-//             onInvoke: (_) {
-//               if (_selectedConversationId != null && !_showAdminPanel) {
-//                 setState(() {
-//                   _searchSignal++;
-//                 });
-//               }
-//               return null;
-//             },
-//           ),
-//           _NewIntent: CallbackAction<_NewIntent>(
-//             onInvoke: (_) async {
-//               final data = ref.read(chatOverviewControllerProvider).valueOrNull;
-//               final currentUser = ref.read(authControllerProvider).valueOrNull;
-//               if (data != null && currentUser != null) {
-//                 await _showCreateDialog(
-//                   currentUser: currentUser,
-//                   overview: data,
-//                 );
-//               }
-//               return null;
-//             },
-//           ),
-//           _EscIntent: CallbackAction<_EscIntent>(
-//             onInvoke: (_) {
-//               if (_showRightPanel) {
-//                 setState(() => _showRightPanel = false);
-//               }
-//               return null;
-//             },
-//           ),
-//         },
-//         child: Focus(
-//           autofocus: true,
-//           child: Scaffold(
-//             appBar: AppBar(),
-//             body: SafeArea(
-//               child: Padding(
-//                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-//                 child: Column(
-//                   children: [
-
-//                     Expanded(
-//                       child: chatState.when(
-//                         loading: () =>
-//                             const Center(child: CircularProgressIndicator()),
-//                         error: (error, _) =>
-//                             Center(child: Text(error.toString())),
-//                         data: (overview) {
-//                           final allConversations = sortConversationsForSidebar(
-//                             overview.conversations,
-//                           );
-//                           final visibleConversations = _visibleConversations(
-//                             allConversations,
-//                             authUser?.id ?? '',
-//                           );
-//                           _ensureSelection(
-//                             allConversations: allConversations,
-//                             visibleConversations: visibleConversations,
-//                           );
-
-//                           final selectedConversation = _selectedConversation(
-//                             allConversations,
-//                           );
-
-//                           return _buildDesktopShell(
-//                             authUser: authUser,
-//                             authToken: authToken,
-//                             usersState: usersState,
-//                             overview: overview,
-//                             themeMode: themeMode,
-//                             visibleConversations: visibleConversations,
-//                             selectedConversation: selectedConversation,
-//                           );
-//                         },
-//                       ),
-//                     ),
-//                   ],
-//                 ),
-//               ),
-//             ),
-//           ),
-//         ),
-//       ),
-//     );
-//   }
-
-//   Widget _buildDesktopShell({
-//     required AppUser? authUser,
-//     required String? authToken,
-//     required AsyncValue<List<ManagedUser>> usersState,
-//     required ChatOverviewData overview,
-//     required ThemeMode themeMode,
-//     required List<ChatConversation> visibleConversations,
-//     required ChatConversation? selectedConversation,
-//   }) {
-//     return Container(
-//       decoration: BoxDecoration(
-//         color: Theme.of(context).colorScheme.surface,
-//         borderRadius: BorderRadius.circular(18),
-//         border: Border.all(
-//           color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
-//         ),
-//       ),
-//       child: ClipRRect(
-//         borderRadius: BorderRadius.circular(18),
-//         child: Row(
-//           children: [
-//             SizedBox(
-//               width: _sidebarWidth,
-//               child: ChatSidebar(
-//                 currentUser: authUser,
-//                 currentThemeMode: themeMode,
-//                 searchController: _sidebarSearchController,
-//                 currentFilter: _sidebarFilter,
-//                 conversations: visibleConversations,
-//                 selectedConversationId: _selectedConversationId,
-//                 onFilterChanged: (filter) {
-//                   setState(() => _sidebarFilter = filter);
-//                 },
-//                 onConversationSelected: (conversation) {
-//                   _selectConversation(conversation);
-//                 },
-//                 onCreateConversation: () async {
-//                   if (authUser == null) {
-//                     return;
-//                   }
-//                   await _showCreateDialog(
-//                     currentUser: authUser,
-//                     overview: overview,
-//                   );
-//                 },
-//                 onRefresh: () {
-//                   ref.read(chatOverviewControllerProvider.notifier).refresh();
-//                 },
-//                 onOpenAdmin: () {
-//                   setState(() {
-//                     _showAdminPanel = true;
-//                     _showRightPanel = false;
-//                   });
-//                   _setActiveConversation(null);
-//                 },
-//                 onToggleTheme: () {
-//                   ref
-//                       .read(themeModeControllerProvider.notifier)
-//                       .cycleThemeMode();
-//                 },
-//                 onTogglePin: (conversation) {
-//                   _updateConversationPreferences(
-//                     conversation,
-//                     isPinned: !conversation.isPinned,
-//                   );
-//                 },
-//                 onToggleMute: (conversation) {
-//                   _updateConversationPreferences(
-//                     conversation,
-//                     isMuted: !conversation.isMuted,
-//                   );
-//                 },
-//                 onToggleArchive: (conversation) {
-//                   _updateConversationPreferences(
-//                     conversation,
-//                     isArchived: !conversation.isArchived,
-//                   );
-//                 },
-//                 onDeleteConversation: (conversation) {
-//                   _deleteConversation(conversation);
-//                 },
-//               ),
-//             ),
-//             _ResizeHandle(
-//               onDrag: (delta) {
-//                 setState(() {
-//                   _sidebarWidth = (_sidebarWidth + delta.delta.dx).clamp(
-//                     250,
-//                     420,
-//                   );
-//                 });
-//               },
-//             ),
-//             Expanded(
-//               child: Container(
-//                 color: Theme.of(context).colorScheme.surfaceContainer,
-//                 child: _showAdminPanel
-//                     ? ChatAdminPanel(
-//                         departments: overview.departments,
-//                         manageableConversations:
-//                             overview.manageableConversations,
-//                         users: overview.users,
-//                         roles: overview.roles,
-//                         usersState: usersState,
-//                       )
-//                     : selectedConversation == null
-//                     ? const _EmptyConversationState()
-//                     : ChatScreen(
-//                         key: ValueKey('chat_${selectedConversation.id}'),
-//                         conversation: selectedConversation,
-//                         currentUser: authUser,
-//                         token: authToken,
-//                         searchSignal: _searchSignal,
-//                         rightPanelVisible: _showRightPanel,
-//                         onToggleRightPanel: () {
-//                           setState(() => _showRightPanel = !_showRightPanel);
-//                         },
-//                         onConversationDeleted: () {
-//                           if (_selectedConversationId ==
-//                               selectedConversation.id) {
-//                             _selectConversation(null);
-//                           }
-//                         },
-//                       ),
-//               ),
-//             ),
-//             AnimatedSwitcher(
-//               duration: const Duration(milliseconds: 220),
-//               transitionBuilder: (child, animation) {
-//                 return SizeTransition(
-//                   axis: Axis.horizontal,
-//                   sizeFactor: animation,
-//                   axisAlignment: -1,
-//                   child: child,
-//                 );
-//               },
-//               child:
-//                   !_showAdminPanel &&
-//                       _showRightPanel &&
-//                       selectedConversation != null
-//                   ? Row(
-//                       key: ValueKey('right_${selectedConversation.id}'),
-//                       mainAxisSize: MainAxisSize.min,
-//                       children: [
-//                         _ResizeHandle(
-//                           onDrag: (delta) {
-//                             setState(() {
-//                               _rightPanelWidth =
-//                                   (_rightPanelWidth - delta.delta.dx).clamp(
-//                                     280,
-//                                     480,
-//                                   );
-//                             });
-//                           },
-//                         ),
-//                         SizedBox(
-//                           width: _rightPanelWidth,
-//                           child: RightPanel(
-//                             conversation: selectedConversation,
-//                             currentUser: authUser,
-//                             onClose: () {
-//                               setState(() => _showRightPanel = false);
-//                             },
-//                             onTogglePinned: () {
-//                               _updateConversationPreferences(
-//                                 selectedConversation,
-//                                 isPinned: !selectedConversation.isPinned,
-//                               );
-//                             },
-//                             onToggleMuted: () {
-//                               _updateConversationPreferences(
-//                                 selectedConversation,
-//                                 isMuted: !selectedConversation.isMuted,
-//                               );
-//                             },
-//                             onToggleArchived: () {
-//                               _updateConversationPreferences(
-//                                 selectedConversation,
-//                                 isArchived: !selectedConversation.isArchived,
-//                               );
-//                             },
-//                             onDeleteConversation: () {
-//                               _deleteConversation(selectedConversation);
-//                             },
-//                             onOpenGroupManagement: () {
-//                               _openGroupManagement(selectedConversation);
-//                             },
-//                           ),
-//                         ),
-//                       ],
-//                     )
-//                   : const SizedBox.shrink(key: ValueKey('right_closed')),
-//             ),
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-// }
-
-// class _ResizeHandle extends StatelessWidget {
-//   const _ResizeHandle({required this.onDrag});
-
-//   final ValueChanged<DragUpdateDetails> onDrag;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return MouseRegion(
-//       cursor: SystemMouseCursors.resizeColumn,
-//       child: GestureDetector(
-//         behavior: HitTestBehavior.translucent,
-//         onHorizontalDragUpdate: onDrag,
-//         child: Container(
-//           width: 6,
-//           color: Theme.of(context).colorScheme.surface,
-//           child: Center(
-//             child: Container(
-//               width: 2,
-//               height: 48,
-//               decoration: BoxDecoration(
-//                 color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
-//                 borderRadius: BorderRadius.circular(999),
-//               ),
-//             ),
-//           ),
-//         ),
-//       ),
-//     );
-//   }
-// }
-
-// class _EmptyConversationState extends StatelessWidget {
-//   const _EmptyConversationState();
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Center(
-//       child: Padding(
-//         padding: const EdgeInsets.all(28),
-//         child: Column(
-//           mainAxisAlignment: MainAxisAlignment.center,
-//           children: [
-//             Container(
-//               width: 92,
-//               height: 92,
-//               decoration: BoxDecoration(
-//                 color: const Color(0xFFE7F0FA),
-//                 borderRadius: BorderRadius.circular(26),
-//               ),
-//               child: const Icon(
-//                 Icons.chat_bubble_rounded,
-//                 size: 40,
-//                 color: Color(0xFF3390EC),
-//               ),
-//             ),
-//             const SizedBox(height: 16),
-//             Text(
-//               'Select a conversation',
-//               style: Theme.of(
-//                 context,
-//               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-//             ),
-//             const SizedBox(height: 8),
-//             Text(
-//               'Use Ctrl + N for a new chat, Ctrl + F to search in current chat.',
-//               textAlign: TextAlign.center,
-//               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-//                 color: Theme.of(context).colorScheme.onSurfaceVariant,
-//               ),
-//             ),
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-// }
-
-// class _SearchIntent extends Intent {
-//   const _SearchIntent();
-// }
-
-// class _NewIntent extends Intent {
-//   const _NewIntent();
-// }
-
-// class _EscIntent extends Intent {
-//   const _EscIntent();
-// }
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -837,9 +21,11 @@ import 'chat_admin_panel.dart';
 import 'chat_appearance.dart';
 import 'favorite_messages_screen.dart';
 import 'group_management_dialog.dart';
+import 'widgets/chat_audio_attachment_player.dart';
 import 'widgets/chat_screen.dart';
 import 'widgets/chat_sidebar.dart';
 import 'widgets/chat_ui_helpers.dart';
+import 'widgets/desktop_message_actions_dialogs.dart';
 import 'widgets/new_conversation_dialog.dart' as widgets;
 import 'widgets/right_panel.dart';
 
@@ -902,6 +88,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   double _rightPanelWidth = 320;
   int _searchSignal = 0;
   int _adminTabIndex = 0;
+  String? _targetMessageId;
+  int _targetMessageSignal = 0;
   void _syncSectionFromWidget() {
     final shouldShowAdmin =
         widget.activeSection == DesktopWorkspaceSection.admin;
@@ -936,6 +124,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     _showAdminPanel = widget.openAdminOnStart;
     _showTicketsPanel = !widget.openAdminOnStart && widget.openTicketsOnStart;
     _sidebarSearchController.addListener(_onSearchChanged);
+    desktopJumpToMessageNotifier.addListener(_onJumpToMessageRequested);
     _chatEventsSubscription = ref.read(chatSocketServiceProvider).events.listen(
       (event) {
         if (!mounted) {
@@ -1007,6 +196,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
 
   @override
   void dispose() {
+    desktopJumpToMessageNotifier.removeListener(_onJumpToMessageRequested);
     _chatEventsSubscription?.cancel();
     for (final timer in _typingPreviewTimers.values) {
       timer.cancel();
@@ -1016,6 +206,28 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
       ..removeListener(_onSearchChanged)
       ..dispose();
     super.dispose();
+  }
+
+  void _onJumpToMessageRequested() {
+    final target = desktopJumpToMessageNotifier.value;
+    if (target == null || !mounted) return;
+    desktopJumpToMessageNotifier.value = null;
+
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    if (overview == null) return;
+    ChatConversation? targetConv;
+    for (final c in overview.conversations) {
+      if (c.id == target.conversationId) {
+        targetConv = c;
+        break;
+      }
+    }
+    if (targetConv != null) {
+      _selectConversation(
+        targetConv,
+        targetMessageId: target.messageId,
+      );
+    }
   }
 
   void _onSearchChanged() {
@@ -1111,9 +323,14 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   void _selectConversation(
     ChatConversation? conversation, {
     bool openInfoPanel = false,
+    String? targetMessageId,
   }) {
     setState(() {
       _selectedConversationId = conversation?.id;
+      _targetMessageId = targetMessageId;
+      if (targetMessageId != null) {
+        _targetMessageSignal++;
+      }
       _showAdminPanel = false;
       _showTicketsPanel = false;
       if (conversation == null) {
@@ -1149,13 +366,16 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   }
 
   Future<void> _openFavoriteMessages() async {
-    final conversation = await Navigator.of(context).push<ChatConversation>(
+    final result = await Navigator.of(context).push<FavoriteMessageSelectionResult>(
       MaterialPageRoute(builder: (_) => const FavoriteMessagesScreen()),
     );
-    if (!mounted || conversation == null) {
+    if (!mounted || result == null) {
       return;
     }
-    _selectConversation(conversation);
+    _selectConversation(
+      result.conversation,
+      targetMessageId: result.targetMessageId,
+    );
   }
 
   Future<void> _openOrStartDirectConversation(
@@ -1245,8 +465,9 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
 
   Future<void> _deleteConversation(ChatConversation conversation) async {
     final authUser = ref.read(authControllerProvider).valueOrNull;
-    final canDeleteForEveryone =
-        authUser?.role == 'admin' || conversation.createdBy == authUser?.id;
+    final canDeleteForEveryone = authUser?.role == 'admin' ||
+        conversation.createdBy == authUser?.id ||
+        conversation.type == 'direct';
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -1256,9 +477,23 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(
+                Icons.delete_outline_rounded,
+                color: Color(0xFFB91C1C),
+              ),
+              title: const Text(
+                'حذف المحادثة من قائمتي',
+                style: TextStyle(color: Color(0xFFB91C1C)),
+              ),
+              subtitle: const Text('إزالة المحادثة ومسح رسائلها من جهازك'),
+              onTap: () => Navigator.of(context).pop('self'),
+            ),
+            ListTile(
               leading: const Icon(Icons.layers_clear_outlined),
-              title: const Text('مسح المحادثة عندي'),
-              subtitle: const Text('يتم حذف الرسائل عندك فقط'),
+              title: const Text('مسح الرسائل فقط'),
+              subtitle: const Text(
+                'تظل المحادثة في القائمة لكن بدون الرسائل القديمة',
+              ),
               onTap: () => Navigator.of(context).pop('clear'),
             ),
             if (conversation.type != 'direct')
@@ -1273,9 +508,11 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                   Icons.delete_forever_rounded,
                   color: Color(0xFFB91C1C),
                 ),
-                title: const Text(
-                  'حذف نهائي للجميع',
-                  style: TextStyle(color: Color(0xFFB91C1C)),
+                title: Text(
+                  conversation.type == 'direct'
+                      ? 'حذف نهائي للطرفين'
+                      : 'حذف نهائي للجميع',
+                  style: const TextStyle(color: Color(0xFFB91C1C)),
                 ),
                 subtitle: const Text('يحذف المحادثة بالكامل من كل الأطراف'),
                 onTap: () => Navigator.of(context).pop('global'),
@@ -1285,19 +522,67 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
       ),
     );
 
-    if (action == null) {
+    if (action == null || !mounted) {
       return;
     }
 
     try {
+      final overviewController = ref.read(
+        chatOverviewControllerProvider.notifier,
+      );
       if (action == 'leave') {
-        await ref
-            .read(chatOverviewControllerProvider.notifier)
-            .leaveConversation(conversation.id);
+        await overviewController.leaveConversation(conversation.id);
         if (!mounted) return;
         if (_selectedConversationId == conversation.id) {
           _selectConversation(null);
         }
+        return;
+      }
+
+      if (action == 'clear') {
+        await overviewController.clearConversationMessages(conversation.id);
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('تم مسح الرسائل بنجاح')));
+        }
+        return;
+      }
+
+      if (action == 'self') {
+        if (!mounted) return;
+        final shouldDeleteSelf = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            title: const Text('حذف المحادثة'),
+            content: const Text('هل أنت متأكد من حذف هذه المحادثة من قائمتك؟'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB91C1C),
+                ),
+                child: const Text('حذف'),
+              ),
+            ],
+          ),
+        );
+        if (shouldDeleteSelf != true) return;
+        await overviewController.deleteConversation(conversation.id);
+        if (!mounted) return;
+        if (_selectedConversationId == conversation.id) {
+          _selectConversation(null);
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم حذف المحادثة من قائمتك')),
+        );
         return;
       }
 
@@ -1309,8 +594,16 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
-            title: const Text('تأكيد الحذف النهائي'),
-            content: const Text('سيتم حذف المحادثة نهائيًا للجميع.'),
+            title: Text(
+              conversation.type == 'direct'
+                  ? 'تأكيد الحذف النهائي للطرفين'
+                  : 'تأكيد الحذف النهائي للجميع',
+            ),
+            content: Text(
+              conversation.type == 'direct'
+                  ? 'سيتم حذف المحادثة ورسائلها نهائيًا عندك وعند الطرف الآخر.'
+                  : 'سيتم حذف المحادثة ورسائلها نهائيًا للجميع.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
@@ -1318,6 +611,9 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB91C1C),
+                ),
                 child: const Text('حذف نهائي'),
               ),
             ],
@@ -1326,18 +622,17 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
         if (shouldDeleteGlobal != true) {
           return;
         }
-        await ref
-            .read(chatOverviewControllerProvider.notifier)
-            .deleteConversation(conversation.id, deleteForEveryone: true);
-      } else {
-        await ref
-            .read(chatOverviewControllerProvider.notifier)
-            .deleteConversation(conversation.id);
-      }
-
-      if (!mounted) return;
-      if (_selectedConversationId == conversation.id) {
-        _selectConversation(null);
+        await overviewController.deleteConversation(
+          conversation.id,
+          deleteForEveryone: true,
+        );
+        if (!mounted) return;
+        if (_selectedConversationId == conversation.id) {
+          _selectConversation(null);
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('تم الحذف النهائي بنجاح')));
       }
     } catch (error) {
       if (!mounted) return;
@@ -1422,6 +717,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     final chatState = ref.watch(chatOverviewControllerProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
+    ref.watch(desktopMessageRemindersProvider);
     final isDark = themeMode == ThemeMode.dark;
     final colorScheme = Theme.of(context).colorScheme;
     final chatPreferences =
@@ -1484,48 +780,57 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
               child: Column(
                 children: [
                   Expanded(
-                    child: chatState.when(
-                loading: () => const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ShimmerSkeleton(width: 180, height: 14),
-                        SizedBox(height: 10),
-                        ShimmerSkeleton(width: 240, height: 12),
-                      ],
+                    child: Builder(
+                      builder: (context) {
+                        final overview = chatState.valueOrNull;
+                        if (overview != null) {
+                          final allConversations = sortConversationsForSidebar(
+                            overview.conversations,
+                          );
+                          final visibleConversations = _visibleConversations(
+                            allConversations,
+                            authUser?.id ?? '',
+                          );
+                          _ensureSelection(allConversations: allConversations);
+                          final selectedConversation = _selectedConversation(
+                            allConversations,
+                          );
+
+                          return _buildTelegramShell(
+                            authUser: authUser,
+                            authToken: authToken,
+                            usersState: usersState,
+                            overview: overview,
+                            appearance: appearance,
+                            themeMode: themeMode,
+                            isDark: isDark,
+                            visibleConversations: visibleConversations,
+                            selectedConversation: selectedConversation,
+                          );
+                        }
+
+                        if (chatState.hasError) {
+                          return Center(
+                            child: Text(chatState.error.toString()),
+                          );
+                        }
+
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ShimmerSkeleton(width: 180, height: 14),
+                                SizedBox(height: 10),
+                                ShimmerSkeleton(width: 240, height: 12),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ),
-                error: (error, _) => Center(child: Text(error.toString())),
-                data: (overview) {
-                  final allConversations = sortConversationsForSidebar(
-                    overview.conversations,
-                  );
-                  final visibleConversations = _visibleConversations(
-                    allConversations,
-                    authUser?.id ?? '',
-                  );
-                  _ensureSelection(allConversations: allConversations);
-                  final selectedConversation = _selectedConversation(
-                    allConversations,
-                  );
-
-                  return _buildTelegramShell(
-                    authUser: authUser,
-                    authToken: authToken,
-                    usersState: usersState,
-                    overview: overview,
-                    appearance: appearance,
-                    themeMode: themeMode,
-                    isDark: isDark,
-                    visibleConversations: visibleConversations,
-                    selectedConversation: selectedConversation,
-                  );
-                },
-              ),
-            ),
           ],
         ),
       ),
@@ -1636,10 +941,13 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                     );
                   },
                   onRefresh: () async {
-                    await ref
-                        .read(chatOverviewControllerProvider.notifier)
-                        .refresh();
-                    await ref.read(chatFoldersProvider.notifier).refresh();
+                    if (!mounted) return;
+                    final overviewCtrl = ref.read(
+                      chatOverviewControllerProvider.notifier,
+                    );
+                    final foldersCtrl = ref.read(chatFoldersProvider.notifier);
+                    await overviewCtrl.refresh();
+                    await foldersCtrl.refresh();
                   },
                   onOpenAdmin: () {
                     setState(() {
@@ -1676,8 +984,10 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                       .cycleThemeMode(),
                   onTogglePin: (c) =>
                       _updateConversationPreferences(c, isPinned: !c.isPinned),
-                  onToggleMute: (c) =>
-                      _updateConversationPreferences(c, isMuted: !c.isMuted),
+                  onToggleMute: (c) => _updateConversationPreferences(
+                    c,
+                    isMuted: !c.isCurrentlyMuted,
+                  ),
                   onToggleArchive: (c) => _updateConversationPreferences(
                     c,
                     isArchived: !c.isArchived,
@@ -1810,12 +1120,32 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                             },
                           )
                         : selectedConversation == null
-                        ? const _TelegramEmptyState()
+                        ? Column(
+                            children: [
+                              const DesktopDueReminderBanner(),
+                              GlobalDesktopMiniAudioPlayerBar(
+                                onTapSession: (session) {
+                                  if (session.message.conversationId
+                                      .isNotEmpty) {
+                                    desktopJumpToMessageNotifier.value = (
+                                      conversationId:
+                                          session.message.conversationId,
+                                      messageId: session.message.id,
+                                    );
+                                  }
+                                },
+                              ),
+                              const Expanded(child: _TelegramEmptyState()),
+                            ],
+                          )
                         : ChatScreen(
-                            key: ValueKey('chat_${selectedConversation.id}'),
+                            key: ValueKey(
+                              'chat_${selectedConversation.id}_$_targetMessageSignal',
+                            ),
                             conversation: selectedConversation,
                             currentUser: authUser,
                             token: authToken,
+                            initialTargetMessageId: _targetMessageId,
                             searchSignal: _searchSignal,
                             rightPanelVisible: _showRightPanel,
                             onToggleRightPanel: () => setState(
@@ -1889,7 +1219,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
                               onToggleMuted: () =>
                                   _updateConversationPreferences(
                                     selectedConversation,
-                                    isMuted: !selectedConversation.isMuted,
+                                    isMuted:
+                                        !selectedConversation.isCurrentlyMuted,
                                   ),
                               onToggleArchived: () =>
                                   _updateConversationPreferences(

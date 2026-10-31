@@ -295,6 +295,11 @@ class UserPreferencesController extends AsyncNotifier<UserPreferences> {
     final current = state.valueOrNull ?? UserPreferences.defaults();
     await savePreferences(current.copyWith(notificationToneId: value));
   }
+  Future<void> setNotificationDisplayMode(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationDisplayModeId: value));
+  }
+
 }
 
 final apiBaseUrlStoreProvider = Provider<ApiBaseUrlStore>(
@@ -665,7 +670,8 @@ final appBootstrapProvider = FutureProvider<BootstrapStatus>((ref) async {
     try {
       final defaults = await ref
           .read(publicAppSettingsServiceProvider)
-          .fetchDefaults();
+          .fetchDefaults()
+          .timeout(const Duration(seconds: 4));
       final desktopBaseUrl = defaults.desktopBaseUrl?.trim();
       if (desktopBaseUrl != null && desktopBaseUrl.isNotEmpty) {
         await ref
@@ -674,7 +680,7 @@ final appBootstrapProvider = FutureProvider<BootstrapStatus>((ref) async {
       }
     } catch (_) {}
 
-    await ref.read(authControllerProvider.notifier).initializeAuth();
+    await ref.read(authControllerProvider.notifier).initializeAuth().timeout(const Duration(seconds: 6), onTimeout: () {});
 
     return BootstrapStatus.ready;
   } catch (_) {

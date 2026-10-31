@@ -10,92 +10,87 @@ import '../../../../core/network/media_url_resolver.dart';
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../models/chat_models.dart';
 
-/// `just_audio` على Linux غالبًا بدون تسجيل native صحيح في هذا المشروع → كراش عند فتح الشات.
+const Color _kAudioPrimary = Color(0xFF007AFF);
+
 bool _justAudioNativePlaybackSupported() {
   if (kIsWeb) {
-    return true; // Web (including Electron) is fully supported by just_audio
+    return true;
   }
   return Platform.isWindows || Platform.isMacOS;
 }
 
-class ChatAudioAttachmentPlayer extends StatefulWidget {
-  const ChatAudioAttachmentPlayer({
-    super.key,
+class GlobalDesktopVoiceSession {
+  const GlobalDesktopVoiceSession({
     required this.message,
-    required this.token,
+    required this.senderName,
+    required this.url,
   });
 
   final ChatMessage message;
-  final String? token;
-
-  @override
-  State<ChatAudioAttachmentPlayer> createState() =>
-      _ChatAudioAttachmentPlayerState();
+  final String senderName;
+  final String url;
 }
 
-class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
-  AudioPlayer? _player;
-  String? _loadedUrl;
-  String? _loadedToken;
-  String? _electronObjectUrl;
-  bool _loading = false;
-  bool _audioPluginUnavailable = false;
-  double _playbackSpeed = 1.0;
+/// Singleton coordinator that keeps voice notes playing across conversations on Desktop
+/// and powers `GlobalDesktopMiniAudioPlayerBar`.
+class DesktopAudioPlaybackCoordinator {
+  static final ValueNotifier<GlobalDesktopVoiceSession?> activeSessionNotifier =
+      ValueNotifier<GlobalDesktopVoiceSession?>(null);
+  static final ValueNotifier<bool> isPlayingNotifier =
+      ValueNotifier<bool>(false);
+  static final ValueNotifier<Duration> positionNotifier =
+      ValueNotifier<Duration>(Duration.zero);
+  static final ValueNotifier<Duration> durationNotifier =
+      ValueNotifier<Duration>(Duration.zero);
+  static final ValueNotifier<double> speedNotifier =
+      ValueNotifier<double>(1.0);
 
-  @override
-  void initState() {
-    super.initState();
-    if (!_justAudioNativePlaybackSupported()) {
-      _audioPluginUnavailable = true;
-      return;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      try {
-        _player = AudioPlayer();
-      } on MissingPluginException {
-        _audioPluginUnavailable = true;
-        _player = null;
-      } catch (_) {
-        _audioPluginUnavailable = true;
-        _player = null;
-      }
-      if (mounted) {
-        setState(() {});
-      }
-    });
-  }
+  static AudioPlayer? _sharedPlayer;
+  static String? _loadedMessageId;
+  static String? _electronObjectUrl;
+  static bool _unavailable = !_justAudioNativePlaybackSupported();
 
-  @override
-  void didUpdateWidget(covariant ChatAudioAttachmentPlayer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _maybeLoad();
-  }
+  static bool get isUnavailable => _unavailable;
 
-  @override
-  void dispose() {
-    _revokeElectronObjectUrl();
-    _player?.dispose().catchError((_) {});
-    super.dispose();
-  }
-
-  void _revokeElectronObjectUrl() {
-    final objectUrl = _electronObjectUrl;
-    if (objectUrl != null) {
-      web_bridge.revokeObjectUrl(objectUrl);
-      _electronObjectUrl = null;
+  static AudioPlayer? _ensurePlayer() {
+    if (_unavailable) return null;
+    if (_sharedPlayer != null) return _sharedPlayer;
+    try {
+      final player = AudioPlayer();
+      _sharedPlayer = player;
+      player.playerStateStream.listen((state) {
+        isPlayingNotifier.value = state.playing;
+        if (state.processingState == ProcessingState.completed) {
+          player.seek(Duration.zero);
+          player.pause();
+          positionNotifier.value = Duration.zero;
+          isPlayingNotifier.value = false;
+        }
+      });
+      player.positionStream.listen((pos) {
+        positionNotifier.value = pos;
+      });
+      player.durationStream.listen((dur) {
+        if (dur != null && dur > Duration.zero) {
+          durationNotifier.value = dur;
+        }
+      });
+      return player;
+    } on MissingPluginException {
+      _unavailable = true;
+      return null;
+    } catch (_) {
+      _unavailable = true;
+      return null;
     }
   }
 
-  String _fallbackMimeType() {
-    final mime = widget.message.mimeType?.trim().toLowerCase();
+  static String _fallbackMimeType(ChatMessage message) {
+    final mime = message.mimeType?.trim().toLowerCase();
     if (mime != null && mime.startsWith('audio/')) {
       return mime;
     }
-    final fileName = (widget.message.fileName ?? widget.message.fileUrl ?? '')
-        .toLowerCase();
+    final fileName = (message.fileName ?? message.fileUrl ?? '').toLowerCase();
     if (fileName.endsWith('.m4a') || fileName.endsWith('.mp4')) {
       return 'audio/mp4';
     }
@@ -114,57 +109,111 @@ class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
     return 'audio/mpeg';
   }
 
-  Future<void> _maybeLoad() async {
-    final player = _player;
-    final url = resolveMediaUrl(widget.message.fileUrl) ?? '';
-    final token = widget.token ?? '';
-    if (url.isEmpty || token.isEmpty) {
+  static Future<void> toggleOrPlay({
+    required ChatMessage message,
+    required String token,
+  }) async {
+    final player = _ensurePlayer();
+    if (player == null) return;
+    final url = resolveMediaUrl(message.fileUrl) ?? '';
+    if (url.isEmpty || token.isEmpty) return;
+
+    if (_loadedMessageId == message.id &&
+        activeSessionNotifier.value?.message.id == message.id) {
+      if (player.playing) {
+        await player.pause();
+      } else {
+        await player.play();
+      }
       return;
     }
-    if (player == null) {
-      return;
-    }
-    if (_audioPluginUnavailable) {
-      return;
-    }
-    if (_loadedUrl == url && _loadedToken == token) {
-      return;
-    }
-    if (_loading) {
-      return;
-    }
-    _loading = true;
+
     try {
+      activeSessionNotifier.value = GlobalDesktopVoiceSession(
+        message: message,
+        senderName: message.sender?.displayName ?? 'عضو',
+        url: url,
+      );
+      positionNotifier.value = Duration.zero;
+      durationNotifier.value = Duration.zero;
+
       final headers = {'Authorization': 'Bearer $token'};
       if (kIsWeb && web_bridge.isElectron()) {
         final objectUrl = await web_bridge.fetchElectronObjectUrl(
           url: url,
           headers: headers,
-          fallbackMimeType: _fallbackMimeType(),
+          fallbackMimeType: _fallbackMimeType(message),
         );
-        _revokeElectronObjectUrl();
+        if (_electronObjectUrl != null) {
+          web_bridge.revokeObjectUrl(_electronObjectUrl!);
+        }
         _electronObjectUrl = objectUrl;
         await player.setUrl(objectUrl);
       } else {
         await player.setUrl(url, headers: headers);
       }
-      _loadedUrl = url;
-      _loadedToken = token;
-    } on MissingPluginException {
-      _audioPluginUnavailable = true;
-      _loadedUrl = null;
-      _loadedToken = null;
-    } catch (_) {
-      _audioPluginUnavailable = true;
-      _loadedUrl = null;
-      _loadedToken = null;
-    } finally {
-      _loading = false;
-      if (mounted) {
-        setState(() {});
-      }
+      _loadedMessageId = message.id;
+      await player.setSpeed(speedNotifier.value);
+      await player.play();
+    } catch (_) {}
+  }
+
+  static Future<void> toggleCurrent() async {
+    final player = _sharedPlayer;
+    if (player == null || activeSessionNotifier.value == null) return;
+    if (player.playing) {
+      await player.pause();
+    } else {
+      await player.play();
     }
   }
+
+  static Future<void> seek(Duration position) async {
+    final player = _sharedPlayer;
+    if (player == null) return;
+    positionNotifier.value = position;
+    try {
+      await player.seek(position);
+    } catch (_) {}
+  }
+
+  static Future<void> cycleSpeed() async {
+    final current = speedNotifier.value;
+    final double next;
+    if (current == 1.0) {
+      next = 1.5;
+    } else if (current == 1.5) {
+      next = 2.0;
+    } else {
+      next = 1.0;
+    }
+    speedNotifier.value = next;
+    try {
+      await _sharedPlayer?.setSpeed(next);
+    } catch (_) {}
+  }
+
+  static Future<void> stopAndDismiss() async {
+    activeSessionNotifier.value = null;
+    _loadedMessageId = null;
+    isPlayingNotifier.value = false;
+    positionNotifier.value = Duration.zero;
+    durationNotifier.value = Duration.zero;
+    try {
+      await _sharedPlayer?.stop();
+    } catch (_) {}
+  }
+}
+
+/// Sleek Telegram-style floating top bar for Desktop that keeps voice notes playing
+/// even when switching conversations.
+class GlobalDesktopMiniAudioPlayerBar extends StatelessWidget {
+  const GlobalDesktopMiniAudioPlayerBar({
+    super.key,
+    this.onTapSession,
+  });
+
+  final ValueChanged<GlobalDesktopVoiceSession>? onTapSession;
 
   String _formatDuration(Duration value) {
     final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -174,9 +223,205 @@ class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
 
   @override
   Widget build(BuildContext context) {
-    _maybeLoad();
-    final player = _player;
-    if (_audioPluginUnavailable) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ValueListenableBuilder<GlobalDesktopVoiceSession?>(
+      valueListenable: DesktopAudioPlaybackCoordinator.activeSessionNotifier,
+      builder: (context, session, _) {
+        if (session == null) {
+          return const SizedBox.shrink();
+        }
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0F9FF),
+            border: Border(
+              bottom: BorderSide(
+                color: _kAudioPrimary.withValues(alpha: 0.22),
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable:
+                    DesktopAudioPlaybackCoordinator.isPlayingNotifier,
+                builder: (context, isPlaying, _) {
+                  return IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: DesktopAudioPlaybackCoordinator.toggleCurrent,
+                    icon: Icon(
+                      isPlaying
+                          ? Icons.pause_circle_filled_rounded
+                          : Icons.play_circle_fill_rounded,
+                      color: _kAudioPrimary,
+                      size: 26,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      onTap: onTapSession != null
+                          ? () => onTapSession!(session)
+                          : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.graphic_eq_rounded,
+                              size: 15,
+                              color: _kAudioPrimary,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'رسالة صوتية • ${session.senderName}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF0F172A),
+                                ),
+                              ),
+                            ),
+                            if (onTapSession != null) ...[
+                              const SizedBox(width: 6),
+                              const Text(
+                                'الانتقال للرسالة ↗',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: _kAudioPrimary,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ValueListenableBuilder<Duration>(
+                      valueListenable:
+                          DesktopAudioPlaybackCoordinator.positionNotifier,
+                      builder: (context, pos, _) {
+                        return ValueListenableBuilder<Duration>(
+                          valueListenable:
+                              DesktopAudioPlaybackCoordinator.durationNotifier,
+                          builder: (context, total, _) {
+                            final maxMs = total.inMilliseconds <= 0
+                                ? 1.0
+                                : total.inMilliseconds.toDouble();
+                            final progress =
+                                (pos.inMilliseconds / maxMs).clamp(0.0, 1.0);
+                            return Row(
+                              children: [
+                                Expanded(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: progress,
+                                      minHeight: 4,
+                                      backgroundColor: _kAudioPrimary
+                                          .withValues(alpha: 0.16),
+                                      valueColor: const AlwaysStoppedAnimation(
+                                        _kAudioPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  '${_formatDuration(pos)} / ${_formatDuration(total)}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              ValueListenableBuilder<double>(
+                valueListenable: DesktopAudioPlaybackCoordinator.speedNotifier,
+                builder: (context, speed, _) {
+                  return InkWell(
+                    onTap: DesktopAudioPlaybackCoordinator.cycleSpeed,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _kAudioPrimary.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${speed}x',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: _kAudioPrimary,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'إيقاف وإغلاق المشغل',
+                onPressed: DesktopAudioPlaybackCoordinator.stopAndDismiss,
+                icon: const Icon(Icons.close_rounded, size: 18),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ChatAudioAttachmentPlayer extends StatelessWidget {
+  const ChatAudioAttachmentPlayer({
+    super.key,
+    required this.message,
+    required this.token,
+  });
+
+  final ChatMessage message;
+  final String? token;
+
+  String _formatDuration(Duration value) {
+    final minutes = value.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (DesktopAudioPlaybackCoordinator.isUnavailable) {
       final onLinux = !kIsWeb && Platform.isLinux;
       return Container(
         constraints: const BoxConstraints(minWidth: 220, maxWidth: 340),
@@ -187,112 +432,92 @@ class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
           border: Border.all(color: const Color(0xFFDCE6F0)),
         ),
         child: Text(
-          style: TextStyle(color: Colors.black),
+          style: const TextStyle(color: Colors.black),
           onLinux
               ? 'تشغيل الملاحظات الصوتية غير مدعوم حاليًا على لينكس. يمكنك تحميل الملف من قائمة الرسالة إن وُجدت.'
               : 'تشغيل الصوت غير متاح حاليًا على هذا الإصدار من التطبيق.',
         ),
       );
     }
-    if (player == null) {
-      return Container(
-        constraints: const BoxConstraints(minWidth: 220, maxWidth: 340),
-        height: 52,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF6F9FC),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFDCE6F0)),
-        ),
-        child: const SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    }
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 220, maxWidth: 340),
-      padding: const EdgeInsets.all(10),
+    return ValueListenableBuilder<GlobalDesktopVoiceSession?>(
+      valueListenable: DesktopAudioPlaybackCoordinator.activeSessionNotifier,
+      builder: (context, activeSession, _) {
+        final isThisActive = activeSession?.message.id == message.id;
 
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        // border: Border.all(color: const Color(0xFFDCE6F0)),
-      ),
-      child: Row(
-        children: [
-          StreamBuilder<PlayerState>(
-            stream: player.playerStateStream,
-            builder: (context, snapshot) {
-              final playing = snapshot.data?.playing == true;
-              return IconButton(
-                onPressed: widget.token == null || widget.token!.isEmpty
-                    ? null
-                    : () async {
-                        try {
-                          if (playing) {
-                            await player.pause();
-                          } else {
-                            await player.play();
-                          }
-                        } on MissingPluginException {
-                          if (!mounted) {
-                            return;
-                          }
-                          setState(() {
-                            _audioPluginUnavailable = true;
-                          });
-                        }
-                      },
-                icon: Icon(
-                  playing
-                      ? Icons.pause_circle_filled_rounded
-                      : Icons.play_circle_fill_rounded,
-                  size: 30,
-                ),
-              );
-            },
+        return Container(
+          constraints: const BoxConstraints(minWidth: 220, maxWidth: 340),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
           ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black,
-                  ),
-                ),
-                StreamBuilder<Duration>(
-                  stream: player.positionStream,
-                  builder: (context, posSnapshot) {
-                    final position = posSnapshot.data ?? Duration.zero;
-                    return StreamBuilder<Duration?>(
-                      stream: player.durationStream,
-                      builder: (context, durSnapshot) {
-                        final total = durSnapshot.data ?? Duration.zero;
+          child: Row(
+            children: [
+              ValueListenableBuilder<bool>(
+                valueListenable:
+                    DesktopAudioPlaybackCoordinator.isPlayingNotifier,
+                builder: (context, isPlaying, _) {
+                  final playingThis = isThisActive && isPlaying;
+                  return IconButton(
+                    onPressed: token == null || token!.isEmpty
+                        ? null
+                        : () => DesktopAudioPlaybackCoordinator.toggleOrPlay(
+                            message: message,
+                            token: token!,
+                          ),
+                    icon: Icon(
+                      playingThis
+                          ? Icons.pause_circle_filled_rounded
+                          : Icons.play_circle_fill_rounded,
+                      size: 30,
+                      color: const Color(0xFF2A8CFF),
+                    ),
+                  );
+                },
+              ),
+              Expanded(
+                child: ValueListenableBuilder<Duration>(
+                  valueListenable:
+                      DesktopAudioPlaybackCoordinator.positionNotifier,
+                  builder: (context, globalPos, _) {
+                    return ValueListenableBuilder<Duration>(
+                      valueListenable:
+                          DesktopAudioPlaybackCoordinator.durationNotifier,
+                      builder: (context, globalTotal, _) {
+                        final position =
+                            isThisActive ? globalPos : Duration.zero;
+                        final total =
+                            isThisActive ? globalTotal : Duration.zero;
                         final safeMaxMs = total.inMilliseconds <= 0
                             ? 1.0
                             : total.inMilliseconds.toDouble();
                         final value = position.inMilliseconds
                             .clamp(0, safeMaxMs.toInt())
                             .toDouble();
-                        final progressPercent = safeMaxMs > 0 ? value / safeMaxMs : 0.0;
+                        final progressPercent =
+                            safeMaxMs > 0 ? value / safeMaxMs : 0.0;
+
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             GestureDetector(
                               onTapDown: (details) {
-                                if (total.inMilliseconds <= 0) return;
-                                final renderBox = context.findRenderObject() as RenderBox;
-                                final tapPercent = details.localPosition.dx / renderBox.size.width;
-                                player.seek(Duration(milliseconds: (tapPercent * safeMaxMs).round()));
+                                if (!isThisActive ||
+                                    total.inMilliseconds <= 0) {
+                                  return;
+                                }
+                                final renderBox =
+                                    context.findRenderObject() as RenderBox;
+                                final tapPercent =
+                                    details.localPosition.dx /
+                                    renderBox.size.width;
+                                DesktopAudioPlaybackCoordinator.seek(
+                                  Duration(
+                                    milliseconds:
+                                        (tapPercent * safeMaxMs).round(),
+                                  ),
+                                );
                               },
                               child: Container(
                                 height: 35,
@@ -300,7 +525,7 @@ class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
                                 color: Colors.transparent,
                                 child: CustomPaint(
                                   painter: _VoiceWaveformPainter(
-                                    amplitudes: _generateAmplitudes(widget.message.id),
+                                    amplitudes: _generateAmplitudes(message.id),
                                     progress: progressPercent,
                                     playedColor: const Color(0xFF2A8CFF),
                                     unplayedColor: Colors.grey.shade400,
@@ -316,34 +541,37 @@ class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
                                   '${_formatDuration(position)} / ${_formatDuration(total)}',
                                   style: Theme.of(context).textTheme.labelSmall,
                                 ),
-                                InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      if (_playbackSpeed == 1.0) {
-                                        _playbackSpeed = 1.5;
-                                      } else if (_playbackSpeed == 1.5) {
-                                        _playbackSpeed = 2.0;
-                                      } else {
-                                        _playbackSpeed = 1.0;
-                                      }
-                                      player.setSpeed(_playbackSpeed);
-                                    });
-                                  },
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.withOpacity(0.2),
+                                ValueListenableBuilder<double>(
+                                  valueListenable:
+                                      DesktopAudioPlaybackCoordinator
+                                          .speedNotifier,
+                                  builder: (context, speed, _) {
+                                    return InkWell(
+                                      onTap: DesktopAudioPlaybackCoordinator
+                                          .cycleSpeed,
                                       borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      '${_playbackSpeed}x',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                        child: Text(
+                                          '${speed}x',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
+                                    );
+                                  },
                                 ),
                               ],
                             ),
@@ -353,11 +581,11 @@ class _ChatAudioAttachmentPlayerState extends State<ChatAudioAttachmentPlayer> {
                     );
                   },
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -385,10 +613,10 @@ class _VoiceWaveformPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (amplitudes.isEmpty) return;
 
-    final barWidth = 3.0;
-    final spacing = 2.0;
+    const barWidth = 3.0;
+    const spacing = 2.0;
     final totalBars = (size.width / (barWidth + spacing)).floor();
-    
+
     final displayAmplitudes = <double>[];
     if (totalBars > 0) {
       for (var i = 0; i < totalBars; i++) {
@@ -425,9 +653,8 @@ class _VoiceWaveformPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _VoiceWaveformPainter oldDelegate) {
     return oldDelegate.progress != progress ||
-           oldDelegate.amplitudes != amplitudes ||
-           oldDelegate.playedColor != playedColor ||
-           oldDelegate.unplayedColor != unplayedColor;
+        oldDelegate.amplitudes != amplitudes ||
+        oldDelegate.playedColor != playedColor ||
+        oldDelegate.unplayedColor != unplayedColor;
   }
 }
-

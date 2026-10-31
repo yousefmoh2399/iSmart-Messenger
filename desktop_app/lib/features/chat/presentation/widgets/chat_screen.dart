@@ -1,944 +1,3 @@
-// import 'dart:async';
-
-// import 'package:desktop_drop/desktop_drop.dart';
-// import 'package:file_picker/file_picker.dart';
-// import 'package:flutter/material.dart';
-// import 'package:flutter_riverpod/flutter_riverpod.dart';
-// import 'package:open_filex/open_filex.dart';
-
-// import '../../../../shared/models/app_user.dart';
-// import '../../../../shared/providers/providers.dart';
-// import '../../data/chat_socket_service.dart';
-// import '../../models/chat_models.dart';
-// import 'chat_input.dart';
-// import 'chat_ui_helpers.dart';
-// import 'message_bubble.dart';
-
-// class ChatScreen extends ConsumerStatefulWidget {
-//   const ChatScreen({
-//     required this.conversation,
-//     required this.currentUser,
-//     required this.token,
-//     required this.searchSignal,
-//     required this.rightPanelVisible,
-//     required this.onToggleRightPanel,
-//     required this.onConversationDeleted,
-//     super.key,
-//   });
-
-//   final ChatConversation conversation;
-//   final AppUser? currentUser;
-//   final String? token;
-//   final int searchSignal;
-//   final bool rightPanelVisible;
-//   final VoidCallback onToggleRightPanel;
-//   final VoidCallback onConversationDeleted;
-
-//   @override
-//   ConsumerState<ChatScreen> createState() => ChatScreenState();
-// }
-
-// class ChatScreenState extends ConsumerState<ChatScreen> {
-//   final TextEditingController _messageController = TextEditingController();
-//   final TextEditingController _searchController = TextEditingController();
-//   final ScrollController _scrollController = ScrollController();
-//   final FocusNode _searchFocusNode = FocusNode();
-//   final Set<String> _typingUsers = <String>{};
-//   ChatMessage? _replyingTo;
-//   ChatMessage? _editingMessage;
-//   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
-//   Object? _typingDebounce;
-//   bool _draggingFiles = false;
-//   bool _showSearch = false;
-//   int _lastMessageCount = 0;
-
-//   String get _conversationId => widget.conversation.id;
-
-//   @override
-//   void initState() {
-//     super.initState();
-//     _scrollController.addListener(_onScroll);
-//     _searchController.addListener(() {
-//       if (mounted) {
-//         setState(() {});
-//       }
-//     });
-//     _listenToSocket();
-//   }
-
-//   @override
-//   void didUpdateWidget(covariant ChatScreen oldWidget) {
-//     super.didUpdateWidget(oldWidget);
-//     if (oldWidget.conversation.id != widget.conversation.id) {
-//       _typingUsers.clear();
-//       _replyingTo = null;
-//       _editingMessage = null;
-//       _showSearch = false;
-//       _searchController.clear();
-//       _messageController.clear();
-//       _lastMessageCount = 0;
-//       WidgetsBinding.instance.addPostFrameCallback((_) {
-//         _scrollToBottom(jump: true);
-//       });
-//     }
-//     if (oldWidget.searchSignal != widget.searchSignal) {
-//       _openSearch();
-//     }
-//   }
-
-//   @override
-//   void dispose() {
-//     _eventsSubscription?.cancel();
-//     _typingDebounce?.cancel();
-//     _messageController.dispose();
-//     _searchController.dispose();
-//     _searchFocusNode.dispose();
-//     _scrollController.dispose();
-//     super.dispose();
-//   }
-
-//   void _listenToSocket() {
-//     _eventsSubscription?.cancel();
-//     final socketService = ref.read(chatSocketServiceProvider);
-//     _eventsSubscription = socketService.events.listen((event) {
-//       if (!mounted) {
-//         return;
-//       }
-
-//       final conversationId = event.payload['conversationId']?.toString();
-
-//       if (event.type == 'conversation_deleted') {
-//         if (event.payload['conversationId']?.toString() == _conversationId) {
-//           widget.onConversationDeleted();
-//         }
-//         return;
-//       }
-
-//       if (conversationId != _conversationId) {
-//         return;
-//       }
-
-//       if (event.type == 'typing') {
-//         final fullName = event.payload['fullName']?.toString().trim();
-//         if (fullName != null && fullName.isNotEmpty) {
-//           setState(() {
-//             _typingUsers.add(fullName);
-//           });
-//         }
-//         return;
-//       }
-
-//       if (event.type == 'stop_typing') {
-//         final fullName = event.payload['fullName']?.toString().trim();
-//         setState(() {
-//           if (fullName == null || fullName.isEmpty) {
-//             _typingUsers.clear();
-//           } else {
-//             _typingUsers.remove(fullName);
-//           }
-//         });
-//       }
-//     });
-//   }
-
-//   void _onScroll() {
-//     if (!_scrollController.hasClients) {
-//       return;
-//     }
-//     if (_scrollController.position.pixels <= 72) {
-//       ref
-//           .read(
-//             conversationMessagesControllerProvider(_conversationId).notifier,
-//           )
-//           .loadMore();
-//     }
-//   }
-
-//   bool _isNearBottom() {
-//     if (!_scrollController.hasClients) {
-//       return true;
-//     }
-//     final distance =
-//         _scrollController.position.maxScrollExtent - _scrollController.offset;
-//     return distance < 220;
-//   }
-
-//   void _scrollToBottom({bool jump = false}) {
-//     if (!_scrollController.hasClients) {
-//       return;
-//     }
-//     final offset = _scrollController.position.maxScrollExtent;
-//     if (jump) {
-//       _scrollController.jumpTo(offset);
-//       return;
-//     }
-//     _scrollController.animateTo(
-//       offset,
-//       duration: const Duration(milliseconds: 220),
-//       curve: Curves.easeOutCubic,
-//     );
-//   }
-
-//   void _openSearch() {
-//     if (!mounted) {
-//       return;
-//     }
-//     setState(() => _showSearch = true);
-//     WidgetsBinding.instance.addPostFrameCallback((_) {
-//       if (!mounted) {
-//         return;
-//       }
-//       _searchFocusNode.requestFocus();
-//     });
-//   }
-
-//   void _scheduleStopTyping() {
-//     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-//     final conversation =
-//         overview?.conversations
-//             .where((entry) => entry.id == _conversationId)
-//             .firstOrNull ??
-//         widget.conversation;
-//     if (!conversation.isActive) {
-//       return;
-//     }
-//     ref
-//         .read(conversationMessagesControllerProvider(_conversationId).notifier)
-//         .sendTyping();
-//     _typingDebounce?.cancel();
-//     // legacy debounce callback
-//       ref
-//           .read(
-//             conversationMessagesControllerProvider(_conversationId).notifier,
-//           )
-//           .stopTyping();
-//     });
-//   }
-
-//   Future<void> _sendText() async {
-//     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-//     final conversation =
-//         overview?.conversations
-//             .where((entry) => entry.id == _conversationId)
-//             .firstOrNull ??
-//         widget.conversation;
-//     if (!conversation.isActive) {
-//       if (mounted) {
-//         ScaffoldMessenger.of(context).showSnackBar(
-//           const SnackBar(
-//             content: Text(
-//               'This room is disabled by admin. Messaging is read-only.',
-//             ),
-//           ),
-//         );
-//       }
-//       return;
-//     }
-
-//     final content = _messageController.text.trim();
-//     if (content.isEmpty) {
-//       return;
-//     }
-//     final notifier = ref.read(
-//       conversationMessagesControllerProvider(_conversationId).notifier,
-//     );
-//     if (_editingMessage != null) {
-//       await notifier.editMessage(
-//         messageId: _editingMessage!.id,
-//         content: content,
-//       );
-//     } else {
-//       await notifier.sendText(content, replyToMessageId: _replyingTo?.id);
-//     }
-
-//     if (!mounted) {
-//       return;
-//     }
-//     _messageController.clear();
-//     setState(() {
-//       _replyingTo = null;
-//       _editingMessage = null;
-//     });
-//     _scrollToBottom();
-//   }
-
-//   Future<void> _sendFile([String? droppedPath]) async {
-//     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
-//     final conversation =
-//         overview?.conversations
-//             .where((entry) => entry.id == _conversationId)
-//             .firstOrNull ??
-//         widget.conversation;
-//     if (!conversation.isActive) {
-//       if (mounted) {
-//         ScaffoldMessenger.of(context).showSnackBar(
-//           const SnackBar(
-//             content: Text(
-//               'This room is disabled by admin. Messaging is read-only.',
-//             ),
-//           ),
-//         );
-//       }
-//       return;
-//     }
-
-//     String? filePath = droppedPath;
-//     if (filePath == null || filePath.isEmpty) {
-//       final result = await FilePicker.platform.pickFiles();
-//       filePath = result?.files.single.path;
-//     }
-//     if (filePath == null || filePath.isEmpty) {
-//       return;
-//     }
-
-//     await ref
-//         .read(conversationMessagesControllerProvider(_conversationId).notifier)
-//         .sendFile(filePath, replyToMessageId: _replyingTo?.id);
-//     if (!mounted) {
-//       return;
-//     }
-//     setState(() {
-//       _replyingTo = null;
-//       _editingMessage = null;
-//     });
-//     _scrollToBottom();
-//   }
-
-//   Future<void> _openAttachment(ChatMessage message) async {
-//     try {
-//       final localPath = await ref
-//           .read(chatRepositoryProvider)
-//           .downloadAttachment(message);
-//       await OpenFilex.open(localPath);
-//     } catch (error) {
-//       if (!mounted) {
-//         return;
-//       }
-//       ScaffoldMessenger.of(
-//         context,
-//       ).showSnackBar(SnackBar(content: Text(error.toString())));
-//     }
-//   }
-
-//   String? _replyPreviewFor(
-//     ChatMessage message,
-//     Map<String, ChatMessage> messageById,
-//   ) {
-//     final replyId = message.replyToMessageId;
-//     if (replyId == null || replyId.isEmpty) {
-//       return null;
-//     }
-//     final replied = messageById[replyId];
-//     if (replied == null) {
-//       return 'Original message';
-//     }
-//     if (replied.content.isNotEmpty) {
-//       return replied.content;
-//     }
-//     return replied.fileName ?? 'Attachment';
-//   }
-
-//   String _statusText(ChatConversation conversation) {
-//     if (!conversation.isActive) {
-//       return 'Room disabled by admin';
-//     }
-//     if (_typingUsers.isNotEmpty) {
-//       if (_typingUsers.length == 1) {
-//         return '${_typingUsers.first} is typing...';
-//       }
-//       return '${_typingUsers.length} members are typing...';
-//     }
-
-//     if (conversation.type != 'direct') {
-//       return '${conversation.members.length} members';
-//     }
-
-//     final peer = conversation.members
-//         .where((member) => member.id != widget.currentUser?.id)
-//         .cast<ChatDirectoryUser?>()
-//         .firstWhere((_) => true, orElse: () => null);
-
-//     if (peer == null) {
-//       return 'Private chat';
-//     }
-
-//     return formatPresenceLabel(peer);
-//   }
-
-//   Color _statusColor(ChatConversation conversation) {
-//     if (!conversation.isActive) {
-//       return const Color(0xFFF59E0B);
-//     }
-//     if (_typingUsers.isNotEmpty) {
-//       return const Color(0xFF3390EC);
-//     }
-//     if (conversation.type != 'direct') {
-//       return Theme.of(context).colorScheme.onSurfaceVariant;
-//     }
-//     final peer = conversation.members
-//         .where((member) => member.id != widget.currentUser?.id)
-//         .cast<ChatDirectoryUser?>()
-//         .firstWhere((_) => true, orElse: () => null);
-//     if (peer == null) {
-//       return Theme.of(context).colorScheme.onSurfaceVariant;
-//     }
-//     return presenceColor(peer.presenceStatus);
-//   }
-
-//   List<ChatMessage> _applySearch(List<ChatMessage> source) {
-//     final query = _searchController.text.trim().toLowerCase();
-//     if (query.isEmpty) {
-//       return source;
-//     }
-//     return source.where((message) {
-//       final sender = (message.sender?.displayName ?? '').toLowerCase();
-//       final content = message.content.toLowerCase();
-//       final fileName = (message.fileName ?? '').toLowerCase();
-//       return sender.contains(query) ||
-//           content.contains(query) ||
-//           fileName.contains(query);
-//     }).toList();
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final overview = ref.watch(chatOverviewControllerProvider).valueOrNull;
-//     final liveConversation =
-//         overview?.conversations
-//             .where((conversation) => conversation.id == _conversationId)
-//             .firstOrNull ??
-//         widget.conversation;
-//     final messagesValue = ref.watch(
-//       conversationMessagesControllerProvider(_conversationId),
-//     );
-//     final messagesState = messagesValue.valueOrNull;
-//     final messages = messagesState?.messages ?? const <ChatMessage>[];
-//     final isReadOnly = !liveConversation.isActive;
-//     final filteredMessages = _applySearch(messages);
-//     final messageById = <String, ChatMessage>{
-//       for (final message in messages) message.id: message,
-//     };
-
-//     if (messages.length != _lastMessageCount) {
-//       final shouldScroll = _isNearBottom();
-//       _lastMessageCount = messages.length;
-//       if (shouldScroll) {
-//         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-//       }
-//     }
-
-//     return DropTarget(
-//       onDragEntered: (_) => setState(() => _draggingFiles = true),
-//       onDragExited: (_) => setState(() => _draggingFiles = false),
-//       onDragDone: (details) async {
-//         setState(() => _draggingFiles = false);
-//         if (isReadOnly) {
-//           return;
-//         }
-//         for (final file in details.files) {
-//           await _sendFile(file.path);
-//         }
-//       },
-//       child: Stack(
-//         children: [
-//           Column(
-//             children: [
-//               _ChatHeader(
-//                 conversation: liveConversation,
-//                 currentUserId: widget.currentUser?.id ?? '',
-//                 statusText: _statusText(liveConversation),
-//                 statusColor: _statusColor(liveConversation),
-//                 onToggleInfoPanel: widget.onToggleRightPanel,
-//                 rightPanelVisible: widget.rightPanelVisible,
-//                 onOpenSearch: _openSearch,
-//               ),
-//               AnimatedSwitcher(
-//                 duration: const Duration(milliseconds: 180),
-//                 child: _showSearch
-//                     ? _SearchBar(
-//                         key: const ValueKey('search_bar'),
-//                         controller: _searchController,
-//                         focusNode: _searchFocusNode,
-//                         totalMatches: filteredMessages.length,
-//                         onClose: () {
-//                           setState(() {
-//                             _showSearch = false;
-//                             _searchController.clear();
-//                           });
-//                         },
-//                       )
-//                     : const SizedBox.shrink(),
-//               ),
-//               Expanded(
-//                 child: messagesValue.when(
-//                   loading: () =>
-//                       const Center(child: CircularProgressIndicator()),
-//                   error: (error, _) => Center(child: Text(error.toString())),
-//                   data: (state) {
-//                     if (filteredMessages.isEmpty &&
-//                         _searchController.text.isNotEmpty) {
-//                       return const Center(child: Text('No matching messages'));
-//                     }
-//                     if (state.messages.isEmpty) {
-//                       return const Center(child: Text('No messages yet'));
-//                     }
-
-//                     return Scrollbar(
-//                       controller: _scrollController,
-//                       child: ListView.builder(
-//                         controller: _scrollController,
-//                         padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-//                         itemCount:
-//                             filteredMessages.length +
-//                             (state.hasMore || state.isLoadingMore ? 1 : 0),
-//                         itemBuilder: (context, index) {
-//                           final prependLoader =
-//                               state.hasMore || state.isLoadingMore;
-//                           if (prependLoader && index == 0) {
-//                             return Padding(
-//                               padding: const EdgeInsets.only(bottom: 10),
-//                               child: Center(
-//                                 child: state.isLoadingMore
-//                                     ? const SizedBox(
-//                                         width: 20,
-//                                         height: 20,
-//                                         child: CircularProgressIndicator(
-//                                           strokeWidth: 2,
-//                                         ),
-//                                       )
-//                                     : OutlinedButton(
-//                                         onPressed: () {
-//                                           ref
-//                                               .read(
-//                                                 conversationMessagesControllerProvider(
-//                                                   _conversationId,
-//                                                 ).notifier,
-//                                               )
-//                                               .loadMore();
-//                                         },
-//                                         child: const Text(
-//                                           'Load older messages',
-//                                         ),
-//                                       ),
-//                               ),
-//                             );
-//                           }
-
-//                           final actualIndex = index - (prependLoader ? 1 : 0);
-//                           final message = filteredMessages[actualIndex];
-//                           final previous = actualIndex > 0
-//                               ? filteredMessages[actualIndex - 1]
-//                               : null;
-//                           final isMine =
-//                               message.senderId == widget.currentUser?.id;
-//                           final shouldBreakGroup =
-//                               previous == null ||
-//                               previous.senderId != message.senderId ||
-//                               message.createdAt
-//                                       .difference(previous.createdAt)
-//                                       .inMinutes >
-//                                   6;
-
-//                           final senderName =
-//                               message.sender?.displayName.isNotEmpty == true
-//                               ? message.sender!.displayName
-//                               : (isMine ? 'You' : 'Member');
-//                           final senderId =
-//                               message.sender?.id ?? message.senderId;
-//                           final canEdit =
-//                               senderId == widget.currentUser?.id &&
-//                               liveConversation.isActive &&
-//                               !message.hasAttachment &&
-//                               !message.isDeleted;
-//                           final canDelete =
-//                               liveConversation.isActive &&
-//                               (senderId == widget.currentUser?.id ||
-//                                   widget.currentUser?.can(
-//                                         'canDeleteMessages',
-//                                       ) ==
-//                                       true);
-
-//                           return Padding(
-//                             padding: EdgeInsets.only(
-//                               bottom: shouldBreakGroup ? 10 : 2,
-//                             ),
-//                             child: MessageBubble(
-//                               message: message,
-//                               isMine: isMine,
-//                               showAvatar: !isMine && shouldBreakGroup,
-//                               showSenderName:
-//                                   liveConversation.type != 'direct' &&
-//                                   !isMine &&
-//                                   shouldBreakGroup,
-//                               senderName: senderName,
-//                               currentUserId: widget.currentUser?.id ?? '',
-//                               avatarUrl: message.sender?.avatarUrl,
-//                               token: widget.token,
-//                               replyPreview: _replyPreviewFor(
-//                                 message,
-//                                 messageById,
-//                               ),
-//                               highlightQuery:
-//                                   _searchController.text.trim().isEmpty
-//                                   ? null
-//                                   : _searchController.text.trim(),
-//                               onReply: () {
-//                                 if (!liveConversation.isActive) {
-//                                   return;
-//                                 }
-//                                 setState(() {
-//                                   _replyingTo = message;
-//                                   _editingMessage = null;
-//                                 });
-//                               },
-//                               onCopy: () {
-//                                 if (!mounted) {
-//                                   return;
-//                                 }
-//                                 ScaffoldMessenger.of(context).showSnackBar(
-//                                   const SnackBar(
-//                                     content: Text('Message copied'),
-//                                   ),
-//                                 );
-//                               },
-//                               onEdit: canEdit
-//                                   ? () {
-//                                       setState(() {
-//                                         _editingMessage = message;
-//                                         _replyingTo = null;
-//                                         _messageController.text =
-//                                             message.content;
-//                                       });
-//                                     }
-//                                   : null,
-//                               onDelete: canDelete && !message.isDeleted
-//                                   ? () {
-//                                       ref
-//                                           .read(
-//                                             conversationMessagesControllerProvider(
-//                                               _conversationId,
-//                                             ).notifier,
-//                                           )
-//                                           .deleteMessage(message.id);
-//                                     }
-//                                   : null,
-//                               onOpenAttachment: () => _openAttachment(message),
-//                               onReact: (emoji) {
-//                                 if (!liveConversation.isActive) {
-//                                   return Future.value();
-//                                 }
-//                                 return ref
-//                                     .read(
-//                                       conversationMessagesControllerProvider(
-//                                         _conversationId,
-//                                       ).notifier,
-//                                     )
-//                                     .toggleReaction(
-//                                       messageId: message.id,
-//                                       emoji: emoji,
-//                                     );
-//                               },
-//                             ),
-//                           );
-//                         },
-//                       ),
-//                     );
-//                   },
-//                 ),
-//               ),
-//               SizedBox(
-//                 height: 24,
-//                 child: Align(
-//                   alignment: Alignment.centerLeft,
-//                   child: AnimatedSwitcher(
-//                     duration: const Duration(milliseconds: 160),
-//                     child: _typingUsers.isEmpty
-//                         ? const SizedBox.shrink(key: ValueKey('no_typing'))
-//                         : Padding(
-//                             key: const ValueKey('typing'),
-//                             padding: const EdgeInsets.symmetric(horizontal: 16),
-//                             child: Text(
-//                               _typingUsers.length == 1
-//                                   ? '${_typingUsers.first} is typing...'
-//                                   : '${_typingUsers.length} members are typing...',
-//                               style: Theme.of(context).textTheme.bodySmall
-//                                   ?.copyWith(color: const Color(0xFF3390EC)),
-//                             ),
-//                           ),
-//                   ),
-//                 ),
-//               ),
-//               if (isReadOnly)
-//                 Container(
-//                   width: double.infinity,
-//                   margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-//                   padding: const EdgeInsets.symmetric(
-//                     horizontal: 12,
-//                     vertical: 8,
-//                   ),
-//                   decoration: BoxDecoration(
-//                     color: const Color(0xFFFFF7ED),
-//                     borderRadius: BorderRadius.circular(12),
-//                     border: Border.all(color: const Color(0xFFF59E0B)),
-//                   ),
-//                   child: const Text(
-//                     'This room is disabled by admin. You can read previous messages, but sending is disabled.',
-//                     style: TextStyle(
-//                       color: Color(0xFF9A3412),
-//                       fontWeight: FontWeight.w600,
-//                     ),
-//                   ),
-//                 ),
-//               if (_replyingTo != null || _editingMessage != null)
-//                 _ComposerBanner(
-//                   text: _editingMessage != null
-//                       ? 'Editing: ${_editingMessage!.content}'
-//                       : 'Replying to: ${_replyingTo!.content.isNotEmpty ? _replyingTo!.content : (_replyingTo!.fileName ?? 'Attachment')}',
-//                   onClose: () {
-//                     setState(() {
-//                       _replyingTo = null;
-//                       _editingMessage = null;
-//                     });
-//                   },
-//                 ),
-//               ChatInput(
-//                 controller: _messageController,
-//                 isEditing: _editingMessage != null,
-//                 onChanged: (_) => _scheduleStopTyping(),
-//                 onSend: _sendText,
-//                 onAttach: () => _sendFile(),
-//                 enabled: !isReadOnly,
-//               ),
-//             ],
-//           ),
-//           if (_draggingFiles && !isReadOnly)
-//             Positioned.fill(
-//               child: IgnorePointer(
-//                 child: Container(
-//                   margin: const EdgeInsets.all(20),
-//                   decoration: BoxDecoration(
-//                     color: Theme.of(
-//                       context,
-//                     ).colorScheme.primary.withValues(alpha: 0.12),
-//                     borderRadius: BorderRadius.circular(20),
-//                     border: Border.all(
-//                       color: Theme.of(context).colorScheme.primary,
-//                       width: 2,
-//                     ),
-//                   ),
-//                   child: const Center(
-//                     child: Text(
-//                       'Drop files here to send',
-//                       style: TextStyle(
-//                         fontSize: 18,
-//                         fontWeight: FontWeight.w700,
-//                       ),
-//                     ),
-//                   ),
-//                 ),
-//               ),
-//             ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// class _ChatHeader extends StatelessWidget {
-//   const _ChatHeader({
-//     required this.conversation,
-//     required this.currentUserId,
-//     required this.statusText,
-//     required this.statusColor,
-//     required this.onToggleInfoPanel,
-//     required this.rightPanelVisible,
-//     required this.onOpenSearch,
-//   });
-
-//   final ChatConversation conversation;
-//   final String currentUserId;
-//   final String statusText;
-//   final Color statusColor;
-//   final VoidCallback onToggleInfoPanel;
-//   final bool rightPanelVisible;
-//   final VoidCallback onOpenSearch;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     final title = conversation.displayTitle(currentUserId);
-//     final peer = conversation.type == 'direct'
-//         ? conversation.members
-//               .where((member) => member.id != currentUserId)
-//               .cast<ChatDirectoryUser?>()
-//               .firstWhere((_) => true, orElse: () => null)
-//         : null;
-
-//     return Container(
-//       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-//       decoration: BoxDecoration(
-//         color: Theme.of(context).colorScheme.surface,
-//         border: Border(
-//           bottom: BorderSide(
-//             color: Theme.of(context).dividerColor.withValues(alpha: 0.26),
-//           ),
-//         ),
-//       ),
-//       child: Row(
-//         children: [
-//           CircleAvatar(
-//             radius: 20,
-//             backgroundColor: conversationTypeAccent(
-//               conversation.type,
-//             ).withValues(alpha: 0.15),
-//             backgroundImage:
-//                 peer?.avatarUrl != null && peer!.avatarUrl!.isNotEmpty
-//                 ? NetworkImage(peer.avatarUrl!)
-//                 : null,
-//             child: peer?.avatarUrl != null && peer!.avatarUrl!.isNotEmpty
-//                 ? null
-//                 : Icon(
-//                     conversationTypeIcon(conversation.type),
-//                     color: conversationTypeAccent(conversation.type),
-//                   ),
-//           ),
-//           const SizedBox(width: 10),
-//           Expanded(
-//             child: Column(
-//               crossAxisAlignment: CrossAxisAlignment.start,
-//               children: [
-//                 Text(
-//                   title,
-//                   maxLines: 1,
-//                   overflow: TextOverflow.ellipsis,
-//                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-//                     fontWeight: FontWeight.w700,
-//                   ),
-//                 ),
-//                 const SizedBox(height: 2),
-//                 SizedBox(
-//                   height: 16,
-//                   child: Text(
-//                     statusText,
-//                     maxLines: 1,
-//                     overflow: TextOverflow.ellipsis,
-//                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
-//                       color: statusColor,
-//                       fontWeight: FontWeight.w600,
-//                     ),
-//                   ),
-//                 ),
-//               ],
-//             ),
-//           ),
-//           IconButton(
-//             tooltip: 'Search in chat',
-//             onPressed: onOpenSearch,
-//             icon: const Icon(Icons.search_rounded),
-//           ),
-//           IconButton(
-//             tooltip: rightPanelVisible ? 'Hide info' : 'Show info',
-//             onPressed: onToggleInfoPanel,
-//             icon: Icon(
-//               rightPanelVisible
-//                   ? Icons.info_rounded
-//                   : Icons.info_outline_rounded,
-//             ),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// class _SearchBar extends StatelessWidget {
-//   const _SearchBar({
-//     required this.controller,
-//     required this.focusNode,
-//     required this.totalMatches,
-//     required this.onClose,
-//     super.key,
-//   });
-
-//   final TextEditingController controller;
-//   final FocusNode focusNode;
-//   final int totalMatches;
-//   final VoidCallback onClose;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Container(
-//       padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-//       decoration: BoxDecoration(
-//         color: Theme.of(context).colorScheme.surface,
-//         border: Border(
-//           bottom: BorderSide(
-//             color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
-//           ),
-//         ),
-//       ),
-//       child: Row(
-//         children: [
-//           Expanded(
-//             child: TextField(
-//               controller: controller,
-//               focusNode: focusNode,
-//               decoration: const InputDecoration(
-//                 hintText: 'Search messages...',
-//                 prefixIcon: Icon(Icons.search_rounded),
-//               ),
-//             ),
-//           ),
-//           const SizedBox(width: 8),
-//           Text('$totalMatches', style: Theme.of(context).textTheme.labelLarge),
-//           const SizedBox(width: 8),
-//           IconButton(
-//             tooltip: 'Close search',
-//             onPressed: onClose,
-//             icon: const Icon(Icons.close_rounded),
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
-// class _ComposerBanner extends StatelessWidget {
-//   const _ComposerBanner({required this.text, required this.onClose});
-
-//   final String text;
-//   final VoidCallback onClose;
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Container(
-//       width: double.infinity,
-//       margin: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-//       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-//       decoration: BoxDecoration(
-//         color: Theme.of(context).colorScheme.surfaceContainerHighest,
-//         borderRadius: BorderRadius.circular(12),
-//       ),
-//       child: Row(
-//         children: [
-//           Expanded(
-//             child: Text(
-//               text,
-//               maxLines: 2,
-//               overflow: TextOverflow.ellipsis,
-//               style: Theme.of(context).textTheme.bodySmall,
-//             ),
-//           ),
-//           IconButton(
-//             onPressed: onClose,
-//             icon: const Icon(Icons.close_rounded),
-//             visualDensity: VisualDensity.compact,
-//           ),
-//         ],
-//       ),
-//     );
-//   }
-// }
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -963,7 +22,6 @@ import '../../../../shared/providers/providers.dart';
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../../shared/widgets/app_loading_placeholders.dart';
 import '../../../../shared/widgets/button_loading_indicator.dart';
-import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../../../shared/widgets/shimmer_skeleton.dart';
 import '../../../admin/models/update_management_models.dart';
@@ -973,14 +31,20 @@ import '../../models/chat_models.dart';
 import '../../utils/chat_attachment_policy.dart';
 import '../chat_appearance.dart';
 import 'attachment_send_dialogs.dart';
+import 'chat_forward_dialog.dart';
+import 'broadcast_target_picker_dialog.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_animated_reaction_picker.dart';
+import 'chat_audio_attachment_player.dart';
 import 'chat_input.dart';
 import 'chat_ui_helpers.dart';
+import 'desktop_message_actions_dialogs.dart';
+import 'desktop_quick_replies.dart';
 import 'gif_picker_panel.dart';
 import 'message_bubble.dart';
 import 'poll_creator_dialog.dart';
 import 'scheduled_messages_list.dart';
+import 'chat_remote_search_dialog.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({
@@ -992,6 +56,7 @@ class ChatScreen extends ConsumerStatefulWidget {
     required this.onToggleRightPanel,
     required this.onCloseConversation,
     required this.onConversationDeleted,
+    this.initialTargetMessageId,
     super.key,
   });
 
@@ -1003,6 +68,7 @@ class ChatScreen extends ConsumerStatefulWidget {
   final VoidCallback onToggleRightPanel;
   final VoidCallback onCloseConversation;
   final VoidCallback onConversationDeleted;
+  final String? initialTargetMessageId;
 
   @override
   ConsumerState<ChatScreen> createState() => ChatScreenState();
@@ -1017,6 +83,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _messageFocusNode = FocusNode();
   final Set<String> _typingUsers = <String>{};
   final Map<String, String> _typingUsersById = <String, String>{};
   final Map<String, Timer> _typingUserTimersById = <String, Timer>{};
@@ -1024,9 +91,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   final Map<String, GlobalKey> _messageKeys = <String, GlobalKey>{};
   String? _mentionQuery;
   List<ChatDirectoryUser> _mentionResults = [];
+  String? _slashReplyQuery;
   late final ProviderContainer _container;
 
   ChatMessage? _replyingTo;
+  bool _isSendingText = false;
   ChatMessage? _editingMessage;
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
   bool _draggingFiles = false;
@@ -1034,6 +103,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   int _lastMessageCount = 0;
   int _activeSearchMatchIndex = 0;
   String? _focusedMessageId;
+  Timer? _focusedMessageClearTimer;
   bool _isUploadingAttachment = false;
   double _uploadProgress = 0;
   String? _uploadingFileName;
@@ -1042,10 +112,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   String? _downloadingFileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
-  bool _pendingInitialViewportReset = true;
+  Set<String> _broadcastTargetUserIds = <String>{};
   bool _showScrollToBottomButton = false;
-  int _scrollToBottomToken = 0;
+  int _unreadBelowCount = 0;
   String? _lastSeenMessageId;
+  String? _lastLatestMessageId;
   BranchPeerDevice? _remotePeerDevice;
   bool _isResolvingRemotePeer = false;
   Timer? _stopTypingTimer;
@@ -1141,14 +212,21 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _listenToSocket();
     unawaited(_refreshRemotePeerDevice());
     unawaited(_restoreDraft());
+    if (widget.initialTargetMessageId != null) {
+      _focusedMessageId = widget.initialTargetMessageId;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ref.read(activeConversationIdProvider.notifier).state = _conversationId;
-      ref
-          .read(
-            conversationMessagesControllerProvider(_conversationId).notifier,
-          )
-          .markSeen();
+      final controller = ref.read(
+        conversationMessagesControllerProvider(_conversationId).notifier,
+      );
+      controller.markSeen();
+      controller.refresh();
+      _messageFocusNode.requestFocus();
+      if (widget.initialTargetMessageId != null) {
+        _scrollToTargetWithRetry(widget.initialTargetMessageId!);
+      }
     });
   }
 
@@ -1180,23 +258,33 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       unawaited(_restoreDraft());
       _lastMessageCount = 0;
       _activeSearchMatchIndex = 0;
-      _focusedMessageId = null;
-      _pendingInitialViewportReset = true;
+      _focusedMessageId = widget.initialTargetMessageId;
       _showScrollToBottomButton = false;
       _lastSeenMessageId = null;
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _scrollToBottom(jump: true),
-      );
+      _lastLatestMessageId = null;
+      _unreadBelowCount = 0;
+      _messageKeys.clear();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(activeConversationIdProvider.notifier).state = _conversationId;
-        ref
-            .read(
-              conversationMessagesControllerProvider(_conversationId).notifier,
-            )
-            .markSeen();
+        final controller = ref.read(
+          conversationMessagesControllerProvider(_conversationId).notifier,
+        );
+        controller.markSeen();
+        controller.refresh();
+        _messageFocusNode.requestFocus();
+        if (widget.initialTargetMessageId != null) {
+          _scrollToTargetWithRetry(widget.initialTargetMessageId!);
+        }
       });
       unawaited(_refreshRemotePeerDevice());
+    } else if (widget.initialTargetMessageId != null &&
+        widget.initialTargetMessageId != oldWidget.initialTargetMessageId) {
+      _focusedMessageId = widget.initialTargetMessageId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scrollToTargetWithRetry(widget.initialTargetMessageId!);
+      });
     }
     if (oldWidget.searchSignal != widget.searchSignal) {
       _openSearch();
@@ -1231,7 +319,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _messageFocusNode.dispose();
+    _focusedMessageClearTimer?.cancel();
     _scrollController.dispose();
+    _messageKeys.clear();
     super.dispose();
   }
 
@@ -1255,11 +346,25 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _onMessageTextChanged() {
+    final text = _messageController.text;
+    final trimmedLeft = text.trimLeft();
+    if (trimmedLeft.startsWith('/')) {
+      final afterSlash = trimmedLeft.substring(1);
+      if (!afterSlash.contains('\n')) {
+        if (_slashReplyQuery != afterSlash) {
+          setState(() => _slashReplyQuery = afterSlash);
+        }
+      } else if (_slashReplyQuery != null) {
+        setState(() => _slashReplyQuery = null);
+      }
+    } else if (_slashReplyQuery != null) {
+      setState(() => _slashReplyQuery = null);
+    }
+
     if (widget.conversation.type != 'group' &&
         widget.conversation.type != 'department') {
       return;
     }
-    final text = _messageController.text;
     final selection = _messageController.selection;
     if (selection.baseOffset >= 0 && selection.baseOffset <= text.length) {
       final textBeforeCursor = text.substring(0, selection.baseOffset);
@@ -1421,36 +526,45 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     return null;
   }
 
-  Future<void> _refreshRemotePeerDevice() async {
+  Future<BranchPeerDevice?> _refreshRemotePeerDevice() async {
     final peer = _directPeerFromConversation(widget.conversation);
     if (peer == null) {
       if (mounted) {
         setState(() => _remotePeerDevice = null);
       }
-      return;
+      return null;
     }
     if (mounted) {
       setState(() => _isResolvingRemotePeer = true);
     }
     try {
-      final peers = await ref
+      var peers = await ref
           .read(updateManagementRepositoryProvider)
           .listBranchPeerDevices(
-            branchCode: peer.branchCode,
             userId: peer.id,
             includeSelf: true,
           );
-      if (!mounted) {
-        return;
+      if (peers.isEmpty && peer.branchCode.trim().isNotEmpty) {
+        peers = await ref
+            .read(updateManagementRepositoryProvider)
+            .listBranchPeerDevices(
+              branchCode: peer.branchCode,
+              userId: peer.id,
+              includeSelf: true,
+            );
       }
-      setState(() {
-        _remotePeerDevice = peers.isNotEmpty ? peers.first : null;
-      });
+      final resolved = peers.isNotEmpty ? peers.first : null;
+      if (mounted) {
+        setState(() {
+          _remotePeerDevice = resolved;
+        });
+      }
+      return resolved;
     } catch (_) {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() => _remotePeerDevice = null);
       }
-      setState(() => _remotePeerDevice = null);
+      return null;
     } finally {
       if (mounted) {
         setState(() => _isResolvingRemotePeer = false);
@@ -1513,7 +627,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (currentUserId == null || currentUserId.isEmpty) {
       return;
     }
-    final latestMessage = messages.last;
+    final latestMessage = messages.first;
     if (!force &&
         (latestMessage.sender?.id == currentUserId ||
             latestMessage.id == _lastSeenMessageId)) {
@@ -1527,24 +641,27 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _openRemoteDesktopForPeer() async {
-    final peerDevice = _remotePeerDevice;
-    final ip = normalizeIpAddress(peerDevice?.localIp);
+    var peerDevice = _remotePeerDevice;
+    var ip = normalizeIpAddress(peerDevice?.localIp);
     if (ip.isEmpty) {
-      _showChatSnackBar('لا يوجد IP متاح لهذا المستخدم الآن.');
+      _showChatSnackBar('جارٍ جلب عنوان IP لجهاز المستخدم...');
+      peerDevice = await _refreshRemotePeerDevice();
+      ip = normalizeIpAddress(peerDevice?.localIp);
+    }
+    if (ip.isEmpty) {
+      _showChatSnackBar(
+        'لا يوجد عنوان IP مسجل لهذا المستخدم الآن. تأكد من تشغيل التطبيق على جهازه.',
+      );
       return;
     }
 
-    // In Electron (kIsWeb) we cannot use Platform.isWindows or Process.start.
-    // Use the IPC bridge to open mstsc.exe via the main process instead.
     if (kIsWeb) {
       try {
         final ok = await web_bridge.electronOpenRdp(ip);
         if (ok) {
-          _showChatSnackBar('تم فتح Remote Desktop على $ip');
+          _showChatSnackBar('تم فتح Remote Desktop ($ip)');
         } else {
-          _showChatSnackBar(
-            'تعذر فتح Remote Desktop. تأكد إن RDP مفعّل وبورت 3389 مفتوح.',
-          );
+          _showChatSnackBar('تعذر فتح Remote Desktop.');
         }
       } catch (e) {
         _showChatSnackBar('خطأ: $e');
@@ -1553,93 +670,96 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     if (!Platform.isWindows) {
-      _showChatSnackBar('فتح Remote Desktop التلقائي متاح على ويندوز فقط.');
+      _showChatSnackBar('فتح Remote Desktop متاح على ويندوز فقط.');
       return;
     }
     try {
-      final rdpReachable = await _isTcpPortReachable(
-        ip,
-        3389,
-        timeout: const Duration(seconds: 2),
-      );
-      if (!rdpReachable) {
-        _showChatSnackBar(
-          'الجهاز بيرد Ping، لكن Remote Desktop غير متاح. تأكد إن RDP مفعّل وبورت 3389 مفتوح في Firewall.',
-        );
-        return;
-      }
       await Process.start('mstsc.exe', ['/v:$ip'], runInShell: true);
-      _showChatSnackBar('تم فتح Remote Desktop على $ip');
+      _showChatSnackBar('تم فتح Remote Desktop ($ip)');
     } catch (error) {
       _showChatSnackBar(error.toString());
     }
   }
 
-  Future<bool> _isTcpPortReachable(
-    String host,
-    int port, {
-    required Duration timeout,
-  }) async {
-    Socket? socket;
-    try {
-      socket = await Socket.connect(host, port, timeout: timeout);
-      return true;
-    } catch (_) {
-      return false;
-    } finally {
-      socket?.destroy();
-    }
-  }
-
   Future<void> _probeRemotePeerConnectivity() async {
-    final peerDevice = _remotePeerDevice;
-    final ip = normalizeIpAddress(peerDevice?.localIp);
+    var peerDevice = _remotePeerDevice;
+    var ip = normalizeIpAddress(peerDevice?.localIp);
     if (ip.isEmpty) {
-      _showChatSnackBar('لا يوجد IP متاح لهذا المستخدم الآن.');
+      _showChatSnackBar('جارٍ جلب عنوان IP لجهاز المستخدم...');
+      peerDevice = await _refreshRemotePeerDevice();
+      ip = normalizeIpAddress(peerDevice?.localIp);
+    }
+    if (ip.isEmpty) {
+      _showChatSnackBar(
+        'لا يوجد عنوان IP مسجل لهذا المستخدم الآن. تأكد من تشغيل التطبيق على جهازه.',
+      );
       return;
     }
-    final result = await ref
-        .read(lanFileTransferServiceProvider)
-        .probeTargetIp(ip);
-    if (!mounted) {
+
+    if (kIsWeb) {
+      try {
+        final ok = await web_bridge.electronOpenPing(ip);
+        if (ok) {
+          _showChatSnackBar('تم فتح نافذة الفحص (Ping $ip)...');
+        } else {
+          _showChatSnackBar('تعذر فتح نافذة Terminal.');
+        }
+      } catch (e) {
+        _showChatSnackBar('خطأ: $e');
+      }
       return;
     }
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('فحص اتصال الجهاز'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(peerDevice?.displayLabel ?? ip),
-            const SizedBox(height: 10),
-            Text(result.message),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إغلاق'),
-          ),
-        ],
-      ),
-    );
+
+    if (!Platform.isWindows) {
+      _showChatSnackBar('فحص الاتصال عبر Terminal متاح على ويندوز فقط.');
+      return;
+    }
+    try {
+      await Process.start(
+        'cmd.exe',
+        ['/c', 'start', 'cmd.exe', '/k', 'ping', ip],
+        runInShell: true,
+      );
+      _showChatSnackBar('تم فتح نافذة الفحص (Ping $ip)...');
+    } catch (error) {
+      _showChatSnackBar(error.toString());
+    }
   }
 
   // ── Scroll ─────────────────────────────────────────────────────────────────
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final shouldShowButton = !_isNearBottom();
+    final isNear = _isNearBottom();
+    final shouldShowButton = !isNear;
+    if (isNear && mounted) {
+      if (_unreadBelowCount > 0) {
+        setState(() {
+          _unreadBelowCount = 0;
+        });
+      }
+      final currentMessages = ref
+          .read(conversationMessagesControllerProvider(_conversationId))
+          .valueOrNull
+          ?.messages;
+      if (currentMessages != null && currentMessages.isNotEmpty) {
+        _markConversationSeenForLatestMessage(currentMessages);
+      }
+    }
     if (shouldShowButton != _showScrollToBottomButton && mounted) {
       setState(() {
         _showScrollToBottomButton = shouldShowButton;
       });
     }
-    if (_pendingInitialViewportReset) {
-      return;
-    }
-    if (_scrollController.position.pixels <= 72) {
+    final messagesData = ref
+        .read(conversationMessagesControllerProvider(_conversationId))
+        .valueOrNull;
+    final canLoadMore =
+        (messagesData?.hasMore ?? false) &&
+        !(messagesData?.isLoadingMore ?? false);
+    if (!canLoadMore) return;
+
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 300) {
       ref
           .read(
             conversationMessagesControllerProvider(_conversationId).notifier,
@@ -1650,71 +770,32 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   bool _isNearBottom() {
     if (!_scrollController.hasClients) return true;
-    return (_scrollController.position.maxScrollExtent -
-            _scrollController.offset) <
-        220;
+    return _scrollController.position.pixels < 50;
   }
 
   void _scrollToBottom({bool jump = false}) {
-    final token = ++_scrollToBottomToken;
-    if (_showScrollToBottomButton && mounted) {
+    if (!_scrollController.hasClients) return;
+    if (mounted && (_showScrollToBottomButton || _unreadBelowCount > 0)) {
       setState(() {
         _showScrollToBottomButton = false;
+        _unreadBelowCount = 0;
       });
     }
-    unawaited(_settleScrollToBottom(jump: jump, token: token));
-  }
-
-  Future<void> _settleScrollToBottom({
-    required bool jump,
-    required int token,
-    int passes = 8,
-  }) async {
-    for (var i = 0; i < 2; i++) {
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
+    final currentMessages = ref
+        .read(conversationMessagesControllerProvider(_conversationId))
+        .valueOrNull
+        ?.messages;
+    if (currentMessages != null && currentMessages.isNotEmpty) {
+      _markConversationSeenForLatestMessage(currentMessages);
     }
-
-    for (var i = 0; i < passes; i++) {
-      if (!mounted ||
-          !_scrollController.hasClients ||
-          token != _scrollToBottomToken) {
-        return;
-      }
-      final offset = _scrollController.position.maxScrollExtent;
-      if (jump || i > 0) {
-        _scrollController.jumpTo(offset);
-      } else {
-        await _scrollController.animateTo(
-          offset,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-        );
-      }
-      await WidgetsBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 35));
-    }
-  }
-
-  void _resetViewportAfterMessagesLoad() {
-    if (!_pendingInitialViewportReset) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      unawaited(_completeInitialViewportReset());
-    });
-  }
-
-  Future<void> _completeInitialViewportReset() async {
-    final token = ++_scrollToBottomToken;
-    await _settleScrollToBottom(jump: true, token: token, passes: 12);
-    if (!mounted) return;
-    _pendingInitialViewportReset = false;
-    if (_showScrollToBottomButton) {
-      setState(() {
-        _showScrollToBottomButton = false;
-      });
+    if (jump) {
+      _scrollController.jumpTo(0);
+    } else {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+      );
     }
   }
 
@@ -1751,13 +832,77 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     setState(_selectedMessageIds.clear);
   }
 
-  void _scrollToMessageById(String messageId) {
-    final key = _messageKeys[messageId];
-    final targetContext = key?.currentContext;
-    if (targetContext == null) {
+  Future<void> _scrollToTargetWithRetry(String targetId) async {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      if (!mounted) return;
+      await Future.delayed(Duration(milliseconds: attempt == 0 ? 350 : 250));
+      if (!mounted) return;
+
+      final messages = ref
+          .read(conversationMessagesControllerProvider(_conversationId))
+          .valueOrNull
+          ?.messages;
+
+      if (messages != null && messages.isNotEmpty) {
+        final found = messages.any((m) => m.id == targetId);
+        if (found) {
+          if (mounted) {
+            setState(() {
+              _focusedMessageId = targetId;
+            });
+          }
+          await _scrollToMessageById(targetId);
+          _focusedMessageClearTimer?.cancel();
+          _focusedMessageClearTimer = Timer(const Duration(seconds: 4), () {
+            if (mounted && _focusedMessageId == targetId) {
+              setState(() => _focusedMessageId = null);
+            }
+          });
+          return;
+        } else {
+          final hasMore = ref
+              .read(conversationMessagesControllerProvider(_conversationId))
+              .valueOrNull
+              ?.hasMore ?? false;
+          if (hasMore) {
+            await ref
+                .read(conversationMessagesControllerProvider(_conversationId).notifier)
+                .loadMore();
+          } else {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _scrollToMessageById(String messageId) async {
+    var key = _messageKeys[messageId];
+    var targetContext = key?.currentContext;
+    if (targetContext == null && _scrollController.hasClients) {
+      final messages = ref
+          .read(conversationMessagesControllerProvider(_conversationId))
+          .valueOrNull
+          ?.messages;
+      if (messages != null && messages.isNotEmpty) {
+        final targetIndex = messages.indexWhere((m) => m.id == messageId);
+        if (targetIndex >= 0) {
+          final maxExt = _scrollController.position.maxScrollExtent;
+          if (maxExt > 0) {
+            final ratio = (targetIndex / messages.length).clamp(0.0, 1.0);
+            _scrollController.jumpTo(ratio * maxExt);
+            await WidgetsBinding.instance.endOfFrame;
+            if (!mounted) return;
+            key = _messageKeys[messageId];
+            targetContext = key?.currentContext;
+          }
+        }
+      }
+    }
+    if (targetContext == null || !targetContext.mounted) {
       return;
     }
-    Scrollable.ensureVisible(
+    await Scrollable.ensureVisible(
       targetContext,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
@@ -1845,123 +990,39 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     final departments = overview?.departments ?? const <DepartmentSummary>[];
-    if (departments.isEmpty) {
-      return {
-        'broadcastTargets': {
-          'departmentIds': const <String>[],
-          'departmentCodes': const <String>[],
-          'departmentNames': const <String>[],
-        },
-      };
-    }
+    final users = overview?.users ?? const <ChatDirectoryUser>[];
 
-    final selectedIds = <String>{..._broadcastTargetDepartmentIds};
-    var sendToAll = _broadcastSendToAllDepartments || selectedIds.isEmpty;
-    final shouldSend = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('إرسال البث إلى'),
-          content: SizedBox(
-            width: 520,
-            height: 420,
-            child: Column(
-              children: [
-                SwitchListTile.adaptive(
-                  value: sendToAll,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      sendToAll = value;
-                    });
-                  },
-                  title: const Text('كل الأقسام'),
-                  subtitle: const Text(
-                    'أغلقها لاختيار أقسام محددة للرسالة الحالية.',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView(
-                    children: departments
-                        .map(
-                          (department) => CheckboxListTile(
-                            value: sendToAll
-                                ? true
-                                : selectedIds.contains(department.id),
-                            onChanged: sendToAll
-                                ? null
-                                : (value) {
-                                    setDialogState(() {
-                                      if (value == true) {
-                                        selectedIds.add(department.id);
-                                      } else {
-                                        selectedIds.remove(department.id);
-                                      }
-                                    });
-                                  },
-                            title: Text(department.name),
-                            subtitle: Text(
-                              department.description.isEmpty
-                                  ? 'قسم ${department.code}'
-                                  : department.description,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: (!sendToAll && selectedIds.isEmpty)
-                  ? null
-                  : () => Navigator.of(dialogContext).pop(true),
-              child: const Text('إرسال'),
-            ),
-          ],
-        ),
-      ),
+    if (!mounted) return null;
+
+    final result = await BroadcastTargetPickerDialog.show(
+      context,
+      departments: departments,
+      users: users,
+      currentUserId: widget.currentUser?.id ?? '',
+      initialSendToAll: _broadcastSendToAllDepartments,
+      initialDepartmentIds: _broadcastTargetDepartmentIds,
+      initialUserIds: _broadcastTargetUserIds,
+      token: widget.token,
     );
 
-    if (shouldSend != true) {
+    if (result == null) {
       return null;
     }
 
-    _broadcastSendToAllDepartments = sendToAll;
-    _broadcastTargetDepartmentIds = sendToAll ? <String>{} : selectedIds;
-    final selectedDepartments = sendToAll
-        ? const <DepartmentSummary>[]
-        : departments.where((entry) => selectedIds.contains(entry.id)).toList();
-    final selectedDepartmentIds = selectedDepartments
-        .map((entry) => entry.id.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentCodes = selectedDepartments
-        .map((entry) => entry.code.trim().toUpperCase())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
-    final selectedDepartmentNames = selectedDepartments
-        .map((entry) => entry.name.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList(growable: false);
+    final broadcastTargets =
+        result['broadcastTargets'] as Map<String, dynamic>?;
+    if (broadcastTargets != null) {
+      _broadcastSendToAllDepartments =
+          broadcastTargets['sentToAllDepartments'] == true;
+      _broadcastTargetDepartmentIds = Set<String>.from(
+        (broadcastTargets['departmentIds'] as List? ?? []),
+      );
+      _broadcastTargetUserIds = Set<String>.from(
+        (broadcastTargets['userIds'] as List? ?? []),
+      );
+    }
 
-    return {
-      'broadcastTargets': {
-        'departmentIds': sendToAll ? const <String>[] : selectedDepartmentIds,
-        'departmentCodes': sendToAll
-            ? const <String>[]
-            : selectedDepartmentCodes,
-        'departmentNames': sendToAll
-            ? const <String>[]
-            : selectedDepartmentNames,
-      },
-    };
+    return result;
   }
 
   Future<void> _jumpToSearchMessage(
@@ -1987,142 +1048,32 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _showRemoteSearchDialog() async {
-    final notifier = ref.read(
-      conversationMessagesControllerProvider(_conversationId).notifier,
-    );
-    final controller = TextEditingController(text: _searchController.text);
-    List<ChatMessage> results = const <ChatMessage>[];
-    bool isLoading = false;
-    String? errorText;
-
-    Future<void> runSearch(StateSetter setDialogState) async {
-      final query = controller.text.trim();
-      if (query.isEmpty) {
-        setDialogState(() {
-          results = const <ChatMessage>[];
-          errorText = null;
-        });
-        return;
-      }
-
-      setDialogState(() {
-        isLoading = true;
-        errorText = null;
-      });
-
-      try {
-        final result = await notifier.searchMessages(query);
-        setDialogState(() {
-          results = result.messages;
-        });
-      } catch (error) {
-        setDialogState(() {
-          errorText = error.toString();
-        });
-      } finally {
-        setDialogState(() {
-          isLoading = false;
-        });
-      }
-    }
-
+    final query = _searchController.text.trim();
     if (!mounted) {
       return;
     }
 
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('بحث في كل رسائل المحادثة'),
-          content: SizedBox(
-            width: 520,
-            height: 460,
-            child: Column(
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (_) => runSearch(setDialogState),
-                  decoration: InputDecoration(
-                    hintText: 'ابحث حتى في الرسائل غير المحمّلة',
-                    prefixIcon: const Icon(Icons.travel_explore_rounded),
-                    suffixIcon: IconButton(
-                      onPressed: () => runSearch(setDialogState),
-                      icon: const Icon(Icons.arrow_forward_rounded),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Expanded(
-                  child: isLoading
-                      ? const Center(child: AppLoadingIndicator(size: 28))
-                      : errorText != null
-                      ? Center(child: Text(errorText!))
-                      : results.isEmpty
-                      ? Center(
-                          child: Text(
-                            controller.text.trim().isEmpty
-                                ? 'اكتب كلمة أو جملة للبحث داخل كل الرسائل.'
-                                : 'لا توجد نتائج مطابقة.',
-                          ),
-                        )
-                      : ListView.separated(
-                          itemCount: results.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (context, index) {
-                            final message = results[index];
-                            final title =
-                                message.sender?.displayName.isNotEmpty == true
-                                ? message.sender!.displayName
-                                : 'رسالة';
-                            final preview = message.content.isNotEmpty
-                                ? message.content
-                                : (message.fileName ?? 'مرفق');
-                            return ListTile(
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              tileColor: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerLowest,
-                              title: Text(title),
-                              subtitle: Text(
-                                preview,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: Text(
-                                DateFormat(
-                                  'dd/MM • HH:mm',
-                                ).format(message.createdAt.toLocal()),
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                              onTap: () async {
-                                Navigator.of(dialogContext).pop();
-                                await _jumpToSearchMessage(
-                                  message,
-                                  query: controller.text,
-                                );
-                              },
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('إغلاق'),
-            ),
-          ],
-        ),
+      barrierColor: Colors.black54,
+      builder: (dialogContext) => ChatRemoteSearchDialog(
+        conversationId: _conversationId,
+        initialQuery: query.isNotEmpty ? query : null,
+        onSelectMessage: (message) async {
+          Navigator.of(dialogContext).pop();
+          await _jumpToSearchMessage(
+            message,
+            query: _searchController.text.trim().isNotEmpty
+                ? _searchController.text.trim()
+                : null,
+          );
+        },
       ),
     );
+  }
+
+  Future<void> _forwardSingleMessage(ChatMessage message) async {
+    await _forwardMessages([message]);
   }
 
   Future<void> _forwardSelectedMessages(List<ChatMessage> allMessages) async {
@@ -2134,100 +1085,206 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (selectedMessages.isEmpty) {
       return;
     }
+    await _forwardMessages(selectedMessages);
+  }
+
+  Future<void> _forwardMessages(List<ChatMessage> messagesToForward) async {
+    if (messagesToForward.isEmpty) {
+      return;
+    }
 
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     if (overview == null) {
       return;
     }
 
-    final conversations = overview.conversations
-        .where((conversation) => conversation.id != _conversationId)
-        .toList();
-    ChatConversation? target;
-
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('إعادة توجيه الرسائل'),
-        content: SizedBox(
-          width: 420,
-          child: conversations.isEmpty
-              ? const Text('لا توجد محادثات أخرى متاحة لإعادة التوجيه.')
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: conversations.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final conversation = conversations[index];
-                    return ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      tileColor: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerLowest,
-                      title: Text(
-                        conversation.displayTitle(widget.currentUser?.id ?? ''),
-                      ),
-                      subtitle: Text(switch (conversation.type) {
-                        'direct' => 'محادثة مباشرة',
-                        'department' => 'غرفة قسم',
-                        'broadcast' => 'قناة إعلانية',
-                        _ => 'مجموعة',
-                      }),
-                      onTap: () {
-                        target = conversation;
-                        Navigator.of(dialogContext).pop();
-                      },
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('إلغاء'),
-          ),
-        ],
-      ),
+    final targets = await ChatForwardDialog.show(
+      context,
+      currentUserId: widget.currentUser?.id ?? '',
+      currentConversationId: _conversationId,
+      selectedMessageCount: messagesToForward.length,
+      token: widget.token,
     );
 
-    if (target == null) {
+    if (targets == null || targets.isEmpty) {
       return;
     }
 
-    final repository = ref.read(chatRepositoryProvider);
-
+    // Filter restricted attachments
     var skippedRestrictedCount = 0;
-    try {
-      for (final message in selectedMessages) {
-        if (message.hasAttachment && !message.attachmentForwardAllowed) {
-          skippedRestrictedCount++;
-          continue;
-        }
-        final metadata = _forwardMetadataFor(message);
-        await repository.forwardMessage(
-          conversationId: target!.id,
-          sourceMessageId: message.id,
-          metadata: metadata,
-        );
+    final validMessages = <ChatMessage>[];
+    for (final message in messagesToForward) {
+      if (!message.attachmentForwardAllowed || message.metadata?['allowForward'] == false) {
+        skippedRestrictedCount++;
+      } else {
+        validMessages.add(message);
       }
+    }
 
-      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
-      if (!mounted) {
-        return;
-      }
-      _clearSelection();
-      final forwardedCount = selectedMessages.length - skippedRestrictedCount;
-      if (forwardedCount > 0) {
+    if (validMessages.isEmpty) {
+      if (mounted && skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'تمت إعادة توجيه $forwardedCount رسالة إلى ${target!.displayTitle(widget.currentUser?.id ?? '')}',
+              skippedRestrictedCount == 1
+                  ? 'المرسل منع إعادة توجيه هذه الرسالة.'
+                  : 'تم تخطي $skippedRestrictedCount رسائل لأن المرسل منع إعادة توجيهها.',
             ),
           ),
         );
       }
+      return;
+    }
+
+    final repository = ref.read(chatRepositoryProvider);
+    final targetConversationIds = <String>{};
+    final targetNames = <String>[];
+
+    // Show loading indicator
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 12),
+            Text('جاري إعادة توجيه الرسائل...'),
+          ],
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    for (final target in targets) {
+      try {
+        switch (target.kind) {
+          case ForwardTargetKind.conversation:
+            if (target.conversation != null) {
+              targetConversationIds.add(target.conversation!.id);
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.user:
+            if (target.user != null) {
+              // Check if direct conversation already exists in overview
+              ChatConversation? existingDirect;
+              for (final conv in overview.conversations) {
+                if (conv.type == 'direct') {
+                  final isWithTarget = conv.members.any((m) => m.id == target.user!.id);
+                  if (isWithTarget) {
+                    existingDirect = conv;
+                    break;
+                  }
+                }
+              }
+
+              if (existingDirect != null) {
+                targetConversationIds.add(existingDirect.id);
+              } else {
+                final created = await repository.createDirectConversation(target.user!.id);
+                targetConversationIds.add(created.id);
+              }
+              targetNames.add(target.title);
+            }
+            break;
+
+          case ForwardTargetKind.department:
+            if (target.department != null) {
+              final dept = target.department!;
+              // 1. Try to find room conversation for this department
+              ChatConversation? deptRoom;
+              for (final conv in overview.conversations) {
+                if (conv.departmentId == dept.id || conv.id == dept.defaultConversationId) {
+                  deptRoom = conv;
+                  break;
+                }
+              }
+
+              if (deptRoom != null) {
+                targetConversationIds.add(deptRoom.id);
+                targetNames.add('غرفة ${dept.name}');
+              } else {
+                // If no room conversation exists, forward to each user in this department!
+                final deptUsers = overview.users.where((u) =>
+                  (u.departmentId == dept.id || u.departmentIds.contains(dept.id)) &&
+                  u.id != (widget.currentUser?.id ?? '')
+                ).toList();
+
+                if (deptUsers.isEmpty) {
+                  targetNames.add(dept.name);
+                } else {
+                  targetNames.add('${dept.name} (${deptUsers.length} أعضاء)');
+                  for (final member in deptUsers) {
+                    ChatConversation? memberConv;
+                    for (final conv in overview.conversations) {
+                      if (conv.type == 'direct' && conv.members.any((m) => m.id == member.id)) {
+                        memberConv = conv;
+                        break;
+                      }
+                    }
+                    if (memberConv != null) {
+                      targetConversationIds.add(memberConv.id);
+                    } else {
+                      try {
+                        final created = await repository.createDirectConversation(member.id);
+                        targetConversationIds.add(created.id);
+                      } catch (_) {}
+                    }
+                  }
+                }
+              }
+            }
+            break;
+        }
+      } catch (err) {
+        debugPrint('Error resolving forward target: $err');
+      }
+    }
+
+    if (targetConversationIds.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر تحديد وجهة إعادة التوجيه')),
+        );
+      }
+      return;
+    }
+
+    try {
+      for (final convId in targetConversationIds) {
+        for (final message in validMessages) {
+          final metadata = _forwardMetadataFor(message);
+          await repository.forwardMessage(
+            conversationId: convId,
+            sourceMessageId: message.id,
+            metadata: metadata,
+          );
+        }
+      }
+
+      unawaited(ref.read(chatOverviewControllerProvider.notifier).refresh());
+
+      if (!mounted) return;
+      _clearSelection();
+
+      final destinationText = targetNames.length <= 2
+          ? targetNames.join(' و ')
+          : '${targetNames.first} و ${targetNames.length - 1} وجهات أخرى';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تمت إعادة توجيه ${validMessages.length} رسالة إلى $destinationText بنجاح',
+          ),
+          backgroundColor: const Color(0xFF34C759),
+        ),
+      );
+
       if (skippedRestrictedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2238,12 +1295,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         );
       }
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('حدث خطأ أثناء إعادة التوجيه: $error')),
+      );
     }
   }
 
@@ -2313,6 +1368,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     bool isSilent = false,
     DateTime? scheduledFor,
   }) async {
+    if (_isSendingText) return;
+
     if (_isUploadingAttachment) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2357,31 +1414,40 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       conversationMessagesControllerProvider(_conversationId).notifier,
     );
 
-    try {
-      if (_editingMessage != null) {
-        await notifier.editMessage(
-          messageId: _editingMessage!.id,
-          content: content,
-        );
-      } else {
-        await notifier.sendText(
-          content,
-          replyToMessageId: _replyingTo?.id,
-          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
-          isSilent: isSilent,
-          scheduledFor: scheduledFor,
-        );
-      }
+    _isSendingText = true;
+    final wasEditing = _editingMessage != null;
+    final targetEditingMessage = _editingMessage;
+    final targetReplyingTo = _replyingTo;
 
-      if (!mounted) return;
-      _messageController.clear();
-      unawaited(_draftStore.clear(_conversationId));
-      _stopTypingNow();
+    // Immediately clear text field and reset composer state for instant UI response
+    // and to prevent any duplicate sending while network request is in flight.
+    _messageController.clear();
+    unawaited(_draftStore.clear(_conversationId));
+    _stopTypingNow();
+    if (mounted) {
       setState(() {
         _replyingTo = null;
         _editingMessage = null;
       });
       _scrollToBottom();
+      _messageFocusNode.requestFocus();
+    }
+
+    try {
+      if (wasEditing && targetEditingMessage != null) {
+        await notifier.editMessage(
+          messageId: targetEditingMessage.id,
+          content: content,
+        );
+      } else {
+        await notifier.sendText(
+          content,
+          replyToMessageId: targetReplyingTo?.id,
+          metadata: payloadMetadata.isEmpty ? null : payloadMetadata,
+          isSilent: isSilent,
+          scheduledFor: scheduledFor,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2390,63 +1456,307 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         );
       }
+    } finally {
+      _isSendingText = false;
     }
   }
 
+  String _formatDesktopReceiptDateTime(DateTime? dateTime) {
+    if (dateTime == null) return '—';
+    final local = dateTime.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(local.year, local.month, local.day);
+    final diff = today.difference(target).inDays;
+    final timeStr = DateFormat('hh:mm a', 'ar').format(local);
+
+    if (diff == 0) {
+      return 'اليوم في $timeStr';
+    } else if (diff == 1) {
+      return 'أمس في $timeStr';
+    } else {
+      return '${DateFormat('dd/MM/yyyy').format(local)}، $timeStr';
+    }
+  }
+
+  Widget _buildDesktopReceiptGroupCard({
+    required bool isDark,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required List<dynamic> receipts,
+    required String timeField,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF262628) : const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? Colors.white12 : Colors.black12,
+          width: 0.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, color: iconColor, size: 18),
+                const SizedBox(width: 10),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                const Spacer(),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (receipts.isNotEmpty) ...[
+            Divider(height: 0.5, thickness: 0.5, color: isDark ? Colors.white12 : Colors.black12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 160),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: receipts.length,
+                itemBuilder: (context, index) {
+                  final user = receipts[index] as Map<String, dynamic>;
+                  final rawTime = user[timeField] ?? user['seenAt'] ?? user['deliveredAt'];
+                  final itemTime = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
+                  final displayName = user['displayName']?.toString() ?? user['username']?.toString() ?? 'مستخدم';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    child: Row(
+                      children: [
+                        SafeNetworkAvatar(
+                          imageUrl: user['avatarUrl']?.toString() ?? '',
+                          radius: 14,
+                          fallbackText: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            displayName,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        if (itemTime != null)
+                          Text(
+                            _formatDesktopReceiptDateTime(itemTime),
+                            style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.black38),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   void _showMessageDetails(ChatMessage message) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final isDirect = widget.conversation.type == 'direct';
+    final previewText = message.content.isNotEmpty
+        ? message.content
+        : (message.fileName ??
+            (message.messageType == 'image'
+                ? 'صورة'
+                : message.messageType == 'gif'
+                    ? 'ملصق'
+                    : 'رسالة'));
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text(
-          'من شاهد الرسالة',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+        title: Row(
+          children: [
+            Icon(
+              Icons.info_outline_rounded,
+              color: theme.colorScheme.primary,
+              size: 22,
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'معلومات الرسالة',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+          ],
         ),
         content: SizedBox(
-          width: 400,
-          height: 400,
-          child: FutureBuilder<Map<String, dynamic>>(
-            future: ref
-                .read(chatRepositoryProvider)
-                .getReadReceipts(message.id),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('خطأ: ${snapshot.error}'));
-              }
-              final seenBy = snapshot.data?['seenBy'] as List<dynamic>? ?? [];
-              if (seenBy.isEmpty) {
-                return const Center(child: Text('لم يشاهدها أحد بعد.'));
-              }
-              return ListView.builder(
-                itemCount: seenBy.length,
-                itemBuilder: (context, index) {
-                  final user = seenBy[index] as Map<String, dynamic>;
-                  return ListTile(
-                    leading: SafeNetworkAvatar(
-                      imageUrl: user['avatarUrl']?.toString() ?? '',
-                      radius: 18,
-                      fallbackText:
-                          user['displayName']?.toString().isNotEmpty == true
-                          ? user['displayName'].toString()[0].toUpperCase()
-                          : '?',
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.primaryContainer,
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Message preview
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A2A2E) : const Color(0xFFF2F4F7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      previewText,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                     ),
-                    title: Text(user['displayName']?.toString() ?? 'مستخدم'),
-                    subtitle: user['seenAt'] != null
-                        ? Text(
-                            DateTime.parse(
-                              user['seenAt'].toString(),
-                            ).toLocal().toString(),
-                          )
-                        : null,
-                  );
-                },
-              );
-            },
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: Text(
+                        DateFormat('hh:mm a', 'ar').format(message.createdAt.toLocal()),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white38 : Colors.black38,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Receipts fetch
+              Flexible(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: ref
+                      .read(chatRepositoryProvider)
+                      .getReadReceipts(message.id),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: Text('خطأ: ${snapshot.error}')),
+                      );
+                    }
+
+                    final data = snapshot.data ?? {};
+                    final rawSeenBy = data['seenBy'] as List<dynamic>? ?? [];
+                    final rawDeliveredTo = data['deliveredTo'] as List<dynamic>? ?? [];
+
+                    final myId = message.senderId;
+                    final seenBy = rawSeenBy.where((e) {
+                      final uid = (e['_id'] ?? e['userId'] ?? '').toString();
+                      return uid.isNotEmpty && uid != myId;
+                    }).toList();
+
+                    final deliveredTo = rawDeliveredTo.where((e) {
+                      final uid = (e['_id'] ?? e['userId'] ?? '').toString();
+                      return uid.isNotEmpty && uid != myId;
+                    }).toList();
+
+                    DateTime? directReadTime;
+                    if (seenBy.isNotEmpty && seenBy.first['seenAt'] != null) {
+                      directReadTime = DateTime.tryParse(seenBy.first['seenAt'].toString());
+                    }
+                    DateTime? directDeliveredTime;
+                    if (deliveredTo.isNotEmpty && deliveredTo.first['deliveredAt'] != null) {
+                      directDeliveredTime = DateTime.tryParse(deliveredTo.first['deliveredAt'].toString());
+                    }
+                    if (directReadTime != null && directDeliveredTime == null) {
+                      directDeliveredTime = directReadTime;
+                    }
+
+                    final isRead = isDirect ? directReadTime != null : seenBy.isNotEmpty;
+                    final isDelivered = isDirect ? directDeliveredTime != null : deliveredTo.isNotEmpty;
+
+                    return SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildDesktopReceiptGroupCard(
+                            isDark: isDark,
+                            icon: Icons.done_all_rounded,
+                            iconColor: isRead ? const Color(0xFF34B7F1) : const Color(0xFF8E8E93),
+                            title: 'قُرِئت',
+                            subtitle: isDirect
+                                ? (directReadTime != null
+                                    ? _formatDesktopReceiptDateTime(directReadTime)
+                                    : 'لم تُقرأ بعد')
+                                : (seenBy.isNotEmpty
+                                    ? '${seenBy.length} من الأعضاء'
+                                    : 'لم يشاهدها أحد بعد'),
+                            receipts: isDirect ? [] : seenBy,
+                            timeField: 'seenAt',
+                          ),
+                          const SizedBox(height: 10),
+                          _buildDesktopReceiptGroupCard(
+                            isDark: isDark,
+                            icon: Icons.done_all_rounded,
+                            iconColor: isDelivered ? const Color(0xFF8E8E93) : (isDark ? Colors.white24 : Colors.black26),
+                            title: 'سُلِّمت',
+                            subtitle: isDirect
+                                ? (directDeliveredTime != null
+                                    ? _formatDesktopReceiptDateTime(directDeliveredTime)
+                                    : 'لم تُسلّم بعد')
+                                : (deliveredTo.isNotEmpty
+                                    ? '${deliveredTo.length} من الأعضاء'
+                                    : 'لم تُسلّم لأحد بعد'),
+                            receipts: isDirect ? [] : deliveredTo,
+                            timeField: 'deliveredAt',
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF262628) : const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? Colors.white12 : Colors.black12,
+                                width: 0.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.done_rounded, color: Color(0xFF8E8E93), size: 18),
+                                const SizedBox(width: 10),
+                                const Text('أُرسِلت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                const Spacer(),
+                                Text(
+                                  _formatDesktopReceiptDateTime(message.createdAt),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? Colors.white60 : Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -2460,110 +1770,227 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _showScheduledMessages() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: SizedBox(
-            width: 400,
-            height: 600,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'الرسائل المجدولة',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ScheduledMessagesList(
-                    conversationId: widget.conversation.id,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
+    ScheduledMessagesDialog.show(
+      context,
+      conversationId: _conversationId,
+      onMessageSent: () {
+        ref
+            .read(conversationMessagesControllerProvider(_conversationId).notifier)
+            .refresh();
       },
     );
   }
 
   void _showSendOptions() {
-    // In desktop app, we can use showMenu
-    // Need to find the button's position. For simplicity, we could just show a dialog,
-    // or standard dialog if we don't have position. Let's use a dialog to be safe.
+    final hasContent = _messageController.text.trim().isNotEmpty;
+    if (!hasContent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى كتابة نص الرسالة أولاً قبل جدولتها.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final today6PM = DateTime(now.year, now.month, now.day, 18, 0);
+    final tomorrow9AM = DateTime(now.year, now.month, now.day + 1, 9, 0);
+
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('خيارات الإرسال'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.notifications_off_rounded),
-                title: const Text('إرسال بدون صوت'),
-                onTap: () {
-                  Navigator.pop(dialogContext);
-                  _sendText(isSilent: true);
-                },
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        final cardBg = isDark ? const Color(0xFF1E1E20) : Colors.white;
+        final borderColor = isDark ? Colors.white12 : const Color(0xFFE5E5EA);
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Container(
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: borderColor, width: 0.8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-              ListTile(
-                leading: const Icon(Icons.schedule_rounded),
-                title: const Text('جدولة الرسالة'),
-                onTap: () async {
-                  Navigator.pop(dialogContext);
-                  final selectedDate = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (selectedDate != null && mounted) {
-                    final selectedTime = await showTimePicker(
-                      context: context,
-                      initialTime: TimeOfDay.now(),
-                    );
-                    if (selectedTime != null && mounted) {
-                      final scheduledFor = DateTime(
-                        selectedDate.year,
-                        selectedDate.month,
-                        selectedDate.day,
-                        selectedTime.hour,
-                        selectedTime.minute,
-                      );
-                      if (scheduledFor.isAfter(DateTime.now())) {
-                        _sendText(scheduledFor: scheduledFor);
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('يجب أن يكون الوقت في المستقبل.'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(9),
                           ),
+                          child: const Icon(
+                            Icons.send_rounded,
+                            color: Color(0xFF007AFF),
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'خيارات الإرسال المتقدمة',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => Navigator.pop(dialogContext),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1, thickness: 0.6, color: borderColor),
+
+                  // Option 1: Silent send
+                  ListTile(
+                    leading: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.notifications_off_rounded, color: Colors.orange, size: 18),
+                    ),
+                    title: const Text('إرسال بدون صوت', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text('يصل إشعار صامت للمستلم دون إصدار نغمة', style: TextStyle(fontSize: 12)),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(isSilent: true);
+                    },
+                  ),
+
+                  Divider(height: 1, thickness: 0.6, color: borderColor),
+
+                  // Presets title
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'جدولة الرسالة',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Preset 1: +30 minutes
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('بعد 30 دقيقة', style: TextStyle(fontSize: 13.5)),
+                    trailing: Text(
+                      DateFormat('hh:mm a', 'ar').format(now.add(const Duration(minutes: 30))),
+                      style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                    ),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(scheduledFor: now.add(const Duration(minutes: 30)));
+                    },
+                  ),
+
+                  // Preset 2: +1 hour
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.timer_outlined, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('بعد ساعة واحدة', style: TextStyle(fontSize: 13.5)),
+                    trailing: Text(
+                      DateFormat('hh:mm a', 'ar').format(now.add(const Duration(hours: 1))),
+                      style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                    ),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(scheduledFor: now.add(const Duration(hours: 1)));
+                    },
+                  ),
+
+                  // Preset 3: Today 6 PM (if before 5:30 PM)
+                  if (now.isBefore(today6PM.subtract(const Duration(minutes: 30))))
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.nightlight_round, size: 20, color: Color(0xFF007AFF)),
+                      title: const Text('مساء اليوم (06:00 م)', style: TextStyle(fontSize: 13.5)),
+                      onTap: () {
+                        Navigator.pop(dialogContext);
+                        _sendText(scheduledFor: today6PM);
+                      },
+                    ),
+
+                  // Preset 4: Tomorrow 9 AM
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.wb_sunny_rounded, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('صباح الغد (09:00 ص)', style: TextStyle(fontSize: 13.5)),
+                    onTap: () {
+                      Navigator.pop(dialogContext);
+                      _sendText(scheduledFor: tomorrow9AM);
+                    },
+                  ),
+
+                  // Preset 5: Custom Date/Time
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.edit_calendar_rounded, size: 20, color: Color(0xFF007AFF)),
+                    title: const Text('تحديد موعد مخصص...', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    onTap: () async {
+                      Navigator.pop(dialogContext);
+                      final selectedDate = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (selectedDate != null && mounted) {
+                        final selectedTime = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.now(),
                         );
+                        if (selectedTime != null && mounted) {
+                          final scheduledFor = DateTime(
+                            selectedDate.year,
+                            selectedDate.month,
+                            selectedDate.day,
+                            selectedTime.hour,
+                            selectedTime.minute,
+                          );
+                          if (scheduledFor.isAfter(DateTime.now())) {
+                            _sendText(scheduledFor: scheduledFor);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('يجب أن يكون الوقت في المستقبل.'),
+                              ),
+                            );
+                          }
+                        }
                       }
-                    }
-                  }
-                },
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ),
-            ],
+            ),
           ),
         );
       },
@@ -2636,6 +2063,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -2746,6 +2174,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         sendPath: sendDraft.filePath,
         displayName: sendDraft.displayName,
         restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
       );
       return;
     }
@@ -2913,11 +2342,14 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
 
     if (sticker != null && mounted) {
+      final ext = resolveStickerExtension(sticker.bytes, sticker.name);
+      final safeBaseName = p.basenameWithoutExtension(sticker.name);
+      final finalName = '$safeBaseName$ext';
       await _sendPreparedFile(
         conversation: conversation,
-        sendPath: sticker.name,
-        displayName: sticker.name,
-        sourceFileName: sticker.name,
+        sendPath: finalName,
+        displayName: finalName,
+        sourceFileName: finalName,
         fileBytes: sticker.bytes,
         restrictForwardAndDownload: false,
         isSticker: true,
@@ -3462,6 +2894,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     required String sendPath,
     required String displayName,
     required bool restrictForwardAndDownload,
+    String? caption,
     Uint8List? fileBytes,
     String? sourceFileName,
     int? knownFileSize,
@@ -3504,6 +2937,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         'allowDownload': !restrictForwardAndDownload,
         'allowForward': !restrictForwardAndDownload,
       },
+      if (restrictForwardAndDownload)
+        'allowForward': false,
       if (isSticker) 'sticker': true,
     };
 
@@ -3522,6 +2957,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
             sendPath,
             fileBytes: fileBytes,
             sourceFileName: sourceFileName ?? displayName,
+            content: caption,
             replyToMessageId: _replyingTo?.id,
             customFileName: displayName,
             metadata: metadata,
@@ -3663,11 +3099,172 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  Future<void> _openLocalFilePath(String localPath, ChatMessage message) async {
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final success = await web_bridge.openElectronLocalFile(localPath);
+        if (!success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'تعذر فتح الملف مباشرة. يمكنك نقله أو حفظه في مجلد آخر.',
+              ),
+              action: SnackBarAction(
+                label: 'نقل / حفظ في...',
+                onPressed: () => _saveAttachmentAs(message),
+              ),
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    // Native Flutter Desktop
+    final openResult = await OpenFilex.open(localPath);
+    if (openResult.type != ResultType.done) {
+      bool openedByFallback = false;
+      if (!kIsWeb && Platform.isWindows) {
+        try {
+          final result = await Process.run(
+            'cmd',
+            ['/c', 'start', '', localPath],
+            runInShell: true,
+          );
+          openedByFallback = (result.exitCode == 0);
+        } catch (_) {}
+      }
+      if (!openedByFallback && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              openResult.type == ResultType.noAppToOpen
+                  ? 'لا يوجد برنامج مثبت لفتح هذا الملف (${p.extension(localPath)}).'
+                  : 'تعذر فتح الملف: ${openResult.message}',
+            ),
+            action: SnackBarAction(
+              label: 'نقل / حفظ في...',
+              onPressed: () => _saveAttachmentAs(message),
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveAttachmentAs(ChatMessage message) async {
+    if (!message.attachmentDownloadAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('غير مسموح بحفظ هذا المرفق.')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final suggestedName = p.basename(message.fileName ?? 'attachment');
+
+      if (kIsWeb) {
+        if (web_bridge.isElectron()) {
+          final bytes = await repo.fetchAttachmentBytes(message);
+          final savedPath = await web_bridge.downloadBytes(
+            bytes: bytes,
+            fileName: suggestedName,
+            preferredDirectoryPath: null,
+          );
+          if (savedPath != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('تم حفظ $suggestedName بنجاح'),
+                action: SnackBarAction(
+                  label: 'فتح الملف',
+                  onPressed: () => web_bridge.openElectronLocalFile(savedPath),
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        await repo.downloadAttachment(message);
+        return;
+      }
+
+      var localPath = await repo.getCachedAttachmentPath(message);
+      if (localPath == null) {
+        if (mounted) {
+          setState(() {
+            _isDownloadingAttachment = true;
+            _downloadProgress = 0;
+            _downloadingFileName = message.fileName ?? 'مرفق';
+          });
+        }
+        localPath = await repo.downloadAttachment(
+          message,
+          onProgress: (received, total) {
+            if (!mounted) return;
+            setState(() {
+              _downloadProgress = total <= 0
+                  ? 0
+                  : (received / total).clamp(0, 1).toDouble();
+            });
+          },
+        );
+      }
+
+      final destinationPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'نقل أو حفظ الملف',
+        fileName: suggestedName,
+        lockParentWindow: true,
+      );
+      if (destinationPath == null || destinationPath.trim().isEmpty) {
+        return;
+      }
+      await File(localPath).copy(destinationPath);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم حفظ $suggestedName بنجاح'),
+            action: SnackBarAction(
+              label: 'فتح الملف',
+              onPressed: () => OpenFilex.open(destinationPath),
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.toString().trim().isEmpty
+                ? 'تعذر حفظ الملف حاليًا'
+                : error.toString(),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted && _isDownloadingAttachment) {
+        setState(() {
+          _isDownloadingAttachment = false;
+          _downloadProgress = 0;
+          _downloadingFileName = null;
+        });
+      }
+    }
+  }
+
   Future<void> _downloadAttachment(
     ChatMessage message, {
     bool openAfterDownload = false,
     bool forceSaveAs = false,
   }) async {
+    if (forceSaveAs) {
+      return _saveAttachmentAs(message);
+    }
+
     if (!message.attachmentDownloadAllowed) {
       if (!mounted) {
         return;
@@ -3706,7 +3303,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         return;
       }
 
-      if (kIsWeb) {
+      if (kIsWeb && !web_bridge.isElectron()) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -3717,27 +3314,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         return;
       }
 
-      if (forceSaveAs) {
-        final suggestedName = p.basename(message.fileName ?? 'attachment');
-        final destinationPath = await FilePicker.platform.saveFile(
-          dialogTitle: 'حفظ الملف',
-          fileName: suggestedName,
-          lockParentWindow: true,
-        );
-        if (destinationPath == null || destinationPath.trim().isEmpty) {
-          return;
-        }
-        await File(localPath).copy(destinationPath);
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم حفظ ${message.fileName ?? 'المرفق'} بنجاح'),
-          ),
-        );
-      } else if (openAfterDownload) {
-        await OpenFilex.open(localPath);
+      if (openAfterDownload) {
+        await _openLocalFilePath(localPath, message);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -3766,20 +3344,51 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
   }
-
   Future<void> _saveReceivedSticker(ChatMessage message) async {
-    if (!message.attachmentDownloadAllowed) return;
+    if (!message.attachmentDownloadAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('غير مسموح بحفظ هذا المرفق.')),
+        );
+      }
+      return;
+    }
     try {
-      final path = await ref
+      Uint8List? bytes;
+      try {
+        final path = await ref
+            .read(chatRepositoryProvider)
+            .downloadAttachment(message);
+        final file = File(path);
+        if (await file.exists()) {
+          bytes = await file.readAsBytes();
+        }
+      } catch (_) {}
+
+      bytes ??= await ref
           .read(chatRepositoryProvider)
-          .downloadAttachment(message);
+          .fetchAttachmentBytes(message);
+
+      if (bytes.isEmpty) {
+        throw Exception('ملف الملصق فارغ');
+      }
+
+      final ext = resolveStickerExtension(bytes, message.fileName);
+      final safeName = message.fileName != null
+          ? '${p.basenameWithoutExtension(message.fileName!)}$ext'
+          : 'sticker_${message.id.substring(0, 6)}$ext';
+
       await saveLocalSticker(
-        name: message.fileName ?? 'sticker.png',
-        bytes: await File(path).readAsBytes(),
+        name: safeName,
+        bytes: bytes,
+        repository: ref.read(chatRepositoryProvider),
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم حفظ الملصق في مكتبتك.')),
+          const SnackBar(
+            content: Text('تمت إضافة الملصق إلى مكتبة ملصقاتك بنجاح! ⭐'),
+            duration: Duration(seconds: 2),
+          ),
         );
       }
     } catch (_) {
@@ -3791,7 +3400,21 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  Future<void> _openAttachment(ChatMessage message) {
+  Future<void> _retryMessage(ChatMessage message) async {
+    try {
+      await ref
+          .read(
+            conversationMessagesControllerProvider(
+              _conversationId,
+            ).notifier,
+          )
+          .retryMessage(message);
+    } catch (_) {
+      // Handled and marked as failed by ConversationMessagesController
+    }
+  }
+
+  Future<void> _openAttachment(ChatMessage message) async {
     if (message.isImageMessage) {
       return _showImagePreview(message);
     }
@@ -3801,11 +3424,16 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           const SnackBar(content: Text('هذا الملف للعرض فقط داخل الشات.')),
         );
       }
-      return Future<void>.value();
+      return;
     }
-    return _downloadAttachment(message, openAfterDownload: true);
+    final repo = ref.read(chatRepositoryProvider);
+    final cachedPath = await repo.getCachedAttachmentPath(message);
+    if (cachedPath != null && cachedPath.isNotEmpty) {
+      await _openLocalFilePath(cachedPath, message);
+      return;
+    }
+    await _downloadAttachment(message, openAfterDownload: true);
   }
-
   Future<void> _printAttachment(ChatMessage message) async {
     if (!message.isPrintableAttachment) {
       if (mounted) {
@@ -3873,21 +3501,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
             .valueOrNull
             ?.messages ??
         const <ChatMessage>[];
-    final groupId = message.metadata?['mediaGroupId']?.toString();
-    final images = groupId == null
-        ? <ChatMessage>[message]
-        : allMessages
-              .where(
-                (m) =>
-                    m.isImageMessage &&
-                    m.metadata?['mediaGroupId']?.toString() == groupId,
-              )
-              .toList();
+    final images = _albumFor(message, allMessages);
     final initialIndex = images
         .indexWhere((m) => m.id == message.id)
         .clamp(0, images.length - 1)
         .toInt();
-        await showDialog<void>(
+    await showDialog<void>(
       context: context,
       builder: (context) => _FullscreenImageViewer(
         images: images,
@@ -3920,13 +3539,15 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
       return <ChatMessage>[message];
     }
-    return messages
+    final album = messages
         .where(
           (item) =>
               item.isImageMessage &&
               item.metadata?['mediaGroupId']?.toString() == groupId,
         )
         .toList();
+    album.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return album;
   }
 
   void _startOverlayDownload(
@@ -3936,8 +3557,22 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     Navigator.of(overlayContext).pop();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(_downloadAttachment(message, forceSaveAs: true));
+      unawaited(_saveAttachmentAs(message));
     });
+  }
+
+  String _formatDateDivider(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final difference = today.difference(target).inDays;
+    if (difference == 0) {
+      return 'اليوم';
+    } else if (difference == 1) {
+      return 'أمس';
+    } else {
+      return DateFormat('yyyy/MM/dd').format(date);
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -4454,14 +4089,44 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     };
 
     if (messages.length != _lastMessageCount) {
-      final shouldScroll = _isNearBottom();
+      final isInitial = _lastMessageCount == 0;
+      final isNear = _isNearBottom();
+      final shouldScroll = !isInitial && isNear;
+      final currentLatestMessageId =
+          messages.isNotEmpty ? messages.first.id : null;
+
+      if (!isInitial &&
+          !isNear &&
+          currentLatestMessageId != null &&
+          currentLatestMessageId != _lastLatestMessageId) {
+        var newMessagesAtBottom = 0;
+        if (_lastLatestMessageId != null) {
+          for (final msg in messages) {
+            if (msg.id == _lastLatestMessageId) break;
+            newMessagesAtBottom++;
+          }
+        } else {
+          newMessagesAtBottom = 1;
+        }
+        if (newMessagesAtBottom > 0) {
+          _unreadBelowCount += newMessagesAtBottom;
+        }
+      }
+      _lastLatestMessageId = currentLatestMessageId;
       _lastMessageCount = messages.length;
-      _markConversationSeenForLatestMessage(messages);
-      if (shouldScroll) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+
+      if (isNear) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _markConversationSeenForLatestMessage(messages);
+          if (shouldScroll) {
+            _scrollToBottom();
+          }
+        });
       }
     }
 
+    ref.watch(desktopMessageRemindersProvider);
     final chatPreferences =
         widget.currentUser?.chatPreferences ?? ChatPreferences.defaults;
     final appearance = ChatAppearanceCatalog.resolveAppearance(
@@ -4519,12 +4184,28 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 hasRemotePeerDevice: normalizeIpAddress(
                   _remotePeerDevice?.localIp,
                 ).isNotEmpty,
+                remotePeerDevice: _remotePeerDevice,
                 isResolvingRemotePeer: _isResolvingRemotePeer,
                 selectionMode: _selectionMode,
                 onClearSelection: _clearSelection,
                 onForwardSelected: () => _forwardSelectedMessages(messages),
                 isDark: isDark,
                 appearance: appearance,
+              ),
+
+              const DesktopDueReminderBanner(),
+
+              GlobalDesktopMiniAudioPlayerBar(
+                onTapSession: (session) {
+                  if (session.message.conversationId == _conversationId) {
+                    _scrollToMessageById(session.message.id);
+                  } else if (session.message.conversationId.isNotEmpty) {
+                    desktopJumpToMessageNotifier.value = (
+                      conversationId: session.message.conversationId,
+                      messageId: session.message.id,
+                    );
+                  }
+                },
               ),
 
               if (liveConversation.pinnedMessage?.content.trim().isNotEmpty ==
@@ -4663,12 +4344,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               // ── Messages ─────────────────────────────────────────────────
               Expanded(
                 child: messagesValue.when(
+                  skipLoadingOnReload: true,
+                  skipLoadingOnRefresh: true,
                   loading: () => const _DesktopChatMessagesLoadingSkeleton(),
                   error: (error, _) => Center(child: Text(error.toString())),
                   data: (state) {
-                    if (state.messages.isNotEmpty) {
-                      _resetViewportAfterMessagesLoad();
-                    }
                     if (filteredMessages.isEmpty &&
                         _searchController.text.isNotEmpty) {
                       return Center(
@@ -4698,6 +4378,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                           child: SelectionArea(
                             child: ListView.builder(
                               controller: _scrollController,
+                              reverse: true,
+                              cacheExtent: 500.0,
                               padding: const EdgeInsets.fromLTRB(
                                 20,
                                 14,
@@ -4710,11 +4392,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       ? 1
                                       : 0),
                               itemBuilder: (context, index) {
-                                final prependLoader =
-                                    state.hasMore || state.isLoadingMore;
-                                if (prependLoader && index == 0) {
+                                if (index >= renderedMessages.length) {
                                   return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.only(top: 10, bottom: 10),
                                     child: Center(
                                       child: state.isLoadingMore
                                           ? const SizedBox(
@@ -4737,31 +4417,34 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                   );
                                 }
 
-                                final actualIndex =
-                                    index - (prependLoader ? 1 : 0);
-                                final message = renderedMessages[actualIndex];
-                                final previous = actualIndex > 0
-                                    ? renderedMessages[actualIndex - 1]
+                                final message = renderedMessages[index];
+                                final older = index < renderedMessages.length - 1
+                                    ? renderedMessages[index + 1]
                                     : null;
-                                final isMine =
-                                    message.sender?.id ==
-                                    widget.currentUser?.id;
+                                final senderId =
+                                    message.sender?.id ?? message.senderId;
+                                final olderSenderId =
+                                    older?.sender?.id ?? older?.senderId;
+                                final isMine = widget.currentUser?.id != null &&
+                                    (senderId == widget.currentUser!.id ||
+                                        message.sender?.id == widget.currentUser!.id);
                                 final shouldBreakGroup =
-                                    previous == null ||
-                                    previous.sender?.id != message.sender?.id ||
+                                    older == null ||
+                                    olderSenderId != senderId ||
                                     message.createdAt
-                                            .difference(previous.createdAt)
+                                            .difference(older.createdAt)
                                             .inMinutes >
                                         6;
 
-                                final next =
-                                    actualIndex < renderedMessages.length - 1
-                                    ? renderedMessages[actualIndex + 1]
+                                final newer = index > 0
+                                    ? renderedMessages[index - 1]
                                     : null;
+                                final newerSenderId =
+                                    newer?.sender?.id ?? newer?.senderId;
                                 final isLastInGroup =
-                                    next == null ||
-                                    next.sender?.id != message.sender?.id ||
-                                    next.createdAt
+                                    newer == null ||
+                                    newerSenderId != senderId ||
+                                    newer.createdAt
                                             .difference(message.createdAt)
                                             .inMinutes >
                                         6;
@@ -4771,8 +4454,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                         true
                                     ? message.sender!.displayName
                                     : (isMine ? 'أنت' : 'عضو');
-                                final senderId =
-                                    message.sender?.id ?? message.senderId;
                                 final canEdit =
                                     senderId == widget.currentUser?.id &&
                                     !isReadOnly &&
@@ -4786,15 +4467,77 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                             ) ==
                                             true);
 
+                                final messageLocalDate =
+                                    message.createdAt.toLocal();
+                                final olderLocalDate =
+                                    older?.createdAt.toLocal();
+                                final showDate = olderLocalDate == null ||
+                                    olderLocalDate.day !=
+                                        messageLocalDate.day ||
+                                    olderLocalDate.month !=
+                                        messageLocalDate.month ||
+                                    olderLocalDate.year !=
+                                        messageLocalDate.year;
+
+                                final stableItemKey =
+                                    message.metadata?['clientMessageId']
+                                        ?.toString() ??
+                                    message.id;
+                                final itemGlobalKey = _messageKeys.putIfAbsent(
+                                  stableItemKey,
+                                  GlobalKey.new,
+                                );
+                                _messageKeys[message.id] = itemGlobalKey;
+
                                 return Padding(
-                                  key: _messageKeys.putIfAbsent(
-                                    message.id,
-                                    GlobalKey.new,
-                                  ),
+                                  key: itemGlobalKey,
                                   padding: EdgeInsets.only(
                                     bottom: isLastInGroup ? 10 : 2,
                                   ),
-                                  child: SwipeTo(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      if (showDate)
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 8,
+                                          ),
+                                          child: Center(
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 12,
+                                                vertical: 4,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isDark
+                                                    ? const Color(0xFF1E293B)
+                                                    : Colors.grey.shade200,
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                border: Border.all(
+                                                  color: isDark
+                                                      ? const Color(0xFF334155)
+                                                      : Colors.grey.shade300,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                _formatDateDivider(
+                                                  messageLocalDate,
+                                                ),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: isDark
+                                                      ? Colors.white70
+                                                      : Colors.black87,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      SwipeTo(
                                     onRightSwipe: (details) {
                                       if (_selectionMode) return;
                                       if (isReadOnly) return;
@@ -4811,8 +4554,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                         _editingMessage = null;
                                       });
                                     },
-                                    child: MessageBubble(
-                                      message: message,
+                                    child: RepaintBoundary(
+                                      child: MessageBubble(
+                                        message: message,
                                       albumMessages: _albumFor(
                                         message,
                                         filteredMessages,
@@ -4850,19 +4594,47 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       isActiveSearchMatch:
                                           activeSearchMessageId == message.id,
                                       chatPreferences: chatPreferences,
-                                      onShowDetails:
-                                          liveConversation.type != 'direct' &&
-                                              isMine
-                                          ? () => _showMessageDetails(message)
-                                          : null,
+                                      onShowDetails: isMine ? () => _showMessageDetails(message) : null,
                                       onTap: _selectionMode
                                           ? () => _toggleMessageSelection(
                                               message.id,
                                             )
                                           : null,
-                                      onLongPress: () =>
-                                          _toggleMessageSelection(message.id),
-                                      onReply: () {
+                                       onLongPress: () =>
+                                           _toggleMessageSelection(message.id),
+                                       onForward: () =>
+                                           _forwardSingleMessage(message),
+                                       onRemindMessage: !message.isDeleted
+                                           ? () =>
+                                                 showDesktopMessageReminderDialog(
+                                                   context,
+                                                   conversationId:
+                                                       _conversationId,
+                                                   conversationTitle:
+                                                       liveConversation
+                                                           .displayTitle(
+                                                             widget.currentUser
+                                                                     ?.id ??
+                                                                 '',
+                                                           ),
+                                                   message: message,
+                                                 )
+                                           : null,
+                                       onConvertToTicket: !message.isDeleted
+                                           ? () =>
+                                                 showDesktopMessageToTicketDialog(
+                                                   context,
+                                                   conversationTitle:
+                                                       liveConversation
+                                                           .displayTitle(
+                                                             widget.currentUser
+                                                                     ?.id ??
+                                                                 '',
+                                                           ),
+                                                   message: message,
+                                                 )
+                                           : null,
+                                       onReply: () {
                                         if (_selectionMode) return;
                                         if (isReadOnly) return;
                                         setState(() {
@@ -4888,7 +4660,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                                   message.content;
                                             })
                                           : null,
-                                      onDelete: canDelete && !message.isDeleted
+                                      onDelete: (canDelete || message.isFailed) &&
+                                          !message.isDeleted
                                           ? () => ref
                                                 .read(
                                                   conversationMessagesControllerProvider(
@@ -4938,7 +4711,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                             )
                                           : null,
                                       onSaveSticker:
-                                          message.isStickerMessage &&
+                                          (message.isStickerMessage ||
+                                                  message.isImageMessage) &&
                                               message.attachmentDownloadAllowed
                                           ? () => _saveReceivedSticker(message)
                                           : null,
@@ -4961,10 +4735,16 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               emoji: emoji,
                                             );
                                       },
+                                      onRetry: message.isFailed
+                                          ? () => _retryMessage(message)
+                                          : null,
+                                      ),
                                     ),
                                   ),
-                                );
-                              },
+                                ],
+                              ),
+                            );
+                          },
                             ),
                           ),
                         ),
@@ -4981,40 +4761,44 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                               opacity: _showScrollToBottomButton ? 1 : 0,
                               child: IgnorePointer(
                                 ignoring: !_showScrollToBottomButton,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () => _scrollToBottom(),
-                                    borderRadius: BorderRadius.circular(999),
-                                    child: Ink(
-                                      width: 46,
-                                      height: 46,
-                                      decoration: BoxDecoration(
-                                        color: isDark
-                                            ? const Color(0xFF202B36)
-                                            : Colors.white,
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: isDark ? 0.28 : 0.14,
+                                child: Badge(
+                                  isLabelVisible: _unreadBelowCount > 0,
+                                  label: Text('$_unreadBelowCount'),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => _scrollToBottom(),
+                                      borderRadius: BorderRadius.circular(999),
+                                      child: Ink(
+                                        width: 46,
+                                        height: 46,
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? const Color(0xFF202B36)
+                                              : Colors.white,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: isDark ? 0.28 : 0.14,
+                                              ),
+                                              blurRadius: 18,
+                                              offset: const Offset(0, 8),
                                             ),
-                                            blurRadius: 18,
-                                            offset: const Offset(0, 8),
+                                          ],
+                                          border: Border.all(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.outlineVariant,
                                           ),
-                                        ],
-                                        border: Border.all(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.outlineVariant,
                                         ),
-                                      ),
-                                      child: Icon(
-                                        Icons.keyboard_arrow_down_rounded,
-                                        color: isDark
-                                            ? Colors.white
-                                            : const Color(0xFF1F2937),
-                                        size: 28,
+                                        child: Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          color: isDark
+                                              ? Colors.white
+                                              : const Color(0xFF1F2937),
+                                          size: 28,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -5121,6 +4905,38 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                   isDark: isDark,
                 ),
 
+              if (_slashReplyQuery != null && !isReadOnly)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: DesktopQuickRepliesSlashPopup(
+                    query: _slashReplyQuery!,
+                    onSelectReply: (reply) {
+                      setState(() {
+                        _messageController.text = reply.content;
+                        _messageController.selection = TextSelection.collapsed(
+                          offset: reply.content.length,
+                        );
+                        _slashReplyQuery = null;
+                      });
+                    },
+                    onManageTap: () => showDesktopQuickRepliesDialog(
+                      context,
+                      onInsertReply: (reply) {
+                        if (!mounted) return;
+                        setState(() {
+                          _messageController.text = reply.content;
+                          _messageController.selection =
+                              TextSelection.collapsed(
+                                offset: reply.content.length,
+                              );
+                          _slashReplyQuery = null;
+                        });
+                      },
+                    ),
+                    onClose: () => setState(() => _slashReplyQuery = null),
+                  ),
+                ),
+
               if (_mentionQuery != null && _mentionResults.isNotEmpty)
                 Container(
                   constraints: const BoxConstraints(maxHeight: 200),
@@ -5183,6 +4999,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
               // ── Input ────────────────────────────────────────────────────
               ChatInput(
                 controller: _messageController,
+                focusNode: _messageFocusNode,
                 isEditing: _editingMessage != null,
                 isUploading: _isUploadingAttachment,
                 uploadProgress: _uploadProgress,
@@ -5198,6 +5015,15 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 onSendPoll: _createPoll,
                 onSendChecklist: _createChecklist,
                 onSendGif: _openGifPicker,
+                onOpenQuickReplies: () {
+                  setState(() {
+                    if (_slashReplyQuery != null) {
+                      _slashReplyQuery = null;
+                    } else {
+                      _slashReplyQuery = '';
+                    }
+                  });
+                },
                 enabled: !isReadOnly,
               ),
             ],
@@ -5265,6 +5091,7 @@ class _ChatHeader extends StatelessWidget {
     required this.onOpenRemoteDesktop,
     required this.onProbePeerConnection,
     required this.hasRemotePeerDevice,
+    this.remotePeerDevice,
     required this.isResolvingRemotePeer,
     required this.selectionMode,
     required this.onClearSelection,
@@ -5287,6 +5114,7 @@ class _ChatHeader extends StatelessWidget {
   final VoidCallback onOpenRemoteDesktop;
   final VoidCallback onProbePeerConnection;
   final bool hasRemotePeerDevice;
+  final BranchPeerDevice? remotePeerDevice;
   final bool isResolvingRemotePeer;
   final bool selectionMode;
   final VoidCallback onClearSelection;
@@ -5304,6 +5132,9 @@ class _ChatHeader extends StatelessWidget {
               .cast<ChatDirectoryUser?>()
               .firstWhere((_) => true, orElse: () => null)
         : null;
+    final headerTooltip = (peer?.jobTitle.trim().isNotEmpty == true)
+        ? '$title\n💼 ${peer!.jobTitle.trim()}'
+        : title;
 
     final headerBg = Color.lerp(
       appearance.incomingBubbleColor,
@@ -5334,7 +5165,7 @@ class _ChatHeader extends StatelessWidget {
             backgroundColor: conversationTypeAccent(
               conversation.type,
             ).withValues(alpha: 0.18),
-            imageUrl: peer?.avatarUrl,
+            imageUrl: (conversation.type == 'direct' ? peer?.avatarUrl : conversation.avatarUrl) ?? conversation.avatarUrl ?? peer?.avatarUrl,
             fallbackIcon: conversationTypeIcon(conversation.type),
             fallbackIconSize: 18,
             fallbackIconColor: conversationTypeAccent(conversation.type),
@@ -5352,19 +5183,25 @@ class _ChatHeader extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: titleColor,
+                    Tooltip(
+                      message: headerTooltip,
+                      waitDuration: const Duration(milliseconds: 250),
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: titleColor,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      statusText,
+                      (peer?.jobTitle.trim().isNotEmpty == true)
+                          ? '${peer!.jobTitle.trim()} • $statusText'
+                          : statusText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -5380,29 +5217,29 @@ class _ChatHeader extends StatelessWidget {
           ),
 
           // ── Action icons ──────────────────────────────────────────────────
-          if (!selectionMode)
+          if (!selectionMode && conversation.type == 'direct')
             _TgHeaderIcon(
               icon: isResolvingRemotePeer
                   ? Icons.sync_rounded
                   : Icons.computer_rounded,
               tooltip: hasRemotePeerDevice
-                  ? 'فتح Remote Desktop'
-                  : 'لا يوجد IP متاح للمستخدم الآن',
+                  ? 'فتح Remote Desktop (${remotePeerDevice?.localIp ?? ''})'
+                  : 'فتح Remote Desktop (انقر للبحث عن IP)',
               color: hasRemotePeerDevice
                   ? iconColor
-                  : iconColor.withValues(alpha: 0.42),
-              onPressed: hasRemotePeerDevice ? onOpenRemoteDesktop : null,
+                  : iconColor.withValues(alpha: 0.65),
+              onPressed: onOpenRemoteDesktop,
             ),
-          if (!selectionMode)
+          if (!selectionMode && conversation.type == 'direct')
             _TgHeaderIcon(
-              icon: Icons.wifi_find_rounded,
+              icon: Icons.terminal_rounded,
               tooltip: hasRemotePeerDevice
-                  ? 'فحص اتصال جهاز المستخدم'
-                  : 'لا يوجد IP متاح للفحص',
+                  ? 'فحص الاتصال عبر Terminal (${remotePeerDevice?.localIp ?? ''})'
+                  : 'فحص الاتصال (انقر للبحث عن IP)',
               color: hasRemotePeerDevice
                   ? iconColor
-                  : iconColor.withValues(alpha: 0.42),
-              onPressed: hasRemotePeerDevice ? onProbePeerConnection : null,
+                  : iconColor.withValues(alpha: 0.65),
+              onPressed: onProbePeerConnection,
             ),
           if (!selectionMode)
             _TgHeaderIcon(

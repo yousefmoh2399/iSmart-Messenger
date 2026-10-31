@@ -26,22 +26,53 @@
     <style>
       @font-face {
         font-family: "NotoSansArabic";
-        src: url("assets/assets/fonts/NotoSansArabic-Regular.ttf")
-          format("truetype");
+        src:
+          url("assets/assets/fonts/NotoSansArabic-Regular.ttf") format("truetype"),
+          url("assets/fonts/NotoSansArabic-Regular.ttf") format("truetype");
         font-weight: 400;
         font-style: normal;
         font-display: block;
-        unicode-range: U+0600-06FF;
       }
 
       @font-face {
         font-family: "NotoSansArabic";
-        src: url("assets/assets/fonts/NotoSansArabic-Bold.ttf")
-          format("truetype");
+        src:
+          url("assets/assets/fonts/NotoSansArabic-Bold.ttf") format("truetype"),
+          url("assets/fonts/NotoSansArabic-Bold.ttf") format("truetype");
         font-weight: 700;
         font-style: normal;
         font-display: block;
-        unicode-range: U+0600-06FF;
+      }
+
+      @font-face {
+        font-family: "NotoSans";
+        src:
+          url("assets/assets/fonts/NotoSans-Regular.ttf") format("truetype"),
+          url("assets/fonts/NotoSans-Regular.ttf") format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: block;
+      }
+
+      @font-face {
+        font-family: "NotoSans";
+        src:
+          url("assets/assets/fonts/NotoSans-Bold.ttf") format("truetype"),
+          url("assets/fonts/NotoSans-Bold.ttf") format("truetype");
+        font-weight: 700;
+        font-style: normal;
+        font-display: block;
+      }
+
+      @font-face {
+        font-family: "Segoe UI Emoji";
+        src:
+          url("assets/assets/fonts/seguiemj.ttf") format("truetype"),
+          url("assets/fonts/seguiemj.ttf") format("truetype"),
+          local("Segoe UI Emoji"),
+          local("Segoe UI Symbol"),
+          local("Apple Color Emoji");
+        font-display: swap;
       }
 
       html,
@@ -52,7 +83,7 @@
         margin: 0;
         background: #eff3f6;
         font-family:
-          "Segoe UI", Tahoma, Arial, "NotoSansArabic", Helvetica, sans-serif;
+          "NotoSansArabic", "NotoSans", "Segoe UI", Tahoma, Arial, sans-serif;
       }
 
       #app-loading {

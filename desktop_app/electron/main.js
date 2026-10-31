@@ -46,7 +46,7 @@ let lanReceiveReminderTimer = null;
 let currentWindowTheme = nativeTheme.shouldUseDarkColors ? "dark" : "light";
 const pendingLanTransfers = new Map();
 const pendingLanReceiveRequests = new Map();
-const MAX_ELECTRON_FETCH_BYTES = 80 * 1024 * 1024;
+const MAX_ELECTRON_FETCH_BYTES = 512 * 1024 * 1024;
 const LAN_DISCOVERY_TIMEOUT_MS = 750;
 const LAN_DISCOVERY_BATCH_SIZE = 96;
 const DEFAULT_TRANSFER_POLICY = {
@@ -85,7 +85,7 @@ function applyWindowTheme(mode = currentWindowTheme) {
   // visually each time the mouse passes over minimize/maximize/close.
   if (themeChanged && typeof mainWindow.setTitleBarOverlay === "function") {
     mainWindow.setTitleBarOverlay({
-      color: "rgba(0,0,0,0)",
+      color: palette.color,
       symbolColor: palette.symbolColor,
       height: 34,
     });
@@ -458,12 +458,37 @@ app.on("second-instance", () => {
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
+app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>,127.0.0.1,localhost");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("renderer-process-limit", "3");
 
-// Windows 7 (NT 6.1) struggles with modern Chromium hardware acceleration,
-// and forcing WebGL causes severe lag, stuttering, and high response times.
-// Disabling hardware acceleration on Windows 7 falls back to a much faster software renderer.
+// V8 32-bit Memory Optimization: constrain heap to 512MB to trigger fast, non-blocking GC pauses
+// preventing memory fragmentation and 1-2 second freezes on low-RAM branch PCs.
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=512");
+
+// Limit disk cache to prevent thrashing slow mechanical 5400rpm hard drives
+app.commandLine.appendSwitch("disk-cache-size", "67108864");
+app.commandLine.appendSwitch("font-render-hinting", "medium");
+
+// Graphics Performance Tuning:
+// On Windows 7 (NT 6.1), disabling hardware acceleration forces CPU software emulation (SwiftShader),
+// which pegs dual-core CPUs at 100% and freezes the app when scrolling or typing.
+// Instead, we force the mature DirectX 9 ANGLE backend with GPU rasterization,
+// which runs at 60fps on virtually all legacy Intel/AMD/Nvidia drivers on Windows 7.
 if (os.release().startsWith("6.1")) {
-  app.disableHardwareAcceleration();
+  const forceSoftware = process.argv.includes("--disable-gpu") || process.env.ISMART_DISABLE_GPU === "1";
+  if (forceSoftware) {
+    app.disableHardwareAcceleration();
+  } else {
+    app.commandLine.appendSwitch("use-angle", "d3d9");
+    app.commandLine.appendSwitch("ignore-gpu-blocklist");
+    app.commandLine.appendSwitch("enable-gpu-rasterization");
+    app.commandLine.appendSwitch("enable-zero-copy");
+  }
+} else {
+  app.commandLine.appendSwitch("enable-gpu-rasterization");
+  app.commandLine.appendSwitch("enable-zero-copy");
 }
 
 app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
@@ -578,18 +603,6 @@ function startWebAppServer() {
   });
 }
 
-function localIpv4s() {
-  const result = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry.family === "IPv4" && !entry.internal) {
-        result.push(entry.address);
-      }
-    }
-  }
-  return result;
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -604,6 +617,102 @@ function normalizeLanIp(value) {
     return "";
   }
   return parts.join(".");
+}
+
+const VIRTUAL_ADAPTER_REGEX =
+  /(vmware|virtualbox|vbox|vethernet|hyper-v|wsl|loopback|npcap|pcap|tap|tun|tailscale|zerotier|hamachi|wireguard|nordlynx|anyconnect|fortinet|pulse|cisco|vpn|bluetooth)/i;
+const PHYSICAL_ADAPTER_REGEX =
+  /(ethernet|wi-fi|wifi|wlan|eth|local area connection|شبكة)/i;
+const VIRTUAL_MAC_PREFIXES = [
+  "00:50:56",
+  "00:0c:29",
+  "00:05:69",
+  "08:00:27",
+  "00:15:5d",
+];
+
+function getRankedIpv4Addresses() {
+  const ifaces = os.networkInterfaces();
+  const candidates = [];
+
+  for (const [name, entries] of Object.entries(ifaces)) {
+    for (const entry of entries || []) {
+      const isIpv4 = entry.family === "IPv4" || entry.family === 4;
+      if (!isIpv4 || entry.internal) {
+        continue;
+      }
+      const rawIp = String(entry.address || "").trim();
+      const ip = normalizeLanIp(rawIp);
+      if (
+        !ip ||
+        ip.startsWith("127.") ||
+        ip.startsWith("169.254.") ||
+        ip === "0.0.0.0"
+      ) {
+        continue;
+      }
+
+      let score = 100;
+      const lowerName = name.toLowerCase();
+      const mac = (entry.mac || "").toLowerCase();
+
+      if (VIRTUAL_ADAPTER_REGEX.test(lowerName)) {
+        score -= 90;
+      }
+      if (VIRTUAL_MAC_PREFIXES.some((prefix) => mac.startsWith(prefix))) {
+        score -= 90;
+      }
+      if (PHYSICAL_ADAPTER_REGEX.test(lowerName)) {
+        score += 60;
+      }
+
+      // Priority for standard private branch / office subnets
+      if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) {
+        score += 30;
+      } else if (ip.startsWith("192.168.")) {
+        score += 20;
+      } else if (ip.startsWith("10.")) {
+        score += 15;
+      }
+
+      candidates.push({ name, ip, mac, score });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+function localIpv4s() {
+  const ranked = getRankedIpv4Addresses();
+  const seen = new Set();
+  const result = [];
+  for (const c of ranked) {
+    if (!seen.has(c.ip)) {
+      seen.add(c.ip);
+      result.push(c.ip);
+    }
+  }
+  if (result.length === 0) {
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) {
+        const isIpv4 = entry.family === "IPv4" || entry.family === 4;
+        if (isIpv4 && !entry.internal) {
+          const ip = normalizeLanIp(entry.address);
+          if (ip && !ip.startsWith("127.") && !seen.has(ip)) {
+            seen.add(ip);
+            result.push(ip);
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function getBestLocalIpv4() {
+  const ips = localIpv4s();
+  return ips.length > 0 ? ips[0] : null;
 }
 
 function lanSubnetKey(value) {
@@ -845,7 +954,7 @@ function createWindow(startUrl) {
     backgroundColor: titleBarPalette().color,
     titleBarStyle: "hidden",
     titleBarOverlay: {
-      ...titleBarPalette(), color: "rgba(0,0,0,0)",
+      ...titleBarPalette(),
       height: 34,
     },
     webPreferences: {
@@ -853,9 +962,16 @@ function createWindow(startUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       webSecurity: false,
       allowRunningInsecureContent: true,
+      defaultFontFamily: {
+        standard: "NotoSansArabic",
+        serif: "NotoSansArabic",
+        sansSerif: "NotoSansArabic",
+        monospace: "Consolas",
+      },
+      defaultEncoding: "UTF-8",
     },
   });
   applyWindowTheme(currentWindowTheme);
@@ -1938,7 +2054,7 @@ function openPendingLanReceiveDialog(requestId) {
 <head>
 <meta charset="utf-8" />
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;font-family:"NotoSansArabic","NotoSans","Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
 .wrap{height:100vh;padding:22px;background:linear-gradient(135deg,#111b26,#182533)}
 .head{display:flex;gap:14px;align-items:center;margin-bottom:18px}.icon{width:46px;height:46px;border-radius:14px;background:#2f8cff;display:grid;place-items:center;font-size:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{font-size:13px;color:#a8b3c1;line-height:1.5}.file{background:#223142;border:1px solid #37516b;border-radius:10px;padding:12px;margin:14px 0;color:#dce8f5;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2030,7 +2146,7 @@ function showLanReceiveDialog({ fileName, fileSizeBytes, senderName }) {
 <head>
 <meta charset="utf-8" />
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;font-family:"NotoSansArabic","NotoSans","Segoe UI",Tahoma,Arial,sans-serif;background:#0e1621;color:#f4f7fb}
 .wrap{height:100vh;padding:22px;background:linear-gradient(135deg,#111b26,#182533)}
 .head{display:flex;gap:14px;align-items:center;margin-bottom:18px}.icon{width:46px;height:46px;border-radius:14px;background:#2f8cff;display:grid;place-items:center;font-size:24px}
 h1{font-size:18px;margin:0 0 4px}.sub{font-size:13px;color:#a8b3c1;line-height:1.5}.file{background:#223142;border:1px solid #37516b;border-radius:10px;padding:12px;margin:14px 0;color:#dce8f5;direction:ltr;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2379,15 +2495,19 @@ async function printFile(target, printerName) {
   }
 }
 
-ipcMain.handle("app:get-device-info", async () => ({
-  hostName: os.hostname(),
-  localIp: localIpv4s()[0] || null,
-  localIps: localIpv4s(),
-  osName: process.platform,
-  osVersion: os.release(),
-  architecture: process.arch,
-  appVersion: app.getVersion(),
-}));
+ipcMain.handle("app:get-device-info", async () => {
+  const bestIp = getBestLocalIpv4();
+  const allIps = localIpv4s();
+  return {
+    hostName: os.hostname(),
+    localIp: bestIp || (allIps.length > 0 ? allIps[0] : null),
+    localIps: allIps,
+    osName: process.platform,
+    osVersion: os.release(),
+    architecture: process.arch,
+    appVersion: app.getVersion(),
+  };
+});
 
 ipcMain.handle("debug:log", async (_event, payload = {}) => {
   appendDebugLog(payload.scope, payload.message, payload.details);
@@ -2722,6 +2842,104 @@ ipcMain.handle("shell:open-rdp", async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle("shell:open-ping", async (_event, payload = {}) => {
+  try {
+    const ip = String(payload.ip || "").trim();
+    if (!ip) {
+      return { success: false, error: "No IP provided." };
+    }
+    const { exec } = require("child_process");
+    exec(`start cmd.exe /k ping ${ip}`, (err) => {
+      if (err) console.warn("[electron] ping error", err.message);
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("[electron] shell:open-ping error", error);
+    return { success: false, error: String(error.message || error) };
+  }
+});
+
+ipcMain.handle("net:probe-peer-status", async (_event, payload = {}) => {
+  const targetIp = normalizeLanIp(payload.ip || payload.targetIp);
+  if (!targetIp) {
+    return {
+      success: false,
+      ip: "",
+      message: "عنوان IP غير صالح أو غير محدد.",
+    };
+  }
+
+  const { exec } = require("child_process");
+  const net = require("net");
+
+  // 1. ICMP Ping check (Windows ping -n 1 -w 1200)
+  const pingPromise = new Promise((resolve) => {
+    exec(`ping -n 1 -w 1200 ${targetIp}`, (err, stdout) => {
+      if (err) {
+        resolve({ reachable: false, latency: null });
+        return;
+      }
+      const text = String(stdout || "");
+      const match = text.match(/time[=<](\d+ms)/i) || text.match(/الوقت[=<](\d+ms)/i);
+      resolve({ reachable: true, latency: match ? match[1] : "<10ms" });
+    });
+  });
+
+  // 2. TCP RDP port check (3389)
+  const rdpPromise = new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1200);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("timeout", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on("error", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(3389, targetIp);
+  });
+
+  // 3. LAN App check (iSmart Messenger HTTP port)
+  const lanAppPromise = probeLanPeerAtIp(targetIp, 1200).catch(() => ({ success: false }));
+
+  const [pingRes, rdpOpen, lanRes] = await Promise.all([pingPromise, rdpPromise, lanAppPromise]);
+
+  const isReachable = pingRes.reachable || rdpOpen || lanRes.success === true;
+  let summary = "";
+  if (isReachable) {
+    const parts = [];
+    if (pingRes.reachable) {
+      parts.push(`Ping: متاح (${pingRes.latency || '<10ms'})`);
+    }
+    if (rdpOpen) {
+      parts.push("Remote Desktop: جاهز (بورت 3389 مفتوح)");
+    } else {
+      parts.push("Remote Desktop: بورت 3389 مغلق");
+    }
+    if (lanRes.success === true) {
+      parts.push("تطبيق المراسلة: متصل ونشط");
+    }
+    summary = parts.join(" | ");
+  } else {
+    summary = "الجهاز لا يستجيب في الشبكة المحلية (Ping أو RDP غير متاح). تأكد من تشغيل الجهاز واتصاله بنفس الشبكة.";
+  }
+
+  return {
+    success: isReachable,
+    ip: targetIp,
+    pingReachable: pingRes.reachable,
+    latency: pingRes.latency,
+    rdpAvailable: rdpOpen,
+    lanAppActive: lanRes.success === true,
+    message: summary,
+  };
+});
+
 ipcMain.handle("http:fetch-base64", async (_event, payload = {}) => {
   const url = String(payload.url || "").trim();
   const rawHeaders = payload.headers || {};
@@ -2837,6 +3055,156 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
     fs.writeFileSync(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
   }
   return { success: true, path: outputPath };
+});
+
+
+const STORAGE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".ico"]);
+const STORAGE_AUDIO_EXTS = new Set([".m4a", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".flac"]);
+const STORAGE_DOC_EXTS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".zip", ".rar"]);
+
+function scanDirectoryStorage(dirPath) {
+  let appCache = 0;
+  let media = 0;
+  let audio = 0;
+  let docs = 0;
+
+  if (!fs.existsSync(dirPath)) {
+    return { appCache, media, audio, docs };
+  }
+
+  function walk(current) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (entry.isFile()) {
+          const size = fs.statSync(full).size;
+          const ext = path.extname(entry.name).toLowerCase();
+          if (STORAGE_IMAGE_EXTS.has(ext)) {
+            media += size;
+          } else if (STORAGE_AUDIO_EXTS.has(ext)) {
+            audio += size;
+          } else if (STORAGE_DOC_EXTS.has(ext)) {
+            docs += size;
+          } else {
+            appCache += size;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  walk(dirPath);
+  return { appCache, media, audio, docs };
+}
+
+ipcMain.handle("storage:get-breakdown", async (_event, payload = {}) => {
+  try {
+    const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
+    const tempDir = path.join(app.getPath("temp"), APP_NAME);
+
+    const s1 = scanDirectoryStorage(cacheDir);
+    const s2 = scanDirectoryStorage(tempDir);
+
+    const appCacheBytes = s1.appCache + s2.appCache;
+    const mediaBytes = s1.media + s2.media;
+    const audioBytes = s1.audio + s2.audio;
+    const documentsBytes = s1.docs + s2.docs;
+
+    return {
+      success: true,
+      appCacheBytes,
+      mediaBytes,
+      audioBytes,
+      documentsBytes,
+      totalBytes: appCacheBytes + mediaBytes + audioBytes + documentsBytes,
+    };
+  } catch (err) {
+    console.error("[electron] storage:get-breakdown error", err);
+    return {
+      success: false,
+      appCacheBytes: 0,
+      mediaBytes: 0,
+      audioBytes: 0,
+      documentsBytes: 0,
+      totalBytes: 0,
+    };
+  }
+});
+
+ipcMain.handle("storage:clear-cache", async (_event, payload = {}) => {
+  try {
+    const category = String(payload.category || "all").toLowerCase();
+    const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
+    const tempDir = path.join(app.getPath("temp"), APP_NAME);
+
+    function cleanDir(dirPath) {
+      if (!fs.existsSync(dirPath)) return;
+      function walkDelete(current) {
+        let entries;
+        try {
+          entries = fs.readdirSync(current, { withFileTypes: true });
+        } catch (_) {
+          return;
+        }
+        for (const entry of entries) {
+          const full = path.join(current, entry.name);
+          try {
+            if (entry.isDirectory()) {
+              walkDelete(full);
+              try { fs.rmdirSync(full); } catch (_) {}
+            } else if (entry.isFile()) {
+              const ext = path.extname(entry.name).toLowerCase();
+              let del = false;
+              if (category === "all") del = true;
+              else if (category === "appcache" && !STORAGE_IMAGE_EXTS.has(ext) && !STORAGE_AUDIO_EXTS.has(ext) && !STORAGE_DOC_EXTS.has(ext)) del = true;
+              else if (category === "media" && STORAGE_IMAGE_EXTS.has(ext)) del = true;
+              else if (category === "audio" && STORAGE_AUDIO_EXTS.has(ext)) del = true;
+              else if (category === "documents" && STORAGE_DOC_EXTS.has(ext)) del = true;
+              if (del) {
+                fs.unlinkSync(full);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      walkDelete(dirPath);
+    }
+
+    cleanDir(cacheDir);
+    cleanDir(tempDir);
+
+    if (category === "all" || category === "appcache") {
+      try {
+        const { session } = require("electron");
+        if (session && session.defaultSession) {
+          await session.defaultSession.clearCache();
+        }
+      } catch (_) {}
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("[electron] storage:clear-cache error", err);
+    return { success: false, error: String(err.message || err) };
+  }
+});
+
+ipcMain.handle("files:get-chat-attachment-path", async (_event, payload = {}) => {
+  const filePath = chatAttachmentCachePath(
+    payload.messageId,
+    payload.fileName || "attachment",
+    payload.directoryPath,
+  );
+  const exists = fs.existsSync(filePath);
+  return { success: true, exists: exists, path: exists ? filePath : null };
 });
 
 ipcMain.handle("files:cache-chat-attachment", async (_event, payload = {}) => {
@@ -3069,13 +3437,14 @@ function downloadFile(url, destinationPath, token, onProgress) {
           return;
         }
 
-        const totalBytes = parseInt(response.headers["content-length"] || "0", 10);
+        const totalHeader = response.headers["content-length"] || response.headers["x-file-size"];
+        const totalBytes = totalHeader ? parseInt(totalHeader, 10) : 0;
         let receivedBytes = 0;
 
         response.on("data", (chunk) => {
           receivedBytes += chunk.length;
           fileStream.write(chunk);
-          if (onProgress && totalBytes > 0) {
+          if (onProgress) {
             onProgress(receivedBytes, totalBytes);
           }
         });
@@ -3112,19 +3481,59 @@ function downloadFile(url, destinationPath, token, onProgress) {
   });
 }
 
+function detectFileType(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return "none";
+    const stat = fs.statSync(filePath);
+    if (stat.size < 4) return "unknown";
+    const fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(4);
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+    
+    // Check for MZ (0x4D, 0x5A) -> Windows Executable (.exe)
+    if (buffer[0] === 0x4d && buffer[1] === 0x5a) {
+      return "exe";
+    }
+    // Check for PK (0x50, 0x4B) -> Zip Archive (.zip)
+    if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+      return "zip";
+    }
+    // Check for MSI compound document (0xD0, 0xCF, 0x11, 0xE0)
+    if (buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0) {
+      return "msi";
+    }
+  } catch (err) {
+    console.error("detectFileType error:", err);
+  }
+  return "unknown";
+}
+
 ipcMain.handle("updater:start-update", async (event, payload = {}) => {
-  const { downloadUrl, token, checksumSha256 } = payload;
+  const { downloadUrl, token, checksumSha256, fileName, silentInstallArgs, installerKind } = payload;
   if (!downloadUrl) {
     throw new Error("Missing download URL");
   }
 
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
-  const updateZipPath = path.join(tempDir, "app-update.zip");
 
-  if (fs.existsSync(updateZipPath)) {
-    try { fs.unlinkSync(updateZipPath); } catch (_) {}
+  // Clean up any previous update artifacts
+  const cleanups = [
+    "update-download.tmp",
+    "update-installer.exe",
+    "update-installer.msi",
+    "update-package.zip",
+    "app-update.zip",
+  ];
+  for (const c of cleanups) {
+    try {
+      const p = path.join(tempDir, c);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    } catch (_) {}
   }
+
+  const tempDownloadPath = path.join(tempDir, "update-download.tmp");
 
   try {
     let lastProgressEventAt = 0;
@@ -3140,8 +3549,8 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
         payload.status === "downloading" &&
         progress !== 0 &&
         progress !== 100 &&
-        progress - lastProgressValue < 2 &&
-        now - lastProgressEventAt < 700
+        progress === lastProgressValue &&
+        now - lastProgressEventAt < 150
       ) {
         return;
       }
@@ -3156,12 +3565,23 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       message: "جاري بدء تحميل التحديث...",
     }, { force: true });
 
-    await downloadFile(downloadUrl, updateZipPath, token, (received, total) => {
-      const progress = Math.round((received / total) * 100);
+    await downloadFile(downloadUrl, tempDownloadPath, token, (received, total) => {
+      let progress = 0;
+      let message = "";
+      if (total > 0) {
+        progress = Math.min(95, Math.round((received / total) * 100));
+        const receivedMb = (received / (1024 * 1024)).toFixed(1);
+        const totalMb = (total / (1024 * 1024)).toFixed(1);
+        message = `جاري تحميل التحديث: ${progress}% (${receivedMb} / ${totalMb} MB)`;
+      } else {
+        const receivedMb = (received / (1024 * 1024)).toFixed(1);
+        progress = Math.min(90, Math.round((received / (60 * 1024 * 1024)) * 100));
+        message = `جاري تحميل التحديث: ${receivedMb} MB`;
+      }
       sendUpdaterProgress({
         status: "downloading",
         progress: progress,
-        message: `جاري تحميل التحديث: ${progress}%`,
+        message: message,
       });
     });
 
@@ -3171,11 +3591,50 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
         progress: 95,
         message: "جاري التحقق من سلامة ملف التحديث...",
       }, { force: true });
-      const calculatedHash = await calculateFileSha256(updateZipPath);
+      const calculatedHash = await calculateFileSha256(tempDownloadPath);
       if (calculatedHash.toLowerCase() !== checksumSha256.trim().toLowerCase()) {
         throw new Error(`بصمة الملف غير مطابقة! المتوقع: ${checksumSha256.trim().toLowerCase()}، المحسوب: ${calculatedHash.toLowerCase()}`);
       }
     }
+
+    // Inspect file magic bytes to determine real file type
+    const detectedType = detectFileType(tempDownloadPath);
+    let finalPackagePath = "";
+    if (detectedType === "exe") {
+      finalPackagePath = path.join(tempDir, "update-installer.exe");
+    } else if (detectedType === "msi") {
+      finalPackagePath = path.join(tempDir, "update-installer.msi");
+    } else if (detectedType === "zip") {
+      finalPackagePath = path.join(tempDir, "update-package.zip");
+    } else {
+      // Fallback based on fileName or downloadUrl
+      const lower = (fileName || downloadUrl).toLowerCase();
+      if (lower.includes(".msi")) {
+        finalPackagePath = path.join(tempDir, "update-installer.msi");
+      } else if (lower.includes(".zip")) {
+        finalPackagePath = path.join(tempDir, "update-package.zip");
+      } else {
+        // Default to executable installer
+        finalPackagePath = path.join(tempDir, "update-installer.exe");
+      }
+    }
+
+    if (fs.existsSync(finalPackagePath)) {
+      try { fs.unlinkSync(finalPackagePath); } catch (_) {}
+    }
+    fs.renameSync(tempDownloadPath, finalPackagePath);
+
+    // Save update metadata for updater:apply-update
+    const meta = {
+      packagePath: finalPackagePath,
+      packageType: detectedType,
+      fileName: fileName || path.basename(finalPackagePath),
+      downloadUrl: downloadUrl,
+      silentInstallArgs: silentInstallArgs || "",
+      installerKind: installerKind || "",
+      downloadedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(tempDir, "update-meta.json"), JSON.stringify(meta, null, 2), "utf8");
 
     sendUpdaterProgress({
       status: "downloaded",
@@ -3183,7 +3642,7 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       message: "تم تحميل التحديث بنجاح وجاهز للتثبيت.",
     }, { force: true });
 
-    return { success: true, zipPath: updateZipPath };
+    return { success: true, filePath: finalPackagePath, packageType: detectedType };
   } catch (error) {
     console.error("Update download failed:", error);
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
@@ -3197,7 +3656,7 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
   }
 });
 
-ipcMain.handle("updater:apply-update", async () => {
+ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
   
@@ -3210,30 +3669,74 @@ ipcMain.handle("updater:apply-update", async () => {
 
   writeLog("=== Starting JS apply-update handler ===");
 
-  const updateZipPath = path.join(tempDir, "app-update.zip");
-  const extractedPath = path.join(tempDir, "extracted");
-  const appDir = path.dirname(process.execPath);
-  const exePath = process.execPath;
+  // Read metadata if available
+  let meta = {};
+  const metaPath = path.join(tempDir, "update-meta.json");
+  if (fs.existsSync(metaPath)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    } catch (_) {}
+  }
 
-  writeLog(`Paths - tempDir: ${tempDir}, zip: ${updateZipPath}, appDir: ${appDir}, exe: ${exePath}`);
+  // Merge any runtime payload options
+  if (payload && typeof payload === "object") {
+    meta = { ...meta, ...payload };
+  }
 
-  if (!fs.existsSync(updateZipPath)) {
-    writeLog("ERROR: update zip path does not exist!");
+  // Locate the update package file
+  let packagePath = meta.packagePath;
+  if (!packagePath || !fs.existsSync(packagePath)) {
+    const candidates = [
+      path.join(tempDir, "update-installer.exe"),
+      path.join(tempDir, "update-installer.msi"),
+      path.join(tempDir, "update-package.zip"),
+      path.join(tempDir, "app-update.zip"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        packagePath = c;
+        break;
+      }
+    }
+  }
+
+  if (!packagePath || !fs.existsSync(packagePath)) {
+    writeLog("ERROR: update package file does not exist in tempDir!");
     throw new Error("ملف التحديث غير موجود! يرجى تحميله أولاً.");
   }
 
-  const zipPathNormalized = updateZipPath.replace(/\\/g, "/");
-  const extractedPathNormalized = extractedPath.replace(/\\/g, "/");
+  const detectedType = detectFileType(packagePath);
+  const isExe = detectedType === "exe" || packagePath.toLowerCase().endsWith(".exe");
+  const isMsi = detectedType === "msi" || packagePath.toLowerCase().endsWith(".msi");
+
+  const appDir = path.dirname(process.execPath);
+  const exePath = process.execPath;
+  const procName = path.basename(exePath, path.extname(exePath));
+  const parentPid = process.pid;
+
+  writeLog(`Found update package: ${packagePath} (type: ${detectedType}, isExe: ${isExe}, isMsi: ${isMsi})`);
+  writeLog(`appDir: ${appDir}, exePath: ${exePath}, procName: ${procName}, PID: ${parentPid}`);
+
+  const packagePathNormalized = packagePath.replace(/\\/g, "/");
   const appDirNormalized = appDir.replace(/\\/g, "/");
   const exePathNormalized = exePath.replace(/\\/g, "/");
   const logPathNormalized = path.join(tempDir, "update_log.txt").replace(/\\/g, "/");
 
   const psScriptPath = path.join(app.getPath("temp"), "apply_update.ps1");
-  const psScriptContent = `
+  let psScriptContent = "";
+
+  if (isExe) {
+    // -------------------------------------------------------------
+    // Direct Executable Installer (.exe) - Electron NSIS setup
+    // Requests Windows Administrator privileges (RunAs / UAC),
+    // closes the application, installs into Program Files, and relaunches.
+    // -------------------------------------------------------------
+    writeLog("Generating PowerShell script for Executable Installer (RunAs / UAC elevation)...");
+    psScriptContent = `
 $logPath = "${logPathNormalized}"
-$zipPath = "${zipPathNormalized}"
-$extractedPath = "${extractedPathNormalized}"
-$appDir = "${appDirNormalized}"
+$installerPath = "${packagePathNormalized}"
+$procName = "${procName}"
+$parentPid = ${parentPid}
 $exePath = "${exePathNormalized}"
 
 function Log-Msg($msg) {
@@ -3245,130 +3748,213 @@ function Log-Msg($msg) {
     "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
 }
 
-Log-Msg "=== Starting update process ==="
-Log-Msg "Parent PID: ${process.pid}"
-Log-Msg "Zip Path: $zipPath"
-Log-Msg "Extraction path: $extractedPath"
-Log-Msg "App Dir: $appDir"
+Log-Msg "=== Starting Electron Setup Installer Update ==="
+Log-Msg "Installer path: $installerPath"
+Log-Msg "Parent PID: $parentPid"
+Log-Msg "Process Name: $procName"
 Log-Msg "Exe Path: $exePath"
 
-# 1. Wait for parent process to exit
-Log-Msg "Waiting for parent process ${process.pid} to exit..."
-$parentPid = ${process.pid}
-while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
-    Start-Sleep -m 200
-}
-Log-Msg "Parent process has exited."
-
-# 2. Force kill any remaining iSmart Messenger or Electron processes in the app directory to prevent file locks
-$procName = [System.IO.Path]::GetFileNameWithoutExtension($exePath)
-Log-Msg "Checking for other running instances of $procName..."
-$timeout = 50
-while ((Get-Process -Name $procName -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
-    Log-Msg "Waiting for remaining child or auxiliary processes to exit..."
+# 1. Wait for current Electron application to exit
+Log-Msg "Waiting for parent process $parentPid to exit..."
+$timeout = 25
+while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
     Start-Sleep -m 200
     $timeout--
 }
+if (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
+    Log-Msg "Terminating parent PID $parentPid forcefully..."
+    Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue
+}
 
-if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-    Log-Msg "Forcefully terminating remaining $procName processes..."
-    Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
-    Start-Sleep -s 1
+# Ensure all instances of the application are terminated so no files are locked
+Log-Msg "Terminating any lingering instances of $procName or electron..."
+Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -m 600
+
+# 2. Launch the installer executable with Administrator rights (triggers Windows UAC prompt!)
+Log-Msg "Launching installer with Administrator privileges (Verb: RunAs)..."
+try {
+    # Launching with -Verb RunAs prompts Windows UAC for administrator elevation
+    $inst = Start-Process -FilePath "$installerPath" -Verb RunAs -PassThru -Wait
+    Log-Msg "Installer process finished with exit code: $($inst.ExitCode)"
+} catch {
+    Log-Msg "Installer execution notice/exception (e.g. UAC prompt outcome): $($_.Exception.Message)"
+}
+
+# 3. Verify application launch and relaunch if not already started by installer
+Start-Sleep -s 2
+$running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
+if (-not $running) {
+    Log-Msg "Application not running yet. Searching for installed executable in Program Files..."
+    $pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
+    $pf64 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+    $localApp = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
+
+    $candidates = @(
+        (Join-Path $pf32 "iSmart Messenger\$procName.exe"),
+        (Join-Path $pf64 "iSmart Messenger\$procName.exe"),
+        (Join-Path $pf32 "$procName\$procName.exe"),
+        (Join-Path $pf64 "$procName\$procName.exe"),
+        (Join-Path $localApp "Programs\iSmart Messenger\$procName.exe"),
+        "$exePath"
+    )
+    $launched = $false
+    foreach ($cand in $candidates) {
+        if ($cand -and (Test-Path "$cand")) {
+            Log-Msg "Relaunching application from: $cand"
+            Start-Process -FilePath "$cand"
+            $launched = $true
+            break
+        }
+    }
+    if (-not $launched) {
+        Log-Msg "Could not find Program Files executable, attempting original exePath: $exePath"
+        if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
+    }
 } else {
-    Log-Msg "All other instances of $procName have exited cleanly."
+    Log-Msg "Application is already running after installer execution."
 }
 
-# 3. Clear extraction folder
-if (Test-Path "$extractedPath") {
-    Log-Msg "Deleting old extracted folder..."
-    Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-}
-New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
-
-# 4. Extract Zip
-Log-Msg "Extracting update package..."
-try {
-    Add-Type -Assembly "System.IO.Compression.FileSystem"
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractedPath)
-    Log-Msg "Extraction completed successfully via .NET."
-} catch {
-    Log-Msg "Fallback to Shell COM extraction due to: $($_.Exception.Message)"
-    if (Test-Path "$extractedPath") {
-        Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
-    
-    $shell = New-Object -ComObject Shell.Application
-    $zip = $shell.NameSpace("$zipPath")
-    $dest = $shell.NameSpace("$extractedPath")
-    $dest.CopyHere($zip.Items(), 0x14)
-    
-    function Get-FolderSize($p) {
-        $files = Get-ChildItem -Path $p -Recurse -ErrorAction SilentlyContinue
-        if ($files) { ($files | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum } else { 0 }
-    }
-    
-    $lastSize = -1
-    $sameCount = 0
-    while ($sameCount -lt 3) {
-        $currentSize = Get-FolderSize "$extractedPath"
-        Log-Msg "Current extracted size: $currentSize bytes"
-        if ($currentSize -eq $lastSize -and $currentSize -gt 0) {
-            $sameCount++
-        } else {
-            $lastSize = $currentSize
-            $sameCount = 0
-        }
-        Start-Sleep -m 500
-    }
-    Log-Msg "Shell COM extraction completed."
-}
-
-Start-Sleep -s 1
-
-# 5. Copy files with Retry Loop (up to 5 retries)
-Log-Msg "Copying files to $appDir..."
-$copied = $false
-for ($i = 1; $i -le 5; $i++) {
-    try {
-        Copy-Item -Path "$extractedPath/app/*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
-        $copied = $true
-        Log-Msg "Files copied successfully on attempt $i."
-        break
-    } catch {
-        Log-Msg "Attempt $i to copy files failed: $($_.Exception.Message). Retrying in 1 second..."
-        if (Get-Process -Name $procName -ErrorAction SilentlyContinue) {
-            Stop-Process -Name $procName -Force -ErrorAction SilentlyContinue
-        }
-        Start-Sleep -s 1
-    }
-}
-
-if (-not $copied) {
-    Log-Msg "CRITICAL ERROR: Failed to copy files after 5 attempts."
-    Log-Msg "Relaunching app anyway..."
-    Start-Process "$exePath"
-    exit 1
-}
-
-# 6. Relaunch app
-Log-Msg "Relaunching application..."
-try {
-    Start-Process "$exePath"
-    Log-Msg "Application relaunched successfully."
-} catch {
-    Log-Msg "ERROR: Could not relaunch application: $($_.Exception.Message)"
-}
-
-# 7. Cleanup
-Log-Msg "Cleaning up update artifacts..."
-Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-Log-Msg "=== Update process completed successfully ==="
+# 4. Clean up installer file
+Start-Sleep -s 3
+Remove-Item -Path "$installerPath" -Force -ErrorAction SilentlyContinue
+Log-Msg "=== Installer update completed ==="
 
 # Self-destruct script
 Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 `.trim();
+  } else if (isMsi) {
+    // -------------------------------------------------------------
+    // MSI Package
+    // -------------------------------------------------------------
+    writeLog("Generating PowerShell script for MSI installer...");
+    psScriptContent = `
+$logPath = "${logPathNormalized}"
+$installerPath = "${packagePathNormalized}"
+$procName = "${procName}"
+$parentPid = ${parentPid}
+$exePath = "${exePathNormalized}"
+
+function Log-Msg($msg) {
+    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    "[$ts] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
+}
+
+Log-Msg "=== Starting MSI Package Update ==="
+$timeout = 25
+while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
+    Start-Sleep -m 200
+    $timeout--
+}
+Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -m 600
+
+try {
+    $inst = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$installerPath\`" /passive /norestart" -Verb RunAs -PassThru -Wait
+    Log-Msg "msiexec finished with exit code: $($inst.ExitCode)"
+} catch {
+    Log-Msg "MSI install error: $($_.Exception.Message)"
+}
+
+Start-Sleep -s 2
+$running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
+if (-not $running) {
+    if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
+}
+Remove-Item -Path "$installerPath" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+`.trim();
+  } else {
+    // -------------------------------------------------------------
+    // Zip Archive Package (Portable / Loose files)
+    // -------------------------------------------------------------
+    writeLog("Generating PowerShell script for Zip Archive (clean extract without COM popups)...");
+    const extractedPath = path.join(tempDir, "extracted");
+    const extractedPathNormalized = extractedPath.replace(/\\/g, "/");
+
+    psScriptContent = `
+$logPath = "${logPathNormalized}"
+$zipPath = "${packagePathNormalized}"
+$extractedPath = "${extractedPathNormalized}"
+$appDir = "${appDirNormalized}"
+$exePath = "${exePathNormalized}"
+$procName = "${procName}"
+$parentPid = ${parentPid}
+
+function Log-Msg($msg) {
+    $logParent = [System.IO.Path]::GetDirectoryName($logPath)
+    if (-not (Test-Path "$logParent")) {
+        New-Item -ItemType Directory -Path "$logParent" -Force | Out-Null
+    }
+    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
+}
+
+Log-Msg "=== Starting Zip Update Process ==="
+$timeout = 25
+while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
+    Start-Sleep -m 200
+    $timeout--
+}
+Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -m 800
+
+if (Test-Path "$extractedPath") {
+    Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
+}
+New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
+
+$extractedOk = $false
+try {
+    Add-Type -Assembly "System.IO.Compression.FileSystem"
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractedPath)
+    $extractedOk = $true
+    Log-Msg "Extraction completed via .NET ZipFile."
+} catch {
+    Log-Msg "Extraction via .NET failed: $($_.Exception.Message)."
+}
+
+if (-not $extractedOk) {
+    try {
+        Expand-Archive -Path "$zipPath" -DestinationPath "$extractedPath" -Force
+        $extractedOk = $true
+        Log-Msg "Extraction completed via Expand-Archive."
+    } catch {
+        Log-Msg "Expand-Archive failed: $($_.Exception.Message)"
+    }
+}
+
+$sourceDir = "$extractedPath"
+if (Test-Path "$extractedPath\\app") {
+    $sourceDir = "$extractedPath\\app"
+} elseif (Test-Path "$extractedPath\\resources") {
+    $sourceDir = "$extractedPath"
+}
+
+Log-Msg "Copying updated files from $sourceDir to $appDir..."
+$copied = $false
+for ($i = 1; $i -le 10; $i++) {
+    try {
+        Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Copy-Item -Path "$sourceDir\\*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
+        $copied = $true
+        Log-Msg "Files copied successfully on attempt $i."
+        break
+    } catch {
+        Log-Msg "Attempt $i failed: $($_.Exception.Message). Retrying..."
+        Start-Sleep -s 1
+    }
+}
+
+Start-Sleep -s 1
+if (Test-Path "$exePath") {
+    Start-Process "$exePath"
+}
+Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+`.trim();
+  }
 
   writeLog(`Writing psScriptPath: ${psScriptPath}...`);
   fs.writeFileSync(psScriptPath, psScriptContent, "utf8");
@@ -3400,21 +3986,20 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
       }
     );
     writeLog(`cmd.exe child process spawned successfully (PID: ${child.pid}).`);
-    
-    child.on("error", (err) => {
-      writeLog(`ERROR: Child process error event: ${err.message}`);
-    });
     child.unref();
   } catch (err) {
     writeLog(`ERROR: Exception spawning child process: ${err.message}`);
   }
 
-  writeLog("Waiting 1.5 seconds to ensure script start before quitting...");
+  writeLog("Quitting application so installer can proceed...");
   setTimeout(() => {
-    writeLog("Quitting application...");
+    writeLog("Quitting Electron app now...");
     isQuitting = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.destroy(); } catch (_) {}
+    }
     app.quit();
-  }, 1500);
+  }, 1000);
 
   return { success: true };
 });
