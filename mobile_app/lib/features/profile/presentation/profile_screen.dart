@@ -71,341 +71,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _showEditProfileModal(BuildContext context, AppUser user) async {
-    final nameCtrl = TextEditingController(text: user.fullName);
-    final jobCtrl = TextEditingController(text: user.jobTitle);
-    final formKey = GlobalKey<FormState>();
-    bool saving = false;
-
-    await showModalBottomSheet<void>(
+  Future<void> _showEditProfileModal(BuildContext context, AppUser user) {
+    return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (modalContext, setModalState) {
-          final isDark = Theme.of(modalContext).brightness == Brightness.dark;
-          final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(modalContext).viewInsets.bottom,
-            ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: sheetBg,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 36,
-                        height: 4.5,
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.white24 : Colors.black12,
-                          borderRadius: BorderRadius.circular(2.5),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'تعديل البيانات الشخصية',
-                      textAlign: TextAlign.center,
-                      style:
-                          TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 18),
-                    TextFormField(
-                      controller: nameCtrl,
-                      decoration: InputDecoration(
-                        labelText: 'الاسم الكامل',
-                        hintText: 'أدخل اسمك المعروض للزملاء',
-                        prefixIcon: const Icon(Icons.person_rounded, size: 20),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : Colors.black.withOpacity(0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      validator: (v) => (v == null || v.trim().length < 2)
-                          ? 'الاسم الكامل مطلوب'
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: jobCtrl,
-                      decoration: InputDecoration(
-                        labelText: 'المسمى الوظيفي',
-                        hintText: 'مثال: مهندس برمجيات، محاسب، مدير فرع...',
-                        prefixIcon:
-                            const Icon(Icons.work_outline_rounded, size: 20),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : Colors.black.withOpacity(0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton(
-                      onPressed: saving
-                          ? null
-                          : () async {
-                              if (!formKey.currentState!.validate()) return;
-                              setModalState(() => saving = true);
-                              final messenger = ScaffoldMessenger.of(modalContext);
-                              try {
-                                await ref
-                                    .read(authControllerProvider.notifier)
-                                    .updateProfile(
-                                      fullName: nameCtrl.text.trim(),
-                                      jobTitle: jobCtrl.text.trim(),
-                                    );
-                                if (modalContext.mounted) {
-                                  Navigator.pop(modalContext);
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text('تم حفظ البيانات بنجاح'),
-                                    ),
-                                  );
-                                }
-                              } catch (e) {
-                                if (modalContext.mounted) {
-                                  setModalState(() => saving = false);
-                                  messenger.showSnackBar(
-                                    SnackBar(content: Text('تعذر الحفظ: $e')),
-                                  );
-                                }
-                              }
-                            },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: saving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text(
-                              'حفظ التعديلات',
-                              style: TextStyle(
-                                  fontSize: 15, fontWeight: FontWeight.w700),
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+      builder: (_) => _EditProfileSheet(user: user),
     );
-    nameCtrl.dispose();
-    jobCtrl.dispose();
   }
 
-  Future<void> _showChangePasswordModal(BuildContext context, AppUser user) async {
-    final pwdCtrl = TextEditingController();
-    final confirmCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    bool obscure = true;
-    bool saving = false;
-
-    await showModalBottomSheet<void>(
+  Future<void> _showChangePasswordModal(BuildContext context, AppUser user) {
+    return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (modalContext, setModalState) {
-          final isDark = Theme.of(modalContext).brightness == Brightness.dark;
-          final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(modalContext).viewInsets.bottom,
-            ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: sheetBg,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 36,
-                        height: 4.5,
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.white24 : Colors.black12,
-                          borderRadius: BorderRadius.circular(2.5),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'تغيير كلمة المرور',
-                      textAlign: TextAlign.center,
-                      style:
-                          TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'أدخل كلمة مرور قوية جديدة لتأمين حسابك',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: isDark ? Colors.white54 : Colors.black54,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    TextFormField(
-                      controller: pwdCtrl,
-                      obscureText: obscure,
-                      decoration: InputDecoration(
-                        labelText: 'كلمة المرور الجديدة',
-                        prefixIcon:
-                            const Icon(Icons.lock_outline_rounded, size: 20),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            obscure
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                            size: 19,
-                          ),
-                          onPressed: () =>
-                              setModalState(() => obscure = !obscure),
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : Colors.black.withOpacity(0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.trim().length < 6) {
-                          return 'يجب أن تكون كلمة المرور 6 أحرف على الأقل';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: confirmCtrl,
-                      obscureText: obscure,
-                      decoration: InputDecoration(
-                        labelText: 'تأكيد كلمة المرور',
-                        prefixIcon:
-                            const Icon(Icons.lock_reset_rounded, size: 20),
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : Colors.black.withOpacity(0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      validator: (v) {
-                        if (v != pwdCtrl.text) {
-                          return 'كلمات المرور غير متطابقة';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton(
-                      onPressed: saving
-                          ? null
-                          : () async {
-                              if (!formKey.currentState!.validate()) return;
-                              setModalState(() => saving = true);
-                              final messenger = ScaffoldMessenger.of(modalContext);
-                              try {
-                                await ref
-                                    .read(authControllerProvider.notifier)
-                                    .updateProfile(
-                                      fullName: user.fullName,
-                                      password: pwdCtrl.text.trim(),
-                                    );
-                                if (modalContext.mounted) {
-                                  Navigator.pop(modalContext);
-                                  messenger.showSnackBar(
-                                    const SnackBar(
-                                      content:
-                                          Text('تم تحديث كلمة المرور بنجاح'),
-                                    ),
-                                  );
-                                }
-                              } catch (e) {
-                                if (modalContext.mounted) {
-                                  setModalState(() => saving = false);
-                                  messenger.showSnackBar(
-                                    SnackBar(content: Text('تعذر التحديث: $e')),
-                                  );
-                                }
-                              }
-                            },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: saving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text(
-                              'تأكيد وتغيير كلمة المرور',
-                              style: TextStyle(
-                                  fontSize: 15, fontWeight: FontWeight.w700),
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+      builder: (_) => _ChangePasswordSheet(user: user),
     );
-    pwdCtrl.dispose();
-    confirmCtrl.dispose();
   }
 
   Future<void> _showStorageDirectoriesSheet(
@@ -589,55 +270,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _showChangeServerUrlDialog(BuildContext context) async {
     final currentUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ??
         AppConfig.defaultApiBaseUrl;
-    final controller = TextEditingController(text: currentUrl);
 
     final newUrl = await showDialog<String>(
       context: context,
-      builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text(
-            'تغيير رابط الخادم (API Base URL)',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          ),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            style: const TextStyle(fontSize: 14),
-            decoration: InputDecoration(
-              labelText: 'عنوان الخادم',
-              hintText: 'http://192.168.1.10:5000',
-              filled: true,
-              fillColor: isDark
-                  ? const Color(0xFF2C2C2E)
-                  : const Color(0xFFF2F2F7),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop('__reset__'),
-              child: const Text('الافتراضي'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
-              child: const Text('حفظ'),
-            ),
-          ],
-        );
-      },
+      builder: (ctx) => _ChangeServerUrlDialog(initialUrl: currentUrl),
     );
-    controller.dispose();
 
     if (newUrl == '__reset__') {
       await ref.read(apiBaseUrlControllerProvider.notifier).reset();
@@ -1721,6 +1358,436 @@ class _AppleTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _EditProfileSheet extends ConsumerStatefulWidget {
+  const _EditProfileSheet({required this.user});
+
+  final AppUser user;
+
+  @override
+  ConsumerState<_EditProfileSheet> createState() => _EditProfileSheetState();
+}
+
+class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _jobCtrl;
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.user.fullName);
+    _jobCtrl = TextEditingController(text: widget.user.jobTitle);
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _jobCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: sheetBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4.5,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(2.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'تعديل البيانات الشخصية',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                controller: _nameCtrl,
+                decoration: InputDecoration(
+                  labelText: 'الاسم الكامل',
+                  hintText: 'أدخل اسمك المعروض للزملاء',
+                  prefixIcon: const Icon(Icons.person_rounded, size: 20),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withOpacity(0.06)
+                      : Colors.black.withOpacity(0.04),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                validator: (v) => (v == null || v.trim().length < 2)
+                    ? 'الاسم الكامل مطلوب'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _jobCtrl,
+                decoration: InputDecoration(
+                  labelText: 'المسمى الوظيفي',
+                  hintText: 'مثال: مهندس برمجيات، محاسب، مدير فرع...',
+                  prefixIcon: const Icon(Icons.work_outline_rounded, size: 20),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withOpacity(0.06)
+                      : Colors.black.withOpacity(0.04),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: _saving
+                    ? null
+                    : () async {
+                        if (!_formKey.currentState!.validate()) return;
+                        setState(() => _saving = true);
+                        final navigator = Navigator.of(context);
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await ref
+                              .read(authControllerProvider.notifier)
+                              .updateProfile(
+                                fullName: _nameCtrl.text.trim(),
+                                jobTitle: _jobCtrl.text.trim(),
+                              );
+                          if (mounted) {
+                            navigator.pop();
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('تم حفظ البيانات بنجاح'),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            setState(() => _saving = false);
+                            messenger.showSnackBar(
+                              SnackBar(content: Text('تعذر الحفظ: $e')),
+                            );
+                          }
+                        }
+                      },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF007AFF),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'حفظ التعديلات',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChangePasswordSheet extends ConsumerStatefulWidget {
+  const _ChangePasswordSheet({required this.user});
+
+  final AppUser user;
+
+  @override
+  ConsumerState<_ChangePasswordSheet> createState() =>
+      _ChangePasswordSheetState();
+}
+
+class _ChangePasswordSheetState extends ConsumerState<_ChangePasswordSheet> {
+  late final TextEditingController _pwdCtrl;
+  late final TextEditingController _confirmCtrl;
+  final _formKey = GlobalKey<FormState>();
+  bool _obscure = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pwdCtrl = TextEditingController();
+    _confirmCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _pwdCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sheetBg = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: sheetBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4.5,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(2.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'تغيير كلمة المرور',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'أدخل كلمة مرور قوية جديدة لتأمين حسابك',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isDark ? Colors.white54 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 18),
+              TextFormField(
+                controller: _pwdCtrl,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'كلمة المرور الجديدة',
+                  prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                      size: 19,
+                    ),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withOpacity(0.06)
+                      : Colors.black.withOpacity(0.04),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().length < 6) {
+                    return 'يجب أن تكون كلمة المرور 6 أحرف على الأقل';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _confirmCtrl,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'تأكيد كلمة المرور',
+                  prefixIcon: const Icon(Icons.lock_reset_rounded, size: 20),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withOpacity(0.06)
+                      : Colors.black.withOpacity(0.04),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                validator: (v) {
+                  if (v != _pwdCtrl.text) {
+                    return 'كلمات المرور غير متطابقة';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: _saving
+                    ? null
+                    : () async {
+                        if (!_formKey.currentState!.validate()) return;
+                        setState(() => _saving = true);
+                        final navigator = Navigator.of(context);
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          await ref
+                              .read(authControllerProvider.notifier)
+                              .updateProfile(
+                                fullName: widget.user.fullName,
+                                password: _pwdCtrl.text.trim(),
+                              );
+                          if (mounted) {
+                            navigator.pop();
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('تم تحديث كلمة المرور بنجاح'),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            setState(() => _saving = false);
+                            messenger.showSnackBar(
+                              SnackBar(content: Text('تعذر التحديث: $e')),
+                            );
+                          }
+                        }
+                      },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF007AFF),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'تأكيد وتغيير كلمة المرور',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChangeServerUrlDialog extends StatefulWidget {
+  const _ChangeServerUrlDialog({required this.initialUrl});
+
+  final String initialUrl;
+
+  @override
+  State<_ChangeServerUrlDialog> createState() => _ChangeServerUrlDialogState();
+}
+
+class _ChangeServerUrlDialogState extends State<_ChangeServerUrlDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AlertDialog(
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text(
+        'تغيير رابط الخادم (API Base URL)',
+        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+      ),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        style: const TextStyle(fontSize: 14),
+        decoration: InputDecoration(
+          labelText: 'عنوان الخادم',
+          hintText: 'http://192.168.1.10:5000',
+          filled: true,
+          fillColor: isDark
+              ? const Color(0xFF2C2C2E)
+              : const Color(0xFFF2F2F7),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop('__reset__'),
+          child: const Text('الافتراضي'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('حفظ'),
+        ),
+      ],
     );
   }
 }

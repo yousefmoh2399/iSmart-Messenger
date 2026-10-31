@@ -987,11 +987,11 @@ class QuickRepliesManagementScreen extends ConsumerWidget {
                       return Container(
                         key: ValueKey(item.id),
                         margin: const EdgeInsets.only(bottom: 10),
-                        decoration: BoxDecoration(
+                        child: Material(
                           color: cardColor,
                           borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: ListTile(
+                          clipBehavior: Clip.antiAlias,
+                          child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14,
                             vertical: 6,
@@ -1084,7 +1084,8 @@ class QuickRepliesManagementScreen extends ConsumerWidget {
                             ],
                           ),
                         ),
-                      );
+                      ),
+                    );
                     },
                   ),
           ),
