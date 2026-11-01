@@ -14,7 +14,6 @@ import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../chat/presentation/chat_admin_management_screen.dart';
-import '../../chat/presentation/chat_appearance.dart';
 import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/conversation_screen.dart';
 import '../../chat/presentation/favorite_messages_screen.dart';
@@ -561,7 +560,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               color: const Color(0xFF5F8D76),
                             ),
                           ].map((t) {
-                            final chatPrefs = user.chatPreferences ?? ChatPreferences.defaults;
+                            final chatPrefs = user.chatPreferences;
                             final isSelected = chatPrefs.themeId == t.id;
 
                             return Padding(
@@ -1023,7 +1022,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
-                      'v1.2.5',
+                      'v1.2.6',
                       style:
                           TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                     ),
