@@ -311,6 +311,16 @@ class DepartmentSummary {
       defaultConversationId: json['defaultConversationId'] is Map ? (json['defaultConversationId']['_id'] ?? json['defaultConversationId']['id'])?.toString() : json['defaultConversationId']?.toString(),
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DepartmentSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class BranchSummary {
@@ -337,6 +347,16 @@ class BranchSummary {
       membersCount: json['membersCount'] as int? ?? 0,
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BranchSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class ChatRole {

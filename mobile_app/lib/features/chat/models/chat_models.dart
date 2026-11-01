@@ -336,6 +336,16 @@ class DepartmentSummary {
       'defaultConversationId': defaultConversationId,
     };
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DepartmentSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class BranchSummary {
@@ -372,6 +382,16 @@ class BranchSummary {
       'membersCount': membersCount,
     };
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BranchSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class ChatRole {

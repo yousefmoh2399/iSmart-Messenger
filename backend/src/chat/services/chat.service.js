@@ -1014,10 +1014,17 @@ async function listConversationsForUser(currentUser) {
     $or: [{ members: currentUser.id }],
   };
 
-  if (currentUser.departmentId) {
+  const userDeptIds = Array.from(
+    new Set([
+      ...(currentUser.departmentId ? [currentUser.departmentId] : []),
+      ...(Array.isArray(currentUser.departmentIds) ? currentUser.departmentIds : []),
+    ].map((d) => getObjectIdString(d)).filter(Boolean)),
+  );
+
+  if (userDeptIds.length > 0) {
     query.$or.push({
       type: "department",
-      departmentId: currentUser.departmentId,
+      departmentId: { $in: userDeptIds },
     });
   }
 

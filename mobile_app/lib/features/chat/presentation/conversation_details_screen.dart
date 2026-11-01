@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart' hide RefreshCallback;
 import 'package:flutter/material.dart';
@@ -14,6 +15,64 @@ import 'favorite_messages_screen.dart';
 import 'group_management_screen.dart';
 import 'widgets/chat_avatar.dart';
 import 'widgets/chat_mute_duration_sheet.dart';
+
+
+Widget _buildSafeImageThumbnail({
+  required String? fileUrl,
+  String? localPath,
+  required String? token,
+  required bool isDark,
+  BoxFit fit = BoxFit.cover,
+  double? width,
+  double? height,
+}) {
+  final hasUrl = fileUrl != null && fileUrl.trim().isNotEmpty;
+  final hasLocal = localPath != null && localPath.trim().isNotEmpty && File(localPath).existsSync();
+
+  if (hasUrl) {
+    return CachedNetworkImage(
+      imageUrl: fileUrl.trim(),
+      width: width,
+      height: height,
+      fit: fit,
+      httpHeaders: token == null || token.isEmpty
+          ? null
+          : {'Authorization': 'Bearer $token'},
+      errorWidget: (_, __, ___) {
+        if (hasLocal) {
+          return Image.file(
+            File(localPath),
+            width: width,
+            height: height,
+            fit: fit,
+          );
+        }
+        return Container(
+          width: width,
+          height: height,
+          color: isDark ? Colors.white12 : Colors.black12,
+          child: const Icon(Icons.broken_image, size: 20),
+        );
+      },
+    );
+  }
+
+  if (hasLocal) {
+    return Image.file(
+      File(localPath),
+      width: width,
+      height: height,
+      fit: fit,
+    );
+  }
+
+  return Container(
+    width: width,
+    height: height,
+    color: isDark ? Colors.white12 : Colors.black12,
+    child: const Icon(Icons.image, size: 20),
+  );
+}
 
 /// WhatsApp iOS-style Conversation & Contact Details Screen
 class ConversationDetailsScreen extends ConsumerStatefulWidget {
@@ -51,7 +110,13 @@ class _ConversationDetailsScreenState
   bool get _isMultiUser => _isGroup || _isBroadcast;
 
   List<ChatMessage> get _sharedImages => widget.messages
-      .where((m) => !m.isDeleted && m.hasAttachment && m.messageType == 'image')
+      .where((m) {
+        if (m.isDeleted || !m.hasAttachment || m.messageType != 'image') return false;
+        final hasUrl = m.fileUrl != null && m.fileUrl!.trim().isNotEmpty;
+        final hasLocal = m.metadata?['localPath'] is String &&
+            (m.metadata!['localPath'] as String).trim().isNotEmpty;
+        return hasUrl || hasLocal;
+      })
       .toList();
 
   List<ChatMessage> get _sharedFiles => widget.messages
@@ -570,24 +635,20 @@ class _ConversationDetailsScreenState
                           separatorBuilder: (_, __) => const SizedBox(width: 8),
                           itemBuilder: (context, index) {
                             final msg = _sharedImages[index];
+                            final fileUrl = msg.fileUrl?.trim();
+                            final localPath = msg.metadata?['localPath'] as String?;
                             return GestureDetector(
-                              onTap: () => _openAvatarFullScreen(msg.fileUrl, msg.fileName ?? 'صورة'),
+                              onTap: () => _openAvatarFullScreen(fileUrl != null && fileUrl.isNotEmpty ? fileUrl : localPath, msg.fileName ?? 'صورة'),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: CachedNetworkImage(
-                                  imageUrl: msg.fileUrl ?? '',
+                                child: _buildSafeImageThumbnail(
+                                  fileUrl: fileUrl,
+                                  localPath: localPath,
+                                  token: widget.token,
+                                  isDark: isDark,
                                   width: 64,
                                   height: 64,
                                   fit: BoxFit.cover,
-                                  httpHeaders: widget.token == null || widget.token!.isEmpty
-                                      ? null
-                                      : {'Authorization': 'Bearer ${widget.token}'},
-                                  errorWidget: (_, __, ___) => Container(
-                                    width: 64,
-                                    height: 64,
-                                    color: isDark ? Colors.white12 : Colors.black12,
-                                    child: const Icon(Icons.broken_image, size: 20),
-                                  ),
                                 ),
                               ),
                             );
@@ -1218,8 +1279,13 @@ class _MediaGalleryScreen extends StatelessWidget {
                     itemCount: images.length,
                     itemBuilder: (context, index) {
                       final item = images[index];
+                      final fileUrl = item.fileUrl?.trim();
+                      final localPath = item.metadata?['localPath'] as String?;
                       return GestureDetector(
                         onTap: () {
+                          final target = fileUrl != null && fileUrl.isNotEmpty ? fileUrl : localPath;
+                          if (target == null || target.isEmpty) return;
+                          final isLocal = File(target).existsSync();
                           Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => Scaffold(
@@ -1231,24 +1297,26 @@ class _MediaGalleryScreen extends StatelessWidget {
                                 ),
                                 body: Center(
                                   child: InteractiveViewer(
-                                    child: CachedNetworkImage(
-                                      imageUrl: item.fileUrl ?? '',
-                                      httpHeaders: token == null || token!.isEmpty
-                                          ? null
-                                          : {'Authorization': 'Bearer $token'},
-                                    ),
+                                    child: isLocal
+                                        ? Image.file(File(target), fit: BoxFit.contain)
+                                        : CachedNetworkImage(
+                                            imageUrl: target,
+                                            httpHeaders: token == null || token!.isEmpty
+                                                ? null
+                                                : {'Authorization': 'Bearer $token'},
+                                          ),
                                   ),
                                 ),
                               ),
                             ),
                           );
                         },
-                        child: CachedNetworkImage(
-                          imageUrl: item.fileUrl ?? '',
+                        child: _buildSafeImageThumbnail(
+                          fileUrl: fileUrl,
+                          localPath: localPath,
+                          token: token,
+                          isDark: isDark,
                           fit: BoxFit.cover,
-                          httpHeaders: token == null || token!.isEmpty
-                              ? null
-                              : {'Authorization': 'Bearer $token'},
                         ),
                       );
                     },

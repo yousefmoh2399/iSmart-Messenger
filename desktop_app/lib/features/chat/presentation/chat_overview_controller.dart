@@ -304,6 +304,11 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         return;
       }
 
+      if (event.type == 'users_updated') {
+        unawaited(refresh(showLoader: false));
+        return;
+      }
+
       if (event.type == 'presence_updated' ||
           event.type == 'user_online' ||
           event.type == 'user_offline') {
