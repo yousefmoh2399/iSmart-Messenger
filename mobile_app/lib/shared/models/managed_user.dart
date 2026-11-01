@@ -5,6 +5,7 @@ class ManagedUser {
     required this.fullName,
     required this.role,
     required this.departmentId,
+    this.departmentIds = const [],
     required this.branchId,
     required this.branchCode,
     required this.isOnline,
@@ -19,6 +20,7 @@ class ManagedUser {
   final String fullName;
   final String role;
   final String? departmentId;
+  final List<String> departmentIds;
   final String? branchId;
   final String branchCode;
   final bool isOnline;
@@ -36,6 +38,9 @@ class ManagedUser {
       fullName: json['fullName'] as String? ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
+      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
+          .map((entry) => entry.toString())
+          .toList(),
       branchId: json['branchId'] as String?,
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,

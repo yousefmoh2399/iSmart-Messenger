@@ -1811,6 +1811,10 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
     final passwordController = TextEditingController();
     var role = user?.role ?? 'user';
     String? departmentId = user?.departmentId;
+    final selectedDepartmentIds = <String>{
+      if (user != null) ..._managedUserDepartmentIds(user),
+      if (departmentId != null) departmentId,
+    };
     String? branchId = user?.branchId;
     final maxAttachmentSizeMBController = TextEditingController(
       text: user?.maxAttachmentSizeMB.toString() ?? '20',
@@ -1974,24 +1978,131 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                     Expanded(
                       child: Column(
                         children: [
-                          _AppleDropdown<String?>(
-                            value: departmentId,
-                            label: 'القسم التابع له',
-                            prefixIcon: Icons.business_outlined,
-                            enabled: !isSaving,
-                            items: [
-                              const DropdownMenuItem<String?>(
-                                value: null,
-                                child: Text('بدون قسم'),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF7F7F9),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isDark ? Colors.white12 : Colors.black12,
                               ),
-                              ...widget.departments.map(
-                                (dept) => DropdownMenuItem<String?>(
-                                  value: dept.id,
-                                  child: Text(dept.name),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.business_outlined, size: 16, color: Color(0xFF007AFF)),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'الأقسام التابع لها (يمكن اختيار أكثر من قسم)',
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                                    ),
+                                    const Spacer(),
+                                    if (selectedDepartmentIds.isNotEmpty)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF007AFF).withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: Text(
+                                          '${selectedDepartmentIds.length} محدد',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF007AFF),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                            onChanged: (val) => setLocalState(() => departmentId = val),
+                                const SizedBox(height: 8),
+                                if (widget.departments.isEmpty)
+                                  const Text(
+                                    'لا توجد أقسام مسجلة',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                                  )
+                                else
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(maxHeight: 120),
+                                    child: SingleChildScrollView(
+                                      child: Wrap(
+                                        spacing: 6,
+                                        runSpacing: 6,
+                                        children: widget.departments.map((dept) {
+                                          final isSelected = selectedDepartmentIds.contains(dept.id);
+                                          final isPrimary = departmentId == dept.id;
+                                          return FilterChip(
+                                            label: Text(
+                                              isPrimary ? '${dept.name} (رئيسي ★)' : dept.name,
+                                              style: TextStyle(
+                                                fontSize: 11.5,
+                                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                                color: isSelected
+                                                    ? Colors.white
+                                                    : (isDark ? Colors.white70 : Colors.black87),
+                                              ),
+                                            ),
+                                            selected: isSelected,
+                                            selectedColor: const Color(0xFF007AFF),
+                                            checkmarkColor: Colors.white,
+                                            backgroundColor: isDark
+                                                ? Colors.white.withValues(alpha: 0.05)
+                                                : Colors.black.withValues(alpha: 0.04),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                              side: BorderSide(
+                                                color: isSelected
+                                                    ? const Color(0xFF007AFF)
+                                                    : (isDark ? Colors.white12 : Colors.black12),
+                                              ),
+                                            ),
+                                            onSelected: isSaving
+                                                ? null
+                                                : (selected) {
+                                                    setLocalState(() {
+                                                      if (selected) {
+                                                        selectedDepartmentIds.add(dept.id);
+                                                        departmentId ??= dept.id;
+                                                      } else {
+                                                        selectedDepartmentIds.remove(dept.id);
+                                                        if (departmentId == dept.id) {
+                                                          departmentId = selectedDepartmentIds.firstOrNull;
+                                                        }
+                                                      }
+                                                    });
+                                                  },
+                                          );
+                                        }).toList(),
+                                      ),
+                                    ),
+                                  ),
+                                if (selectedDepartmentIds.length > 1) ...[
+                                  const SizedBox(height: 10),
+                                  _AppleDropdown<String?>(
+                                    value: selectedDepartmentIds.contains(departmentId)
+                                        ? departmentId
+                                        : selectedDepartmentIds.firstOrNull,
+                                    label: 'القسم الرئيسي (الأساسي)',
+                                    prefixIcon: Icons.star_outline_rounded,
+                                    enabled: !isSaving,
+                                    items: [
+                                      ...widget.departments
+                                          .where((dept) => selectedDepartmentIds.contains(dept.id))
+                                          .map(
+                                            (dept) => DropdownMenuItem<String?>(
+                                              value: dept.id,
+                                              child: Text('${dept.name} (أساسي)'),
+                                            ),
+                                          ),
+                                    ],
+                                    onChanged: (val) => setLocalState(() => departmentId = val),
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 12),
                           _AppleDropdown<String?>(
@@ -2178,13 +2289,18 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                           final effectivePermissions =
                               resolvePermissionsForRole();
                           final maxAttachmentSizeMB = int.tryParse(maxAttachmentSizeMBController.text.trim()) ?? 20;
+                          final deptIdsList = selectedDepartmentIds.toList();
+                          final primaryDeptId = (departmentId != null && selectedDepartmentIds.contains(departmentId))
+                              ? departmentId
+                              : (deptIdsList.isNotEmpty ? deptIdsList.first : null);
                           if (user == null) {
                             await userRepository.createUser(
                               username: username,
                               fullName: fullName,
                               password: password.isEmpty ? '123456' : password,
                               role: role,
-                              departmentId: departmentId,
+                              departmentId: primaryDeptId,
+                              departmentIds: deptIdsList,
                               branchId: branchId,
                               maxAttachmentSizeMB: maxAttachmentSizeMB,
                               permissions: effectivePermissions,
@@ -2196,7 +2312,8 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                               fullName: fullName,
                               password: password,
                               role: role,
-                              departmentId: departmentId,
+                              departmentId: primaryDeptId,
+                              departmentIds: deptIdsList,
                               branchId: branchId,
                               maxAttachmentSizeMB: maxAttachmentSizeMB,
                               permissions: effectivePermissions,

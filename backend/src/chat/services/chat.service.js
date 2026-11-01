@@ -843,10 +843,13 @@ async function assertConversationAccess(currentUser, conversation) {
       conversation.departmentId?.toString?.() ||
       null;
     const currentUserDepartmentId = getObjectIdString(currentUser.departmentId);
-    if (
-      currentUserDepartmentId &&
-      currentUserDepartmentId === conversationDepartmentId
-    ) {
+    const currentUserDeptIds = [
+      ...(currentUserDepartmentId ? [currentUserDepartmentId] : []),
+      ...(Array.isArray(currentUser.departmentIds)
+        ? currentUser.departmentIds.map((d) => getObjectIdString(d)).filter(Boolean)
+        : []),
+    ];
+    if (currentUserDeptIds.includes(conversationDepartmentId)) {
       return;
     }
     if (memberIds.includes(currentUserId)) {
@@ -1064,9 +1067,15 @@ async function listManageableConversations(currentUser) {
     const orClauses = [
       { admins: currentUser.id },
       { createdBy: currentUser.id },
-      ...(currentUser.departmentId
-        ? [{ type: "department", departmentId: currentUser.departmentId }]
-        : []),
+      ...((() => {
+        const userDeptIds = [
+          ...(currentUser.departmentId ? [currentUser.departmentId] : []),
+          ...(Array.isArray(currentUser.departmentIds) ? currentUser.departmentIds : []),
+        ].filter(Boolean);
+        return userDeptIds.length
+          ? [{ type: "department", departmentId: { $in: userDeptIds } }]
+          : [];
+      })()),
       ...(canSendBroadcast ? [{ type: "broadcast" }] : []),
     ];
     query = {
@@ -1898,9 +1907,16 @@ async function createMessage(currentUser, payload, file) {
       userNames: targetUserNames,
       sentToAllDepartments: targetDepartmentIds.length === 0 && targetUserIds.length === 0,
     };
-  } else if (conversation.type === "department" && currentUser.departmentId) {
+  } else if (conversation.type === "department" && conversation.departmentId) {
+    const deptId = conversation.departmentId._id || conversation.departmentId;
     const departmentUsers = await User.find(
-      { departmentId: currentUser.departmentId, isActive: true },
+      {
+        $or: [
+          { departmentId: deptId },
+          { departmentIds: deptId },
+        ],
+        isActive: true,
+      },
       "_id",
     ).lean();
     recipientIds = departmentUsers.map((entry) => entry._id.toString());

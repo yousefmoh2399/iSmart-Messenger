@@ -92,7 +92,10 @@ async function resolveConversationAudienceUserIds(conversationId) {
   if (conversation.type === "department" && conversation.departmentId) {
     const departmentUsers = await User.find(
       {
-        departmentId: conversation.departmentId,
+        $or: [
+          { departmentId: conversation.departmentId },
+          { departmentIds: conversation.departmentId },
+        ],
         isActive: true,
       },
       "_id",
