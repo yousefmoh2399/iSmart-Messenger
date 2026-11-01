@@ -7714,9 +7714,7 @@ class _RoomsAdminTabState extends ConsumerState<_RoomsAdminTab> {
     );
     final isBroadcast = conversation.type == 'broadcast';
     final selectedMembers = <String>{
-      ...(isBroadcast
-          ? conversation.broadcastPublisherIds
-          : conversation.members.map((entry) => entry.id)),
+      ...conversation.members.map((entry) => entry.id),
     };
     final selectedAdmins = <String>{
       ...conversation.admins.map((entry) => entry.id),

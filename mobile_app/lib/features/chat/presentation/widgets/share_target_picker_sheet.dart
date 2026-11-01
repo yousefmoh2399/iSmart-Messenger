@@ -298,8 +298,20 @@ class _ShareTargetPickerSheetState
     );
 
     // 3. Recent conversations targets (excluding self chat which is pinned)
+    final authUser = ref.read(authControllerProvider).valueOrNull;
     final recentConversationTargets = overview.conversations
-        .where((c) => !c.isSelfChat(widget.currentUserId))
+        .where((c) {
+          if (c.isSelfChat(widget.currentUserId)) return false;
+          if (c.type == 'broadcast') {
+            final uid = widget.currentUserId;
+            if (uid.isEmpty) return false;
+            if (authUser?.id == uid && authUser?.role == 'admin') return true;
+            if (c.createdBy == uid) return true;
+            if (c.admins.any((a) => a.id == uid)) return true;
+            return c.broadcastPublisherIds.contains(uid);
+          }
+          return true;
+        })
         .map((conv) {
           final isGroup = conv.type == 'group' || conv.type == 'broadcast';
           ChatDirectoryUser? directPeer;

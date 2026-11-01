@@ -2321,7 +2321,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
   }
 
   void _showActionMenu(BuildContext context) {
-    final folders = ref.read(chatFoldersProvider).value ?? [];
+    final folders = ref.read(chatFoldersProvider).valueOrNull ?? [];
     final inFolders = folders
         .where((f) => f.conversationIds.contains(widget.conversation.id))
         .toList();
@@ -2471,7 +2471,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => Consumer(
         builder: (context, ref, _) {
-          final folders = ref.watch(chatFoldersProvider).value ?? [];
+          final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
 
           return Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),

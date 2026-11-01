@@ -201,7 +201,7 @@ class _ConversationDetailsScreenState
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => Consumer(
         builder: (context, ref, _) {
-          final folders = ref.watch(chatFoldersProvider).value ?? [];
+          final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
 
           return Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -303,9 +303,24 @@ class _ConversationDetailsScreenState
     final authUser = ref.watch(authControllerProvider).valueOrNull;
     final currentUserId = authUser?.id ?? '';
 
-    final title = _conversation.displayTitle(currentUserId);
-    final avatarUrl = (widget.peer != null ? widget.peer?.avatarUrl : _conversation.avatarUrl) ?? _conversation.avatarUrl;
-    final folders = ref.watch(chatFoldersProvider).value ?? [];
+    final overview = ref.watch(chatOverviewControllerProvider).valueOrNull;
+    final effectivePeer = widget.peer ??
+        (!_isGroup
+            ? (_conversation.members
+                    .where((m) => m.id != currentUserId)
+                    .map((m) =>
+                        overview?.users.where((u) => u.id == m.id).firstOrNull ??
+                        m)
+                    .firstOrNull ??
+                _conversation.members.firstOrNull)
+            : null);
+
+    final title = (effectivePeer?.displayName.isNotEmpty == true
+            ? effectivePeer!.displayName
+            : null) ??
+        _conversation.displayTitle(currentUserId);
+    final avatarUrl = (effectivePeer != null ? effectivePeer.avatarUrl : _conversation.avatarUrl) ?? _conversation.avatarUrl;
+    final folders = ref.watch(chatFoldersProvider).valueOrNull ?? [];
     final currentFolders = folders
         .where((f) => f.conversationIds.contains(_conversation.id))
         .toList();
@@ -408,9 +423,9 @@ class _ConversationDetailsScreenState
                     Text(
                       _isGroup
                           ? 'مجموعة • ${_conversation.members.length} مشاركاً'
-                          : (widget.peer?.jobTitle.isNotEmpty == true
-                              ? '${widget.peer!.jobTitle} • ${widget.peer!.branchCode}'
-                              : (widget.peer?.presenceStatus == 'online'
+                          : (effectivePeer?.jobTitle.isNotEmpty == true
+                              ? '${effectivePeer!.jobTitle} • ${effectivePeer!.branchCode}'
+                              : (effectivePeer?.presenceStatus == 'online'
                                   ? 'متصل الآن 🟢'
                                   : 'غير متصل')),
                       style: TextStyle(
@@ -590,39 +605,50 @@ class _ConversationDetailsScreenState
                 ),
                 child: Column(
                   children: [
-                    if (!_isGroup && widget.peer != null) ...[
-                      if (widget.peer!.jobTitle.isNotEmpty)
+                    if (!_isGroup) ...[
+                      if (effectivePeer != null) ...[
+                        if (effectivePeer.jobTitle.isNotEmpty)
+                          _buildInfoTile(
+                            isDark: isDark,
+                            title: 'المسمى الوظيفي',
+                            value: effectivePeer.jobTitle,
+                            icon: CupertinoIcons.briefcase,
+                          ),
+                        if (effectivePeer.role.isNotEmpty) ...[
+                          Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 48),
+                          _buildInfoTile(
+                            isDark: isDark,
+                            title: 'الدور / الصلاحية',
+                            value: effectivePeer.role,
+                            icon: CupertinoIcons.shield_fill,
+                          ),
+                        ],
+                        if (effectivePeer.branchCode.isNotEmpty) ...[
+                          Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 48),
+                          _buildInfoTile(
+                            isDark: isDark,
+                            title: 'الفرع',
+                            value: 'فرع ${effectivePeer.branchCode}',
+                            icon: CupertinoIcons.location_solid,
+                          ),
+                        ],
+                        if (effectivePeer.username.isNotEmpty) ...[
+                          Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 48),
+                          _buildInfoTile(
+                            isDark: isDark,
+                            title: 'اسم المستخدم',
+                            value: '@${effectivePeer.username}',
+                            icon: CupertinoIcons.person_alt_circle,
+                          ),
+                        ],
+                      ] else ...[
                         _buildInfoTile(
                           isDark: isDark,
-                          title: 'المسمى الوظيفي',
-                          value: widget.peer!.jobTitle,
-                          icon: CupertinoIcons.briefcase,
-                        ),
-                      if (widget.peer!.role.isNotEmpty) ...[
-                        Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 48),
-                        _buildInfoTile(
-                          isDark: isDark,
-                          title: 'الدور / الصلاحية',
-                          value: widget.peer!.role,
-                          icon: CupertinoIcons.shield_fill,
+                          title: 'نوع المحادثة',
+                          value: 'محادثة خاصة ومباشرة',
+                          icon: CupertinoIcons.person_fill,
                         ),
                       ],
-                      if (widget.peer!.branchCode.isNotEmpty) ...[
-                        Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 48),
-                        _buildInfoTile(
-                          isDark: isDark,
-                          title: 'الفرع',
-                          value: 'فرع ${widget.peer!.branchCode}',
-                          icon: CupertinoIcons.location_solid,
-                        ),
-                      ],
-                      Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 48),
-                      _buildInfoTile(
-                        isDark: isDark,
-                        title: 'اسم المستخدم',
-                        value: '@${widget.peer!.username}',
-                        icon: CupertinoIcons.person_alt_circle,
-                      ),
                     ] else ...[
                       // Group details
                       _buildInfoTile(

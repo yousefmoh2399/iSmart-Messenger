@@ -231,10 +231,21 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
     }).toList();
 
     // 4. Groups
+    final authUser = ref.read(authControllerProvider).valueOrNull;
     final filteredGroups = overview.conversations
-        .where((conv) =>
-            conv.id != widget.currentConversationId &&
-            (conv.type == 'group' || conv.type == 'broadcast'))
+        .where((conv) {
+          if (conv.id == widget.currentConversationId) return false;
+          if (conv.type == 'group') return true;
+          if (conv.type == 'broadcast') {
+            final uid = widget.currentUserId;
+            if (uid.isEmpty) return false;
+            if (authUser?.id == uid && authUser?.role == 'admin') return true;
+            if (conv.createdBy == uid) return true;
+            if (conv.admins.any((a) => a.id == uid)) return true;
+            return conv.broadcastPublisherIds.contains(uid);
+          }
+          return false;
+        })
         .where((conv) {
           if (query.isEmpty) return true;
           final name = conv.name.toLowerCase();

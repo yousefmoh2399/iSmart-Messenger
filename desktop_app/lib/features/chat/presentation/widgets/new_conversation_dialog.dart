@@ -1686,7 +1686,7 @@ class _NewConversationDialogState
     List<ChatDirectoryUser> allUsers,
     bool isDark,
   ) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1726,17 +1726,21 @@ class _NewConversationDialogState
 
           const SizedBox(height: 14),
 
+          _buildBroadcastRoleNotice(isDark),
+
+          const SizedBox(height: 14),
+
           Text(
-            'المستلمون المحددون: ${_selectedMembers.length} زميل',
+            _selectedMembers.isEmpty
+                ? 'المستلمون: لم يتم تحديد مستلمين بعد (اختياري)'
+                : 'المستلمون المحددون: ${_selectedMembers.length} زميل',
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
           ),
 
-          const Spacer(),
+          const SizedBox(height: 24),
 
           FilledButton.icon(
-            onPressed: _isCreating || _selectedMembers.isEmpty
-                ? null
-                : _createConversation,
+            onPressed: _isCreating ? null : _createConversation,
             icon: _isCreating
                 ? const SizedBox(
                     width: 16,
@@ -1757,6 +1761,59 @@ class _NewConversationDialogState
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBroadcastRoleNotice(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E2838) : const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? const Color(0xFF3B82F6).withValues(alpha: 0.35)
+              : const Color(0xFFBFDBFE),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 20,
+            color: isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'تنبيه حول صلاحيات النشر والمشرفين:',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '• أنت (منشئ القناة) فقط من يملك صلاحية إرسال الرسائل والنشر لجميع الأعضاء.\n'
+                  '• الزملاء المحددون في القائمة هم مستمعون ومستلمون فقط ولا يمكنهم إرسال أي رسائل داخل القناة.\n'
+                  '• إذا رغبت مستقبلاً بالسماح لأي زميل بالنشر معك، يمكنك ترقيته كمشرف من إعدادات القناة.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: isDark ? Colors.white70 : const Color(0xFF1E3A8A).withValues(alpha: 0.9),
+                  ),
+                ),
+              ],
             ),
           ),
         ],

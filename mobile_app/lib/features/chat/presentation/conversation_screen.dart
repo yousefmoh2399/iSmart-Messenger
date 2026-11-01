@@ -225,6 +225,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     if (userId == null || userId.isEmpty) {
       return false;
     }
+    final authUser = ref.read(authControllerProvider).valueOrNull;
+    if (authUser?.id == userId && authUser?.role == 'admin') {
+      return true;
+    }
     if (_data.createdBy == userId) {
       return true;
     }

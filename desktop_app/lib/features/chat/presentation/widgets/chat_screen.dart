@@ -3993,6 +3993,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     if (conversation.type != 'broadcast') {
       return true;
     }
+    if (widget.currentUser?.role == 'admin') {
+      return true;
+    }
     final currentUserId = widget.currentUser?.id;
     if (currentUserId == null || currentUserId.isEmpty) {
       return false;

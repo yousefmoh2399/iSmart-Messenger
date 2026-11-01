@@ -7,6 +7,7 @@ const Department = require("../models/department.model");
 const ConversationMemberState = require("../models/conversation-member-state.model");
 const User = require("../../models/user.model");
 const ApiError = require("../../utils/api-error");
+const logger = require("../../utils/logger");
 const { deleteFileIfExists } = require("../../utils/file.util");
 const exceljs = require("exceljs");
 const {
@@ -530,9 +531,26 @@ async function serializeConversation(conversation, currentUserId) {
         : conversation.createdBy?.toString?.() || conversation.createdBy,
       members,
       admins,
-      broadcastPublisherIds: (conversation.broadcastPublisherIds || [])
-        .filter(Boolean)
-        .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+      broadcastPublisherIds: (() => {
+        const raw = (conversation.broadcastPublisherIds || [])
+          .filter(Boolean)
+          .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
+        if (conversation.type !== "broadcast") {
+          return raw;
+        }
+        const creatorId = conversation.createdBy?._id
+          ? conversation.createdBy._id.toString()
+          : conversation.createdBy?.toString?.() || conversation.createdBy;
+        const adminIdSet = new Set([
+          ...(creatorId ? [String(creatorId)] : []),
+          ...(conversation.admins || []).map((e) => (e._id ? e._id.toString() : e.toString())),
+        ]);
+        const totalMembersCount = (conversation.members || []).length;
+        if (totalMembersCount > 1 && raw.length >= totalMembersCount) {
+          return Array.from(adminIdSet);
+        }
+        return raw;
+      })(),
       blockedMemberIds: (conversation.blockedMembers || [])
         .filter(Boolean)
         .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
@@ -1278,29 +1296,52 @@ async function createConversation(currentUser, payload) {
     throw new ApiError(403, "Permission denied.");
   }
 
-  const requestedPublisherIds = normalizeIdList(payload.memberIds);
-  const publisherCandidates = Array.from(
-    new Set([currentUser.id, ...requestedPublisherIds]),
-  );
-  const existingPublisherUsers = await User.find(
-    { _id: { $in: publisherCandidates }, isActive: true },
-    "_id",
-  ).lean();
-  const broadcastPublisherIds = Array.from(
-    new Set(existingPublisherUsers.map((entry) => entry._id.toString())),
+  const requestedMemberIds = normalizeIdList(payload.memberIds);
+  const requestedAdminIds = normalizeIdList(payload.adminIds);
+  const requestedPublisherIds = normalizeIdList(
+    payload.broadcastPublisherIds || payload.publisherIds,
   );
 
-  const requestedAdminIds = normalizeIdList(payload.adminIds);
-  const publisherSet = new Set(broadcastPublisherIds);
+  const allCandidateIds = Array.from(
+    new Set([
+      currentUser.id,
+      ...requestedMemberIds,
+      ...requestedAdminIds,
+      ...requestedPublisherIds,
+    ]),
+  );
+  const existingUsers = await User.find(
+    { _id: { $in: allCandidateIds }, isActive: true },
+    "_id",
+  ).lean();
+  const activeUserSet = new Set(
+    existingUsers.map((entry) => entry._id.toString()),
+  );
+
   const adminIds = Array.from(
     new Set(
       [currentUser.id, ...requestedAdminIds].filter((id) =>
-        publisherSet.has(id),
+        activeUserSet.has(id),
       ),
     ),
   );
 
-  const members = [...broadcastPublisherIds];
+  const broadcastPublisherIds = Array.from(
+    new Set(
+      [...adminIds, ...requestedPublisherIds].filter((id) =>
+        activeUserSet.has(id),
+      ),
+    ),
+  );
+
+  const members = Array.from(
+    new Set(
+      [...broadcastPublisherIds, ...requestedMemberIds].filter((id) =>
+        activeUserSet.has(id),
+      ),
+    ),
+  );
+
   const conversation = await Conversation.create({
     type,
     name: name || "Broadcast",
@@ -1366,72 +1407,72 @@ async function updateConversation(currentUser, conversationId, payload) {
     }
   }
   if (conversation.type === "broadcast") {
-    if (payload.memberIds != null) {
-      const requestedPublisherIds = normalizeIdList(payload.memberIds);
-      const publisherCandidates = Array.from(
-        new Set([
-          conversation.createdBy?.toString?.() || currentUser.id,
-          ...requestedPublisherIds,
-        ]),
+    const creatorId = conversation.createdBy?.toString?.() || currentUser.id;
+
+    if (payload.broadcastPublisherIds != null || payload.publisherIds != null) {
+      const explicitPublishers = normalizeIdList(
+        payload.broadcastPublisherIds != null
+          ? payload.broadcastPublisherIds
+          : payload.publisherIds,
       );
-      const existingPublisherUsers = await User.find(
-        { _id: { $in: publisherCandidates }, isActive: true },
+      const activePublishers = await User.find(
+        { _id: { $in: explicitPublishers }, isActive: true },
         "_id",
       ).lean();
-      const broadcastPublisherIds = Array.from(
-        new Set(existingPublisherUsers.map((entry) => entry._id.toString())),
-      );
-      if (broadcastPublisherIds.length === 0) {
-        throw new ApiError(
-          400,
-          "Broadcast must include at least one publisher.",
-        );
-      }
-      conversation.broadcastPublisherIds = broadcastPublisherIds;
-
-      const conversationMemberIds = new Set(
-        extractIdArray(conversation.members),
-      );
-      let hasMemberChanges = false;
-      for (const publisherId of broadcastPublisherIds) {
-        if (!conversationMemberIds.has(publisherId)) {
-          conversationMemberIds.add(publisherId);
-          hasMemberChanges = true;
-        }
-      }
-      if (hasMemberChanges) {
-        conversation.members = [...conversationMemberIds];
-        await syncConversationMemberStates(
-          conversation._id,
-          conversation.members,
-        );
-      }
+      const currentAdmins = (conversation.admins || []).map((e) => e.toString());
+      const publisherSet = new Set([
+        creatorId,
+        ...currentAdmins,
+        ...activePublishers.map((e) => e._id.toString()),
+      ]);
+      conversation.broadcastPublisherIds = Array.from(publisherSet);
     }
 
     if (payload.adminIds != null) {
-      const configuredPublisherIds = new Set(
-        (conversation.broadcastPublisherIds || []).map((entry) =>
-          entry.toString(),
-        ),
-      );
-      const publisherIds =
-        configuredPublisherIds.size > 0
-          ? configuredPublisherIds
-          : new Set(
-              (conversation.members || []).map((entry) => entry.toString()),
-            );
       const requestedAdminIds = normalizeIdList(payload.adminIds);
+      const activeAdmins = await User.find(
+        { _id: { $in: requestedAdminIds }, isActive: true },
+        "_id",
+      ).lean();
       const nextAdmins = Array.from(
-        new Set(
-          [currentUser.id, ...requestedAdminIds].filter((id) =>
-            publisherIds.has(id),
-          ),
-        ),
+        new Set([
+          creatorId,
+          ...activeAdmins.map((e) => e._id.toString()),
+        ]),
       );
-      if (nextAdmins.length === 0) {
-        throw new ApiError(400, "Broadcast must include at least one admin.");
-      }
       conversation.admins = nextAdmins;
+
+      const publisherSet = new Set(
+        (conversation.broadcastPublisherIds || []).map((e) => e.toString()),
+      );
+      for (const adminId of nextAdmins) {
+        publisherSet.add(adminId);
+      }
+      conversation.broadcastPublisherIds = Array.from(publisherSet);
+    }
+
+    if (payload.memberIds != null) {
+      const requestedMemberIds = normalizeIdList(payload.memberIds);
+      const activeMembers = await User.find(
+        { _id: { $in: requestedMemberIds }, isActive: true },
+        "_id",
+      ).lean();
+      const mandatoryMembers = [
+        creatorId,
+        ...(conversation.admins || []).map((e) => e.toString()),
+        ...(conversation.broadcastPublisherIds || []).map((e) => e.toString()),
+      ];
+      const nextMembers = Array.from(
+        new Set([
+          ...mandatoryMembers,
+          ...activeMembers.map((e) => e._id.toString()),
+        ]),
+      );
+      conversation.members = nextMembers;
+      await syncConversationMemberStates(
+        conversation._id,
+        conversation.members,
+      );
     }
   }
 
@@ -1753,31 +1794,30 @@ async function createMessage(currentUser, payload, file) {
   const normalizedMetadata = normalizeMessageMetadata(payload.metadata) || {};
   let recipientIds = [];
   if (conversation.type === "broadcast") {
+    const creatorId = conversation.createdBy
+      ? getObjectIdString(conversation.createdBy)
+      : null;
+    const adminIds = new Set(
+      (conversation.admins || []).map((entry) => getObjectIdString(entry)),
+    );
     const configuredPublisherIds = new Set(
       (conversation.broadcastPublisherIds || []).map((entry) =>
         getObjectIdString(entry),
       ),
     );
-    const publisherIds =
-      configuredPublisherIds.size > 0
-        ? configuredPublisherIds
-        : new Set(
-            (conversation.members || []).map((entry) => getObjectIdString(entry)),
-          );
-    const adminIds = new Set(
-      (conversation.admins || []).map((entry) => getObjectIdString(entry)),
-    );
-    if (
-      currentUser.role !== "admin" &&
-      !publisherIds.has(currentUser.id) &&
-      !adminIds.has(currentUser.id)
-    ) {
+
+    const isSystemAdmin = currentUser.role === "admin";
+    const isCreator = creatorId === currentUser.id;
+    const isConversationAdmin = adminIds.has(currentUser.id);
+    const isPublisher = configuredPublisherIds.has(currentUser.id);
+
+    if (!isSystemAdmin && !isCreator && !isConversationAdmin && !isPublisher) {
       if (file?.path) {
         await deleteFileIfExists(file.path);
       }
       throw new ApiError(
         403,
-        "You are not allowed to publish in this broadcast.",
+        "هذه قناة بث. فقط المشرفون والناشرون المصرح لهم يمكنهم إرسال الرسائل.",
       );
     }
 
@@ -1869,6 +1909,11 @@ async function createMessage(currentUser, payload, file) {
     const conversationMemberIds = new Set(
       (conversation.members || []).map((entry) => getObjectIdString(entry)),
     );
+    const publisherIds = new Set([
+      ...(creatorId ? [creatorId] : []),
+      ...Array.from(adminIds),
+      ...Array.from(configuredPublisherIds),
+    ]);
     for (const publisherId of publisherIds) {
       conversationMemberIds.add(publisherId);
     }
@@ -2750,6 +2795,11 @@ async function removeConversationMember(currentUser, conversationId, userId) {
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== String(userId),
   );
+  if (conversation.type === "broadcast") {
+    conversation.broadcastPublisherIds = (
+      conversation.broadcastPublisherIds || []
+    ).filter((entry) => entry.toString() !== String(userId));
+  }
   conversation.blockedMembers.addToSet(userId);
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
@@ -2803,6 +2853,15 @@ async function promoteConversationAdmin(currentUser, conversationId, userId) {
   adminIds.add(String(userId));
   adminIds.add(currentUser.id);
   conversation.admins = [...adminIds];
+  if (conversation.type === "broadcast") {
+    const publisherIds = new Set(
+      (conversation.broadcastPublisherIds || []).map((entry) =>
+        entry.toString(),
+      ),
+    );
+    publisherIds.add(String(userId));
+    conversation.broadcastPublisherIds = [...publisherIds];
+  }
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
@@ -2848,6 +2907,11 @@ async function demoteConversationAdmin(currentUser, conversationId, userId) {
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== String(userId),
   );
+  if (conversation.type === "broadcast") {
+    conversation.broadcastPublisherIds = (
+      conversation.broadcastPublisherIds || []
+    ).filter((entry) => entry.toString() !== String(userId));
+  }
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
@@ -3577,6 +3641,65 @@ async function getConversationAvatarFilePath(conversationId) {
   return latestEntry.filePath;
 }
 
+
+async function sanitizeBroadcastConversations() {
+  try {
+    const broadcastConversations = await Conversation.find({
+      type: "broadcast",
+      deletedAt: null,
+    }).exec();
+
+    let repairedCount = 0;
+    for (const conv of broadcastConversations) {
+      const creatorId = conv.createdBy ? conv.createdBy.toString() : null;
+      const adminIds = new Set(
+        (conv.admins || []).map((entry) => entry.toString()),
+      );
+      if (creatorId) {
+        adminIds.add(creatorId);
+      }
+
+      const rawPublishers = (conv.broadcastPublisherIds || []).map((entry) =>
+        entry.toString(),
+      );
+      const memberIds = new Set(
+        (conv.members || []).map((entry) => entry.toString()),
+      );
+
+      let nextPublishers = rawPublishers;
+      if (memberIds.size > 1 && rawPublishers.length >= memberIds.size) {
+        nextPublishers = Array.from(adminIds);
+      } else {
+        nextPublishers = Array.from(new Set([...adminIds, ...rawPublishers]));
+      }
+
+      for (const pubId of nextPublishers) {
+        memberIds.add(pubId);
+      }
+
+      const needsUpdate =
+        conv.broadcastPublisherIds.length !== nextPublishers.length ||
+        conv.admins.length !== adminIds.size ||
+        conv.members.length !== memberIds.size;
+
+      if (needsUpdate) {
+        conv.broadcastPublisherIds = nextPublishers;
+        conv.admins = Array.from(adminIds);
+        conv.members = Array.from(memberIds);
+        await conv.save();
+        repairedCount++;
+      }
+    }
+    if (repairedCount > 0) {
+      logger.info(
+        `[Broadcast Sanitization] Repaired ${repairedCount} broadcast channels in database.`
+      );
+    }
+  } catch (err) {
+    logger.error("[Broadcast Sanitization Error]:", err);
+  }
+}
+
 module.exports = {
   updateConversationAvatar,
   removeConversationAvatar,
@@ -3631,6 +3754,7 @@ module.exports = {
   getMessageReadReceipts,
   sanitizeMessageContent,
   sanitizePinnedMessageContent,
+  sanitizeBroadcastConversations,
 };
 
 async function getMessageReadReceipts(currentUser, messageId) {

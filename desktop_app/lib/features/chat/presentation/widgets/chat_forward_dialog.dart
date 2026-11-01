@@ -219,9 +219,20 @@ class _ChatForwardDialogState extends ConsumerState<ChatForwardDialog>
 
     // 4. Groups & Broadcasts
     final filteredGroups = overview.conversations
-        .where((conv) =>
-            conv.id != widget.currentConversationId &&
-            (conv.type == 'group' || conv.type == 'broadcast'))
+        .where((conv) {
+          if (conv.id == widget.currentConversationId) return false;
+          if (conv.type == 'group') return true;
+          if (conv.type == 'broadcast') {
+            final uid = widget.currentUserId;
+            if (uid.isEmpty) return false;
+            final currentUserObj = overview.users.where((u) => u.id == uid).firstOrNull;
+            if (currentUserObj?.role == 'admin') return true;
+            if (conv.createdBy == uid) return true;
+            if (conv.admins.any((a) => a.id == uid)) return true;
+            return conv.broadcastPublisherIds.contains(uid);
+          }
+          return false;
+        })
         .where((conv) {
           if (query.isEmpty) return true;
           final name = conv.name.toLowerCase();

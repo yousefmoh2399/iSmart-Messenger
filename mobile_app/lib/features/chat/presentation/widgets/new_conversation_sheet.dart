@@ -42,6 +42,7 @@ class NewConversationSheet extends ConsumerStatefulWidget {
 class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
   _NewChatMode _mode = _NewChatMode.direct;
   int _groupStep = 1; // 1: Select members, 2: Group info & details
+  int _broadcastStep = 1; // 1: Select recipients, 2: Broadcast info & details
 
   final _searchController = TextEditingController();
   final _groupNameController = TextEditingController();
@@ -217,6 +218,20 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
             memberIds: _selectedMemberIds.toList(),
             adminIds: _selectedAdminIds.toList(),
           );
+
+      if (_pickedAvatarFile != null) {
+        try {
+          await ref
+              .read(chatOverviewControllerProvider.notifier)
+              .uploadConversationAvatar(
+                conversationId: conv.id,
+                filePath: _pickedAvatarFile!.path,
+                fileBytes: _pickedAvatarBytes,
+                fileName: _pickedAvatarFile!.name,
+              );
+        } catch (_) {}
+      }
+
       if (mounted) {
         Navigator.of(context).pop(conv);
       }
@@ -292,15 +307,6 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
       return;
     }
 
-    if (_selectedMemberIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('يرجى اختيار عضو واحد على الأقل للاستقبال'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
 
     if (_isCreating) return;
     setState(() => _isCreating = true);
@@ -314,6 +320,20 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
             memberIds: _selectedMemberIds.toList(),
             adminIds: _selectedAdminIds.toList(),
           );
+
+      if (_pickedAvatarFile != null) {
+        try {
+          await ref
+              .read(chatOverviewControllerProvider.notifier)
+              .uploadConversationAvatar(
+                conversationId: conv.id,
+                filePath: _pickedAvatarFile!.path,
+                fileBytes: _pickedAvatarBytes,
+                fileName: _pickedAvatarFile!.name,
+              );
+        } catch (_) {}
+      }
+
       if (mounted) {
         Navigator.of(context).pop(conv);
       }
@@ -456,7 +476,7 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
             if (_mode == _NewChatMode.group && _groupStep == 1)
               _buildGroupSelectionBottomBar(isDark),
 
-            if (_mode == _NewChatMode.broadcast)
+            if (_mode == _NewChatMode.broadcast && _broadcastStep == 1)
               _buildBroadcastBottomBar(isDark),
           ],
         ),
@@ -551,13 +571,62 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
         onPressed: () => setState(() => _mode = _NewChatMode.direct),
       );
     } else {
-      title = 'قناة بث جديدة';
-      subtitle = 'إرسال تعليمات وتوجيهات للأعضاء';
-      leading = IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-        tooltip: 'رجوع',
-        onPressed: () => setState(() => _mode = _NewChatMode.direct),
-      );
+      if (_broadcastStep == 1) {
+        title = 'قناة بث جديدة';
+        subtitle = _selectedMemberIds.isEmpty
+            ? 'اختر المستلمين (اختياري)'
+            : 'تم اختيار ${_selectedMemberIds.length} مستلم';
+        leading = IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          tooltip: 'رجوع',
+          onPressed: () {
+            setState(() {
+              _mode = _NewChatMode.direct;
+              _selectedMemberIds.clear();
+            });
+          },
+        );
+        trailing = TextButton(
+          onPressed: () => setState(() => _broadcastStep = 2),
+          child: const Text(
+            'التالي',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+              color: Color(0xFFF59E0B),
+            ),
+          ),
+        );
+      } else {
+        title = 'بيانات قناة البث';
+        subtitle = 'أدخل اسم ووصف القناة';
+        leading = IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          tooltip: 'رجوع',
+          onPressed: () => setState(() => _broadcastStep = 1),
+        );
+        trailing = FilledButton.tonal(
+          onPressed: _isCreating ? null : _createBroadcast,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFF59E0B),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          ),
+          child: _isCreating
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text(
+                  'إنشاء',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+        );
+      }
     }
 
     return Padding(
@@ -613,6 +682,10 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
       return _buildGroupDetailsStep(allUsers, isDark);
     }
 
+    if (_mode == _NewChatMode.broadcast && _broadcastStep == 2) {
+      return _buildBroadcastDetailsStep(allUsers, isDark);
+    }
+
     if (_mode == _NewChatMode.department) {
       return _buildDepartmentRoomForm(departments, isDark);
     }
@@ -640,13 +713,52 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
           },
         ),
 
-        // 3. Select All in Department Banner (when in Group Mode)
-        if (_mode == _NewChatMode.group && departmentUsers.isNotEmpty)
+        // 3. Select All in Department Banner (when in Group or Broadcast Mode)
+        if ((_mode == _NewChatMode.group || _mode == _NewChatMode.broadcast) &&
+            departmentUsers.isNotEmpty)
           _buildDepartmentBatchSelectBanner(departmentUsers, isDark),
 
-        // 4. Selected Members Horizontal Tray (when 1+ members selected in Group Mode)
-        if (_mode == _NewChatMode.group && _selectedMemberIds.isNotEmpty)
+        // 4. Selected Members Horizontal Tray (when 1+ members selected in Group or Broadcast Mode)
+        if ((_mode == _NewChatMode.group || _mode == _NewChatMode.broadcast) &&
+            _selectedMemberIds.isNotEmpty)
           _buildSelectedMembersTray(allUsers, isDark),
+
+        // 4b. Broadcast Step 1 Helpful Notice
+        if (_mode == _NewChatMode.broadcast && _broadcastStep == 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E2838) : const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.3) : const Color(0xFFBFDBFE),
+                  width: 0.8,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 18,
+                    color: isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'المستلمون يستقبلون التوجيهات فقط ولا يمكنهم النشر. يمكنك تخطي التحديد والضغط على التالي.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E40AF),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
         // 5. Action Tiles (New Group / Department / Broadcast) - only in Direct Mode
         if (_mode == _NewChatMode.direct && _searchQuery.isEmpty)
@@ -658,9 +770,11 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
           child: Row(
             children: [
               Text(
-                _mode == _NewChatMode.group
-                    ? 'جهات الاتصال المتاحة'
-                    : 'جميع الزملاء',
+                _mode == _NewChatMode.broadcast
+                    ? 'اختيار المستلمين (اختياري)'
+                    : (_mode == _NewChatMode.group
+                        ? 'جهات الاتصال المتاحة'
+                        : 'جميع الزملاء'),
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
@@ -775,7 +889,15 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
             isDark: isDark,
             onTap: () {
               HapticFeedback.lightImpact();
-              setState(() => _mode = _NewChatMode.broadcast);
+              setState(() {
+                _mode = _NewChatMode.broadcast;
+                _broadcastStep = 1;
+                _selectedMemberIds.clear();
+                _groupNameController.clear();
+                _groupDescController.clear();
+                _pickedAvatarBytes = null;
+                _pickedAvatarFile = null;
+              });
             },
           ),
         const Padding(
@@ -1324,19 +1446,12 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
         ),
       ),
       child: FilledButton.icon(
-        onPressed: _isCreating ? null : _createBroadcast,
-        icon: _isCreating
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : const Icon(Icons.campaign_rounded),
+        onPressed: () => setState(() => _broadcastStep = 2),
+        icon: const Icon(Icons.arrow_forward_rounded, size: 18),
         label: Text(
-          'إنشاء قناة البث (${_selectedMemberIds.length} مستلم)',
+          _selectedMemberIds.isEmpty
+              ? 'التالي: بيانات القناة (بدون مستلمين)'
+              : 'التالي: بيانات القناة (${_selectedMemberIds.length} مستلم)',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         style: FilledButton.styleFrom(
@@ -1348,6 +1463,297 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
           ),
         ),
       ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Broadcast Role Notice Banner
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildBroadcastRoleNotice(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E2838) : const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? const Color(0xFF3B82F6).withValues(alpha: 0.35)
+              : const Color(0xFFBFDBFE),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 20,
+            color: isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'تنبيه حول صلاحيات النشر والمشرفين:',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '• أنت (منشئ القناة) فقط من يملك صلاحية إرسال الرسائل والنشر لجميع الأعضاء.\n'
+                  '• الزملاء المحددون في القائمة هم مستمعون ومستلمون فقط ولا يمكنهم إرسال أي رسائل داخل القناة.\n'
+                  '• إذا رغبت مستقبلاً بالسماح لأي زميل بالنشر معك، يمكنك ترقيته كمشرف من إعدادات القناة.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: isDark ? Colors.white70 : const Color(0xFF1E3A8A).withValues(alpha: 0.9),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Step 2: Broadcast Details & Final Confirmation
+  // ─────────────────────────────────────────────────────────────────────────
+  Widget _buildBroadcastDetailsStep(
+    List<ChatDirectoryUser> allUsers,
+    bool isDark,
+  ) {
+    final selectedUsers = allUsers
+        .where((u) => _selectedMemberIds.contains(u.id))
+        .toList();
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: [
+        // Broadcast Avatar Picker
+        Center(
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              GestureDetector(
+                onTap: _pickAvatar,
+                child: Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF262118) : const Color(0xFFFEF3C7),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFFF59E0B),
+                      width: 2,
+                    ),
+                    image: _pickedAvatarBytes != null
+                        ? DecorationImage(
+                            image: MemoryImage(_pickedAvatarBytes!),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: _pickedAvatarBytes == null
+                      ? const Icon(
+                          Icons.campaign_rounded,
+                          color: Color(0xFFF59E0B),
+                          size: 38,
+                        )
+                      : null,
+                ),
+              ),
+              Positioned(
+                bottom: -2,
+                left: -2,
+                child: Material(
+                  color: const Color(0xFFF59E0B),
+                  shape: const CircleBorder(),
+                  elevation: 2,
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: _pickAvatar,
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(Icons.edit_rounded, size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+              if (_pickedAvatarBytes != null)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _pickedAvatarBytes = null;
+                      _pickedAvatarFile = null;
+                    }),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.redAccent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close_rounded, size: 12, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // Broadcast Name Input
+        TextField(
+          controller: _groupNameController,
+          autofocus: true,
+          maxLength: 50,
+          decoration: InputDecoration(
+            labelText: 'اسم قناة البث (مطلوب)',
+            hintText: 'مثال: إعلانات الإدارة العامة',
+            prefixIcon: const Icon(Icons.campaign_rounded),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF212B36) : Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        // Broadcast Description Input
+        TextField(
+          controller: _groupDescController,
+          maxLines: 2,
+          maxLength: 150,
+          decoration: InputDecoration(
+            labelText: 'وصف القناة (اختياري)',
+            hintText: 'الهدف من القناة أو تعليمات المتابعة...',
+            prefixIcon: const Icon(Icons.description_outlined),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF212B36) : Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Prominent Role & Permission Notice Banner
+        _buildBroadcastRoleNotice(isDark),
+
+        const SizedBox(height: 16),
+
+        // Recipients Summary
+        Text(
+          selectedUsers.isEmpty
+              ? 'المستلمون: لم يتم تحديد مستلمين بعد (اختياري)'
+              : 'المستلمون المحددون (${selectedUsers.length})',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+        ),
+        const SizedBox(height: 10),
+
+        if (selectedUsers.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.person_add_outlined,
+                  size: 20,
+                  color: isDark ? Colors.white54 : Colors.black54,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'يمكنك إنشاء القناة الآن بمفردك وإضافة المستلمين لاحقاً في أي وقت.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: selectedUsers.map((u) {
+              return Chip(
+                avatar: ChatAvatar(
+                  radius: 12,
+                  backgroundColor: const Color(0xFFF59E0B),
+                  avatarUrl: u.avatarUrl,
+                  fallback: Text(
+                    u.displayName.isNotEmpty ? u.displayName[0] : '?',
+                    style: const TextStyle(fontSize: 10, color: Colors.white),
+                  ),
+                ),
+                label: Text(u.displayName),
+                onDeleted: () => _toggleMember(u.id),
+                deleteIconColor: Colors.red,
+              );
+            }).toList(),
+          ),
+
+        const SizedBox(height: 28),
+
+        FilledButton.icon(
+          onPressed: _isCreating ? null : _createBroadcast,
+          icon: _isCreating
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.campaign_rounded),
+          label: Text(
+            selectedUsers.isEmpty
+                ? 'إنشاء قناة البث الآن'
+                : 'إنشاء قناة البث (${selectedUsers.length} مستلم)',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          ),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFF59E0B),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
