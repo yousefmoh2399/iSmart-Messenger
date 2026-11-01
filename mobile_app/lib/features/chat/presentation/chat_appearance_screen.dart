@@ -15,7 +15,7 @@ class ChatAppearanceScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
-  int _selectedTabIndex = 0; // 0: الخلفيات, 1: الثيمات, 2: تخصيص يدوي
+  int _selectedTabIndex = 0; // 0: الثيمات, 1: الخلفيات, 2: تخصيص يدوي
   bool? _previewIsDark;
 
   Future<void> _save(ChatPreferences next) async {
@@ -139,16 +139,16 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 220),
             child: switch (_selectedTabIndex) {
-              0 => _WallpapersView(
-                  key: const ValueKey('wallpapers_view'),
+              0 => _ThemesView(
+                  key: const ValueKey('themes_view'),
                   preferences: prefs,
                   isDark: previewDark,
                   cardBg: cardBg,
                   borderColor: borderColor,
                   onSave: _save,
                 ),
-              1 => _ThemesView(
-                  key: const ValueKey('themes_view'),
+              1 => _WallpapersView(
+                  key: const ValueKey('wallpapers_view'),
                   preferences: prefs,
                   isDark: previewDark,
                   cardBg: cardBg,
@@ -521,9 +521,9 @@ class _SegmentedSwitcher extends StatelessWidget {
     final activeBg = isDark ? const Color(0xFF2C3646) : Colors.white;
 
     final tabs = [
-      (icon: Icons.wallpaper_rounded, label: 'الخلفيات'),
-      (icon: Icons.palette_outlined, label: 'الثيمات'),
-      (icon: Icons.tune_rounded, label: 'تخصيص يدوي'),
+      (icon: Icons.palette_outlined, label: 'الثيمات 🎨'),
+      (icon: Icons.wallpaper_rounded, label: 'الخلفيات 🖼️'),
+      (icon: Icons.tune_rounded, label: 'تخصيص يدوي 🛠️'),
     ];
 
     return Container(

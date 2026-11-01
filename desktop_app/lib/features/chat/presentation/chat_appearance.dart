@@ -269,6 +269,26 @@ class ChatAppearanceCatalog {
   ];
 
   static const wallpapers = <ChatWallpaperOption>[
+    // 0. Festive & Seasons
+    ChatWallpaperOption(
+      id: 'wp_winter_snow',
+      title: 'جليد وشتاء رأس السنة ❄️',
+      category: 'festive',
+      previewColors: [Color(0xFF0284C7), Color(0xFFBAE6FD)],
+      lightColors: [Color(0xFFE0F2FE), Color(0xFFF0F9FF)],
+      darkColors: [Color(0xFF082F49), Color(0xFF0C4A6E)],
+      hasDoodles: true,
+    ),
+    ChatWallpaperOption(
+      id: 'wp_halloween',
+      title: 'يقطين الهالوين 🎃',
+      category: 'festive',
+      previewColors: [Color(0xFFEA580C), Color(0xFF261B31)],
+      lightColors: [Color(0xFFFFF7ED), Color(0xFFFFEDD5)],
+      darkColors: [Color(0xFF1F122B), Color(0xFF2E1065)],
+      hasDoodles: true,
+    ),
+
     // 1. Telegram Originals
     ChatWallpaperOption(
       id: 'tg_classic',

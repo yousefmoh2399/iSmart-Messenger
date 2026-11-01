@@ -14,6 +14,7 @@ import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../chat/presentation/chat_admin_management_screen.dart';
+import '../../chat/presentation/chat_appearance.dart';
 import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/conversation_screen.dart';
 import '../../chat/presentation/favorite_messages_screen.dart';
@@ -501,6 +502,159 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     );
                   },
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Divider(height: 1, thickness: 0.5),
+                      const SizedBox(height: 10),
+                      Text(
+                        'ثيمات المحادثة السريعة 🎨 (تطبيق فوري)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 68,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          children: [
+                            (
+                              id: 'festive_winter',
+                              title: 'رأس السنة والجليد ❄️',
+                              badge: 'ثلج على الحواف',
+                              wpId: 'wp_winter_snow',
+                              color: const Color(0xFF0284C7),
+                            ),
+                            (
+                              id: 'festive_halloween',
+                              title: 'هالوين الاحتفالي 🎃',
+                              badge: 'يقطين متوهج',
+                              wpId: 'wp_halloween',
+                              color: const Color(0xFFEA580C),
+                            ),
+                            (
+                              id: 'telegram_night',
+                              title: 'ليل تلجرام ✈️',
+                              badge: 'كحلي ليلي',
+                              wpId: 'tg_night',
+                              color: const Color(0xFF2AABEE),
+                            ),
+                            (
+                              id: 'whatsapp',
+                              title: 'واتساب الرسمي 💬',
+                              badge: 'كلاسيكي',
+                              wpId: 'wa_classic',
+                              color: const Color(0xFF00A884),
+                            ),
+                            (
+                              id: 'sage_harmony',
+                              title: 'راحة العين 👁️',
+                              badge: 'Zero Blue',
+                              wpId: 'grad_eye_comfort',
+                              color: const Color(0xFF5F8D76),
+                            ),
+                          ].map((t) {
+                            final chatPrefs = user.chatPreferences ?? ChatPreferences.defaults;
+                            final isSelected = chatPrefs.themeId == t.id;
+
+                            return Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: InkWell(
+                                onTap: () async {
+                                  HapticFeedback.lightImpact();
+                                  final next = chatPrefs.copyWith(
+                                    themeId: t.id,
+                                    wallpaperId: t.wpId,
+                                  );
+                                  await ref
+                                      .read(authControllerProvider.notifier)
+                                      .updateChatPreferences(next);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('تم تفعيل ${t.title} بنجاح!'),
+                                        behavior: SnackBarBehavior.floating,
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  width: 145,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? t.color.withValues(alpha: isDark ? 0.22 : 0.12)
+                                        : (isDark ? const Color(0xFF26262A) : const Color(0xFFF2F2F7)),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? t.color
+                                          : (isDark
+                                              ? Colors.white.withValues(alpha: 0.08)
+                                              : Colors.black.withValues(alpha: 0.06)),
+                                      width: isSelected ? 1.8 : 0.8,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            width: 10,
+                                            height: 10,
+                                            decoration: BoxDecoration(
+                                              color: t.color,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              t.title,
+                                              style: TextStyle(
+                                                fontSize: 11.5,
+                                                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                                color: isDark ? Colors.white : Colors.black87,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          if (isSelected)
+                                            Icon(CupertinoIcons.checkmark_alt_circle_fill, size: 14, color: t.color),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        t.badge,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: isDark ? Colors.white60 : Colors.black54,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

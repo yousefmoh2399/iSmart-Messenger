@@ -20,6 +20,7 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/safe_network_avatar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
+import '../../chat/presentation/chat_appearance.dart';
 import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/widgets/desktop_message_actions_dialogs.dart';
 import '../../chat/presentation/widgets/desktop_quick_replies.dart';
@@ -770,6 +771,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     required bool isDark,
   }) {
     final currentMode = ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.system;
+    final authUser = ref.watch(authControllerProvider).valueOrNull;
+    final chatPrefs = authUser?.chatPreferences ?? ChatPreferences.defaults;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -815,6 +818,173 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // Quick Chat Theme Selection (Apple / Modern Style)
+        _InsetGroup(
+          title: 'ثيمات الشات المميّزة (تطبيق فوري بضغطة واحدة)',
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final activeThemeId = chatPrefs.themeId;
+                  final quickThemes = [
+                    (
+                      id: 'festive_winter',
+                      title: 'رأس السنة والجليد ❄️',
+                      subtitle: 'تأثير الثلج على الحواف',
+                      wpId: 'wp_winter_snow',
+                      color: const Color(0xFF0284C7),
+                      badge: 'احتفالي ❄️',
+                    ),
+                    (
+                      id: 'festive_halloween',
+                      title: 'هالوين الاحتفالي 🎃',
+                      subtitle: 'أجواء اليقطين والظلال',
+                      wpId: 'wp_halloween',
+                      color: const Color(0xFFEA580C),
+                      badge: 'احتفالي 🎃',
+                    ),
+                    (
+                      id: 'telegram_night',
+                      title: 'ليل تلجرام ✈️',
+                      subtitle: 'كحلي ليلي راقي',
+                      wpId: 'tg_night',
+                      color: const Color(0xFF2AABEE),
+                      badge: 'الأكثر شعبية',
+                    ),
+                    (
+                      id: 'whatsapp',
+                      title: 'واتساب الرسمي 💬',
+                      subtitle: 'النمط الكلاسيكي الأصلي',
+                      wpId: 'wa_classic',
+                      color: const Color(0xFF00A884),
+                      badge: 'كلاسيكي',
+                    ),
+                    (
+                      id: 'sage_harmony',
+                      title: 'راحة وحماية العين 👁️',
+                      subtitle: 'Zero Blue دافئ ومريح',
+                      wpId: 'grad_eye_comfort',
+                      color: const Color(0xFF5F8D76),
+                      badge: 'صحي للعين',
+                    ),
+                  ];
+
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: quickThemes.map((t) {
+                      final isSelected = activeThemeId == t.id;
+                      return SizedBox(
+                        width: (constraints.maxWidth - 24) / 2 > 260
+                            ? (constraints.maxWidth - 24) / 3
+                            : (constraints.maxWidth - 12) / 2,
+                        child: InkWell(
+                          onTap: () async {
+                            final next = chatPrefs.copyWith(
+                              themeId: t.id,
+                              wallpaperId: t.wpId,
+                            );
+                            await ref
+                                .read(authControllerProvider.notifier)
+                                .updateChatPreferences(next);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('تم تفعيل ${t.title} بنجاح!'),
+                                  behavior: SnackBarBehavior.floating,
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? (isSelected
+                                      ? t.color.withValues(alpha: 0.16)
+                                      : const Color(0xFF232326))
+                                  : (isSelected
+                                      ? t.color.withValues(alpha: 0.08)
+                                      : const Color(0xFFF7F7FA)),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected
+                                    ? t.color
+                                    : (isDark
+                                        ? Colors.white.withValues(alpha: 0.08)
+                                        : Colors.black.withValues(alpha: 0.06)),
+                                width: isSelected ? 2.0 : 1.0,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: t.color.withValues(alpha: 0.20),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Center(
+                                    child: isSelected
+                                        ? Icon(Icons.check_circle_rounded, color: t.color, size: 22)
+                                        : Container(
+                                            width: 14,
+                                            height: 14,
+                                            decoration: BoxDecoration(
+                                              color: t.color,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        t.title,
+                                        style: TextStyle(
+                                          fontWeight: isSelected
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                          fontSize: 13,
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        t.subtitle,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark ? Colors.white60 : Colors.black54,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
               ),
             ),
           ],

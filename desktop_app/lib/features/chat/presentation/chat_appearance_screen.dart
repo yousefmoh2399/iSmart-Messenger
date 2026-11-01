@@ -16,8 +16,8 @@ class ChatAppearanceScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
-  int _selectedTabIndex = 0; // 0: خلفيات واتساب, 1: السمات الجاهزة, 2: تخصيص يدوي
-  String _selectedCategory = 'all'; // 'all', 'whatsapp', 'gradient'
+  int _selectedTabIndex = 0; // 0: السمات الجاهزة, 1: خلفيات المحادثة, 2: تخصيص يدوي
+  String _selectedCategory = 'all'; // 'all', 'festive', 'whatsapp', 'telegram', 'comfort', 'gradient'
   bool? _previewIsDark; // null: follow app mode, true: force dark, false: force light
 
   Future<void> _save(ChatPreferences next) async {
@@ -211,7 +211,15 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
                               AnimatedSwitcher(
                                 duration: const Duration(milliseconds: 220),
                                 child: switch (_selectedTabIndex) {
-                                  0 => _DesktopWallpapersView(
+                                  0 => _DesktopThemesView(
+                                      key: const ValueKey('themes_tab'),
+                                      preferences: prefs,
+                                      isDark: previewDark,
+                                      cardBg: cardBg,
+                                      borderColor: borderColor,
+                                      onSave: _save,
+                                    ),
+                                  1 => _DesktopWallpapersView(
                                       key: const ValueKey('wallpapers_tab'),
                                       preferences: prefs,
                                       isDark: previewDark,
@@ -221,14 +229,6 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
                                       onCategoryChanged: (cat) => setState(
                                         () => _selectedCategory = cat,
                                       ),
-                                      onSave: _save,
-                                    ),
-                                  1 => _DesktopThemesView(
-                                      key: const ValueKey('themes_tab'),
-                                      preferences: prefs,
-                                      isDark: previewDark,
-                                      cardBg: cardBg,
-                                      borderColor: borderColor,
                                       onSave: _save,
                                     ),
                                   _ => _DesktopCustomizerView(
@@ -520,19 +520,19 @@ class _DesktopSegmentedTabs extends StatelessWidget {
       child: Row(
         children: [
           _TabPill(
-            title: 'خلفيات واتساب ومميزة',
-            icon: Icons.wallpaper_rounded,
+            title: 'السمات الجاهزة 🎨',
+            icon: Icons.palette_outlined,
             selected: selectedIndex == 0,
             onTap: () => onChanged(0),
           ),
           _TabPill(
-            title: 'السمات الجاهزة',
-            icon: Icons.palette_outlined,
+            title: 'خلفيات المحادثة 🖼️',
+            icon: Icons.wallpaper_rounded,
             selected: selectedIndex == 1,
             onTap: () => onChanged(1),
           ),
           _TabPill(
-            title: 'تخصيص يدوي متقدم',
+            title: 'تخصيص يدوي متقدم 🛠️',
             icon: Icons.tune_rounded,
             selected: selectedIndex == 2,
             onTap: () => onChanged(2),
@@ -700,6 +700,11 @@ class _DesktopWallpapersView extends StatelessWidget {
               label: 'الكل (${ChatAppearanceCatalog.wallpapers.length})',
               selected: selectedCategory == 'all',
               onTap: () => onCategoryChanged('all'),
+            ),
+            _FilterChipPill(
+              label: 'احتفالي ومواسم ❄️🎃',
+              selected: selectedCategory == 'festive',
+              onTap: () => onCategoryChanged('festive'),
             ),
             _FilterChipPill(
               label: 'واتساب 💬',
@@ -983,6 +988,8 @@ class _DesktopThemesView extends StatelessWidget {
           borderColor: borderColor,
           onTap: () {
             final defaultWp = switch (themeOption.id) {
+              'festive_winter' => 'wp_winter_snow',
+              'festive_halloween' => 'wp_halloween',
               'whatsapp' => 'wa_classic',
               'ios' => 'wa_slate',
               'classic' => 'wa_midnight',
