@@ -243,6 +243,13 @@ class _NewConversationDialogState
           setState(() => _isCreating = false);
           return;
         }
+        if (_selectedMembers.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('يرجى تحديد عضو واحد على الأقل للمجموعة')),
+          );
+          setState(() => _isCreating = false);
+          return;
+        }
         conversation = await controller.createConversation(
           type: 'group',
           name: name,

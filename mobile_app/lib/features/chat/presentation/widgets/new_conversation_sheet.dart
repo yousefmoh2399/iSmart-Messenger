@@ -206,6 +206,16 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
       return;
     }
 
+    if (_selectedMemberIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى تحديد عضو واحد على الأقل للمجموعة'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     if (_isCreating) return;
     setState(() => _isCreating = true);
     try {

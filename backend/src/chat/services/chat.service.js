@@ -1235,7 +1235,16 @@ async function createConversation(currentUser, payload) {
   }
 
   if (type === "group") {
-    const members = Array.from(new Set([currentUser.id, ...memberIds]));
+    if (!name) {
+      throw new ApiError(400, "Group name is required.");
+    }
+    if (!Array.isArray(memberIds) || memberIds.length === 0) {
+      throw new ApiError(400, "Group must have at least one member.");
+    }
+    const adminIds = Array.from(
+      new Set([currentUser.id, ...(payload.adminIds || []).map(String)]),
+    );
+    const members = Array.from(new Set([currentUser.id, ...memberIds, ...adminIds]));
     const conversation = await Conversation.create({
       type,
       name,
@@ -1243,7 +1252,7 @@ async function createConversation(currentUser, payload) {
       avatarUrl: payload.avatarUrl || null,
       createdBy: currentUser.id,
       members,
-      admins: [currentUser.id],
+      admins: adminIds,
       blockedMembers: [],
     });
     await ensureConversationMemberStates(conversation._id, members);
