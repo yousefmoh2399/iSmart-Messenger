@@ -3925,6 +3925,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       if (_typingUsers.length == 1) return '${_typingUsers.first} يكتب...';
       return '${_typingUsers.length} أعضاء يكتبون...';
     }
+    if (conversation.type == 'broadcast') {
+      return !_canPublishInBroadcast(conversation)
+          ? 'قناة بث • استقبال فقط (${conversation.members.length} مستلم)'
+          : 'قناة بث • نشر وإشراف (${conversation.members.length} مستلم)';
+    }
     if (conversation.type != 'direct') {
       return '${conversation.members.length} عضو';
     }

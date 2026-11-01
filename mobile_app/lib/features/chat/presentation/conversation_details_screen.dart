@@ -47,6 +47,8 @@ class _ConversationDetailsScreenState
 
   bool get _isGroup =>
       _conversation.type == 'group' || _conversation.type == 'department';
+  bool get _isBroadcast => _conversation.type == 'broadcast';
+  bool get _isMultiUser => _isGroup || _isBroadcast;
 
   List<ChatMessage> get _sharedImages => widget.messages
       .where((m) => !m.isDeleted && m.hasAttachment && m.messageType == 'image')
@@ -305,7 +307,7 @@ class _ConversationDetailsScreenState
 
     final overview = ref.watch(chatOverviewControllerProvider).valueOrNull;
     final effectivePeer = widget.peer ??
-        (!_isGroup
+        (!_isMultiUser
             ? (_conversation.members
                     .where((m) => m.id != currentUserId)
                     .map((m) =>
@@ -324,6 +326,19 @@ class _ConversationDetailsScreenState
     final currentFolders = folders
         .where((f) => f.conversationIds.contains(_conversation.id))
         .toList();
+
+    final String subtitleText;
+    if (_isBroadcast) {
+      subtitleText = 'قناة بث • ${_conversation.members.length} مستلم';
+    } else if (_isGroup) {
+      subtitleText = 'مجموعة • ${_conversation.members.length} مشاركاً';
+    } else if (effectivePeer != null && effectivePeer.jobTitle.isNotEmpty) {
+      subtitleText = '${effectivePeer.jobTitle} • ${effectivePeer.branchCode}';
+    } else if (effectivePeer?.presenceStatus == 'online') {
+      subtitleText = 'متصل الآن 🟢';
+    } else {
+      subtitleText = 'غير متصل';
+    }
 
     final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
     final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
@@ -348,7 +363,7 @@ class _ConversationDetailsScreenState
               onPressed: () => Navigator.pop(context, _conversation),
             ),
             actions: [
-              if (_isGroup && (_conversation.createdBy == currentUserId || _conversation.admins.any((a) => a.id == currentUserId) || authUser?.role == 'admin'))
+              if (_isMultiUser && (_conversation.createdBy == currentUserId || _conversation.admins.any((a) => a.id == currentUserId) || authUser?.role == 'admin'))
                 IconButton(
                   icon: const Icon(CupertinoIcons.ellipsis_circle),
                   onPressed: () async {
@@ -421,13 +436,7 @@ class _ConversationDetailsScreenState
                     const SizedBox(height: 4),
                     // Subtitle / Status
                     Text(
-                      _isGroup
-                          ? 'مجموعة • ${_conversation.members.length} مشاركاً'
-                          : (effectivePeer?.jobTitle.isNotEmpty == true
-                              ? '${effectivePeer!.jobTitle} • ${effectivePeer!.branchCode}'
-                              : (effectivePeer?.presenceStatus == 'online'
-                                  ? 'متصل الآن 🟢'
-                                  : 'غير متصل')),
+                      subtitleText,
                       style: TextStyle(
                         fontSize: 14,
                         color: isDark ? Colors.white54 : Colors.black45,
@@ -605,7 +614,7 @@ class _ConversationDetailsScreenState
                 ),
                 child: Column(
                   children: [
-                    if (!_isGroup) ...[
+                    if (!_isMultiUser) ...[
                       if (effectivePeer != null) ...[
                         if (effectivePeer.jobTitle.isNotEmpty)
                           _buildInfoTile(
@@ -777,8 +786,8 @@ class _ConversationDetailsScreenState
             ),
           ),
 
-          // 4. Participants Section (if Group / Department)
-          if (_isGroup) ...[
+          // 4. Participants Section (if Group / Department / Broadcast)
+          if (_isMultiUser) ...[
             const SliverToBoxAdapter(child: SizedBox(height: 18)),
             SliverToBoxAdapter(
               child: Padding(
@@ -789,7 +798,9 @@ class _ConversationDetailsScreenState
                     Padding(
                       padding: const EdgeInsets.only(right: 8, bottom: 8),
                       child: Text(
-                        'المشاركون (${_conversation.members.length})',
+                        _isBroadcast
+                            ? 'المستلمون والمشرفون (${_conversation.members.length})'
+                            : 'المشاركون (${_conversation.members.length})',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -803,7 +814,7 @@ class _ConversationDetailsScreenState
                       clipBehavior: Clip.antiAlias,
                       child: Column(
                         children: [
-                          if (_conversation.createdBy == currentUserId)
+                          if (_conversation.createdBy == currentUserId || _conversation.admins.any((a) => a.id == currentUserId) || authUser?.role == 'admin')
                             ListTile(
                               leading: Container(
                                 width: 36,
@@ -814,9 +825,9 @@ class _ConversationDetailsScreenState
                                 ),
                                 child: const Icon(CupertinoIcons.person_add_solid, color: Color(0xFF34C759), size: 18),
                               ),
-                              title: const Text(
-                                'إضافة مشاركين...',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF007AFF)),
+                              title: Text(
+                                _isBroadcast ? 'إدارة المستلمين والمشرفين...' : 'إضافة مشاركين...',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF007AFF)),
                               ),
                               onTap: () async {
                                 final updated = await Navigator.of(context).push<ChatConversation>(
@@ -832,13 +843,13 @@ class _ConversationDetailsScreenState
                           ..._conversation.members.asMap().entries.map((entry) {
                             final idx = entry.key;
                             final member = entry.value;
-                            final isAdmin = _conversation.admins.any((a) => a.id == member.id) ||
-                                _conversation.createdBy == member.id;
+                            final isOwner = _conversation.createdBy == member.id;
+                            final isAdmin = _conversation.admins.any((a) => a.id == member.id) || isOwner;
                             final isMe = member.id == currentUserId;
 
                             return Column(
                               children: [
-                                if (idx > 0 || _conversation.createdBy == currentUserId)
+                                if (idx > 0 || _conversation.createdBy == currentUserId || _conversation.admins.any((a) => a.id == currentUserId) || authUser?.role == 'admin')
                                   Divider(height: 0.5, thickness: 0.5, color: dividerColor, indent: 64),
                                 ListTile(
                                   leading: ChatAvatar(
@@ -858,16 +869,32 @@ class _ConversationDetailsScreenState
                                           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                                         ),
                                       ),
-                                      if (isAdmin)
+                                      if (isOwner)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF007AFF).withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: const Text(
+                                            'المالك',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF007AFF),
+                                            ),
+                                          ),
+                                        )
+                                      else if (isAdmin)
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                           decoration: BoxDecoration(
                                             color: const Color(0xFF34C759).withValues(alpha: 0.15),
                                             borderRadius: BorderRadius.circular(6),
                                           ),
-                                          child: const Text(
-                                            'مشرف',
-                                            style: TextStyle(
+                                          child: Text(
+                                            _isBroadcast ? 'ناشر / مشرف' : 'مشرف',
+                                            style: const TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w700,
                                               color: Color(0xFF34C759),
@@ -936,6 +963,40 @@ class _ConversationDetailsScreenState
                           }
                         },
                       ),
+                    ] else if (_isBroadcast) ...[
+                      if (_conversation.createdBy == currentUserId || authUser?.role == 'admin')
+                        ListTile(
+                          leading: const Icon(CupertinoIcons.delete_solid, color: CupertinoColors.systemRed),
+                          title: const Text(
+                            'حذف قناة البث نهائياً',
+                            style: TextStyle(color: CupertinoColors.systemRed, fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: const Text('حذف القناة وجميع رسائلها لكافة المستلمين نهائياً'),
+                          onTap: () async {
+                            final nav = Navigator.of(context);
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('حذف قناة البث'),
+                                content: const Text('هل أنت متأكد من حذف هذه القناة نهائياً لجميع المشتركين؟ لا يمكن التراجع عن هذا الإجراء.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                    child: const Text('حذف نهائي'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm == true && mounted) {
+                              await ref.read(chatOverviewControllerProvider.notifier).deleteConversation(_conversation.id, deleteForEveryone: true);
+                              if (mounted) {
+                                nav.pop('deleted');
+                              }
+                            }
+                          },
+                        ),
                     ] else ...[
                       ListTile(
                         leading: const Icon(CupertinoIcons.trash, color: CupertinoColors.systemRed),

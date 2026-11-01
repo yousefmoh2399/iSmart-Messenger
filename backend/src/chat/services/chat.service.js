@@ -989,16 +989,22 @@ function assertGroupOwnerAccess(currentUser, conversation) {
     throw new ApiError(404, "Conversation not found.");
   }
 
-  if (conversation.type !== "group") {
+  if (conversation.type !== "group" && conversation.type !== "broadcast") {
     throw new ApiError(
       400,
-      "This action is available for group conversations only.",
+      "This action is available for group and broadcast conversations only.",
     );
   }
 
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
-  if (!currentUserId || conversation.createdBy?.toString() !== currentUserId) {
-    throw new ApiError(403, "Only the group creator can manage members.");
+  const isSystemAdmin = currentUser.role === "admin";
+  const isCreator = currentUserId && conversation.createdBy?.toString() === currentUserId;
+  const isConversationAdmin = (conversation.admins || []).some(
+    (a) => getObjectIdString(a) === currentUserId,
+  );
+
+  if (!isSystemAdmin && !isCreator && !isConversationAdmin) {
+    throw new ApiError(403, "Only the conversation creator or admin can manage members.");
   }
 }
 
