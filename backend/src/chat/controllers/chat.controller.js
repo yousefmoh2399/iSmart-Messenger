@@ -90,11 +90,18 @@ async function resolveConversationAudienceUserIds(conversationId) {
   );
 
   if (conversation.type === "department" && conversation.departmentId) {
+    const rawDeptId = conversation.departmentId.toString();
+    const deptMatchValues = [
+      rawDeptId,
+      ...(mongoose.Types.ObjectId.isValid(rawDeptId)
+        ? [new mongoose.Types.ObjectId(rawDeptId)]
+        : []),
+    ];
     const departmentUsers = await User.find(
       {
         $or: [
-          { departmentId: conversation.departmentId },
-          { departmentIds: conversation.departmentId },
+          { departmentId: { $in: deptMatchValues } },
+          { departmentIds: { $in: deptMatchValues } },
         ],
         isActive: true,
       },

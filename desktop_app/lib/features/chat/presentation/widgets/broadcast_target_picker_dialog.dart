@@ -118,7 +118,7 @@ class _BroadcastTargetPickerDialogState
       final username = user.username.toLowerCase();
       final branch = user.branchCode.toLowerCase();
       final deptName =
-          (departmentsById[user.departmentId]?.name ?? '').toLowerCase();
+          user.formatDepartmentNames(departmentsById).toLowerCase();
       return name.contains(query) ||
           username.contains(query) ||
           branch.contains(query) ||
@@ -687,7 +687,7 @@ class _BroadcastTargetPickerDialogState
               final user = users[index];
               final isSelected = _selectedUserIds.contains(user.id);
               final deptName =
-                  departmentsById[user.departmentId]?.name ?? '';
+                  user.formatDepartmentNames(departmentsById);
               final subtitle = deptName.isNotEmpty
                   ? '$deptName • ${user.branchCode}'
                   : '@${user.username} • ${user.branchCode}';

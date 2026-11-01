@@ -1980,127 +1980,253 @@ class _UsersAdminTabState extends ConsumerState<_UsersAdminTab> {
                         children: [
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF7F7F9),
-                              borderRadius: BorderRadius.circular(12),
+                              color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7),
+                              borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: isDark ? Colors.white12 : Colors.black12,
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.06),
+                                width: 0.8,
                               ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.business_outlined, size: 16, color: Color(0xFF007AFF)),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'الأقسام التابع لها (يمكن اختيار أكثر من قسم)',
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                                    ),
-                                    const Spacer(),
-                                    if (selectedDepartmentIds.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  child: Row(
+                                    children: [
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        padding: const EdgeInsets.all(6),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFF007AFF).withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(10),
+                                          color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(8),
                                         ),
-                                        child: Text(
-                                          '${selectedDepartmentIds.length} محدد',
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF007AFF),
-                                          ),
+                                        child: const Icon(
+                                          Icons.business_rounded,
+                                          size: 16,
+                                          color: Color(0xFF007AFF),
                                         ),
                                       ),
-                                  ],
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Text(
+                                              'أقسام الموظف',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            Text(
+                                              'يمكن تحديد عدة أقسام وتعيين قسم أساسي',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: isDark ? Colors.white54 : Colors.black45,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (selectedDepartmentIds.isNotEmpty)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF007AFF).withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Text(
+                                            '${selectedDepartmentIds.length} محدد',
+                                            style: const TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF007AFF),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(height: 8),
+                                Divider(
+                                  height: 1,
+                                  thickness: 0.5,
+                                  color: isDark ? Colors.white10 : Colors.black12,
+                                ),
                                 if (widget.departments.isEmpty)
-                                  const Text(
-                                    'لا توجد أقسام مسجلة',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                                  Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Center(
+                                      child: Text(
+                                        'لا توجد أقسام مسجلة في النظام',
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          color: isDark ? Colors.white38 : Colors.black38,
+                                        ),
+                                      ),
+                                    ),
                                   )
                                 else
                                   ConstrainedBox(
-                                    constraints: const BoxConstraints(maxHeight: 120),
-                                    child: SingleChildScrollView(
-                                      child: Wrap(
-                                        spacing: 6,
-                                        runSpacing: 6,
-                                        children: widget.departments.map((dept) {
-                                          final isSelected = selectedDepartmentIds.contains(dept.id);
-                                          final isPrimary = departmentId == dept.id;
-                                          return FilterChip(
-                                            label: Text(
-                                              isPrimary ? '${dept.name} (رئيسي ★)' : dept.name,
-                                              style: TextStyle(
-                                                fontSize: 11.5,
-                                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                                color: isSelected
-                                                    ? Colors.white
-                                                    : (isDark ? Colors.white70 : Colors.black87),
-                                              ),
-                                            ),
-                                            selected: isSelected,
-                                            selectedColor: const Color(0xFF007AFF),
-                                            checkmarkColor: Colors.white,
-                                            backgroundColor: isDark
-                                                ? Colors.white.withValues(alpha: 0.05)
-                                                : Colors.black.withValues(alpha: 0.04),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              side: BorderSide(
-                                                color: isSelected
-                                                    ? const Color(0xFF007AFF)
-                                                    : (isDark ? Colors.white12 : Colors.black12),
-                                              ),
-                                            ),
-                                            onSelected: isSaving
+                                    constraints: const BoxConstraints(maxHeight: 180),
+                                    child: ListView.separated(
+                                      shrinkWrap: true,
+                                      padding: EdgeInsets.zero,
+                                      itemCount: widget.departments.length,
+                                      separatorBuilder: (_, __) => Divider(
+                                        height: 1,
+                                        thickness: 0.5,
+                                        indent: 48,
+                                        endIndent: 12,
+                                        color: isDark ? Colors.white10 : Colors.black12,
+                                      ),
+                                      itemBuilder: (context, idx) {
+                                        final dept = widget.departments[idx];
+                                        final isSelected = selectedDepartmentIds.contains(dept.id);
+                                        final isPrimary = departmentId == dept.id;
+
+                                        return Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: isSaving
                                                 ? null
-                                                : (selected) {
+                                                : () {
                                                     setLocalState(() {
-                                                      if (selected) {
-                                                        selectedDepartmentIds.add(dept.id);
-                                                        departmentId ??= dept.id;
-                                                      } else {
+                                                      if (isSelected) {
                                                         selectedDepartmentIds.remove(dept.id);
                                                         if (departmentId == dept.id) {
                                                           departmentId = selectedDepartmentIds.firstOrNull;
                                                         }
+                                                      } else {
+                                                        selectedDepartmentIds.add(dept.id);
+                                                        departmentId ??= dept.id;
                                                       }
                                                     });
                                                   },
-                                          );
-                                        }).toList(),
-                                      ),
-                                    ),
-                                  ),
-                                if (selectedDepartmentIds.length > 1) ...[
-                                  const SizedBox(height: 10),
-                                  _AppleDropdown<String?>(
-                                    value: selectedDepartmentIds.contains(departmentId)
-                                        ? departmentId
-                                        : selectedDepartmentIds.firstOrNull,
-                                    label: 'القسم الرئيسي (الأساسي)',
-                                    prefixIcon: Icons.star_outline_rounded,
-                                    enabled: !isSaving,
-                                    items: [
-                                      ...widget.departments
-                                          .where((dept) => selectedDepartmentIds.contains(dept.id))
-                                          .map(
-                                            (dept) => DropdownMenuItem<String?>(
-                                              value: dept.id,
-                                              child: Text('${dept.name} (أساسي)'),
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 14,
+                                                vertical: 9,
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  AnimatedContainer(
+                                                    duration: const Duration(milliseconds: 180),
+                                                    width: 22,
+                                                    height: 22,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: isSelected
+                                                          ? const Color(0xFF007AFF)
+                                                          : Colors.transparent,
+                                                      border: Border.all(
+                                                        color: isSelected
+                                                            ? const Color(0xFF007AFF)
+                                                            : (isDark ? Colors.white30 : Colors.black26),
+                                                        width: 1.5,
+                                                      ),
+                                                    ),
+                                                    child: isSelected
+                                                        ? const Icon(
+                                                            Icons.check_rounded,
+                                                            size: 15,
+                                                            color: Colors.white,
+                                                          )
+                                                        : null,
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Expanded(
+                                                    child: Text(
+                                                      dept.name,
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                                        color: isSelected
+                                                            ? (isDark ? Colors.white : Colors.black87)
+                                                            : (isDark ? Colors.white70 : Colors.black54),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  if (isSelected) ...[
+                                                    const SizedBox(width: 8),
+                                                    if (isPrimary)
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                                                        decoration: BoxDecoration(
+                                                          color: const Color(0xFF007AFF),
+                                                          borderRadius: BorderRadius.circular(12),
+                                                        ),
+                                                        child: const Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            Icon(Icons.star_rounded, size: 13, color: Colors.white),
+                                                            SizedBox(width: 3),
+                                                            Text(
+                                                              'الأساسي',
+                                                              style: TextStyle(
+                                                                fontSize: 11,
+                                                                fontWeight: FontWeight.w700,
+                                                                color: Colors.white,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      )
+                                                    else
+                                                      InkWell(
+                                                        onTap: isSaving
+                                                            ? null
+                                                            : () {
+                                                                setLocalState(() {
+                                                                  departmentId = dept.id;
+                                                                });
+                                                              },
+                                                        borderRadius: BorderRadius.circular(12),
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                                                          decoration: BoxDecoration(
+                                                            color: isDark
+                                                                ? Colors.white.withValues(alpha: 0.08)
+                                                                : Colors.black.withValues(alpha: 0.05),
+                                                            borderRadius: BorderRadius.circular(12),
+                                                            border: Border.all(
+                                                              color: isDark ? Colors.white12 : Colors.black12,
+                                                              width: 0.8,
+                                                            ),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              Icon(
+                                                                Icons.star_border_rounded,
+                                                                size: 13,
+                                                                color: isDark ? Colors.white60 : Colors.black54,
+                                                              ),
+                                                              const SizedBox(width: 3),
+                                                              Text(
+                                                                'جعله أساسي',
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  fontWeight: FontWeight.w500,
+                                                                  color: isDark ? Colors.white60 : Colors.black54,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ],
+                                              ),
                                             ),
                                           ),
-                                    ],
-                                    onChanged: (val) => setLocalState(() => departmentId = val),
+                                        );
+                                      },
+                                    ),
                                   ),
-                                ],
                               ],
                             ),
                           ),

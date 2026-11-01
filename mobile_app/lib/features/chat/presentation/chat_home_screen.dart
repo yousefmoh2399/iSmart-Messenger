@@ -960,27 +960,38 @@ class _ChatHomeScreenState extends ConsumerState<ChatHomeScreen> {
               if (user.id == currentUserId) {
                 continue;
               }
-              final department = departmentById[user.departmentId];
               final branch = branchById[user.branchId];
-              if (!_matchesUserQuery(user, department, searchQuery)) {
-                final branchName = branch?.name.toLowerCase() ?? '';
-                final displayName = user.displayName.toLowerCase();
-                final username = user.username.toLowerCase();
-                final matchesBranch =
-                    searchQuery.isEmpty ||
-                    displayName.contains(searchQuery) ||
-                    username.contains(searchQuery) ||
-                    branchName.contains(searchQuery);
-                if (!matchesBranch) {
-                  continue;
+              final userDeptIds = user.allDepartmentIds;
+              final userDepartments = userDeptIds
+                  .map((id) => departmentById[id])
+                  .whereType<DepartmentSummary>()
+                  .toList();
+
+              if (userDepartments.isEmpty) {
+                final department = departmentById[user.departmentId];
+                if (_matchesUserQuery(user, department, searchQuery)) {
+                  usersByDepartment
+                      .putIfAbsent(department, () => <ChatDirectoryUser>[])
+                      .add(user);
+                }
+              } else {
+                for (final department in userDepartments) {
+                  if (_matchesUserQuery(user, department, searchQuery)) {
+                    usersByDepartment
+                        .putIfAbsent(department, () => <ChatDirectoryUser>[])
+                        .add(user);
+                  }
                 }
               }
-              usersByDepartment
-                  .putIfAbsent(department, () => <ChatDirectoryUser>[])
-                  .add(user);
-              usersByBranch
-                  .putIfAbsent(branch, () => <ChatDirectoryUser>[])
-                  .add(user);
+
+              final primaryDept = userDepartments.isNotEmpty
+                  ? userDepartments.first
+                  : departmentById[user.departmentId];
+              if (_matchesUserQuery(user, primaryDept, searchQuery)) {
+                usersByBranch
+                    .putIfAbsent(branch, () => <ChatDirectoryUser>[])
+                    .add(user);
+              }
             }
             final orderedDepartmentEntries = [
               for (final department in overview.departments)

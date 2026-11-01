@@ -176,7 +176,7 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
       final branch = user.branchCode.toLowerCase();
       final jobTitle = user.jobTitle.toLowerCase();
       final deptName =
-          (departmentsById[user.departmentId]?.name ?? '').toLowerCase();
+          user.formatDepartmentNames(departmentsById).toLowerCase();
       return name.contains(query) ||
           username.contains(query) ||
           branch.contains(query) ||
@@ -865,7 +865,7 @@ class _BroadcastTargetPickerSheetState extends State<BroadcastTargetPickerSheet>
               final user = filteredUsers[index];
               final isChecked =
                   _sendToAll || _selectedUserIds.contains(user.id);
-              final deptName = departmentsById[user.departmentId]?.name ?? '';
+              final deptName = user.formatDepartmentNames(departmentsById);
               final isOnline = user.isOnline || user.presenceStatus == 'online';
 
               final deptBgColor = isChecked && !_sendToAll

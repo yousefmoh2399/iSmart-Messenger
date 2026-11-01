@@ -371,9 +371,8 @@ class _NewConversationDialogState
           .where((d) =>
               d.id == u.departmentId ||
               u.departmentIds.contains(d.id))
-          .firstOrNull
-          ?.name ??
-          '';
+          .map((d) => d.name)
+          .join(' ');
       return u.displayName.toLowerCase().contains(q) ||
           u.username.toLowerCase().contains(q) ||
           u.jobTitle.toLowerCase().contains(q) ||
@@ -862,8 +861,9 @@ class _NewConversationDialogState
                         : _selectedMembers.contains(user.id);
                     final deptName = departments
                         .where((d) => d.id == user.departmentId || user.departmentIds.contains(d.id))
-                        .firstOrNull
-                        ?.name;
+                        .map((d) => d.name)
+                        .toSet()
+                        .join('، ');
                     final branch = branches.firstWhere(
                       (b) =>
                           b.id == user.branchId ||
@@ -1310,8 +1310,9 @@ class _NewConversationDialogState
     final user = _selectedDirectUser!;
     final deptName = departments
         .where((d) => d.id == user.departmentId || user.departmentIds.contains(d.id))
-        .firstOrNull
-        ?.name;
+        .map((d) => d.name)
+        .toSet()
+        .join('، ');
     final branch = branches.firstWhere(
       (b) =>
           b.id == user.branchId ||

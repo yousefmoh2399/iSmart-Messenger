@@ -15,69 +15,6 @@ import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
 import 'instant_clipboard_sync_dialog.dart';
 
-class _SidebarGroupingCache {
-  static Object? _lastUsers;
-  static Object? _lastDepartments;
-  static Object? _lastBranches;
-  static String? _lastQuery;
-  static ChatSidebarFilter? _lastFilter;
-  static String? _lastUserId;
-
-  static List<MapEntry<DepartmentSummary?, List<ChatDirectoryUser>>> _cachedDepartmentEntries = [];
-  static List<MapEntry<BranchSummary?, List<ChatDirectoryUser>>> _cachedBranchEntries = [];
-
-  static ({
-    List<MapEntry<DepartmentSummary?, List<ChatDirectoryUser>>> departmentEntries,
-    List<MapEntry<BranchSummary?, List<ChatDirectoryUser>>> branchEntries,
-  }) getEntries({
-    required ChatOverviewData overview,
-    required String currentUserId,
-    required ChatSidebarFilter currentFilter,
-    required String query,
-    required Map<String, DepartmentSummary> departmentById,
-    required Map<String, BranchSummary> branchById,
-  }) {
-    final same = identical(_lastUsers, overview.users) &&
-        identical(_lastDepartments, overview.departments) &&
-        identical(_lastBranches, overview.branches) &&
-        _lastQuery == query &&
-        _lastFilter == currentFilter &&
-        _lastUserId == currentUserId;
-
-    if (same) {
-      return (
-        departmentEntries: _cachedDepartmentEntries,
-        branchEntries: _cachedBranchEntries,
-      );
-    }
-
-    final groupedEntries = _SidebarGroupingCache.getEntries(
-      overview: overview,
-      currentUserId: currentUserId,
-      currentFilter: currentFilter,
-      query: query,
-      departmentById: departmentById,
-      branchById: branchById,
-    );
-    final orderedDepartmentEntries = groupedEntries.departmentEntries;
-    final orderedBranchEntries = groupedEntries.branchEntries;
-
-    _lastUsers = overview.users;
-    _lastDepartments = overview.departments;
-    _lastBranches = overview.branches;
-    _lastQuery = query;
-    _lastFilter = currentFilter;
-    _lastUserId = currentUserId;
-    _cachedDepartmentEntries = orderedDepartmentEntries;
-    _cachedBranchEntries = orderedBranchEntries;
-
-    return (
-      departmentEntries: orderedDepartmentEntries,
-      branchEntries: orderedBranchEntries,
-    );
-  }
-}
-
 class ChatSidebar extends ConsumerWidget {
   const ChatSidebar({
     super.key,
@@ -237,9 +174,7 @@ class ChatSidebar extends ConsumerWidget {
         if (user.id == currentUserId) {
           continue;
         }
-        final userDepartmentIds = user.departmentIds.isNotEmpty
-            ? user.departmentIds
-            : [if (user.departmentId != null) user.departmentId!];
+        final userDepartmentIds = user.allDepartmentIds;
         final userDepartments = userDepartmentIds
             .map((departmentId) => departmentById[departmentId])
             .whereType<DepartmentSummary>()

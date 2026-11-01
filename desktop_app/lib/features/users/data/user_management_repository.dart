@@ -151,9 +151,9 @@ class UserManagementRepository {
         if (password != null && password.isNotEmpty) 'password': password,
         if (role != null) 'role': role,
         if (permissions != null) 'permissions': permissions,
-        if (departmentId != null) 'departmentId': departmentId,
+        'departmentId': departmentId,
         if (departmentIds != null) 'departmentIds': departmentIds,
-        if (branchId != null) 'branchId': branchId,
+        'branchId': branchId,
         if (maxAttachmentSizeMB != null) 'maxAttachmentSizeMB': maxAttachmentSizeMB,
       },
     );

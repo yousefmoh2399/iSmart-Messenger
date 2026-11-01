@@ -383,9 +383,8 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
           '';
       final deptName = overview.departments
           .where((d) => d.id == u.departmentId || u.departmentIds.contains(d.id))
-          .firstOrNull
-          ?.name ??
-          '';
+          .map((d) => d.name)
+          .join(' ');
       return name.contains(query) ||
           username.contains(query) ||
           job.contains(query) ||
@@ -698,7 +697,11 @@ class _NewConversationSheetState extends ConsumerState<NewConversationSheet> {
                   itemBuilder: (context, index) {
                     final user = filteredUsers[index];
                     final isSelected = _selectedMemberIds.contains(user.id);
-                    final deptName = departments.where((d) => d.id == user.departmentId).firstOrNull?.name ?? '';
+                    final deptName = departments
+                        .where((d) => d.id == user.departmentId || user.departmentIds.contains(d.id))
+                        .map((d) => d.name)
+                        .toSet()
+                        .join('، ');
 
                     return _ContactListItem(
                       user: user,

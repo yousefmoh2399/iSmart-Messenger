@@ -37,9 +37,18 @@ class DepartmentsScreen extends StatelessWidget {
       if (user.id == currentUser?.id) {
         continue;
       }
-      usersByDepartment
-          .putIfAbsent(user.departmentId, () => <ChatDirectoryUser>[])
-          .add(user);
+      final userDeptIds = user.allDepartmentIds;
+      if (userDeptIds.isEmpty) {
+        usersByDepartment
+            .putIfAbsent(null, () => <ChatDirectoryUser>[])
+            .add(user);
+      } else {
+        for (final deptId in userDeptIds) {
+          usersByDepartment
+              .putIfAbsent(deptId, () => <ChatDirectoryUser>[])
+              .add(user);
+        }
+      }
     }
 
     return ListView.separated(

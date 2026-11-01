@@ -56,6 +56,18 @@ function getObjectIdString(value) {
   return null;
 }
 
+function toMatchObjectIds(id) {
+  if (!id) return [];
+  const str = String(id).trim();
+  const values = [str];
+  if (mongoose.Types.ObjectId.isValid(str)) {
+    try {
+      values.push(new mongoose.Types.ObjectId(str));
+    } catch (_) {}
+  }
+  return values;
+}
+
 function sanitizeMessageContent(value) {
   return String(value || "")
     .replace(/\r\n|\r/g, "\n")
@@ -659,7 +671,7 @@ async function createSystemConversationMessage(conversation, actor, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -674,7 +686,7 @@ async function refreshConversationLastMessage(conversationId) {
     .sort({ createdAt: -1, _id: -1 })
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -742,15 +754,15 @@ async function getConversationById(conversationId) {
   })
     .populate(
       "members",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "blockedMembers",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .exec();
@@ -782,10 +794,11 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
     });
   }
   if (options.departmentId) {
+    const matchValues = toMatchObjectIds(options.departmentId);
     andConditions.push({
       $or: [
-        { departmentId: options.departmentId },
-        { departmentIds: options.departmentId },
+        { departmentId: { $in: matchValues } },
+        { departmentIds: { $in: matchValues } },
       ],
     });
   }
@@ -931,18 +944,22 @@ async function assertConversationManagementAccess(currentUser, conversation) {
     return;
   }
 
-  if (
-    conversation.type === "department" &&
-    getObjectIdString(currentUser.departmentId) &&
-    getObjectIdString(conversation.departmentId) ===
-      getObjectIdString(currentUser.departmentId)
-  ) {
-    const canModerateDepartment = await userHasPermission(
-      currentUser,
-      "canModerateDepartment",
-    );
-    if (canModerateDepartment) {
-      return;
+  if (conversation.type === "department") {
+    const conversationDeptId = getObjectIdString(conversation.departmentId);
+    const currentUserDeptIds = [
+      ...(currentUser.departmentId ? [getObjectIdString(currentUser.departmentId)] : []),
+      ...(Array.isArray(currentUser.departmentIds)
+        ? currentUser.departmentIds.map((d) => getObjectIdString(d)).filter(Boolean)
+        : []),
+    ];
+    if (currentUserDeptIds.includes(conversationDeptId)) {
+      const canModerateDepartment = await userHasPermission(
+        currentUser,
+        "canModerateDepartment",
+      );
+      if (canModerateDepartment) {
+        return;
+      }
     }
   }
 
@@ -984,11 +1001,11 @@ async function listConversationsForUser(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -1089,11 +1106,11 @@ async function listManageableConversations(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -1170,11 +1187,11 @@ async function createConversation(currentUser, payload) {
     })
       .populate(
         "members",
-        "username fullName role departmentId isOnline isActive lastSeen",
+        "username fullName role departmentId departmentIds isOnline isActive lastSeen",
       )
       .populate(
         "admins",
-        "username fullName role departmentId isOnline isActive lastSeen",
+        "username fullName role departmentId departmentIds isOnline isActive lastSeen",
       )
       .exec();
 
@@ -1606,7 +1623,7 @@ async function listMessagesForConversation(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1640,7 +1657,7 @@ async function createMessage(currentUser, payload, file) {
     })
       .populate(
         "senderId",
-        "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
     if (existing) {
@@ -1909,11 +1926,12 @@ async function createMessage(currentUser, payload, file) {
     };
   } else if (conversation.type === "department" && conversation.departmentId) {
     const deptId = conversation.departmentId._id || conversation.departmentId;
+    const matchValues = toMatchObjectIds(deptId);
     const departmentUsers = await User.find(
       {
         $or: [
-          { departmentId: deptId },
-          { departmentIds: deptId },
+          { departmentId: { $in: matchValues } },
+          { departmentIds: { $in: matchValues } },
         ],
         isActive: true,
       },
@@ -2088,7 +2106,7 @@ async function createMessage(currentUser, payload, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2203,10 +2221,21 @@ async function markPendingDeliveriesForUser(currentUser) {
     $or: [{ members: currentUser.id }],
   };
 
-  if (currentUser.departmentId) {
+  const userDeptIds = [
+    ...(currentUser.departmentId ? [currentUser.departmentId] : []),
+    ...(Array.isArray(currentUser.departmentIds) ? currentUser.departmentIds : []),
+  ].filter(Boolean);
+
+  if (userDeptIds.length > 0) {
+    const matchValues = [];
+    for (const d of userDeptIds) {
+      for (const v of toMatchObjectIds(d)) {
+        matchValues.push(v);
+      }
+    }
     conversationQuery.$or.push({
       type: "department",
-      departmentId: currentUser.departmentId,
+      departmentId: { $in: matchValues },
     });
   }
 
@@ -2378,7 +2407,7 @@ async function updateMessage(currentUser, messageId, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2443,7 +2472,7 @@ async function toggleMessageReaction(currentUser, messageId, emoji) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2483,7 +2512,7 @@ async function toggleMessageFavorite(currentUser, messageId) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -3003,7 +3032,7 @@ async function searchMessages(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -3081,7 +3110,7 @@ async function listFavoriteMessages(
       .limit(batchSize)
       .populate(
         "senderId",
-        "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
 
@@ -3286,7 +3315,7 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
   return serializeMessage(populated, populated.senderId);
@@ -3342,7 +3371,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 

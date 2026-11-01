@@ -351,7 +351,7 @@ class _ShareTargetPickerSheetState
     final directoryUserTargets = overview.users
         .where((u) => u.id != widget.currentUserId && seenUserIds.add(u.id))
         .map((u) {
-          final deptName = departmentsById[u.departmentId]?.name ?? '';
+          final deptName = u.formatDepartmentNames(departmentsById);
           final parts = <String>[];
           if (u.jobTitle.trim().isNotEmpty) parts.add(u.jobTitle.trim());
           if (deptName.isNotEmpty) parts.add(deptName);
@@ -395,7 +395,7 @@ class _ShareTargetPickerSheetState
         : directoryUserTargets.where((t) {
             final u = t.user!;
             final deptName =
-                (departmentsById[u.departmentId]?.name ?? '').toLowerCase();
+                u.formatDepartmentNames(departmentsById).toLowerCase();
             return t.title.toLowerCase().contains(q) ||
                 u.username.toLowerCase().contains(q) ||
                 u.jobTitle.toLowerCase().contains(q) ||

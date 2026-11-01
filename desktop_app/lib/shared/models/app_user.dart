@@ -6,6 +6,7 @@ class AppUser {
     this.jobTitle = '',
     required this.role,
     required this.departmentId,
+    this.departmentIds = const [],
     required this.branchId,
     required this.branchCode,
     required this.isOnline,
@@ -25,7 +26,14 @@ class AppUser {
   final String jobTitle;
   final String role;
   final String? departmentId;
+  final List<String> departmentIds;
   final String? branchId;
+
+  List<String> get allDepartmentIds {
+    if (departmentIds.isNotEmpty) return departmentIds;
+    if (departmentId != null && departmentId!.isNotEmpty) return [departmentId!];
+    return const [];
+  }
   final String branchCode;
   final bool isOnline;
   final String presenceStatus;
@@ -124,6 +132,9 @@ class AppUser {
       jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
       departmentId: json['departmentId'] as String?,
+      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
       branchId: json['branchId'] as String?,
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
@@ -152,6 +163,7 @@ class AppUser {
       'jobTitle': jobTitle,
       'role': role,
       'departmentId': departmentId,
+      'departmentIds': departmentIds,
       'branchId': branchId,
       'branchCode': branchCode,
       'isOnline': isOnline,

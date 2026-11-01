@@ -147,6 +147,60 @@ class ChatDirectoryUser {
   String get displayName => fullName.trim().isEmpty ? username : fullName;
   bool get isIdle => presenceStatus == 'idle';
 
+  List<String> get allDepartmentIds {
+    if (departmentIds.isNotEmpty) return departmentIds;
+    if (departmentId != null && departmentId!.isNotEmpty) return [departmentId!];
+    return const [];
+  }
+
+  String formatDepartmentNames(Map<String, DepartmentSummary> departmentsById) {
+    final ids = allDepartmentIds;
+    if (ids.isEmpty) return '';
+    final names = ids
+        .map((id) => departmentsById[id]?.name)
+        .whereType<String>()
+        .where((n) => n.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    return names.join('، ');
+  }
+
+  ChatDirectoryUser copyWith({
+    String? id,
+    String? username,
+    String? fullName,
+    String? jobTitle,
+    String? role,
+    String? departmentId,
+    List<String>? departmentIds,
+    String? branchId,
+    String? branchCode,
+    bool? isOnline,
+    String? presenceStatus,
+    bool? isActive,
+    String? avatarUrl,
+    DateTime? lastSeen,
+    DateTime? lastActiveAt,
+  }) {
+    return ChatDirectoryUser(
+      id: id ?? this.id,
+      username: username ?? this.username,
+      fullName: fullName ?? this.fullName,
+      jobTitle: jobTitle ?? this.jobTitle,
+      role: role ?? this.role,
+      departmentId: departmentId ?? this.departmentId,
+      departmentIds: departmentIds ?? this.departmentIds,
+      branchId: branchId ?? this.branchId,
+      branchCode: branchCode ?? this.branchCode,
+      isOnline: isOnline ?? this.isOnline,
+      presenceStatus: presenceStatus ?? this.presenceStatus,
+      isActive: isActive ?? this.isActive,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      lastSeen: lastSeen ?? this.lastSeen,
+      lastActiveAt: lastActiveAt ?? this.lastActiveAt,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -168,17 +222,34 @@ class ChatDirectoryUser {
   }
 
   factory ChatDirectoryUser.fromJson(Map<String, dynamic> json) {
+    final parsedDepartmentId = json['departmentId'] is Map
+        ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString()
+        : json['departmentId']?.toString();
+    final parsedDepartmentIds = (json['departmentIds'] as List<dynamic>? ?? const [])
+        .map((entry) {
+          if (entry is Map) {
+            return (entry['_id'] ?? entry['id'])?.toString();
+          }
+          return entry?.toString();
+        })
+        .whereType<String>()
+        .where((id) => id.trim().isNotEmpty)
+        .toList();
+    final effectiveDepartmentIds = parsedDepartmentIds.isNotEmpty
+        ? parsedDepartmentIds
+        : [if (parsedDepartmentId != null && parsedDepartmentId.trim().isNotEmpty) parsedDepartmentId];
+
     return ChatDirectoryUser(
       id: (json['_id'] ?? json['id'])?.toString() ?? '',
       username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
       jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
-      departmentId: json['departmentId'] is Map ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString() : json['departmentId']?.toString(),
-      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
-          .map((entry) => entry.toString())
-          .toList(),
-      branchId: json['branchId'] is Map ? (json['branchId']['_id'] ?? json['branchId']['id'])?.toString() : json['branchId']?.toString(),
+      departmentId: parsedDepartmentId,
+      departmentIds: effectiveDepartmentIds,
+      branchId: json['branchId'] is Map
+          ? (json['branchId']['_id'] ?? json['branchId']['id'])?.toString()
+          : json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       presenceStatus: json['presenceStatus'] as String? ?? 'offline',

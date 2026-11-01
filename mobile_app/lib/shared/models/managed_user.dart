@@ -22,6 +22,12 @@ class ManagedUser {
   final String? departmentId;
   final List<String> departmentIds;
   final String? branchId;
+
+  List<String> get allDepartmentIds {
+    if (departmentIds.isNotEmpty) return departmentIds;
+    if (departmentId != null && departmentId!.isNotEmpty) return [departmentId!];
+    return const [];
+  }
   final String branchCode;
   final bool isOnline;
   final bool isActive;
@@ -32,16 +38,33 @@ class ManagedUser {
   factory ManagedUser.fromJson(Map<String, dynamic> json) {
     final permissionsJson =
         json['permissions'] as Map<String, dynamic>? ?? const {};
+    final deptId = json['departmentId'] is Map
+        ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString()
+        : json['departmentId']?.toString();
+    final parsedDeptIds = (json['departmentIds'] as List<dynamic>? ?? const [])
+        .map((entry) {
+          if (entry is Map) {
+            return (entry['_id'] ?? entry['id'])?.toString();
+          }
+          return entry?.toString();
+        })
+        .whereType<String>()
+        .where((id) => id.trim().isNotEmpty)
+        .toList();
+    final effectiveDeptIds = parsedDeptIds.isNotEmpty
+        ? parsedDeptIds
+        : [if (deptId != null && deptId.trim().isNotEmpty) deptId];
+
     return ManagedUser(
-      id: json['id'] as String,
-      username: json['username'] as String,
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
       role: json['role'] as String? ?? 'user',
-      departmentId: json['departmentId'] as String?,
-      departmentIds: (json['departmentIds'] as List<dynamic>? ?? const [])
-          .map((entry) => entry.toString())
-          .toList(),
-      branchId: json['branchId'] as String?,
+      departmentId: deptId,
+      departmentIds: effectiveDeptIds,
+      branchId: json['branchId'] is Map
+          ? (json['branchId']['_id'] ?? json['branchId']['id'])?.toString()
+          : json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       isActive: json['isActive'] as bool? ?? true,

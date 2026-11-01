@@ -447,14 +447,22 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       fullName: updated.fullName.isNotEmpty
           ? updated.fullName
           : source.fullName,
+      jobTitle: updated.jobTitle.isNotEmpty
+          ? updated.jobTitle
+          : source.jobTitle,
       role: updated.role.isNotEmpty ? updated.role : source.role,
-      departmentId: updated.departmentId,
-      branchId: updated.branchId,
-      branchCode: updated.branchCode,
+      departmentId: updated.departmentId ?? source.departmentId,
+      departmentIds: updated.departmentIds.isNotEmpty
+          ? updated.departmentIds
+          : source.departmentIds,
+      branchId: updated.branchId ?? source.branchId,
+      branchCode: updated.branchCode.isNotEmpty
+          ? updated.branchCode
+          : source.branchCode,
       isOnline: source.isOnline,
       presenceStatus: source.presenceStatus,
       isActive: updated.isActive,
-      avatarUrl: updated.avatarUrl,
+      avatarUrl: updated.avatarUrl ?? source.avatarUrl,
       lastSeen: source.lastSeen,
       lastActiveAt: source.lastActiveAt,
     );
@@ -536,18 +544,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     DateTime? lastSeen,
     DateTime? lastActiveAt,
   }) {
-    return ChatDirectoryUser(
-      id: source.id,
-      username: source.username,
-      fullName: source.fullName,
-      role: source.role,
-      departmentId: source.departmentId,
-      branchId: source.branchId,
-      branchCode: source.branchCode,
+    return source.copyWith(
       isOnline: isOnline,
       presenceStatus: presenceStatus,
-      isActive: source.isActive,
-      avatarUrl: source.avatarUrl,
       lastSeen: lastSeen ?? source.lastSeen,
       lastActiveAt: lastActiveAt ?? source.lastActiveAt,
     );
@@ -2077,8 +2076,10 @@ class ConversationMessagesController
                 id: currentUser.id,
                 username: currentUser.username,
                 fullName: currentUser.fullName,
+                jobTitle: currentUser.jobTitle,
                 role: currentUser.role,
                 departmentId: currentUser.departmentId,
+                departmentIds: currentUser.allDepartmentIds,
                 branchId: currentUser.branchId,
                 branchCode: currentUser.branchCode,
                 isOnline: currentUser.isOnline,

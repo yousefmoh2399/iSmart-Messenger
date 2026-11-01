@@ -426,14 +426,22 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       fullName: updated.fullName.isNotEmpty
           ? updated.fullName
           : source.fullName,
+      jobTitle: updated.jobTitle.isNotEmpty
+          ? updated.jobTitle
+          : source.jobTitle,
       role: updated.role.isNotEmpty ? updated.role : source.role,
-      departmentId: updated.departmentId,
-      branchId: updated.branchId,
-      branchCode: updated.branchCode,
+      departmentId: updated.departmentId ?? source.departmentId,
+      departmentIds: updated.departmentIds.isNotEmpty
+          ? updated.departmentIds
+          : source.departmentIds,
+      branchId: updated.branchId ?? source.branchId,
+      branchCode: updated.branchCode.isNotEmpty
+          ? updated.branchCode
+          : source.branchCode,
       isOnline: source.isOnline,
       presenceStatus: source.presenceStatus,
       isActive: updated.isActive,
-      avatarUrl: updated.avatarUrl,
+      avatarUrl: updated.avatarUrl ?? source.avatarUrl,
       lastSeen: source.lastSeen,
       lastActiveAt: source.lastActiveAt,
     );
@@ -643,18 +651,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     DateTime? lastSeen,
     DateTime? lastActiveAt,
   }) {
-    return ChatDirectoryUser(
-      id: source.id,
-      username: source.username,
-      fullName: source.fullName,
-      role: source.role,
-      departmentId: source.departmentId,
-      branchId: source.branchId,
-      branchCode: source.branchCode,
+    return source.copyWith(
       isOnline: isOnline,
       presenceStatus: presenceStatus,
-      isActive: source.isActive,
-      avatarUrl: source.avatarUrl,
       lastSeen: lastSeen ?? source.lastSeen,
       lastActiveAt: lastActiveAt ?? source.lastActiveAt,
     );
@@ -2208,8 +2207,10 @@ class ConversationMessagesController
                 id: authUser.id,
                 username: authUser.username,
                 fullName: authUser.fullName,
+                jobTitle: authUser.jobTitle,
                 role: authUser.role,
                 departmentId: authUser.departmentId,
+                departmentIds: authUser.allDepartmentIds,
                 branchId: authUser.branchId,
                 branchCode: authUser.branchCode,
                 isOnline: authUser.isOnline,
@@ -2439,8 +2440,10 @@ class ConversationMessagesController
                 id: authUser.id,
                 username: authUser.username,
                 fullName: authUser.fullName,
+                jobTitle: authUser.jobTitle,
                 role: authUser.role,
                 departmentId: authUser.departmentId,
+                departmentIds: authUser.allDepartmentIds,
                 branchId: authUser.branchId,
                 branchCode: authUser.branchCode,
                 isOnline: authUser.isOnline,

@@ -2180,7 +2180,10 @@ class _SupportTeamDialogState extends ConsumerState<_SupportTeamDialog> {
     final filteredUsers = users.where((user) {
       final dynamic userData = user;
       if (_selectedDepartmentId != null && _selectedDepartmentId!.isNotEmpty) {
-        if (userData.departmentId != _selectedDepartmentId) {
+        final List<String> deptIds = userData.allDepartmentIds is List<String>
+            ? (userData.allDepartmentIds as List<String>)
+            : [if (userData.departmentId != null) userData.departmentId.toString()];
+        if (!deptIds.contains(_selectedDepartmentId)) {
           return false;
         }
       }

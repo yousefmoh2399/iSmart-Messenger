@@ -191,16 +191,29 @@ function buildUserSearchRegex(value) {
   return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 }
 
+function toMatchObjectIds(id) {
+  if (!id) return [];
+  const str = String(id).trim();
+  const values = [str];
+  if (mongoose.Types.ObjectId.isValid(str)) {
+    try {
+      values.push(new mongoose.Types.ObjectId(str));
+    } catch (_) {}
+  }
+  return values;
+}
+
 function addDepartmentMembershipFilter(query, departmentId) {
   if (!departmentId) {
     return;
   }
+  const matchValues = toMatchObjectIds(departmentId);
   query.$and = [
     ...(query.$and || []),
     {
       $or: [
-        { departmentId },
-        { departmentIds: departmentId },
+        { departmentId: { $in: matchValues } },
+        { departmentIds: { $in: matchValues } },
       ],
     },
   ];
@@ -336,11 +349,41 @@ async function createUser(payload = {}, actor = null) {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const resolvedDepartmentIds = await resolveDepartmentAssignments(
-    departmentIds,
-    departmentId,
-  );
-  const resolvedDepartmentId = resolvedDepartmentIds[0] || null;
+  const requestedPrimary = departmentId
+    ? String(departmentId).trim()
+    : null;
+
+  let candidateIds = [];
+  if (Array.isArray(departmentIds)) {
+    candidateIds = departmentIds
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+  } else if (requestedPrimary) {
+    candidateIds = [requestedPrimary];
+  }
+
+  if (requestedPrimary && !candidateIds.includes(requestedPrimary)) {
+    candidateIds.unshift(requestedPrimary);
+  }
+
+  const resolvedDepartmentIds = (
+    await resolveDepartmentAssignments(
+      candidateIds,
+      requestedPrimary,
+    )
+  ).map((entry) => entry.toString());
+
+  const resolvedDepartmentId = (requestedPrimary && resolvedDepartmentIds.includes(requestedPrimary))
+    ? requestedPrimary
+    : (resolvedDepartmentIds[0] || null);
+
+  const finalDepartmentIds = resolvedDepartmentId
+    ? [
+        resolvedDepartmentId,
+        ...resolvedDepartmentIds.filter((id) => id !== resolvedDepartmentId),
+      ]
+    : resolvedDepartmentIds;
+
   const branchAssignment = await resolveBranchAssignment(branchId);
   let user;
   try {
@@ -354,7 +397,7 @@ async function createUser(payload = {}, actor = null) {
       maxAttachmentSizeMB:
         maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
       departmentId: resolvedDepartmentId,
-      departmentIds: resolvedDepartmentIds,
+      departmentIds: finalDepartmentIds,
       branchId: branchAssignment.branchId,
       branchCode: branchAssignment.branchCode,
     });
@@ -365,7 +408,7 @@ async function createUser(payload = {}, actor = null) {
     throw error;
   }
 
-  for (const deptId of resolvedDepartmentIds) {
+  for (const deptId of finalDepartmentIds) {
     await Department.updateOne(
       { _id: deptId, deletedAt: null },
       { $inc: { membersCount: 1 } },
@@ -470,19 +513,55 @@ async function updateUser(actor, userId, payload) {
       Object.prototype.hasOwnProperty.call(payload, "departmentIds")) &&
     (actorIsAdmin || actorCanManageUsers)
   ) {
-    const previousDepartmentIds = Array.isArray(user.departmentIds)
+    const previousDepartmentIds = Array.isArray(user.departmentIds) && user.departmentIds.length > 0
       ? user.departmentIds.map((entry) => entry.toString())
       : user.departmentId
         ? [user.departmentId.toString()]
         : [];
-    const nextDepartmentIds = (
+
+    const requestedPrimary = payload.departmentId
+      ? String(payload.departmentId).trim()
+      : null;
+
+    let candidateIds = [];
+    if (Array.isArray(payload.departmentIds)) {
+      candidateIds = payload.departmentIds
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean);
+    } else if (requestedPrimary) {
+      candidateIds = [requestedPrimary];
+    }
+
+    if (requestedPrimary && !candidateIds.includes(requestedPrimary)) {
+      candidateIds.unshift(requestedPrimary);
+    }
+
+    const resolvedIds = (
       await resolveDepartmentAssignments(
-        payload.departmentIds,
-        payload.departmentId,
+        candidateIds,
+        requestedPrimary,
       )
     ).map((entry) => entry.toString());
+
+    let nextPrimaryId = null;
+    if (requestedPrimary && resolvedIds.includes(requestedPrimary)) {
+      nextPrimaryId = requestedPrimary;
+    } else if (user.departmentId && resolvedIds.includes(user.departmentId.toString())) {
+      nextPrimaryId = user.departmentId.toString();
+    } else {
+      nextPrimaryId = resolvedIds[0] || null;
+    }
+
+    let nextDepartmentIds = resolvedIds;
+    if (nextPrimaryId) {
+      nextDepartmentIds = [
+        nextPrimaryId,
+        ...resolvedIds.filter((id) => id !== nextPrimaryId),
+      ];
+    }
+
     user.departmentIds = nextDepartmentIds;
-    user.departmentId = nextDepartmentIds[0] || null;
+    user.departmentId = nextPrimaryId;
 
     const removedDepartmentIds = previousDepartmentIds.filter(
       (entry) => !nextDepartmentIds.includes(entry),

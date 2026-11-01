@@ -36,7 +36,7 @@ async function processSingleScheduledMessage(msgData, io) {
     { new: true }
   ).populate(
     "senderId",
-    "username fullName role jobTitle departmentId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
+    "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
   );
 
   if (!message) return null;

@@ -209,7 +209,7 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
       final name = user.displayName.toLowerCase();
       final username = user.username.toLowerCase();
       final branch = user.branchCode.toLowerCase();
-      final deptName = (departmentsById[user.departmentId]?.name ?? '').toLowerCase();
+      final deptName = user.formatDepartmentNames(departmentsById).toLowerCase();
       return name.contains(query) ||
           username.contains(query) ||
           branch.contains(query) ||
@@ -612,7 +612,7 @@ class _ChatForwardSheetState extends ConsumerState<ChatForwardSheet>
         final targetId = 'user_' + user.id;
         final isSelected = _isTargetSelected(targetId);
 
-        final deptName = departmentsById[user.departmentId]?.name ?? '';
+        final deptName = user.formatDepartmentNames(departmentsById);
         final subtitle = deptName.isNotEmpty
             ? deptName + ' • ' + user.branchCode
             : '@' + user.username + ' • ' + user.branchCode;
