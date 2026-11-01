@@ -692,20 +692,30 @@ class _DesktopWallpapersView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Category Filter Chips
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             _FilterChipPill(
               label: 'الكل (${ChatAppearanceCatalog.wallpapers.length})',
               selected: selectedCategory == 'all',
               onTap: () => onCategoryChanged('all'),
             ),
-            const SizedBox(width: 8),
             _FilterChipPill(
-              label: 'خلفيات واتساب الأصلية 💬',
+              label: 'واتساب 💬',
               selected: selectedCategory == 'whatsapp',
               onTap: () => onCategoryChanged('whatsapp'),
             ),
-            const SizedBox(width: 8),
+            _FilterChipPill(
+              label: 'أناقة تلجرام ✈️',
+              selected: selectedCategory == 'telegram',
+              onTap: () => onCategoryChanged('telegram'),
+            ),
+            _FilterChipPill(
+              label: 'راحة العين 👁️',
+              selected: selectedCategory == 'comfort',
+              onTap: () => onCategoryChanged('comfort'),
+            ),
             _FilterChipPill(
               label: 'تدرجات هادئة 🎨',
               selected: selectedCategory == 'gradient',
@@ -979,6 +989,12 @@ class _DesktopThemesView extends StatelessWidget {
               'mint' => 'wa_emerald',
               'sunset' => 'wa_peach',
               'mono' => 'wa_dark_oled',
+              'telegram_night' => 'tg_night',
+              'telegram_arctic' => 'tg_classic',
+              'desert_warmth' => 'tg_desert',
+              'sage_harmony' => 'tg_sage',
+              'nordic_frost' => 'grad_deep_cosmos',
+              'blossom_mauve' => 'grad_eye_comfort',
               _ => preferences.wallpaperId,
             };
             onSave(

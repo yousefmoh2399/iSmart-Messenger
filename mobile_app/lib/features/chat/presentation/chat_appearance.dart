@@ -41,7 +41,7 @@ class ChatWallpaperOption {
 
   final String id;
   final String title;
-  final String category; // 'whatsapp', 'gradient'
+  final String category; // 'telegram', 'comfort', 'whatsapp', 'gradient'
   final List<Color> previewColors;
   final List<Color> lightColors;
   final List<Color> darkColors;
@@ -100,6 +100,61 @@ class ChatAppearanceCatalog {
       badge: 'الأكثر طلباً',
     ),
     ChatThemeOption(
+      id: 'telegram_night',
+      title: 'ليل تلجرام',
+      description: 'المظهر الليلي الفاخر لتلجرام بدرجات كحلي وأزرق متوهج فائق الراحة للعين',
+      color: Color(0xFF2AABEE),
+      outgoingLightColor: Color(0xFFD8EEFE),
+      incomingLightColor: Color(0xFFFFFFFF),
+      outgoingDarkColor: Color(0xFF2B5278),
+      incomingDarkColor: Color(0xFF182533),
+      badge: 'Telegram Dark',
+    ),
+    ChatThemeOption(
+      id: 'telegram_arctic',
+      title: 'أزرق قطبي',
+      description: 'مظهر تلجرام العصري الأنيق بتدرج أزرق ناصع وفقاعات انسيابية مريحة للبصر',
+      color: Color(0xFF229ED9),
+      outgoingLightColor: Color(0xFF229ED9),
+      incomingLightColor: Color(0xFFFFFFFF),
+      outgoingDarkColor: Color(0xFF1D78B0),
+      incomingDarkColor: Color(0xFF1C2733),
+      badge: 'Telegram Pro',
+    ),
+    ChatThemeOption(
+      id: 'desert_warmth',
+      title: 'صحراء دافئة',
+      description: 'مستوحى من سمة صحراء تلجرام الكهرمانية بدون إشعاع أزرق مجهد لإراحة العين التامة',
+      color: Color(0xFFD97706),
+      outgoingLightColor: Color(0xFFEEDCC7),
+      incomingLightColor: Color(0xFFFFFDF9),
+      outgoingDarkColor: Color(0xFF4A3728),
+      incomingDarkColor: Color(0xFF241D17),
+      badge: 'مريح للعين 👁️',
+    ),
+    ChatThemeOption(
+      id: 'sage_harmony',
+      title: 'أعشاب المريمية',
+      description: 'ألوان نباتية ترابية مهدئة للأعصاب مصممة خصيصاً لساعات العمل الطويلة وقراءة المحادثات',
+      color: Color(0xFF5F8D76),
+      outgoingLightColor: Color(0xFFDCECE1),
+      incomingLightColor: Color(0xFFF9FCFA),
+      outgoingDarkColor: Color(0xFF1E3A2B),
+      incomingDarkColor: Color(0xFF15261D),
+      badge: 'حماية العين 🌿',
+    ),
+    ChatThemeOption(
+      id: 'classic',
+      title: 'تلجرام كلاسيك',
+      description: 'مظهر تلجرام الشهير بفقاعة خضراء هادئة وأزرق ناصع',
+      color: Color(0xFF3390EC),
+      outgoingLightColor: Color(0xFFEFFDDE),
+      incomingLightColor: Color(0xFFFFFFFF),
+      outgoingDarkColor: Color(0xFF2B5278),
+      incomingDarkColor: Color(0xFF182533),
+      badge: 'Telegram Classic',
+    ),
+    ChatThemeOption(
       id: 'ios',
       title: 'رسائل آبل',
       description: 'مظهر iMessage الأنيق بفقاعة زرقاء ناصعة ورمادي هادئ',
@@ -111,14 +166,26 @@ class ChatAppearanceCatalog {
       badge: 'Apple iOS',
     ),
     ChatThemeOption(
-      id: 'classic',
-      title: 'تلجرام كلاسيك',
-      description: 'مظهر تلجرام الشهير بفقاعة خضراء هادئة وأزرق ناصع',
-      color: Color(0xFF3390EC),
-      outgoingLightColor: Color(0xFFEFFDDE),
+      id: 'nordic_frost',
+      title: 'صقيع الشمال',
+      description: 'درجات رمادية مائلة للزرقة النوردية الهادئة، فخامة وتركيز بصري ممتاز',
+      color: Color(0xFF64748B),
+      outgoingLightColor: Color(0xFFE2E8F0),
       incomingLightColor: Color(0xFFFFFFFF),
-      outgoingDarkColor: Color(0xFF2B5278),
-      incomingDarkColor: Color(0xFF182533),
+      outgoingDarkColor: Color(0xFF273544),
+      incomingDarkColor: Color(0xFF182029),
+      badge: 'نوردي هادئ',
+    ),
+    ChatThemeOption(
+      id: 'blossom_mauve',
+      title: 'أزهار لافندر',
+      description: 'درجات الموف واللافندر الهادئة غير المتوهجة، لمسة تلجرام الفنية العصرية',
+      color: Color(0xFF8B5CF6),
+      outgoingLightColor: Color(0xFFEDE9FE),
+      incomingLightColor: Color(0xFFFDFBFE),
+      outgoingDarkColor: Color(0xFF381E48),
+      incomingDarkColor: Color(0xFF201328),
+      badge: 'أنيق',
     ),
     ChatThemeOption(
       id: 'mint',
@@ -149,6 +216,7 @@ class ChatAppearanceCatalog {
       incomingLightColor: Color(0xFFFFFFFF),
       outgoingDarkColor: Color(0xFF27272A),
       incomingDarkColor: Color(0xFF18181B),
+      badge: 'OLED Black',
     ),
     ChatThemeOption(
       id: 'system',
@@ -173,7 +241,56 @@ class ChatAppearanceCatalog {
   ];
 
   static const wallpapers = <ChatWallpaperOption>[
-    // 1. WhatsApp Classics
+    // 1. Telegram Originals
+    ChatWallpaperOption(
+      id: 'tg_classic',
+      title: 'سماء تلجرام',
+      category: 'telegram',
+      previewColors: [Color(0xFF2AABEE), Color(0xFF229ED9)],
+      lightColors: [Color(0xFFE4EDF5), Color(0xFFD6E3EF)],
+      darkColors: [Color(0xFF0E1621), Color(0xFF17212B)],
+      hasDoodles: true,
+    ),
+    ChatWallpaperOption(
+      id: 'tg_night',
+      title: 'ليل تلجرام الكحلي',
+      category: 'telegram',
+      previewColors: [Color(0xFF17212B), Color(0xFF0E1621)],
+      lightColors: [Color(0xFFD9E2EC), Color(0xFFBCCCDC)],
+      darkColors: [Color(0xFF0A1017), Color(0xFF121B24)],
+      hasDoodles: true,
+    ),
+
+    // 2. Eye Comfort & Protection
+    ChatWallpaperOption(
+      id: 'tg_desert',
+      title: 'كثبان الصحراء الدافئة',
+      category: 'comfort',
+      previewColors: [Color(0xFFE2C9AC), Color(0xFFD6BA99)],
+      lightColors: [Color(0xFFF7F2E9), Color(0xFFEDE4D5)],
+      darkColors: [Color(0xFF1C1712), Color(0xFF261D17)],
+      hasDoodles: true,
+    ),
+    ChatWallpaperOption(
+      id: 'tg_sage',
+      title: 'حديقة المريمية الهادئة',
+      category: 'comfort',
+      previewColors: [Color(0xFF5F8D76), Color(0xFF3F6352)],
+      lightColors: [Color(0xFFEBF4EE), Color(0xFFDEEDE3)],
+      darkColors: [Color(0xFF0D1712), Color(0xFF13221A)],
+      hasDoodles: true,
+    ),
+    ChatWallpaperOption(
+      id: 'grad_eye_comfort',
+      title: 'حماية العين (بدون أزرق)',
+      category: 'comfort',
+      previewColors: [Color(0xFFF7F4EC), Color(0xFFEFE8DA)],
+      lightColors: [Color(0xFFF7F4EC), Color(0xFFEFE8DA)],
+      darkColors: [Color(0xFF1C1917), Color(0xFF241F1A)],
+      hasDoodles: false,
+    ),
+
+    // 3. WhatsApp Classics
     ChatWallpaperOption(
       id: 'wa_classic',
       title: 'البيج الكلاسيكي',
@@ -292,7 +409,16 @@ class ChatAppearanceCatalog {
       hasDoodles: true,
     ),
 
-    // 2. Modern Gradients
+    // 4. Modern Gradients
+    ChatWallpaperOption(
+      id: 'grad_deep_cosmos',
+      title: 'سديم فضائي عميق',
+      category: 'gradient',
+      previewColors: [Color(0xFF1A1A2E), Color(0xFF16213E)],
+      lightColors: [Color(0xFFE0E7FF), Color(0xFFC7D2FE)],
+      darkColors: [Color(0xFF0D0D1A), Color(0xFF14142B)],
+      hasDoodles: false,
+    ),
     ChatWallpaperOption(
       id: 'grad_aurora',
       title: 'شفق قطبي',
@@ -351,13 +477,13 @@ class ChatAppearanceCatalog {
 
   static const customAccentSwatches = <Color>[
     Color(0xFF00A884), // WhatsApp Green
+    Color(0xFF2AABEE), // Telegram Sky
+    Color(0xFF229ED9), // Telegram Blue
     Color(0xFF007AFF), // Apple Blue
-    Color(0xFF3390EC), // Telegram Blue
+    Color(0xFF5F8D76), // Sage Harmony
+    Color(0xFFD97706), // Desert Amber
     Color(0xFF10B981), // Emerald
-    Color(0xFF0EA5E9), // Sky Blue
-    Color(0xFF8B5CF6), // Violet
-    Color(0xFFF59E0B), // Amber
-    Color(0xFFEF4444), // Coral Red
+    Color(0xFF8B5CF6), // Violet / Mauve
     Color(0xFFEC4899), // Pink
     Color(0xFF64748B), // Slate
   ];
@@ -365,31 +491,32 @@ class ChatAppearanceCatalog {
   static const customBubbleSwatches = <Color>[
     Color(0xFFD9FDD3), // WhatsApp light outgoing
     Color(0xFF005C4B), // WhatsApp dark outgoing
+    Color(0xFF2AABEE), // Telegram Vibrant Blue
+    Color(0xFF2B5278), // Telegram Dark Outgoing
+    Color(0xFF182533), // Telegram Dark Incoming
     Color(0xFF007AFF), // Apple Blue
     Color(0xFFE9E9EB), // Apple Light Gray
-    Color(0xFF5BA9FF),
-    Color(0xFF2F8CFF),
-    Color(0xFF18BFA0),
-    Color(0xFF10B981),
-    Color(0xFF7C3AED),
-    Color(0xFFF59E0B),
-    Color(0xFFEF4444),
-    Color(0xFF17212B),
-    Color(0xFF202C33),
-    Color(0xFFFFFFFF),
+    Color(0xFFEEDCC7), // Desert Warmth Light
+    Color(0xFF4A3728), // Desert Warmth Dark
+    Color(0xFFDCECE1), // Sage Harmony Light
+    Color(0xFF1E3A2B), // Sage Harmony Dark
+    Color(0xFFEDE9FE), // Mauve Light
+    Color(0xFF381E48), // Mauve Dark
+    Color(0xFF27272A), // Mono Dark
+    Color(0xFFFFFFFF), // Pure White
   ];
 
   static const customWallpaperPalettes = <List<Color>>[
     [Color(0xFFEFEAE2), Color(0xFFEFEAE2)],
     [Color(0xFF0B141A), Color(0xFF0B141A)],
+    [Color(0xFFE4EDF5), Color(0xFFD6E3EF)],
+    [Color(0xFF0E1621), Color(0xFF17212B)],
+    [Color(0xFFF7F2E9), Color(0xFFEDE4D5)],
+    [Color(0xFF1C1712), Color(0xFF261D17)],
+    [Color(0xFFEBF4EE), Color(0xFFDEEDE3)],
+    [Color(0xFF0D1712), Color(0xFF13221A)],
     [Color(0xFFD5F3E4), Color(0xFFE2F8EE)],
     [Color(0xFF053E31), Color(0xFF084D3E)],
-    [Color(0xFFDCEAF7), Color(0xFFEDF4FA)],
-    [Color(0xFF0C131F), Color(0xFF141F30)],
-    [Color(0xFFF7F3EB), Color(0xFFF2ECE1)],
-    [Color(0xFF1E1B18), Color(0xFF282420)],
-    [Color(0xFFEDE9FE), Color(0xFFF5F2FE)],
-    [Color(0xFF1C162E), Color(0xFF251E3C)],
   ];
 
   static bool usesSystemMode(String themeId) => themeId == 'system';
@@ -398,52 +525,16 @@ class ChatAppearanceCatalog {
 
   static ChatThemeOption themeById(String themeId) {
     for (final entry in themes) {
-      if (entry.id == themeId) {
-        return entry;
-      }
+      if (entry.id == themeId) return entry;
     }
-    // Handle backwards compatibility for legacy theme ids
-    if (themeId == 'violet') {
-      return themeById('mint');
-    }
-    return themes.first; // Defaults to WhatsApp
+    return themes.first;
   }
 
   static ChatWallpaperOption wallpaperById(String wallpaperId) {
     for (final entry in wallpapers) {
-      if (entry.id == wallpaperId) {
-        return entry;
-      }
+      if (entry.id == wallpaperId) return entry;
     }
-    // Handle backwards compatibility for legacy wallpaper ids
-    return switch (wallpaperId) {
-      'default' => wallpapers.first, // wa_classic
-      'night' => wallpaperById('wa_midnight'),
-      'sky' => wallpaperById('wa_sky'),
-      'mint' => wallpaperById('wa_mint'),
-      'violet' => wallpaperById('wa_lilac'),
-      'sunset' => wallpaperById('wa_peach'),
-      _ => wallpapers.first,
-    };
-  }
-
-  static Color colorFromHex(
-    String hex, {
-    Color fallback = const Color(0xFF00A884),
-  }) {
-    final normalized = hex.trim();
-    final raw = normalized.startsWith('#')
-        ? normalized.substring(1)
-        : normalized;
-    if (!RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(raw)) {
-      return fallback;
-    }
-    return Color(int.parse('FF$raw', radix: 16));
-  }
-
-  static String colorToHex(Color color) {
-    final value = color.toARGB32() & 0x00FFFFFF;
-    return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+    return wallpapers.first;
   }
 
   static ChatResolvedAppearance resolveAppearance({
@@ -451,17 +542,23 @@ class ChatAppearanceCatalog {
     required bool isDark,
     required ColorScheme colorScheme,
   }) {
-    if (preferences.themeId == 'system') {
+    if (usesCustomTheme(preferences.themeId)) {
+      return _resolveCustomAppearance(
+        preferences: preferences,
+        isDark: isDark,
+      );
+    }
+    if (usesSystemMode(preferences.themeId)) {
       return _resolveSystemAppearance(
         preferences: preferences,
         isDark: isDark,
         colorScheme: colorScheme,
       );
     }
-    if (preferences.themeId == 'custom') {
-      return _resolveCustomAppearance(preferences: preferences, isDark: isDark);
-    }
-    return _resolvePresetAppearance(preferences: preferences, isDark: isDark);
+    return _resolvePresetAppearance(
+      preferences: preferences,
+      isDark: isDark,
+    );
   }
 
   static ChatResolvedAppearance _resolveSystemAppearance({
@@ -473,31 +570,37 @@ class ChatAppearanceCatalog {
       wallpaperId: preferences.wallpaperId,
       isDark: isDark,
       fallback: isDark
-          ? const [Color(0xFF0B141A), Color(0xFF0B141A)]
-          : const [Color(0xFFEFEAE2), Color(0xFFEFEAE2)],
+          ? [const Color(0xFF0B141A), const Color(0xFF070B0E)]
+          : [const Color(0xFFEFEAE2), const Color(0xFFE6DFD5)],
       customTheme: preferences.customTheme,
     );
+
     final patternColor = _doodleColorFor(
       wallpaperColors: wallpaperColors,
       isDark: isDark,
     );
+
+    final outgoingBubble = isDark
+        ? [colorScheme.primaryContainer, colorScheme.primary.withValues(alpha: 0.85)]
+        : [colorScheme.primary.withValues(alpha: 0.16)];
+
+    final incomingBubble = isDark
+        ? const Color(0xFF1E2836)
+        : colorScheme.surface;
+
     return ChatResolvedAppearance(
       accent: colorScheme.primary,
-      outgoingBubbleColors: isDark
-          ? const [Color(0xFF1E3A5F), Color(0xFF274B7A)]
-          : const [Color(0xFFDDF4FF), Color(0xFFF0FAFF)],
-      incomingBubbleColor: isDark
-          ? const Color(0xFF182533)
-          : colorScheme.surfaceContainerLowest,
+      outgoingBubbleColors: outgoingBubble,
+      incomingBubbleColor: incomingBubble,
       outgoingTextColor: isDark
-          ? const Color(0xFFF4FBFF)
-          : const Color(0xFF102331),
+          ? colorScheme.onPrimaryContainer
+          : colorScheme.onSurface,
       incomingTextColor: isDark
-          ? const Color(0xFFF2F5F7)
-          : const Color(0xFF182533),
-      outgoingBorderColor: colorScheme.primary.withValues(
-        alpha: isDark ? 0.40 : 0.18,
-      ),
+          ? const Color(0xFFF1F5F9)
+          : colorScheme.onSurface,
+      outgoingBorderColor: isDark
+          ? colorScheme.primary.withValues(alpha: 0.3)
+          : colorScheme.primary.withValues(alpha: 0.25),
       incomingBorderColor: isDark
           ? const Color(0xFF243140)
           : colorScheme.outlineVariant.withValues(alpha: 0.3),
@@ -569,7 +672,147 @@ class ChatAppearanceCatalog {
       );
     }
 
-    // 2. Apple iOS Theme
+    // 2. Telegram Night (Deep Slate & Glowing Blue)
+    if (preferences.themeId == 'telegram_night') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFF2AABEE),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF2B5278), Color(0xFF224466)]
+            : const [Color(0xFFD8EEFE), Color(0xFFC5E3FC)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF182533)
+            : const Color(0xFFFFFFFF),
+        outgoingTextColor: isDark
+            ? const Color(0xFFF4FBFF)
+            : const Color(0xFF0C243B),
+        incomingTextColor: isDark
+            ? const Color(0xFFF2F5F7)
+            : const Color(0xFF111827),
+        outgoingBorderColor: isDark
+            ? const Color(0xFF3D6B9C)
+            : const Color(0xFFBCE0FD),
+        incomingBorderColor: isDark
+            ? const Color(0xFF243140)
+            : const Color(0xFFE2E8F0),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF204264)
+            : const Color(0xFFBEE1FD),
+        incomingReplyColor: isDark
+            ? const Color(0xFF203243)
+            : const Color(0xFFF1F5F9),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.05 : 0.02),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+      );
+    }
+
+    // 3. Telegram Arctic (Crisp Gradient Outgoing)
+    if (preferences.themeId == 'telegram_arctic') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFF229ED9),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF1D78B0), Color(0xFF186290)]
+            : const [Color(0xFF2AABEE), Color(0xFF229ED9)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF1C2733)
+            : const Color(0xFFFFFFFF),
+        outgoingTextColor: Colors.white,
+        incomingTextColor: isDark
+            ? const Color(0xFFF2F5F7)
+            : const Color(0xFF0F172A),
+        outgoingBorderColor: Colors.transparent,
+        incomingBorderColor: isDark
+            ? const Color(0xFF283647)
+            : const Color(0xFFE2E8F0),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF14567F)
+            : const Color(0xFF1B8BC4),
+        incomingReplyColor: isDark
+            ? const Color(0xFF223140)
+            : const Color(0xFFF1F5F9),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.05 : 0.02),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+      );
+    }
+
+    // 4. Desert Warmth (Eye Comfort / Zero Harsh Blue Light)
+    if (preferences.themeId == 'desert_warmth') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFFD97706),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF4A3728), Color(0xFF3D2C1F)]
+            : const [Color(0xFFEEDCC7), Color(0xFFE4CFB6)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF241D17)
+            : const Color(0xFFFFFDF9),
+        outgoingTextColor: isDark
+            ? const Color(0xFFFEF3C7)
+            : const Color(0xFF451A03),
+        incomingTextColor: isDark
+            ? const Color(0xFFF5F5F4)
+            : const Color(0xFF292524),
+        outgoingBorderColor: isDark
+            ? const Color(0xFF6B4E37)
+            : const Color(0xFFDDC3A5),
+        incomingBorderColor: isDark
+            ? const Color(0xFF332921)
+            : const Color(0xFFEFE9DE),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF3B2B1F)
+            : const Color(0xFFDECAA9),
+        incomingReplyColor: isDark
+            ? const Color(0xFF2D231C)
+            : const Color(0xFFF7F1E7),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.05 : 0.02),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+      );
+    }
+
+    // 5. Sage Harmony (Eye Comfort / Botanical Rest)
+    if (preferences.themeId == 'sage_harmony') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFF5F8D76),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF1E3A2B), Color(0xFF162D21)]
+            : const [Color(0xFFDCECE1), Color(0xFFCEE3D5)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF15261D)
+            : const Color(0xFFF9FCFA),
+        outgoingTextColor: isDark
+            ? const Color(0xFFE8F5ED)
+            : const Color(0xFF143521),
+        incomingTextColor: isDark
+            ? const Color(0xFFE8F5ED)
+            : const Color(0xFF1C2D22),
+        outgoingBorderColor: isDark
+            ? const Color(0xFF2A523D)
+            : const Color(0xFFBEDBC7),
+        incomingBorderColor: isDark
+            ? const Color(0xFF1F372A)
+            : const Color(0xFFE3EDE6),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF162D21)
+            : const Color(0xFFBEDBC7),
+        incomingReplyColor: isDark
+            ? const Color(0xFF1B3125)
+            : const Color(0xFFEFF5F1),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.05 : 0.02),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+      );
+    }
+
+    // 6. Apple iOS Theme
     if (preferences.themeId == 'ios') {
       return ChatResolvedAppearance(
         accent: const Color(0xFF007AFF),
@@ -599,7 +842,7 @@ class ChatAppearanceCatalog {
       );
     }
 
-    // 3. Telegram Classic Theme
+    // 7. Telegram Classic Theme
     if (preferences.themeId == 'classic') {
       return ChatResolvedAppearance(
         accent: const Color(0xFF3390EC),
@@ -635,7 +878,79 @@ class ChatAppearanceCatalog {
       );
     }
 
-    // 4. Emerald Luxury Theme
+    // 8. Nordic Frost
+    if (preferences.themeId == 'nordic_frost') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFF64748B),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF273544), Color(0xFF1E2833)]
+            : const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF182029)
+            : const Color(0xFFF8FAFC),
+        outgoingTextColor: isDark
+            ? const Color(0xFFF8FAFC)
+            : const Color(0xFF1E293B),
+        incomingTextColor: isDark
+            ? const Color(0xFFF1F5F9)
+            : const Color(0xFF0F172A),
+        outgoingBorderColor: isDark
+            ? const Color(0xFF3D4F63)
+            : const Color(0xFFB8C5D3),
+        incomingBorderColor: isDark
+            ? const Color(0xFF25303D)
+            : const Color(0xFFE2E8F0),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF1E2833)
+            : const Color(0xFFB8C5D3),
+        incomingReplyColor: isDark
+            ? const Color(0xFF202A35)
+            : const Color(0xFFEDF2F7),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.05 : 0.02),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+      );
+    }
+
+    // 9. Blossom Mauve
+    if (preferences.themeId == 'blossom_mauve') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFF8B5CF6),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF381E48), Color(0xFF2A1538)]
+            : const [Color(0xFFEDE9FE), Color(0xFFDDD6FE)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF201328)
+            : const Color(0xFFFDFBFE),
+        outgoingTextColor: isDark
+            ? const Color(0xFFFDF4FF)
+            : const Color(0xFF4C1D95),
+        incomingTextColor: isDark
+            ? const Color(0xFFF5E8FF)
+            : const Color(0xFF2E1065),
+        outgoingBorderColor: isDark
+            ? const Color(0xFF552E6D)
+            : const Color(0xFFC4B5FD),
+        incomingBorderColor: isDark
+            ? const Color(0xFF311E3E)
+            : const Color(0xFFF3E8FF),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF2B1637)
+            : const Color(0xFFC4B5FD),
+        incomingReplyColor: isDark
+            ? const Color(0xFF291833)
+            : const Color(0xFFF9F5FF),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.05 : 0.02),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+      );
+    }
+
+    // 10. Emerald Luxury Theme
     if (preferences.themeId == 'mint') {
       return ChatResolvedAppearance(
         accent: const Color(0xFF10B981),
@@ -671,7 +986,7 @@ class ChatAppearanceCatalog {
       );
     }
 
-    // 5. Warm Sunset Theme
+    // 11. Warm Sunset Theme
     if (preferences.themeId == 'sunset') {
       return ChatResolvedAppearance(
         accent: const Color(0xFFF59E0B),
@@ -707,7 +1022,7 @@ class ChatAppearanceCatalog {
       );
     }
 
-    // 6. Graphite Dark Theme (mono)
+    // 12. Graphite Dark Theme (mono)
     return ChatResolvedAppearance(
       accent: const Color(0xFF94A3B8),
       outgoingBubbleColors: isDark
@@ -778,19 +1093,24 @@ class ChatAppearanceCatalog {
       outgoingBubbleColors: outgoingBubbleColors,
       incomingBubbleColor: incomingBubbleColor,
       outgoingTextColor: isDark
-          ? const Color(0xFFF7FBFF)
-          : const Color(0xFF102331),
-      incomingTextColor: isDark
-          ? const Color(0xFFF1F5F8)
-          : const Color(0xFF182533),
-      outgoingBorderColor: accent.withValues(alpha: isDark ? 0.40 : 0.22),
-      incomingBorderColor: accent.withValues(alpha: isDark ? 0.25 : 0.16),
-      outgoingReplyColor: _blend(outgoingBubbleColors.first, accent, 0.20),
-      incomingReplyColor: _blend(
-        incomingBubbleColor,
-        accent,
-        isDark ? 0.18 : 0.08,
-      ),
+          ? Colors.white
+          : (outgoingBubbleColors.isNotEmpty &&
+                  outgoingBubbleColors.first.computeLuminance() < 0.45
+              ? Colors.white
+              : const Color(0xFF0F172A)),
+      incomingTextColor: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
+      outgoingBorderColor: isDark
+          ? Colors.white.withValues(alpha: 0.12)
+          : accent.withValues(alpha: 0.20),
+      incomingBorderColor: isDark
+          ? Colors.white.withValues(alpha: 0.06)
+          : Colors.black.withValues(alpha: 0.06),
+      outgoingReplyColor: isDark
+          ? Colors.black.withValues(alpha: 0.25)
+          : accent.withValues(alpha: 0.15),
+      incomingReplyColor: isDark
+          ? Colors.white.withValues(alpha: 0.06)
+          : Colors.black.withValues(alpha: 0.04),
       wallpaperColors: wallpaperColors,
       patternColor: patternColor,
       sparkleColor: isDark
@@ -816,7 +1136,6 @@ class ChatAppearanceCatalog {
             wallpaperColors.length;
 
     if (avgLuminance > 0.6) {
-      // Light background (such as Classic Beige #EFEAE2)
       return const Color(0xFF334155).withValues(alpha: 0.075);
     } else {
       return Colors.white.withValues(alpha: 0.08);
@@ -848,10 +1167,38 @@ class ChatAppearanceCatalog {
         isDark
             ? const [Color(0xFF0B141A), Color(0xFF0B141A)]
             : const [Color(0xFFEFEAE2), Color(0xFFEFEAE2)],
+      'telegram_night' =>
+        isDark
+            ? const [Color(0xFF0A1017), Color(0xFF121B24)]
+            : const [Color(0xFFD9E2EC), Color(0xFFBCCCDC)],
+      'telegram_arctic' =>
+        isDark
+            ? const [Color(0xFF0E1621), Color(0xFF17212B)]
+            : const [Color(0xFFE4EDF5), Color(0xFFD6E3EF)],
+      'desert_warmth' =>
+        isDark
+            ? const [Color(0xFF1C1712), Color(0xFF261D17)]
+            : const [Color(0xFFF7F2E9), Color(0xFFEDE4D5)],
+      'sage_harmony' =>
+        isDark
+            ? const [Color(0xFF0D1712), Color(0xFF13221A)]
+            : const [Color(0xFFEBF4EE), Color(0xFFDEEDE3)],
+      'classic' =>
+        isDark
+            ? const [Color(0xFF0E1621), Color(0xFF17212B)]
+            : const [Color(0xFFE4EDF5), Color(0xFFD6E3EF)],
       'ios' =>
         isDark
             ? const [Color(0xFF141C22), Color(0xFF1B242B)]
             : const [Color(0xFFECEFF1), Color(0xFFE4E8EB)],
+      'nordic_frost' =>
+        isDark
+            ? const [Color(0xFF141C22), Color(0xFF1B242B)]
+            : const [Color(0xFFECEFF1), Color(0xFFE4E8EB)],
+      'blossom_mauve' =>
+        isDark
+            ? const [Color(0xFF1C162E), Color(0xFF251E3C)]
+            : const [Color(0xFFEDE9FE), Color(0xFFF5F2FE)],
       'mint' =>
         isDark
             ? const [Color(0xFF053E31), Color(0xFF084D3E)]
@@ -900,6 +1247,26 @@ class ChatAppearanceCatalog {
 
   static Color _blend(Color base, Color overlay, double amount) {
     return Color.lerp(base, overlay, amount.clamp(0, 1))!;
+  }
+
+  static Color colorFromHex(String hex, {Color fallback = const Color(0xFF00A884)}) {
+    final clean = hex.replaceAll('#', '').trim();
+    if (clean.length == 6) {
+      final val = int.tryParse('FF$clean', radix: 16);
+      if (val != null) return Color(val);
+    } else if (clean.length == 8) {
+      final val = int.tryParse(clean, radix: 16);
+      if (val != null) return Color(val);
+    }
+    return fallback;
+  }
+
+  static String colorToHex(Color color, {bool includeAlpha = false}) {
+    final a = (color.a * 255).round().toRadixString(16).padLeft(2, '0');
+    final r = (color.r * 255).round().toRadixString(16).padLeft(2, '0');
+    final g = (color.g * 255).round().toRadixString(16).padLeft(2, '0');
+    final b = (color.b * 255).round().toRadixString(16).padLeft(2, '0');
+    return includeAlpha ? '#$a$r$g$b'.toUpperCase() : '#$r$g$b'.toUpperCase();
   }
 }
 
@@ -990,7 +1357,7 @@ class WhatsAppDoodlePainter extends CustomPainter {
 
       for (int c = -1; c < cols; c++) {
         final x = c * cellW + xOffset + 24;
-        final iconType = ((r * 7) + c + 100) % 12;
+        final iconType = ((r * 7) + c + 100) % 16;
 
         canvas.save();
         canvas.translate(x, y);
@@ -1032,6 +1399,18 @@ class WhatsAppDoodlePainter extends CustomPainter {
           case 11:
             _drawHeadphones(canvas, strokePaint);
             break;
+          case 12:
+            _drawMoon(canvas, strokePaint);
+            break;
+          case 13:
+            _drawSparkle(canvas, strokePaint);
+            break;
+          case 14:
+            _drawPlanet(canvas, strokePaint);
+            break;
+          case 15:
+            _drawLeaf(canvas, strokePaint);
+            break;
         }
 
         canvas.restore();
@@ -1048,33 +1427,30 @@ class WhatsAppDoodlePainter extends CustomPainter {
     final tail = Path()
       ..moveTo(-1, 5)
       ..lineTo(-4, 9)
-      ..lineTo(-4, 5);
+      ..lineTo(2, 5);
     canvas.drawPath(tail, paint);
   }
 
   void _drawHeart(Canvas canvas, Paint paint) {
     final path = Path()
-      ..moveTo(0, 5)
-      ..cubicTo(-6.5, 0.5, -7.5, -5.5, 0, -5.5)
-      ..cubicTo(7.5, -5.5, 6.5, 0.5, 0, 5);
+      ..moveTo(0, 6)
+      ..cubicTo(-7, 1, -7, -5, 0, -3)
+      ..cubicTo(7, -5, 7, 1, 0, 6);
     canvas.drawPath(path, paint);
   }
 
   void _drawCoffee(Canvas canvas, Paint paint) {
     final cup = RRect.fromRectAndCorners(
-      const Rect.fromLTWH(-6, -4, 11, 10),
-      bottomLeft: const Radius.circular(3.5),
-      bottomRight: const Radius.circular(3.5),
+      const Rect.fromLTWH(-6, -3, 12, 10),
+      bottomLeft: const Radius.circular(4),
+      bottomRight: const Radius.circular(4),
     );
     canvas.drawRRect(cup, paint);
+    canvas.drawLine(const Offset(-8, -3), const Offset(8, -3), paint);
     final handle = Path()
-      ..moveTo(5, -2)
-      ..cubicTo(8.5, -2, 8.5, 3, 5, 3);
+      ..moveTo(6, -1)
+      ..cubicTo(9, -1, 9, 4, 6, 4);
     canvas.drawPath(handle, paint);
-    final steam = Path()
-      ..moveTo(-2, -6)
-      ..quadraticBezierTo(-4, -8, -1, -10);
-    canvas.drawPath(steam, paint);
   }
 
   void _drawCamera(Canvas canvas, Paint paint) {
@@ -1084,104 +1460,149 @@ class WhatsAppDoodlePainter extends CustomPainter {
     );
     canvas.drawRRect(body, paint);
     canvas.drawCircle(const Offset(0, 1.5), 3, paint);
-    canvas.drawLine(const Offset(-3, -4), const Offset(-3, -6), paint);
-    canvas.drawLine(const Offset(0, -4), const Offset(0, -6), paint);
+    final flash = Path()
+      ..moveTo(-4, -4)
+      ..lineTo(-3, -7)
+      ..lineTo(0, -7)
+      ..lineTo(1, -4);
+    canvas.drawPath(flash, paint);
   }
 
   void _drawPaperPlane(Canvas canvas, Paint paint) {
     final path = Path()
-      ..moveTo(-7, 6)
-      ..lineTo(0, -8)
-      ..lineTo(7, 6)
-      ..lineTo(0, 2)
+      ..moveTo(-7, -7)
+      ..lineTo(8, 0)
+      ..lineTo(-7, 7)
+      ..lineTo(-3, 0)
       ..close();
     canvas.drawPath(path, paint);
-    canvas.drawLine(const Offset(0, -8), const Offset(0, 2), paint);
   }
 
   void _drawClock(Canvas canvas, Paint paint) {
-    canvas.drawCircle(Offset.zero, 6.5, paint);
-    canvas.drawLine(Offset.zero, const Offset(0, -3.8), paint);
-    canvas.drawLine(Offset.zero, const Offset(2.8, 0), paint);
+    canvas.drawCircle(Offset.zero, 7, paint);
+    canvas.drawLine(Offset.zero, const Offset(0, -4), paint);
+    canvas.drawLine(Offset.zero, const Offset(3, 0), paint);
   }
 
   void _drawStar(Canvas canvas, Paint paint) {
     final path = Path();
-    const double outerR = 6.5;
-    const double innerR = 3.0;
-    for (int i = 0; i < 10; i++) {
-      final r = (i % 2 == 0) ? outerR : innerR;
-      final angle = (i * math.pi / 5) - (math.pi / 2);
-      final x = r * math.cos(angle);
-      final y = r * math.sin(angle);
+    for (int i = 0; i < 5; i++) {
+      final outerX = 7 * math.cos((18 + i * 72) * math.pi / 180);
+      final outerY = -7 * math.sin((18 + i * 72) * math.pi / 180);
       if (i == 0) {
-        path.moveTo(x, y);
+        path.moveTo(outerX, outerY);
       } else {
-        path.lineTo(x, y);
+        path.lineTo(outerX, outerY);
       }
+      final innerX = 3 * math.cos((54 + i * 72) * math.pi / 180);
+      final innerY = -3 * math.sin((54 + i * 72) * math.pi / 180);
+      path.lineTo(innerX, innerY);
     }
     path.close();
     canvas.drawPath(path, paint);
   }
 
   void _drawLightbulb(Canvas canvas, Paint paint) {
-    canvas.drawCircle(const Offset(0, -2.5), 4.8, paint);
-    canvas.drawLine(const Offset(-2, 2.5), const Offset(2, 2.5), paint);
-    canvas.drawLine(const Offset(-1.2, 4.5), const Offset(1.2, 4.5), paint);
+    canvas.drawCircle(const Offset(0, -2), 5, paint);
+    final base = RRect.fromRectAndRadius(
+      const Rect.fromLTWH(-3, 3, 6, 4),
+      const Radius.circular(1),
+    );
+    canvas.drawRRect(base, paint);
   }
 
   void _drawMusicNote(Canvas canvas, Paint stroke, Paint fill) {
     canvas.drawOval(
-      Rect.fromCenter(center: const Offset(-2.5, 3.5), width: 5.5, height: 4),
+      Rect.fromCenter(center: const Offset(-3, 4), width: 5, height: 3.5),
       fill,
     );
-    canvas.drawLine(const Offset(0, 3.5), const Offset(0, -6), stroke);
+    canvas.drawLine(const Offset(-0.5, 4), const Offset(-0.5, -6), stroke);
     final flag = Path()
-      ..moveTo(0, -6)
+      ..moveTo(-0.5, -6)
       ..quadraticBezierTo(4, -5, 4, -1);
     canvas.drawPath(flag, stroke);
   }
 
   void _drawSmiley(Canvas canvas, Paint stroke, Paint fill) {
-    canvas.drawCircle(Offset.zero, 6.5, stroke);
-    canvas.drawCircle(const Offset(-2.2, -1.8), 0.8, fill);
-    canvas.drawCircle(const Offset(2.2, -1.8), 0.8, fill);
-    final smile = Path()
-      ..moveTo(-3, 1.5)
-      ..quadraticBezierTo(0, 4.5, 3, 1.5);
-    canvas.drawPath(smile, stroke);
+    canvas.drawCircle(Offset.zero, 7, stroke);
+    canvas.drawCircle(const Offset(-2.5, -2), 1, fill);
+    canvas.drawCircle(const Offset(2.5, -2), 1, fill);
+    final mouth = Path()
+      ..moveTo(-3.5, 1.5)
+      ..quadraticBezierTo(0, 4.5, 3.5, 1.5);
+    canvas.drawPath(mouth, stroke);
   }
 
   void _drawCloud(Canvas canvas, Paint paint) {
     final path = Path()
       ..moveTo(-6, 3)
       ..lineTo(6, 3)
-      ..quadraticBezierTo(8, 0, 5, -1)
-      ..quadraticBezierTo(4, -5, 0, -4)
-      ..quadraticBezierTo(-4, -5, -4, -1)
-      ..quadraticBezierTo(-8, 0, -6, 3);
+      ..cubicTo(8, 3, 8, 0, 6, -1)
+      ..cubicTo(6, -4, 2, -5, 0, -3)
+      ..cubicTo(-2, -5, -6, -3, -5, 0)
+      ..cubicTo(-8, 0, -8, 3, -6, 3);
     canvas.drawPath(path, paint);
   }
 
   void _drawHeadphones(Canvas canvas, Paint paint) {
-    final band = Path()
-      ..arcTo(
-        const Rect.fromLTWH(-6, -6, 12, 12),
+    final arc = Path()
+      ..addArc(
+        Rect.fromCircle(center: const Offset(0, -1), radius: 6),
         math.pi,
         math.pi,
-        false,
       );
-    canvas.drawPath(band, paint);
-    final cup1 = RRect.fromRectAndRadius(
-      const Rect.fromLTWH(-7.5, 0, 3, 5),
-      const Radius.circular(1.5),
+    canvas.drawPath(arc, paint);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(-7, -1, 3, 6),
+        const Radius.circular(1.5),
+      ),
+      paint,
     );
-    final cup2 = RRect.fromRectAndRadius(
-      const Rect.fromLTWH(4.5, 0, 3, 5),
-      const Radius.circular(1.5),
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(4, -1, 3, 6),
+        const Radius.circular(1.5),
+      ),
+      paint,
     );
-    canvas.drawRRect(cup1, paint);
-    canvas.drawRRect(cup2, paint);
+  }
+
+  void _drawMoon(Canvas canvas, Paint paint) {
+    final path = Path()
+      ..moveTo(4, -7)
+      ..cubicTo(-3, -5, -5, 2, -1, 7)
+      ..cubicTo(5, 6, 7, 2, 6, -1)
+      ..cubicTo(4, 2, 0, 2, 4, -7);
+    canvas.drawPath(path, paint);
+  }
+
+  void _drawSparkle(Canvas canvas, Paint paint) {
+    final path = Path()
+      ..moveTo(0, -7)
+      ..quadraticBezierTo(0, 0, 7, 0)
+      ..quadraticBezierTo(0, 0, 0, 7)
+      ..quadraticBezierTo(0, 0, -7, 0)
+      ..quadraticBezierTo(0, 0, 0, -7);
+    canvas.drawPath(path, paint);
+  }
+
+  void _drawPlanet(Canvas canvas, Paint paint) {
+    canvas.drawCircle(Offset.zero, 5, paint);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: 16, height: 4),
+      paint,
+    );
+  }
+
+  void _drawLeaf(Canvas canvas, Paint paint) {
+    final path = Path()
+      ..moveTo(-5, 5)
+      ..quadraticBezierTo(-5, -5, 5, -5)
+      ..quadraticBezierTo(5, 5, -5, 5)
+      ..moveTo(-5, 5)
+      ..lineTo(2, -2);
+    canvas.drawPath(path, paint);
   }
 
   @override

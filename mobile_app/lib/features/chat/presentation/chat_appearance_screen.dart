@@ -621,6 +621,12 @@ class _WallpapersView extends StatelessWidget {
     final waWallpapers = ChatAppearanceCatalog.wallpapers
         .where((w) => w.category == 'whatsapp')
         .toList();
+    final tgWallpapers = ChatAppearanceCatalog.wallpapers
+        .where((w) => w.category == 'telegram')
+        .toList();
+    final comfortWallpapers = ChatAppearanceCatalog.wallpapers
+        .where((w) => w.category == 'comfort')
+        .toList();
     final gradWallpapers = ChatAppearanceCatalog.wallpapers
         .where((w) => w.category == 'gradient')
         .toList();
@@ -721,7 +727,75 @@ class _WallpapersView extends StatelessWidget {
 
         const SizedBox(height: 24),
 
-        // Section 2: Modern Gradients
+        // Section 2: Telegram Originals
+        _SectionHeader(
+          title: 'أناقة تلجرام الرسمية',
+          subtitle: 'خلفيات تلجرام الشهيرة بدرجات هادئة مريحة ورموز عصرية',
+          icon: Icons.send_rounded,
+        ),
+        const SizedBox(height: 10),
+
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: tgWallpapers.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.35,
+          ),
+          itemBuilder: (context, index) {
+            final wallpaper = tgWallpapers[index];
+            final selected = preferences.wallpaperId == wallpaper.id;
+
+            return _WallpaperCard(
+              wallpaper: wallpaper,
+              selected: selected,
+              isDark: isDark,
+              showDoodles: preferences.doodles && wallpaper.hasDoodles,
+              onTap: () => onSave(preferences.copyWith(wallpaperId: wallpaper.id)),
+            );
+          },
+        ),
+
+        const SizedBox(height: 24),
+
+        // Section 3: Eye Comfort & Night
+        _SectionHeader(
+          title: 'راحة وحماية العين (Zero Blue Light)',
+          subtitle: 'ألوان ترابية ودافئة مهدئة تقلل إجهاد العين أثناء المحادثات الطويلة',
+          icon: Icons.visibility_rounded,
+        ),
+        const SizedBox(height: 10),
+
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: comfortWallpapers.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.35,
+          ),
+          itemBuilder: (context, index) {
+            final wallpaper = comfortWallpapers[index];
+            final selected = preferences.wallpaperId == wallpaper.id;
+
+            return _WallpaperCard(
+              wallpaper: wallpaper,
+              selected: selected,
+              isDark: isDark,
+              showDoodles: preferences.doodles && wallpaper.hasDoodles,
+              onTap: () => onSave(preferences.copyWith(wallpaperId: wallpaper.id)),
+            );
+          },
+        ),
+
+        const SizedBox(height: 24),
+
+        // Section 4: Modern Gradients
         _SectionHeader(
           title: 'تدرجات لونية عصرية',
           subtitle: 'تدرجات أنيقة وعميقة تضيف لمسة حيوية ومميزة للمحادثة',
@@ -936,10 +1010,21 @@ class _ThemesView extends StatelessWidget {
               cardBg: cardBg,
               borderColor: borderColor,
               onTap: () {
-                // When selecting whatsapp theme, automatically select whatsapp classic wallpaper if on default
-                final wallpaperId = theme.id == 'whatsapp'
-                    ? 'wa_classic'
-                    : (theme.id == 'ios' ? 'wa_slate' : preferences.wallpaperId);
+                final wallpaperId = switch (theme.id) {
+                  'whatsapp' => 'wa_classic',
+                  'ios' => 'wa_slate',
+                  'classic' => 'wa_midnight',
+                  'mint' => 'wa_emerald',
+                  'sunset' => 'wa_peach',
+                  'mono' => 'wa_dark_oled',
+                  'telegram_night' => 'tg_night',
+                  'telegram_arctic' => 'tg_classic',
+                  'desert_warmth' => 'tg_desert',
+                  'sage_harmony' => 'tg_sage',
+                  'nordic_frost' => 'grad_deep_cosmos',
+                  'blossom_mauve' => 'grad_eye_comfort',
+                  _ => preferences.wallpaperId,
+                };
 
                 onSave(
                   preferences.copyWith(
