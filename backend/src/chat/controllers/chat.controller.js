@@ -60,7 +60,10 @@ const {
   getChatTransferForUser,
 } = require("../services/chat-transfer.service");
 const { sendChatResponse } = require("../utils/chat-response");
-const { getUserDeliveryContext } = require("../sockets/chat.socket");
+const {
+  getUserDeliveryContext,
+  leaveUserFromConversationRoom,
+} = require("../sockets/chat.socket");
 const {
   sendChatPushNotifications,
   sendChatReactionPushNotifications,
@@ -504,10 +507,18 @@ const joinChatConversation = asyncHandler(async (req, res) => {
 });
 
 const leaveChatConversation = asyncHandler(async (req, res) => {
-  await leaveConversation(req.user, req.params.id);
+  const result = await leaveConversation(req.user, req.params.id);
+  const io = req.app.get("io");
+  if (io) {
+    leaveUserFromConversationRoom(io, req.user.id, req.params.id);
+    emitConversationToMembers(io, req.params.id, [req.user.id]);
+    if (result?.systemMessage) {
+      emitMessageToRecipients(io, result.systemMessage);
+    }
+  }
   sendChatResponse(res, {
-    data: { left: true },
-    legacy: { left: true },
+    data: { left: true, conversation: result.conversation },
+    legacy: { left: true, conversation: result.conversation },
   });
 });
 
@@ -546,6 +557,11 @@ const removeMember = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
+    leaveUserFromConversationRoom(
+      io,
+      req.params.userId,
+      result.conversation.id,
+    );
     emitConversationToMembers(
       io,
       result.conversation.id,
@@ -608,34 +624,38 @@ const demoteMemberAdmin = asyncHandler(async (req, res) => {
 });
 
 const blockMember = asyncHandler(async (req, res) => {
-  const conversation = await blockConversationMember(
+  const result = await blockConversationMember(
     req.user,
     req.params.id,
     req.params.userId,
   );
   const io = req.app.get("io");
   if (io) {
-    emitConversationToMembers(io, conversation.id);
+    leaveUserFromConversationRoom(io, req.params.userId, result.conversation.id);
+    emitConversationToMembers(io, result.conversation.id, result.affectedUserIds);
+    if (result.systemMessage) {
+      emitMessageToRecipients(io, result.systemMessage);
+    }
   }
   sendChatResponse(res, {
-    data: { conversation },
-    legacy: { conversation },
+    data: { conversation: result.conversation },
+    legacy: { conversation: result.conversation },
   });
 });
 
 const unblockMember = asyncHandler(async (req, res) => {
-  const conversation = await unblockConversationMember(
+  const result = await unblockConversationMember(
     req.user,
     req.params.id,
     req.params.userId,
   );
   const io = req.app.get("io");
   if (io) {
-    emitConversationToMembers(io, conversation.id);
+    emitConversationToMembers(io, result.conversation.id, result.affectedUserIds);
   }
   sendChatResponse(res, {
-    data: { conversation },
-    legacy: { conversation },
+    data: { conversation: result.conversation },
+    legacy: { conversation: result.conversation },
   });
 });
 

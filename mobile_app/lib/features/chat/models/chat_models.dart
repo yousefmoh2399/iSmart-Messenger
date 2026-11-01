@@ -606,6 +606,10 @@ class ChatConversation {
     required this.isPinned,
     required this.isFavorite,
     required this.isActive,
+    this.isMember = true,
+    this.membershipStatus = 'active',
+    this.canSend = true,
+    this.isBlocked = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -631,8 +635,16 @@ class ChatConversation {
   final bool isPinned;
   final bool isFavorite;
   final bool isActive;
+  final bool isMember;
+  final String membershipStatus;
+  final bool canSend;
+  final bool isBlocked;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  bool get isRemoved => membershipStatus == 'removed';
+  bool get isLeft => membershipStatus == 'left';
+  bool get isUserBlocked => isBlocked || membershipStatus == 'blocked';
 
   bool get isEffectivelyMuted {
     if (!isMuted) return false;
@@ -683,6 +695,10 @@ class ChatConversation {
     bool? isPinned,
     bool? isFavorite,
     bool? isActive,
+    bool? isMember,
+    String? membershipStatus,
+    bool? canSend,
+    bool? isBlocked,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -712,6 +728,10 @@ class ChatConversation {
       isPinned: isPinned ?? this.isPinned,
       isFavorite: isFavorite ?? this.isFavorite,
       isActive: isActive ?? this.isActive,
+      isMember: isMember ?? this.isMember,
+      membershipStatus: membershipStatus ?? this.membershipStatus,
+      canSend: canSend ?? this.canSend,
+      isBlocked: isBlocked ?? this.isBlocked,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -789,6 +809,10 @@ class ChatConversation {
       isPinned: json['isPinned'] == true,
       isFavorite: json['isFavorite'] == true,
       isActive: json['isActive'] != false,
+      isMember: json['isMember'] != false,
+      membershipStatus: json['membershipStatus']?.toString() ?? 'active',
+      canSend: json['canSend'] != false,
+      isBlocked: json['isBlocked'] == true,
       createdAt:
           DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
@@ -821,6 +845,10 @@ class ChatConversation {
       'isPinned': isPinned,
       'isFavorite': isFavorite,
       'isActive': isActive,
+      'isMember': isMember,
+      'membershipStatus': membershipStatus,
+      'canSend': canSend,
+      'isBlocked': isBlocked,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };

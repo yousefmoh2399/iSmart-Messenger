@@ -203,17 +203,31 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   }
 
   bool _isReadOnlyFor(String? userId) {
+    if (!_data.isMember || !_data.canSend) {
+      return true;
+    }
+    if (_data.isUserBlocked || _isBlockedFromSending(userId)) {
+      return true;
+    }
     return !_data.isActive ||
-        _isBlockedFromSending(userId) ||
         !_canPublishInBroadcast(userId);
   }
 
   String _readOnlyTextFor(String? userId) {
-    if (_isBlockedFromSending(userId)) {
-      return 'تم تقييدك في هذه المحادثة. يمكنك قراءة الرسائل فقط.';
+    if (_data.isUserBlocked || _isBlockedFromSending(userId)) {
+      return '🚫 تم حظرك من هذه المجموعة/القناة - لا يمكنك إرسال أو استلام رسائل.';
+    }
+    if (_data.membershipStatus == 'removed') {
+      return 'لم تعد عضواً في هذه المجموعة - يمكنك فقط استعراض الرسائل السابقة.';
+    }
+    if (_data.membershipStatus == 'left') {
+      return 'لقد غادرت هذه المجموعة - يمكنك فقط استعراض الرسائل السابقة.';
+    }
+    if (!_data.isMember) {
+      return 'لست عضواً في هذه المحادثة - يمكنك فقط استعراض الرسائل السابقة.';
     }
     if (_data.type == 'broadcast' && !_canPublishInBroadcast(userId)) {
-      return 'هذه قناة بث. ليس لديك صلاحية الإرسال فيها.';
+      return 'هذه قناة بث. فقط المشرفون والناشرون المصرح لهم يمكنهم الإرسال فيها.';
     }
     return 'الغرفة معطلة بواسطة المشرف. المحادثة للقراءة فقط.';
   }

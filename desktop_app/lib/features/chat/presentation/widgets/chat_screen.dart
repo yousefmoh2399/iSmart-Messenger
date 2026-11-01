@@ -3978,18 +3978,32 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   bool _isReadOnlyConversation(ChatConversation conversation) {
+    if (!conversation.isMember || !conversation.canSend) {
+      return true;
+    }
+    if (conversation.isUserBlocked || _isBlockedFromSending(conversation)) {
+      return true;
+    }
     return !conversation.isActive ||
-        _isBlockedFromSending(conversation) ||
         !_canPublishInBroadcast(conversation);
   }
 
   String _readOnlyBannerText(ChatConversation conversation) {
-    if (_isBlockedFromSending(conversation)) {
-      return 'تم تقييدك في هذه المحادثة. يمكنك القراءة فقط.';
+    if (conversation.isUserBlocked || _isBlockedFromSending(conversation)) {
+      return '🚫 تم حظرك من هذه المجموعة/القناة - لا يمكنك إرسال أو استلام رسائل.';
+    }
+    if (conversation.membershipStatus == 'removed') {
+      return 'لم تعد عضواً في هذه المجموعة - يمكنك فقط استعراض الرسائل السابقة.';
+    }
+    if (conversation.membershipStatus == 'left') {
+      return 'لقد غادرت هذه المجموعة - يمكنك فقط استعراض الرسائل السابقة.';
+    }
+    if (!conversation.isMember) {
+      return 'لست عضواً في هذه المحادثة - يمكنك فقط استعراض الرسائل السابقة.';
     }
     if (conversation.type == 'broadcast' &&
         !_canPublishInBroadcast(conversation)) {
-      return 'هذه قناة بث. ليس لديك صلاحية الإرسال فيها.';
+      return 'هذه قناة بث. فقط المشرفون والناشرون المصرح لهم يمكنهم الإرسال فيها.';
     }
     return 'هذه الغرفة معطّلة من قِبل المسؤول. يمكنك القراءة فقط.';
   }

@@ -419,19 +419,50 @@ async function emitConversationToUsers(io, conversationId, userIds = []) {
   );
 }
 
-async function emitConversationToMembers(io, conversationId) {
+async function emitConversationToMembers(io, conversationId, extraUserIds = []) {
   try {
     const conv = await getConversationById(conversationId).catch(() => null);
-    if (!conv || !Array.isArray(conv.members)) return;
-    const memberIds = conv.members.map((m) =>
-      m?._id ? m._id.toString() : m?.toString?.(),
-    ).filter(Boolean);
-    return await emitConversationToUsers(io, conversationId, memberIds);
+    if (!conv) return;
+    const memberIds = Array.isArray(conv.members)
+      ? conv.members.map((m) => (m?._id ? m._id.toString() : m?.toString?.())).filter(Boolean)
+      : [];
+    const allUserIds = [
+      ...new Set([...memberIds, ...(extraUserIds || []).map(String).filter(Boolean)]),
+    ];
+    return await emitConversationToUsers(io, conversationId, allUserIds);
   } catch (err) {
     logger.warn("chat.conversation_members_emit_failed", {
       conversationId: String(conversationId),
       error: err?.message,
     });
+  }
+}
+
+function leaveUserFromConversationRoom(ioInstance, userId, conversationId) {
+  const io = ioInstance || activeIOInstance;
+  const uid = String(userId?._id || userId || "").trim();
+  const room = getConversationRoom(conversationId);
+  if (!io || !uid || !room) return;
+
+  try {
+    if (typeof io.in === "function" && typeof io.in(`user:${uid}`).socketsLeave === "function") {
+      io.in(`user:${uid}`).socketsLeave(room);
+    }
+  } catch (_) {}
+
+  if (io.sockets?.sockets) {
+    const socketIds = pruneUserSockets(io, uid);
+    for (const socketId of socketIds) {
+      const sock =
+        typeof io.sockets.sockets.get === "function"
+          ? io.sockets.sockets.get(socketId)
+          : io.sockets.sockets[socketId];
+      if (sock) {
+        try {
+          sock.leave(room);
+        } catch (_) {}
+      }
+    }
   }
 }
 
@@ -761,27 +792,43 @@ function initializeChatSocketServer(httpServer) {
       try {
         const conversation = await getConversationById(payload.conversationId);
         await assertConversationAccess(currentUser, conversation);
-        socket.join(getConversationRoom(payload.conversationId));
-        const deliveredMessageIds = await markConversationDelivered(
-          currentUser,
-          payload.conversationId,
-        );
-        if (deliveredMessageIds.length) {
-          io.to(getConversationRoom(payload.conversationId)).emit(
-            "message_delivered",
-            {
-              conversationId: payload.conversationId,
-              userId: currentUser.id,
-              messageIds: deliveredMessageIds,
-            },
+
+        const memberState = await getConversationState(currentUser.id, payload.conversationId);
+        const isBlocked = (conversation.blockedMembers || []).some(
+          (entry) => (entry._id ? entry._id.toString() : entry.toString()) === currentUser.id,
+        ) || memberState?.membershipStatus === "blocked";
+        const isActiveMember = (conversation.members || []).some(
+          (entry) => (entry._id ? entry._id.toString() : entry.toString()) === currentUser.id,
+        ) && (memberState?.membershipStatus === "active" || !memberState?.membershipStatus);
+
+        let deliveredMessageIds = [];
+        if (isActiveMember && !isBlocked) {
+          socket.join(getConversationRoom(payload.conversationId));
+          deliveredMessageIds = await markConversationDelivered(
+            currentUser,
+            payload.conversationId,
           );
+          if (deliveredMessageIds.length) {
+            io.to(getConversationRoom(payload.conversationId)).emit(
+              "message_delivered",
+              {
+                conversationId: payload.conversationId,
+                userId: currentUser.id,
+                messageIds: deliveredMessageIds,
+              },
+            );
+          }
+        } else {
+          socket.leave(getConversationRoom(payload.conversationId));
         }
+
         socketAck(ack, {
           ok: true,
           success: true,
           data: {
             conversationId: payload.conversationId,
             deliveredMessageIds,
+            isReadOnly: !isActiveMember || isBlocked,
           },
         });
       } catch (error) {
@@ -904,6 +951,16 @@ function initializeChatSocketServer(httpServer) {
       try {
         const conversation = await getConversationById(payload.conversationId);
         await assertConversationAccess(currentUser, conversation);
+        const memberIds = (conversation?.members || []).map((m) =>
+          (m._id ? m._id.toString() : m.toString()),
+        );
+        const isBlocked = (conversation?.blockedMembers || []).some(
+          (m) => (m._id ? m._id.toString() : m.toString()) === currentUser.id,
+        );
+        if (!memberIds.includes(currentUser.id) || isBlocked) {
+          socketAck(ack, { ok: false, success: false, error: "Not allowed" });
+          return;
+        }
         setTyping(io, payload.conversationId, currentUser.id);
         socket.to(getConversationRoom(payload.conversationId)).emit("typing", {
           conversationId: payload.conversationId,
@@ -2093,4 +2150,5 @@ module.exports = {
   emitMessageToRecipients,
   emitConversationToUsers,
   emitConversationToMembers,
+  leaveUserFromConversationRoom,
 };

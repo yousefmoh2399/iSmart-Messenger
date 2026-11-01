@@ -36,6 +36,13 @@ async function ensureConversationMemberStates(conversationId, memberIds) {
     updateOne: {
       filter: { conversationId, userId },
       update: {
+        $set: {
+          membershipStatus: "active",
+          removedAt: null,
+          leftAt: null,
+          blockedAt: null,
+          isDeleted: false,
+        },
         $setOnInsert: {
           conversationId,
           userId,
@@ -52,6 +59,83 @@ async function ensureConversationMemberStates(conversationId, memberIds) {
   }
 }
 
+async function markConversationMemberRemoved(conversationId, userId, removedAt = new Date()) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: "removed",
+        removedAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId: cleanUserId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function markConversationMemberLeft(conversationId, userId, leftAt = new Date()) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: "left",
+        leftAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId: cleanUserId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function markConversationMemberBlocked(conversationId, userId, blockedAt = new Date()) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: "blocked",
+        blockedAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId: cleanUserId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function markConversationMemberUnblocked(conversationId, userId, isMember = false) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: isMember ? "active" : "removed",
+        blockedAt: null,
+      },
+    }
+  );
+}
+
 async function removeConversationMemberState(conversationId, userId) {
   const cleanUserId = extractObjectId(userId);
   if (!cleanUserId) return;
@@ -62,10 +146,22 @@ async function syncConversationMemberStates(conversationId, memberIds) {
   const normalized = [...new Set((memberIds || []).map(extractObjectId).filter(Boolean))];
 
   await ensureConversationMemberStates(conversationId, normalized);
-  await ConversationMemberState.deleteMany({
-    conversationId,
-    userId: { $nin: normalized },
-  });
+  if (normalized.length > 0) {
+    await ConversationMemberState.updateMany(
+      {
+        conversationId,
+        userId: { $nin: normalized },
+        membershipStatus: "active",
+      },
+      {
+        $set: {
+          membershipStatus: "removed",
+          removedAt: new Date(),
+          unreadCount: 0,
+        },
+      }
+    );
+  }
 }
 
 async function incrementUnreadCounts(conversationId, recipientIds, exceptUserId = null) {
@@ -81,6 +177,8 @@ async function incrementUnreadCounts(conversationId, recipientIds, exceptUserId 
     {
       conversationId,
       userId: { $in: filtered },
+      membershipStatus: "active",
+      isDeleted: { $ne: true },
     },
     {
       $inc: { unreadCount: 1 },
@@ -213,6 +311,10 @@ async function updateConversationState(userId, conversationId, payload = {}) {
 
 module.exports = {
   ensureConversationMemberStates,
+  markConversationMemberRemoved,
+  markConversationMemberLeft,
+  markConversationMemberBlocked,
+  markConversationMemberUnblocked,
   removeConversationMemberState,
   syncConversationMemberStates,
   incrementUnreadCounts,

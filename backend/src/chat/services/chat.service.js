@@ -21,6 +21,10 @@ const { userHasPermission } = require("./role.service");
 const { logAuditEvent } = require("./audit.service");
 const {
   ensureConversationMemberStates,
+  markConversationMemberRemoved,
+  markConversationMemberLeft,
+  markConversationMemberBlocked,
+  markConversationMemberUnblocked,
   removeConversationMemberState,
   syncConversationMemberStates,
   incrementUnreadCounts,
@@ -477,9 +481,32 @@ async function serializeConversation(conversation, currentUserId) {
     userId: currentUserId,
   })
     .select(
-      "unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt"
+      "unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt membershipStatus removedAt leftAt blockedAt"
     )
     .lean();
+
+  const currentUserIdStr = currentUserId ? String(currentUserId) : "";
+  const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
+  const isCurrentlyInMembers = memberIdsList.includes(currentUserIdStr);
+
+  const blockedList = (conversation.blockedMembers || []).map(getObjectIdString).filter(Boolean);
+  const isUserBlocked = blockedList.includes(currentUserIdStr) || memberState?.membershipStatus === "blocked";
+
+  const effectiveStatus = memberState?.membershipStatus || (isCurrentlyInMembers ? "active" : "removed");
+  const isCurrentlyActiveMember = isCurrentlyInMembers && effectiveStatus === "active" && !isUserBlocked;
+
+  const publisherIdsList = (conversation.broadcastPublisherIds || []).map(getObjectIdString).filter(Boolean);
+  const adminIdsList = (conversation.admins || []).map(getObjectIdString).filter(Boolean);
+  const createdByIdStr = getObjectIdString(conversation.createdBy);
+
+  let canSend = isCurrentlyActiveMember && !isUserBlocked && conversation.isActive !== false;
+  if (conversation.type === "broadcast" && canSend) {
+    canSend = (
+      adminIdsList.includes(currentUserIdStr) ||
+      publisherIdsList.includes(currentUserIdStr) ||
+      createdByIdStr === currentUserIdStr
+    );
+  }
 
   const clearHistoryAt = memberState?.clearHistoryAt
     ? new Date(memberState.clearHistoryAt)
@@ -492,92 +519,120 @@ async function serializeConversation(conversation, currentUserId) {
     lastMessageCreatedAt &&
     lastMessageCreatedAt.getTime() <= clearHistoryAt.getTime();
 
-  const normalizedLastMessage = shouldHideLastMessage
-    ? {
-        id: null,
-        content: "",
-        senderId: null,
-        senderName: "",
-        messageType: null,
-        seenBy: [],
-        deliveredTo: [],
-        status: "sent",
-        createdAt: null,
-      }
-    : (conversation.lastMessage ? buildLastMessagePayload(conversation.lastMessage) : null);
+  let normalizedLastMessage = null;
+  const cutoffDate = (!isCurrentlyActiveMember && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt))
+    ? new Date(memberState.removedAt || memberState.leftAt || memberState.blockedAt)
+    : null;
 
-    const now = new Date();
-    const mutedUntil = memberState?.mutedUntil
-      ? new Date(memberState.mutedUntil)
-      : null;
-    const isMuted = Boolean(
-      memberState?.isMuted &&
-        (!mutedUntil || mutedUntil.getTime() > now.getTime())
-    );
+  if (cutoffDate) {
+    const lastHistMessage = await Message.findOne({
+      conversationId: conversation._id,
+      isDeleted: { $ne: true },
+      createdAt: {
+        $lte: cutoffDate,
+        ...(clearHistoryAt ? { $gt: clearHistoryAt } : {}),
+      },
+      ...(conversation.type === "broadcast"
+        ? getBroadcastRecipientVisibilityQuery(currentUserIdStr)
+        : {}),
+    })
+      .sort({ _id: -1 })
+      .populate("senderId", "username fullName")
+      .lean();
 
-    return {
-      id: conversation._id.toString(),
-      type: conversation.type,
-      name: conversation.name,
-      description: conversation.description || "",
-      avatarUrl: conversation.avatarUrl ? normalizeMediaUrl(conversation.avatarUrl) : null,
-      departmentId: conversation.departmentId
-        ? conversation.departmentId._id
-          ? conversation.departmentId._id.toString()
-          : conversation.departmentId.toString()
-        : null,
-      createdBy: conversation.createdBy?._id
-        ? conversation.createdBy._id.toString()
-        : conversation.createdBy?.toString?.() || conversation.createdBy,
-      members,
-      admins,
-      broadcastPublisherIds: (() => {
-        const raw = (conversation.broadcastPublisherIds || [])
-          .filter(Boolean)
-          .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
-        if (conversation.type !== "broadcast") {
-          return raw;
+    normalizedLastMessage = lastHistMessage ? buildLastMessagePayload(lastHistMessage) : null;
+  } else {
+    normalizedLastMessage = shouldHideLastMessage
+      ? {
+          id: null,
+          content: "",
+          senderId: null,
+          senderName: "",
+          messageType: null,
+          seenBy: [],
+          deliveredTo: [],
+          status: "sent",
+          createdAt: null,
         }
-        const creatorId = conversation.createdBy?._id
-          ? conversation.createdBy._id.toString()
-          : conversation.createdBy?.toString?.() || conversation.createdBy;
-        const adminIdSet = new Set([
-          ...(creatorId ? [String(creatorId)] : []),
-          ...(conversation.admins || []).map((e) => (e._id ? e._id.toString() : e.toString())),
-        ]);
-        const totalMembersCount = (conversation.members || []).length;
-        if (totalMembersCount > 1 && raw.length >= totalMembersCount) {
-          return Array.from(adminIdSet);
-        }
+      : (conversation.lastMessage ? buildLastMessagePayload(conversation.lastMessage) : null);
+  }
+
+  const now = new Date();
+  const mutedUntil = memberState?.mutedUntil
+    ? new Date(memberState.mutedUntil)
+    : null;
+  const isMuted = Boolean(
+    memberState?.isMuted &&
+      (!mutedUntil || mutedUntil.getTime() > now.getTime())
+  );
+
+  return {
+    id: conversation._id.toString(),
+    type: conversation.type,
+    name: conversation.name,
+    description: conversation.description || "",
+    avatarUrl: conversation.avatarUrl ? normalizeMediaUrl(conversation.avatarUrl) : null,
+    departmentId: conversation.departmentId
+      ? conversation.departmentId._id
+        ? conversation.departmentId._id.toString()
+        : conversation.departmentId.toString()
+      : null,
+    createdBy: conversation.createdBy?._id
+      ? conversation.createdBy._id.toString()
+      : conversation.createdBy?.toString?.() || conversation.createdBy,
+    members,
+    admins,
+    broadcastPublisherIds: (() => {
+      const raw = (conversation.broadcastPublisherIds || [])
+        .filter(Boolean)
+        .map((entry) => (entry._id ? entry._id.toString() : entry.toString()));
+      if (conversation.type !== "broadcast") {
         return raw;
-      })(),
-      blockedMemberIds: (conversation.blockedMembers || [])
-        .filter(Boolean)
-        .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
-      blockedMembers: (conversation.blockedMembers || [])
-        .filter(Boolean)
-        .map((entry) =>
-          entry._id ? serializeUserLite(entry) : { id: entry.toString() },
-        ),
-      pinnedMessage: conversation.pinnedMessage
-        ? {
-            content: conversation.pinnedMessage.content || "",
-            setBy: getObjectIdString(conversation.pinnedMessage.setBy),
-            setByName: conversation.pinnedMessage.setByName || "",
-            createdAt: conversation.pinnedMessage.createdAt || null,
-            updatedAt: conversation.pinnedMessage.updatedAt || null,
-          }
-        : null,
-      lastMessage: normalizedLastMessage,
-      unreadCount: memberState?.unreadCount || 0,
-      isArchived: memberState?.isArchived || conversation.isArchived || false,
-      isMuted,
-      mutedUntil: isMuted && mutedUntil ? mutedUntil.toISOString() : null,
-      isPinned: memberState?.isPinned || false,
-      isFavorite: memberState?.isFavorite || false,
-      isActive: conversation.isActive !== false,
-      createdAt: conversation.createdAt,
-      updatedAt: conversation.updatedAt,
+      }
+      const creatorId = conversation.createdBy?._id
+        ? conversation.createdBy._id.toString()
+        : conversation.createdBy?.toString?.() || conversation.createdBy;
+      const adminIdSet = new Set([
+        ...(creatorId ? [String(creatorId)] : []),
+        ...(conversation.admins || []).map((e) => (e._id ? e._id.toString() : e.toString())),
+      ]);
+      const totalMembersCount = (conversation.members || []).length;
+      if (totalMembersCount > 1 && raw.length >= totalMembersCount) {
+        return Array.from(adminIdSet);
+      }
+      return raw;
+    })(),
+    blockedMemberIds: (conversation.blockedMembers || [])
+      .filter(Boolean)
+      .map((entry) => (entry._id ? entry._id.toString() : entry.toString())),
+    blockedMembers: (conversation.blockedMembers || [])
+      .filter(Boolean)
+      .map((entry) =>
+        entry._id ? serializeUserLite(entry) : { id: entry.toString() },
+      ),
+    pinnedMessage: conversation.pinnedMessage
+      ? {
+          content: conversation.pinnedMessage.content || "",
+          setBy: getObjectIdString(conversation.pinnedMessage.setBy),
+          setByName: conversation.pinnedMessage.setByName || "",
+          createdAt: conversation.pinnedMessage.createdAt || null,
+          updatedAt: conversation.pinnedMessage.updatedAt || null,
+        }
+      : null,
+    lastMessage: normalizedLastMessage,
+    unreadCount: memberState?.unreadCount || 0,
+    isArchived: memberState?.isArchived || conversation.isArchived || false,
+    isMuted,
+    mutedUntil: isMuted && mutedUntil ? mutedUntil.toISOString() : null,
+    isPinned: memberState?.isPinned || false,
+    isFavorite: memberState?.isFavorite || false,
+    isActive: conversation.isActive !== false,
+    isMember: isCurrentlyActiveMember,
+    membershipStatus: effectiveStatus,
+    isBlocked: isUserBlocked,
+    canSend,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
       deletedAt: conversation.deletedAt || null,
     };
 }
@@ -896,6 +951,10 @@ async function assertConversationAccess(currentUser, conversation) {
     ) {
       return;
     }
+    const memberState = await getConversationState(currentUserId, conversation._id);
+    if (memberState && !memberState.isDeleted) {
+      return;
+    }
     throw new ApiError(403, "Conversation access denied.");
   }
 
@@ -915,6 +974,10 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   if (!memberIds.includes(currentUserId)) {
+    const memberState = await getConversationState(currentUserId, conversation._id);
+    if (memberState && !memberState.isDeleted) {
+      return;
+    }
     throw new ApiError(403, "Conversation access denied.");
   }
 }
@@ -1009,9 +1072,21 @@ function assertGroupOwnerAccess(currentUser, conversation) {
 }
 
 async function listConversationsForUser(currentUser) {
+  const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
+
+  const userMemberStates = await ConversationMemberState.find({
+    userId: currentUserId,
+    isDeleted: { $ne: true },
+  })
+    .select("conversationId")
+    .lean();
+  const validMemberConvIds = userMemberStates
+    .map((s) => s.conversationId)
+    .filter(Boolean);
+
   const query = {
     deletedAt: null,
-    $or: [{ members: currentUser.id }],
+    $or: [{ members: currentUserId }, { _id: { $in: validMemberConvIds } }],
   };
 
   const userDeptIds = Array.from(
@@ -1042,7 +1117,6 @@ async function listConversationsForUser(currentUser) {
     .lean({ getters: true });
 
   const unreadByConversation = await getUnreadCountsForUser(currentUser.id);
-  const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
   const visible = [];
 
   for (const conversation of conversations) {
@@ -1056,15 +1130,7 @@ async function listConversationsForUser(currentUser) {
         conversation._id,
       );
       if (memberState?.isDeleted) {
-        const lastMsgTime = conversation.lastMessage?.createdAt
-          ? new Date(conversation.lastMessage.createdAt).getTime()
-          : 0;
-        const deletedTime = memberState.deletedAt
-          ? new Date(memberState.deletedAt).getTime()
-          : 0;
-        if (lastMsgTime <= deletedTime) {
-          continue;
-        }
+        continue;
       }
       const serialized = await serializeConversation(
         conversation,
@@ -1072,6 +1138,7 @@ async function listConversationsForUser(currentUser) {
       );
       if (
         conversation.type === "broadcast" &&
+        serialized.isMember &&
         !canUserViewAllBroadcastMessages(currentUser, conversation)
       ) {
         const visibleLastMessage = await Message.findOne({
@@ -1086,8 +1153,9 @@ async function listConversationsForUser(currentUser) {
       }
       visible.push({
         ...serialized,
-        unreadCount:
-          unreadByConversation[serialized.id] || serialized.unreadCount || 0,
+        unreadCount: serialized.isMember
+          ? (unreadByConversation[serialized.id] || serialized.unreadCount || 0)
+          : 0,
       });
     } catch (_) {
       // Skip unauthorized conversation
@@ -1677,7 +1745,25 @@ async function listMessagesForConversation(
   if (cursor) {
     query._id = { $lt: cursor };
   }
-  if (clearHistoryAt) {
+
+  if (conversationId && conversation) {
+    const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
+    const isCurrentlyInMembers = memberIdsList.includes(currentUserId);
+    const isBlocked = (conversation.blockedMembers || []).some((b) => getObjectIdString(b) === currentUserId);
+    const isNonActive = !isCurrentlyInMembers || memberState?.membershipStatus !== "active" || isBlocked;
+
+    const cutoffDate = isNonActive && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt)
+      ? new Date(memberState.removedAt || memberState.leftAt || memberState.blockedAt)
+      : null;
+
+    if (cutoffDate && clearHistoryAt) {
+      query.createdAt = { $gt: clearHistoryAt, $lte: cutoffDate };
+    } else if (cutoffDate) {
+      query.createdAt = { $lte: cutoffDate };
+    } else if (clearHistoryAt) {
+      query.createdAt = { $gt: clearHistoryAt };
+    }
+  } else if (clearHistoryAt) {
     query.createdAt = { $gt: clearHistoryAt };
   }
 
@@ -1745,9 +1831,25 @@ async function createMessage(currentUser, payload, file) {
     }
     throw new ApiError(
       403,
-      "You can read this conversation but cannot send messages in it.",
+      "You are blocked from this conversation and cannot send messages.",
     );
   }
+
+  const memberIds = new Set(
+    (conversation.members || []).map((entry) =>
+      entry?._id ? entry._id.toString() : entry.toString(),
+    ),
+  );
+  if (!memberIds.has(currentUser.id)) {
+    if (file?.path) {
+      await deleteFileIfExists(file.path);
+    }
+    throw new ApiError(
+      403,
+      "You are no longer a member of this conversation.",
+    );
+  }
+
   if (conversation.isActive === false) {
     if (file?.path) {
       await deleteFileIfExists(file.path);
@@ -1924,9 +2026,15 @@ async function createMessage(currentUser, payload, file) {
     } else if (targetUserIds.length > 0) {
       recipientIds = targetUserIds;
     } else {
-      const allActiveUsers = await User.find({ isActive: true }, "_id").lean();
-      recipientIds = allActiveUsers.map((entry) => entry._id.toString());
+      recipientIds = (conversation.members || [])
+        .map((m) => getObjectIdString(m))
+        .filter(Boolean);
     }
+
+    const blockedMemberIdsSet = new Set(
+      (conversation.blockedMembers || []).map((m) => getObjectIdString(m)).filter(Boolean)
+    );
+    recipientIds = recipientIds.filter((id) => !blockedMemberIdsSet.has(id));
 
     const conversationMemberIds = new Set(
       (conversation.members || []).map((entry) => getObjectIdString(entry)),
@@ -1940,18 +2048,20 @@ async function createMessage(currentUser, payload, file) {
       conversationMemberIds.add(publisherId);
     }
     let hasMemberChanges = false;
-    for (const userId of recipientIds) {
-      if (!conversationMemberIds.has(userId)) {
-        conversationMemberIds.add(userId);
-        hasMemberChanges = true;
+    if (requestedTargetCount > 0) {
+      for (const userId of recipientIds) {
+        if (!conversationMemberIds.has(userId) && !blockedMemberIdsSet.has(userId)) {
+          conversationMemberIds.add(userId);
+          hasMemberChanges = true;
+        }
       }
-    }
-    if (hasMemberChanges) {
-      conversation.members = [...conversationMemberIds];
-      await syncConversationMemberStates(
-        conversation._id,
-        conversation.members,
-      );
+      if (hasMemberChanges) {
+        conversation.members = [...conversationMemberIds];
+        await syncConversationMemberStates(
+          conversation._id,
+          conversation.members,
+        );
+      }
     }
 
     let targetDepartmentNames = [];
@@ -2010,6 +2120,13 @@ async function createMessage(currentUser, payload, file) {
       entry._id ? entry._id.toString() : entry.toString(),
     );
   }
+
+  const blockedMembersSet = new Set(
+    (conversation.blockedMembers || []).map((entry) =>
+      entry?._id ? entry._id.toString() : entry.toString(),
+    ),
+  );
+  recipientIds = recipientIds.filter((id) => !blockedMembersSet.has(id));
 
   let attachment = file
     ? classifyAttachment({
@@ -2153,7 +2270,7 @@ async function createMessage(currentUser, payload, file) {
     );
 
     await ConversationMemberState.updateMany(
-      { conversationId: conversation._id },
+      { conversationId: conversation._id, userId: { $in: [currentUser.id, ...targetRecipientIds] } },
       { $set: { isDeleted: false, deletedAt: null } },
     );
   }
@@ -2169,6 +2286,7 @@ async function createMessage(currentUser, payload, file) {
       new Set([currentUser.id, ...extractIdArray(conversation.members)]),
     );
   }
+  audienceUserIds = audienceUserIds.filter((id) => !blockedMembersSet.has(id));
 
   const populated = await Message.findById(message._id)
     .populate(
@@ -2725,8 +2843,34 @@ async function leaveConversation(currentUser, conversationId) {
     (entry) => entry.toString() !== currentUser.id,
   );
   await conversation.save();
-  await removeConversationMemberState(conversation._id, currentUser.id);
-  return true;
+  const leftAt = new Date();
+  await markConversationMemberLeft(conversation._id, currentUser.id, leftAt);
+
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${currentUser.fullName || currentUser.username} غادر المجموعة`,
+      metadata: {
+        eventType: "group.member.left",
+        userIds: [String(currentUser.id)],
+      },
+    },
+  );
+
+  await logAuditEvent({
+    actorId: currentUser.id,
+    action: "group.member.left",
+    entityType: "Conversation",
+    entityId: conversation._id,
+    payload: { userId: String(currentUser.id) },
+  });
+
+  return {
+    conversation: await getConversationDetailsForUser(currentUser, conversation._id),
+    systemMessage,
+    affectedUserIds: [String(currentUser.id)],
+  };
 }
 
 async function listConversationMembers(currentUser, conversationId) {
@@ -2827,7 +2971,8 @@ async function removeConversationMember(currentUser, conversationId, userId) {
     ).filter((entry) => entry.toString() !== String(userId));
   }
   await conversation.save();
-  await removeConversationMemberState(conversation._id, userId);
+  const removedAt = new Date();
+  await markConversationMemberRemoved(conversation._id, userId, removedAt);
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
   const channelTypeLabel = conversation.type === "broadcast" ? "القناة" : "المجموعة";
@@ -3002,7 +3147,22 @@ async function blockConversationMember(currentUser, conversationId, userId) {
   }
   conversation.blockedMembers.addToSet(userId);
   await conversation.save();
-  await removeConversationMemberState(conversation._id, userId);
+  const blockedAt = new Date();
+  await markConversationMemberBlocked(conversation._id, userId, blockedAt);
+  const target = await User.findById(userId, "username fullName").lean();
+  const targetLabel = target?.fullName || target?.username || "عضو";
+  const channelTypeLabel = conversation.type === "broadcast" ? "القناة" : "المجموعة";
+  const systemMessage = await createSystemConversationMessage(
+    conversation,
+    currentUser,
+    {
+      content: `${currentUser.fullName || currentUser.username} قام بحظر ${targetLabel} من ${channelTypeLabel}`,
+      metadata: {
+        eventType: "group.member.blocked",
+        userIds: [String(userId)],
+      },
+    },
+  );
   await logAuditEvent({
     actorId: currentUser.id,
     action: "group.member.blocked",
@@ -3010,7 +3170,14 @@ async function blockConversationMember(currentUser, conversationId, userId) {
     entityId: conversation._id,
     payload: { userId: String(userId) },
   });
-  return getConversationDetailsForUser(currentUser, conversation._id);
+  return {
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
+    systemMessage,
+    affectedUserIds: [String(userId)],
+  };
 }
 
 async function unblockConversationMember(currentUser, conversationId, userId) {
@@ -3023,6 +3190,10 @@ async function unblockConversationMember(currentUser, conversationId, userId) {
 
   conversation.blockedMembers.pull(userId);
   await conversation.save();
+  const isMember = (conversation.members || []).some(
+    (m) => getObjectIdString(m) === String(userId),
+  );
+  await markConversationMemberUnblocked(conversation._id, userId, isMember);
   await logAuditEvent({
     actorId: currentUser.id,
     action: "group.member.unblocked",
@@ -3030,7 +3201,13 @@ async function unblockConversationMember(currentUser, conversationId, userId) {
     entityId: conversation._id,
     payload: { userId: String(userId) },
   });
-  return getConversationDetailsForUser(currentUser, conversation._id);
+  return {
+    conversation: await getConversationDetailsForUser(
+      currentUser,
+      conversation._id,
+    ),
+    affectedUserIds: [String(userId)],
+  };
 }
 
 async function searchMessages(
@@ -3126,7 +3303,25 @@ async function searchMessages(
   if (cursor) {
     query._id = { $lt: cursor };
   }
-  if (clearHistoryAt) {
+
+  if (conversationId && conversation) {
+    const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
+    const isCurrentlyInMembers = memberIdsList.includes(currentUserId);
+    const isBlocked = (conversation.blockedMembers || []).some((b) => getObjectIdString(b) === currentUserId);
+    const isNonActive = !isCurrentlyInMembers || memberState?.membershipStatus !== "active" || isBlocked;
+
+    const cutoffDate = isNonActive && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt)
+      ? new Date(memberState.removedAt || memberState.leftAt || memberState.blockedAt)
+      : null;
+
+    if (cutoffDate && clearHistoryAt) {
+      query.createdAt = { $gt: clearHistoryAt, $lte: cutoffDate };
+    } else if (cutoffDate) {
+      query.createdAt = { $lte: cutoffDate };
+    } else if (clearHistoryAt) {
+      query.createdAt = { $gt: clearHistoryAt };
+    }
+  } else if (clearHistoryAt) {
     query.createdAt = { $gt: clearHistoryAt };
   }
 

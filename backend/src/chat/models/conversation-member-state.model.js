@@ -65,6 +65,24 @@ const conversationMemberStateSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    membershipStatus: {
+      type: String,
+      enum: ["active", "removed", "left", "blocked"],
+      default: "active",
+      index: true,
+    },
+    removedAt: {
+      type: Date,
+      default: null,
+    },
+    leftAt: {
+      type: Date,
+      default: null,
+    },
+    blockedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
