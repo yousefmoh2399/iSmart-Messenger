@@ -190,8 +190,10 @@ class _GroupManagementScreenState
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم تحديث صورة المجموعة بنجاح! 🎉'),
+        SnackBar(
+          content: Text(_conversation.type == 'broadcast'
+              ? 'تم تحديث صورة قناة البث بنجاح! 🎉'
+              : 'تم تحديث صورة المجموعة بنجاح! 🎉'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -215,8 +217,12 @@ class _GroupManagementScreenState
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          title: const Text('إزالة صورة المجموعة'),
-          content: const Text('هل أنت متأكد من حذف صورة المجموعة؟'),
+          title: Text(_conversation.type == 'broadcast'
+              ? 'إزالة صورة قناة البث'
+              : 'إزالة صورة المجموعة'),
+          content: Text(_conversation.type == 'broadcast'
+              ? 'هل أنت متأكد من حذف صورة قناة البث؟'
+              : 'هل أنت متأكد من حذف صورة المجموعة؟'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -288,7 +294,9 @@ class _GroupManagementScreenState
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  'تعديل معلومات المجموعة',
+                  _conversation.type == 'broadcast'
+                      ? 'تعديل معلومات قناة البث'
+                      : 'تعديل معلومات المجموعة',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
@@ -299,7 +307,9 @@ class _GroupManagementScreenState
             ),
             const SizedBox(height: 18),
             Text(
-              'اسم المجموعة',
+              _conversation.type == 'broadcast'
+                  ? 'اسم قناة البث'
+                  : 'اسم المجموعة',
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
@@ -323,10 +333,12 @@ class _GroupManagementScreenState
                   color: isDark ? Colors.white : const Color(0xFF0F172A),
                   fontSize: 14,
                 ),
-                decoration: const InputDecoration(
-                  hintText: 'اكتب اسم المجموعة...',
+                decoration: InputDecoration(
+                  hintText: _conversation.type == 'broadcast'
+                      ? 'اكتب اسم قناة البث...'
+                      : 'اكتب اسم المجموعة...',
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 ),
               ),
             ),
@@ -356,10 +368,12 @@ class _GroupManagementScreenState
                   color: isDark ? Colors.white : const Color(0xFF0F172A),
                   fontSize: 13.5,
                 ),
-                decoration: const InputDecoration(
-                  hintText: 'أضف وصفاً يوضح أهداف المجموعة...',
+                decoration: InputDecoration(
+                  hintText: _conversation.type == 'broadcast'
+                      ? 'أضف وصفاً يوضح أهداف قناة البث...'
+                      : 'أضف وصفاً يوضح أهداف المجموعة...',
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 ),
               ),
             ),
@@ -400,8 +414,10 @@ class _GroupManagementScreenState
     final newName = nameCtrl.text.trim();
     if (newName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('اسم المجموعة لا يمكن أن يكون فارغاً'),
+        SnackBar(
+          content: Text(_conversation.type == 'broadcast'
+              ? 'اسم قناة البث لا يمكن أن يكون فارغاً'
+              : 'اسم المجموعة لا يمكن أن يكون فارغاً'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -672,7 +688,13 @@ class _GroupManagementScreenState
                   ),
                 ),
                 title: Text(
-                  isMemberAdmin ? 'إلغاء صفة المشرف' : 'تعيين كمشرف للمجموعة',
+                  isMemberAdmin
+                      ? (_conversation.type == 'broadcast'
+                          ? 'إلغاء صفة الناشر والمشرف'
+                          : 'إلغاء صفة المشرف')
+                      : (_conversation.type == 'broadcast'
+                          ? 'تعيين كأدمن وناشر في القناة'
+                          : 'تعيين كمشرف للمجموعة'),
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 onTap: () {
@@ -699,7 +721,10 @@ class _GroupManagementScreenState
                   ),
                   child: const Icon(CupertinoIcons.person_crop_circle_badge_minus, color: Color(0xFFFF9500), size: 19),
                 ),
-                title: const Text('إزالة من المجموعة', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF9500))),
+                title: Text(
+                  _conversation.type == 'broadcast' ? 'إزالة من القناة' : 'إزالة من المجموعة',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF9500)),
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _run(() => ref.read(chatOverviewControllerProvider.notifier).removeGroupMember(
@@ -719,7 +744,10 @@ class _GroupManagementScreenState
                   ),
                   child: const Icon(CupertinoIcons.slash_circle, color: Color(0xFFFF3B30), size: 19),
                 ),
-                title: const Text('حظر العضو من المجموعة', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF3B30))),
+                title: Text(
+                  _conversation.type == 'broadcast' ? 'حظر العضو من القناة' : 'حظر العضو من المجموعة',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFFF3B30)),
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _run(() => ref.read(chatOverviewControllerProvider.notifier).blockGroupMember(
@@ -988,7 +1016,11 @@ class _GroupManagementScreenState
                       fontWeight: FontWeight.w500,
                     ),
                     tabs: [
-                      Tab(text: 'الأعضاء (${_conversation.members.length})'),
+                      Tab(
+                        text: _conversation.type == 'broadcast'
+                            ? 'المستلمون (${_conversation.members.length})'
+                            : 'الأعضاء (${_conversation.members.length})',
+                      ),
                       const Tab(text: 'إضافة +'),
                       const Tab(text: 'المثبتة 📌'),
                       Tab(text: 'المحظورون (${blockedUsers.length})'),
@@ -1233,8 +1265,17 @@ class _GroupManagementScreenState
                           else if (isMemberAdmin)
                             _buildApplePill(
                               icon: CupertinoIcons.shield_fill,
-                              text: 'مشرف',
+                              text: _conversation.type == 'broadcast'
+                                  ? 'ناشر / مشرف'
+                                  : 'مشرف',
                               color: primaryColor,
+                              isDark: isDark,
+                            )
+                          else if (_conversation.type == 'broadcast')
+                            _buildApplePill(
+                              icon: CupertinoIcons.person_fill,
+                              text: 'مستلم',
+                              color: isDark ? Colors.white54 : Colors.black45,
                               isDark: isDark,
                             ),
                         ],
@@ -1484,14 +1525,18 @@ class _GroupManagementScreenState
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'الأعضاء المحددون',
+                    _conversation.type == 'broadcast'
+                        ? 'المستلمون المحددون'
+                        : 'الأعضاء المحددون',
                     style: TextStyle(
                       fontSize: 11,
                       color: isDark ? Colors.white54 : Colors.black45,
                     ),
                   ),
                   Text(
-                    '${_selectedToAdd.length} عضو',
+                    _conversation.type == 'broadcast'
+                        ? '${_selectedToAdd.length} مستلم'
+                        : '${_selectedToAdd.length} عضو',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
@@ -1526,8 +1571,10 @@ class _GroupManagementScreenState
                           });
                           _tabController.animateTo(0);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('تمت إضافة الأعضاء بنجاح! 🎉'),
+                            SnackBar(
+                              content: Text(_conversation.type == 'broadcast'
+                                  ? 'تمت إضافة المستلمين بنجاح! 🎉'
+                                  : 'تمت إضافة الأعضاء بنجاح! 🎉'),
                               behavior: SnackBarBehavior.floating,
                             ),
                           );
@@ -1535,7 +1582,9 @@ class _GroupManagementScreenState
                       },
                 icon: const Icon(CupertinoIcons.person_badge_plus, size: 17),
                 label: Text(
-                  'إضافة إلى المجموعة',
+                  _conversation.type == 'broadcast'
+                      ? 'إضافة إلى القناة'
+                      : 'إضافة إلى المجموعة',
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                 ),
               ),

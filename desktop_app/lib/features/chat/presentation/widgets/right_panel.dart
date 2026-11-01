@@ -121,9 +121,13 @@ class RightPanel extends ConsumerWidget {
 
                 // ── Members ─────────────────────────────────────────────────
                 _SectionHeader(
-                  label: 'الأعضاء (${conversation.members.length})',
+                  label: conversation.type == 'broadcast'
+                      ? 'المشتركون (${conversation.members.length})'
+                      : 'الأعضاء (${conversation.members.length})',
                   isDark: isDark,
-                  action: canManage && conversation.type == 'group'
+                  action: canManage &&
+                          (conversation.type == 'group' ||
+                              conversation.type == 'broadcast')
                       ? _TgTextButton(
                           label: 'إدارة',
                           onPressed: onOpenGroupManagement,
@@ -131,7 +135,25 @@ class RightPanel extends ConsumerWidget {
                       : null,
                 ),
                 ...conversation.members.map(
-                  (member) => _MemberTile(member: member, isDark: isDark),
+                  (member) {
+                    final isMemberOwner = member.id == conversation.createdBy;
+                    final isMemberAdmin = conversation.admins.any(
+                          (e) => e.id == member.id,
+                        ) ||
+                        isMemberOwner;
+                    final roleBadge = isMemberOwner
+                        ? 'المالك'
+                        : (isMemberAdmin
+                            ? (conversation.type == 'broadcast'
+                                ? 'ناشر / مشرف'
+                                : 'مشرف')
+                            : null);
+                    return _MemberTile(
+                      member: member,
+                      isDark: isDark,
+                      roleBadge: roleBadge,
+                    );
+                  },
                 ),
 
                 _Divider(isDark: isDark),
@@ -288,6 +310,18 @@ class RightPanel extends ConsumerWidget {
                 if (canManage) ...[
                   _Divider(isDark: isDark),
                   _SectionHeader(label: 'إعدادات المحادثة', isDark: isDark),
+                  if (conversation.type == 'group' ||
+                      conversation.type == 'broadcast')
+                    _ActionTile(
+                      icon: conversation.type == 'broadcast'
+                          ? Icons.cell_tower_rounded
+                          : Icons.group_outlined,
+                      label: conversation.type == 'broadcast'
+                          ? 'إدارة قناة البث'
+                          : 'إدارة المجموعة',
+                      isDark: isDark,
+                      onTap: onOpenGroupManagement,
+                    ),
                   _ActionTile(
                     icon: conversation.isPinned
                         ? Icons.push_pin_rounded
@@ -640,10 +674,15 @@ class _SectionHeader extends StatelessWidget {
 
 // ── Member tile ────────────────────────────────────────────────────────────────
 class _MemberTile extends StatelessWidget {
-  const _MemberTile({required this.member, required this.isDark});
+  const _MemberTile({
+    required this.member,
+    required this.isDark,
+    this.roleBadge,
+  });
 
   final ChatDirectoryUser member;
   final bool isDark;
+  final String? roleBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -694,15 +733,41 @@ class _MemberTile extends StatelessWidget {
               ),
             ],
           ),
-          title: Text(
-            member.displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: nameColor,
-            ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  member.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: nameColor,
+                  ),
+                ),
+              ),
+              if (roleBadge != null)
+                Container(
+                  margin: const EdgeInsetsDirectional.only(start: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3390EC).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    roleBadge!,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF3390EC),
+                    ),
+                  ),
+                ),
+            ],
           ),
           subtitle: Text(
             formatPresenceLabel(member),

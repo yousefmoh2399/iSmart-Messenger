@@ -2769,11 +2769,12 @@ async function addConversationMembers(currentUser, conversationId, userIds) {
   conversation.members = nextMembers;
   await conversation.save();
   await syncConversationMemberStates(conversation._id, nextMembers);
+  const channelTypeLabel = conversation.type === "broadcast" ? "قناة البث" : "المجموعة";
   const systemMessage = await createSystemConversationMessage(
     conversation,
     currentUser,
     {
-      content: `${currentUser.fullName || currentUser.username} أضاف ${addedNames.join("، ")} إلى المجموعة`,
+      content: `${currentUser.fullName || currentUser.username} أضاف ${addedNames.join("، ")} إلى ${channelTypeLabel}`,
       metadata: {
         eventType: "group.members.added",
         userIds: nextUserIds,
@@ -2814,6 +2815,9 @@ async function removeConversationMember(currentUser, conversationId, userId) {
   if (!memberIds.has(String(userId))) {
     throw new ApiError(400, "User is not a member of this group.");
   }
+  conversation.members = (conversation.members || []).filter(
+    (entry) => entry.toString() !== String(userId),
+  );
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== String(userId),
   );
@@ -2822,15 +2826,16 @@ async function removeConversationMember(currentUser, conversationId, userId) {
       conversation.broadcastPublisherIds || []
     ).filter((entry) => entry.toString() !== String(userId));
   }
-  conversation.blockedMembers.addToSet(userId);
   await conversation.save();
+  await removeConversationMemberState(conversation._id, userId);
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
+  const channelTypeLabel = conversation.type === "broadcast" ? "القناة" : "المجموعة";
   const systemMessage = await createSystemConversationMessage(
     conversation,
     currentUser,
     {
-      content: `${currentUser.fullName || currentUser.username} أزال ${targetLabel} من الإرسال داخل المجموعة`,
+      content: `${currentUser.fullName || currentUser.username} أزال ${targetLabel} من ${channelTypeLabel}`,
       metadata: {
         eventType: "group.member.removed",
         userIds: [String(userId)],
@@ -2887,11 +2892,15 @@ async function promoteConversationAdmin(currentUser, conversationId, userId) {
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
+  const roleLabel =
+    conversation.type === "broadcast"
+      ? "مشرفاً وناشراً في قناة البث"
+      : "أدمن في المجموعة";
   const systemMessage = await createSystemConversationMessage(
     conversation,
     currentUser,
     {
-      content: `${targetLabel} أصبح أدمن في المجموعة`,
+      content: `${targetLabel} أصبح ${roleLabel}`,
       metadata: {
         eventType: "group.admin.promoted",
         userIds: [String(userId)],
@@ -2937,11 +2946,15 @@ async function demoteConversationAdmin(currentUser, conversationId, userId) {
   await conversation.save();
   const target = await User.findById(userId, "username fullName").lean();
   const targetLabel = target?.fullName || target?.username || "عضو";
+  const roleLabel =
+    conversation.type === "broadcast"
+      ? "صلاحية الإشراف والنشر في قناة البث"
+      : "صلاحية الأدمن في المجموعة";
   const systemMessage = await createSystemConversationMessage(
     conversation,
     currentUser,
     {
-      content: `تمت إزالة صلاحية الأدمن من ${targetLabel}`,
+      content: `تمت إزالة ${roleLabel} من ${targetLabel}`,
       metadata: {
         eventType: "group.admin.demoted",
         userIds: [String(userId)],
@@ -2982,6 +2995,11 @@ async function blockConversationMember(currentUser, conversationId, userId) {
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== String(userId),
   );
+  if (conversation.type === "broadcast") {
+    conversation.broadcastPublisherIds = (
+      conversation.broadcastPublisherIds || []
+    ).filter((entry) => entry.toString() !== String(userId));
+  }
   conversation.blockedMembers.addToSet(userId);
   await conversation.save();
   await removeConversationMemberState(conversation._id, userId);

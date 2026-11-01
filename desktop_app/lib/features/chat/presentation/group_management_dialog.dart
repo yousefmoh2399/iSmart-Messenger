@@ -113,8 +113,10 @@ class _GroupManagementDialogState
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم تحديث صورة المجموعة بنجاح'),
+        SnackBar(
+          content: Text(_conversation.type == 'broadcast'
+              ? 'تم تحديث صورة قناة البث بنجاح'
+              : 'تم تحديث صورة المجموعة بنجاح'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -134,8 +136,12 @@ class _GroupManagementDialogState
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('إزالة صورة المجموعة'),
-        content: const Text('هل أنت متأكد من حذف صورة المجموعة؟'),
+        title: Text(_conversation.type == 'broadcast'
+            ? 'إزالة صورة قناة البث'
+            : 'إزالة صورة المجموعة'),
+        content: Text(_conversation.type == 'broadcast'
+            ? 'هل أنت متأكد من حذف صورة قناة البث؟'
+            : 'هل أنت متأكد من حذف صورة المجموعة؟'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -167,7 +173,9 @@ class _GroupManagementDialogState
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('تعديل معلومات المجموعة'),
+        title: Text(_conversation.type == 'broadcast'
+            ? 'تعديل معلومات قناة البث'
+            : 'تعديل معلومات المجموعة'),
         content: SizedBox(
           width: 420,
           child: Column(
@@ -175,20 +183,26 @@ class _GroupManagementDialogState
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'اسم المجموعة',
-                  hintText: 'أدخل اسم المجموعة',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: _conversation.type == 'broadcast'
+                      ? 'اسم قناة البث'
+                      : 'اسم المجموعة',
+                  hintText: _conversation.type == 'broadcast'
+                      ? 'أدخل اسم قناة البث'
+                      : 'أدخل اسم المجموعة',
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: descCtrl,
                 maxLines: 3,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'الوصف',
-                  hintText: 'اكتب وصفاً مختصراً للمجموعة',
-                  border: OutlineInputBorder(),
+                  hintText: _conversation.type == 'broadcast'
+                      ? 'اكتب وصفاً مختصراً لقناة البث'
+                      : 'اكتب وصفاً مختصراً للمجموعة',
+                  border: const OutlineInputBorder(),
                 ),
               ),
             ],
@@ -212,8 +226,10 @@ class _GroupManagementDialogState
     final newName = nameCtrl.text.trim();
     if (newName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('اسم المجموعة لا يمكن أن يكون فارغاً'),
+        SnackBar(
+          content: Text(_conversation.type == 'broadcast'
+              ? 'اسم قناة البث لا يمكن أن يكون فارغاً'
+              : 'اسم المجموعة لا يمكن أن يكون فارغاً'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -627,8 +643,16 @@ class _GroupManagementDialogState
                             fontWeight: FontWeight.w600,
                           ),
                           tabs: [
-                            Tab(text: 'الأعضاء (${_conversation.members.length})'),
-                            const Tab(text: 'إضافة أعضاء'),
+                            Tab(
+                              text: _conversation.type == 'broadcast'
+                                  ? 'المستلمون (${_conversation.members.length})'
+                                  : 'الأعضاء (${_conversation.members.length})',
+                            ),
+                            Tab(
+                              text: _conversation.type == 'broadcast'
+                                  ? 'إضافة مستلمين'
+                                  : 'إضافة أعضاء',
+                            ),
                             const Tab(text: 'الرسالة المثبتة'),
                             Tab(text: 'المحظورون (${blockedUsers.length})'),
                           ],
@@ -825,13 +849,17 @@ class _GroupManagementDialogState
                             else if (isMemberAdmin)
                               _buildStatusBadge(
                                 isDark: isDark,
-                                text: 'مشرف',
+                                text: _conversation.type == 'broadcast'
+                                    ? 'مشرف وناشر'
+                                    : 'مشرف',
                                 color: primaryColor,
                               )
                             else
                               _buildStatusBadge(
                                 isDark: isDark,
-                                text: 'عضو',
+                                text: _conversation.type == 'broadcast'
+                                    ? 'مستلم'
+                                    : 'عضو',
                                 color: Colors.grey,
                               ),
                           ],
@@ -916,38 +944,50 @@ class _GroupManagementDialogState
                                         const SizedBox(width: 8),
                                         Text(
                                           isMemberAdmin
-                                              ? 'إلغاء الإشراف'
-                                              : 'تعيين كمشرف',
+                                              ? (_conversation.type == 'broadcast'
+                                                  ? 'إلغاء صفة الناشر والمشرف'
+                                                  : 'إلغاء الإشراف')
+                                              : (_conversation.type == 'broadcast'
+                                                  ? 'تعيين كأدمن وناشر في القناة'
+                                                  : 'تعيين كمشرف'),
                                         ),
                                       ],
                                     ),
                                   ),
                                   const PopupMenuDivider(),
-                                  const PopupMenuItem(
+                                  PopupMenuItem(
                                     value: 'remove',
                                     child: Row(
                                       children: [
-                                        Icon(
+                                        const Icon(
                                           CupertinoIcons.person_crop_circle_badge_minus,
                                           size: 18,
                                           color: Colors.redAccent,
                                         ),
-                                        SizedBox(width: 8),
-                                        Text('إزالة من المجموعة'),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          _conversation.type == 'broadcast'
+                                              ? 'إزالة من القناة'
+                                              : 'إزالة من المجموعة',
+                                        ),
                                       ],
                                     ),
                                   ),
-                                  const PopupMenuItem(
+                                  PopupMenuItem(
                                     value: 'block',
                                     child: Row(
                                       children: [
-                                        Icon(
+                                        const Icon(
                                           CupertinoIcons.slash_circle,
                                           size: 18,
                                           color: Colors.red,
                                         ),
-                                        SizedBox(width: 8),
-                                        Text('حظر العضو'),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          _conversation.type == 'broadcast'
+                                              ? 'حظر من القناة'
+                                              : 'حظر العضو',
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -1106,7 +1146,11 @@ class _GroupManagementDialogState
                         }
                       },
                 icon: const Icon(CupertinoIcons.person_badge_plus, size: 18),
-                label: Text('إضافة المحددين (${_selectedToAdd.length})'),
+                label: Text(
+                  _conversation.type == 'broadcast'
+                      ? 'إضافة للقناة (${_selectedToAdd.length})'
+                      : 'إضافة المحددين (${_selectedToAdd.length})',
+                ),
               ),
             ],
           ),
