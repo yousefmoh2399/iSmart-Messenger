@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -19,11 +20,63 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/safe_network_avatar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
+import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/widgets/desktop_message_actions_dialogs.dart';
 import '../../chat/presentation/widgets/desktop_quick_replies.dart';
 import '../../chat/presentation/widgets/instant_clipboard_sync_dialog.dart';
 import '../../updates/presentation/update_center_screen.dart';
 import 'active_sessions_dialog.dart';
+
+enum _DesktopSettingsSection {
+  profile(
+    title: 'الملف الشخصي والحساب',
+    subtitle: 'بياناتك الشخصية، المسمى والفرع، وتغيير كلمة المرور',
+    icon: Icons.person_rounded,
+    accentColor: Color(0xFF007AFF),
+  ),
+  appearance(
+    title: 'المظهر واستوديو الشات',
+    subtitle: 'الوضع الليلي، ثيمات تلجرام، رأس السنة والجليد ❄️، وحماية العين',
+    icon: Icons.palette_rounded,
+    accentColor: Color(0xFFAF52DE),
+  ),
+  notifications(
+    title: 'الإشعارات والأصوات',
+    subtitle: 'نغمات التنبيه المخصصة وأسلوب الظهور على الشاشة',
+    icon: Icons.notifications_active_rounded,
+    accentColor: Color(0xFFFF9500),
+  ),
+  storage(
+    title: 'التخزين والملفات والذاكرة',
+    subtitle: 'مسارات الحفظ وتفريغ الكاش والملفات المؤقتة لتسريع التطبيق',
+    icon: Icons.storage_rounded,
+    accentColor: Color(0xFF34C759),
+  ),
+  smartTools(
+    title: 'الأدوات الذكية للشات',
+    subtitle: 'الحافظة الفورية بين الأجهزة، الردود السريعة (/)، والتذكيرات المجدولة',
+    icon: Icons.bolt_rounded,
+    accentColor: Color(0xFF5856D6),
+  ),
+  security(
+    title: 'الأجهزة والأمان',
+    subtitle: 'الأجهزة المسجل الدخول منها، مستوى الصلاحيات، وتسجيل الخروج',
+    icon: Icons.shield_rounded,
+    accentColor: Color(0xFFFF2D55),
+  );
+
+  const _DesktopSettingsSection({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accentColor,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accentColor;
+}
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key, this.isWrapped = false});
@@ -42,6 +95,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _saving = false;
   bool _uploadingAvatar = false;
   bool _initialized = false;
+  bool _obscurePassword = true;
+  _DesktopSettingsSection _selectedSection = _DesktopSettingsSection.profile;
 
   @override
   void dispose() {
@@ -110,7 +165,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
       if (!mounted) return;
 
-      // Show interactive image cropping and adjustment dialog
       final croppedBytes = await showDialog<Uint8List>(
         context: context,
         barrierDismissible: false,
@@ -120,35 +174,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       );
 
-      if (croppedBytes == null || croppedBytes.isEmpty) {
-        return; // User cancelled
-      }
+      if (croppedBytes == null || croppedBytes.isEmpty || !mounted) return;
 
       setState(() => _uploadingAvatar = true);
 
-      String? tempFilePath;
-      if (!kIsWeb) {
-        try {
-          final tempDir = await getTemporaryDirectory();
-          final tempFile = File(
-            p.join(tempDir.path, 'cropped_avatar_${DateTime.now().millisecondsSinceEpoch}.png'),
-          );
-          await tempFile.writeAsBytes(croppedBytes);
-          tempFilePath = tempFile.path;
-        } catch (_) {}
-      }
+      final tempDir = await getTemporaryDirectory();
+      final tempFilePath = p.join(
+        tempDir.path,
+        'avatar_cropped_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      final tempFile = File(tempFilePath);
+      await tempFile.writeAsBytes(croppedBytes, flush: true);
 
-      await ref.read(authControllerProvider.notifier).uploadAvatar(
-            tempFilePath ?? picked.name,
-            fileBytes: croppedBytes,
-            fileName: 'avatar.png',
-          );
+      await ref.read(authControllerProvider.notifier).uploadAvatar(tempFile.path);
+
+      try {
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      } catch (_) {}
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text('تم ضبط وتحديث الصورة الشخصية بنجاح'),
+          content: Text('تم تحديث الصورة الشخصية بنجاح'),
         ),
       );
     } catch (error) {
@@ -325,629 +375,100 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     final preferences =
                         userPreferencesState.valueOrNull ?? UserPreferences.defaults();
 
-                    return Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 820),
-                        child: ListView(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 28,
-                          ),
-                          children: [
-                            // Apple Profile Hero Card
-                            _ProfileHero(
-                              user: user,
-                              uploadingAvatar: _uploadingAvatar,
-                              onPickAvatar: _pickAvatar,
-                            ),
-                            const SizedBox(height: 28),
-
-                            // Basic Information (Read-only)
-                            _InsetGroup(
-                              title: 'المعلومات الأساسية',
-                              children: [
-                                _InsetListTile(
-                                  icon: Icons.work_rounded,
-                                  iconColor: const Color(0xFF007AFF),
-                                  title: 'المسمى الوظيفي والفرع',
-                                  trailing: Text(
-                                    user.jobTitle.isNotEmpty
-                                        ? user.jobTitle
-                                        : 'غير محدد (يمكنك إضافته بالأسفل)',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                      color: user.jobTitle.isNotEmpty
-                                          ? (isDark ? Colors.white : const Color(0xFF1C2B3A))
-                                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 52),
-                                _InsetListTile(
-                                  icon: Icons.badge_rounded,
-                                  iconColor: const Color(0xFF34C759),
-                                  title: 'الدور والنظام',
-                                  trailing: Text(
-                                    user.role,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 13,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 52),
-                                _InsetListTile(
-                                  icon: Icons.alternate_email_rounded,
-                                  iconColor: const Color(0xFFFF9500),
-                                  title: 'اسم المستخدم',
-                                  trailing: Text(
-                                    user.username,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontFamily: 'monospace',
-                                      fontSize: 13,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 52),
-                                _InsetListTile(
-                                  icon: Icons.admin_panel_settings_rounded,
-                                  iconColor: const Color(0xFFAF52DE),
-                                  title: 'مستوى الصلاحيات',
-                                  trailing: Text(
-                                    user.can('canCreateUsers')
-                                        ? 'صلاحيات إدارية متقدمة'
-                                        : 'صلاحيات مستخدم قياسي',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                      color: user.can('canCreateUsers')
-                                          ? const Color(0xFFAF52DE)
-                                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
-
-                            // Edit Profile Form
-                            Form(
-                              key: _formKey,
-                              child: _InsetGroup(
-                                title: 'تحديث البيانات والفرع',
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 6,
-                                    ),
-                                    child: TextFormField(
-                                      controller: _fullNameController,
-                                      style: const TextStyle(fontSize: 14),
-                                      decoration: const InputDecoration(
-                                        labelText: 'الاسم الكامل',
-                                        prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                      ),
-                                      validator: (value) {
-                                        if (value == null || value.trim().length < 2) {
-                                          return 'الاسم الكامل مطلوب';
-                                        }
-                                        return null;
-                                      },
-                                    ),
-                                  ),
-                                  const Divider(height: 0.5, indent: 52),
-
-                                  // Job Title + Branch Input Field
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 6,
-                                    ),
-                                    child: TextFormField(
-                                      controller: _jobTitleController,
-                                      style: const TextStyle(fontSize: 14),
-                                      decoration: const InputDecoration(
-                                        labelText: 'المسمى الوظيفي + الفرع',
-                                        hintText: 'مثال: محاسب - فرع شبرا أو مسؤول مبيعات - فرع الدقي',
-                                        prefixIcon: Icon(Icons.work_outline_rounded, size: 20),
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                      ),
-                                    ),
-                                  ),
-                                  const Divider(height: 0.5, indent: 52),
-
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 6,
-                                    ),
-                                    child: TextFormField(
-                                      initialValue: user.username,
-                                      enabled: false,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                      ),
-                                      decoration: const InputDecoration(
-                                        labelText: 'اسم المستخدم (غير قابل للتعديل)',
-                                        prefixIcon: Icon(Icons.lock_outline_rounded, size: 20),
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                      ),
-                                    ),
-                                  ),
-                                  const Divider(height: 0.5, indent: 52),
-
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 6,
-                                    ),
-                                    child: TextFormField(
-                                      controller: _passwordController,
-                                      obscureText: true,
-                                      style: const TextStyle(fontSize: 14),
-                                      decoration: const InputDecoration(
-                                        labelText: 'كلمة مرور جديدة',
-                                        hintText: 'اتركها فارغة إذا كنت لا تريد تغييرها',
-                                        prefixIcon: Icon(Icons.key_rounded, size: 20),
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                      ),
-                                    ),
-                                  ),
-                                  const Divider(height: 0.5),
-
-                                  Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: SizedBox(
-                                      width: double.infinity,
-                                      child: FilledButton.icon(
-                                        onPressed: _saving ? null : _saveProfile,
-                                        icon: _saving
-                                            ? const SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: Colors.white,
-                                                ),
-                                              )
-                                            : const Icon(Icons.check_circle_outline_rounded, size: 18),
-                                        label: Text(
-                                          _saving ? 'جارٍ الحفظ...' : 'حفظ التغييرات',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 15,
-                                          ),
-                                        ),
-                                        style: FilledButton.styleFrom(
-                                          padding: const EdgeInsets.symmetric(vertical: 14),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                    return Row(
+                      children: [
+                        // ── Left Navigation Sidebar (Apple Control Center Style) ──
+                        Container(
+                          width: 270,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF161618) : Colors.white,
+                            border: Border(
+                              left: BorderSide(
+                                color: isDark
+                                    ? const Color(0xFF2C2C2E)
+                                    : const Color(0xFFE5E5EA),
+                                width: 0.8,
                               ),
                             ),
-                            const SizedBox(height: 24),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // User Mini Header
+                              _SidebarUserHeader(
+                                user: user,
+                                isDark: isDark,
+                                isSelected: _selectedSection == _DesktopSettingsSection.profile,
+                                onTap: () => setState(() => _selectedSection = _DesktopSettingsSection.profile),
+                              ),
+                              Divider(
+                                height: 1,
+                                color: isDark ? const Color(0xFF262628) : const Color(0xFFEDEDF2),
+                              ),
+                              const SizedBox(height: 8),
 
-                            // App Preferences
-                            _InsetGroup(
-                              title: 'إعدادات الاستخدام والمحادثة',
-                              children: [
-                                SwitchListTile.adaptive(
-                                  value: preferences.enterSendsMessage,
-                                  onChanged: (value) => ref
-                                      .read(userPreferencesControllerProvider.notifier)
-                                      .setEnterSendsMessage(value),
-                                  title: const Text(
-                                    'زر Enter يرسل الرسالة',
-                                    style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-                                  ),
-                                  subtitle: const Text(
-                                    'إذا تم التعطيل، زر Enter سينشئ سطرًا جديدًا للإرسال يدويًا.',
-                                    style: TextStyle(fontSize: 12),
-                                  ),
+                              // Category Navigation List
+                              Expanded(
+                                child: ListView(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  children: _DesktopSettingsSection.values.map((section) {
+                                    final isSelected = _selectedSection == section;
+                                    return _SidebarNavTile(
+                                      section: section,
+                                      isSelected: isSelected,
+                                      isDark: isDark,
+                                      onTap: () => setState(() => _selectedSection = section),
+                                    );
+                                  }).toList(),
                                 ),
-                                const Divider(height: 0.5, indent: 16),
-                                SwitchListTile.adaptive(
-                                  value: preferences.autoSaveAfterScan,
-                                  onChanged: (value) => ref
-                                      .read(userPreferencesControllerProvider.notifier)
-                                      .setAutoSaveAfterScan(value),
-                                  title: const Text(
-                                    'حفظ تلقائي باسم افتراضي بعد المسح',
-                                    style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-                                  ),
-                                  subtitle: const Text(
-                                    'إذا تم التعطيل، سيُطلب اسم الملف يدويًا قبل الحفظ.',
-                                    style: TextStyle(fontSize: 12),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 16),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  child: DropdownButtonFormField<String>(
-                                    value: preferences.notificationToneId,
-                                    decoration: const InputDecoration(
-                                      labelText: 'نغمة الإشعارات',
-                                      prefixIcon: Icon(Icons.notifications_active_outlined, size: 20),
-                                      border: InputBorder.none,
-                                    ),
-                                    items: NotificationTone.values
-                                        .map(
-                                          (tone) => DropdownMenuItem(
-                                            value: tone.id,
-                                            child: Text(tone.label),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: (value) {
-                                      if (value != null) {
-                                        ref
-                                            .read(userPreferencesControllerProvider.notifier)
-                                            .setNotificationTone(value);
-                                        ref
-                                            .read(localNotificationServiceProvider)
-                                            .previewNotificationTone(value);
-                                      }
-                                    },
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 16),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  child: DropdownButtonFormField<String>(
-                                    value: preferences.notificationDisplayModeId,
-                                    isExpanded: true,
-                                    decoration: const InputDecoration(
-                                      labelText: 'ظهور الإشعارات على الشاشة',
-                                      prefixIcon: Icon(Icons.visibility_outlined, size: 20),
-                                      border: InputBorder.none,
-                                    ),
-                                    selectedItemBuilder: (context) {
-                                      return NotificationDisplayMode.values
-                                          .map(
-                                            (mode) => Text(
-                                              mode.label,
-                                              style: const TextStyle(fontSize: 14),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          )
-                                          .toList();
-                                    },
-                                    items: NotificationDisplayMode.values
-                                        .map(
-                                          (mode) => DropdownMenuItem(
-                                            value: mode.id,
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Text(
-                                                  mode.label,
-                                                  style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-                                                ),
-                                                Text(
-                                                  mode.description,
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: (value) {
-                                      if (value != null) {
-                                        ref
-                                            .read(userPreferencesControllerProvider.notifier)
-                                            .setNotificationDisplayMode(value);
-                                      }
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
+                              ),
 
-                            // Smart Chat Tools & Security
-                            _InsetGroup(
-                              title: 'الأمان والأدوات الذكية للشات',
-                              children: [
-                                ListTile(
-                                  leading: Container(
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF0EA5E9).withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.devices_rounded,
-                                      color: Color(0xFF0EA5E9),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'إدارة الجلسات والأجهزة المتصلة',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    'عرض الأجهزة المسجل الدخول منها حالياً وتسجيل الخروج من الأجهزة الأخرى',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  trailing: FilledButton.tonal(
-                                    onPressed: () => showDesktopActiveSessionsDialog(context),
-                                    child: const Text('إدارة الجلسات'),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 52),
-                                ListTile(
-                                  leading: Container(
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF2563EB).withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.bolt_rounded,
-                                      color: Color(0xFF2563EB),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'الردود السريعة والقوالب الجاهزة (/)',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    'إضافة وتخصيص الردود الجاهزة التي تظهر عند كتابة / في صندوق الرسائل',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  trailing: FilledButton.tonal(
-                                    onPressed: () => showDesktopQuickRepliesDialog(context),
-                                    child: const Text('تخصيص الردود'),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 52),
-                                ListTile(
-                                  leading: Container(
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.content_paste_go_rounded,
-                                      color: Color(0xFF10B981),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    'إرسال واستقبال النصوص والروابط والأكواد لحظياً بين الكمبيوتر والموبايل',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  trailing: FilledButton.tonal(
-                                    onPressed: () => showDesktopInstantClipboardSyncDialog(context, ref),
-                                    child: const Text('فتح الحافظة'),
-                                  ),
-                                ),
-                                const Divider(height: 0.5, indent: 52),
-                                ListTile(
-                                  leading: Container(
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.notifications_active_rounded,
-                                      color: Color(0xFFF59E0B),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'تذكيرات الرسائل المجدولة',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    'استعراض وإدارة التذكيرات التي ضبطتها للرسائل المهمة',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  trailing: FilledButton.tonal(
-                                    onPressed: () => showDesktopRemindersListDialog(context),
-                                    child: const Text('عرض التذكيرات'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 24),
-
-                            // Folders & Paths
-                            _InsetGroup(
-                              title: 'مسارات الحفظ والتخزين المحلي',
-                              children: [
-                                ListTile(
-                                  leading: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF34C759).withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.picture_as_pdf_rounded,
-                                      color: Color(0xFF34C759),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'مجلد ملفات المسح (PDF)',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    preferences.scanSaveDirectoryPath ?? 'المسار الافتراضي',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontFamily: 'monospace',
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  trailing: FilledButton.tonal(
-                                    onPressed: _pickScanSaveDirectory,
-                                    style: FilledButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                    child: const Text('تغيير'),
-                                  ),
-                                ),
-                                 const Divider(height: 0.5, indent: 52),
-                                 ListTile(
-                                   leading: Container(
-                                     width: 36,
-                                     height: 36,
-                                     decoration: BoxDecoration(
-                                       color: const Color(0xFF5856D6).withValues(alpha: 0.14),
-                                       borderRadius: BorderRadius.circular(10),
-                                     ),
-                                     child: const Icon(
-                                       Icons.cleaning_services_rounded,
-                                       color: Color(0xFF5856D6),
-                                       size: 20,
-                                     ),
-                                   ),
-                                   title: const Text(
-                                     'إدارة مساحة التخزين والذاكرة المؤقتة (Cache Cleaner)',
-                                     style: TextStyle(
-                                       fontSize: 14,
-                                       fontWeight: FontWeight.w600,
-                                     ),
-                                   ),
-                                   subtitle: Text(
-                                     'تفريغ كاش البرنامج ومصغرات الصور والملفات المؤقتة لتسريع الكمبيوتر',
-                                     style: TextStyle(
-                                       fontSize: 11,
-                                       color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                     ),
-                                   ),
-                                   trailing: FilledButton.tonal(
-                                     onPressed: () {
-                                       Navigator.of(context).push(
-                                         MaterialPageRoute(
-                                           builder: (_) => const DesktopStorageManagementScreen(),
-                                         ),
-                                       );
-                                     },
-                                     style: FilledButton.styleFrom(
-                                       padding: const EdgeInsets.symmetric(horizontal: 14),
-                                       shape: RoundedRectangleBorder(
-                                         borderRadius: BorderRadius.circular(8),
-                                       ),
-                                     ),
-                                     child: const Text('إدارة الذاكرة'),
-                                   ),
-                                 ),
-                                const Divider(height: 0.5, indent: 52),
-                                ListTile(
-                                  leading: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFF9500).withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.folder_rounded,
-                                      color: Color(0xFFFF9500),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'مجلد تخزين الصور والمستندات',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    preferences.localStorageDirectoryPath ?? 'المسار الافتراضي',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontFamily: 'monospace',
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  trailing: FilledButton.tonal(
-                                    onPressed: _pickLocalStorageDirectory,
-                                    style: FilledButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                    child: const Text('تغيير'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                              // Bottom Sidebar Footer
+                              Divider(
+                                height: 1,
+                                color: isDark ? const Color(0xFF262628) : const Color(0xFFEDEDF2),
+                              ),
+                              _SidebarFooter(
+                                isDark: isDark,
+                                onLogout: () => _confirmLogout(context),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+
+                        // ── Main Content Area ──
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Top Bar Header
+                              _SectionTopHeader(
+                                section: _selectedSection,
+                                isDark: isDark,
+                              ),
+
+                              // Section View Body
+                              Expanded(
+                                child: ListView(
+                                  padding: const EdgeInsets.fromLTRB(36, 24, 36, 48),
+                                  children: [
+                                    Center(
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(maxWidth: 780),
+                                        child: _buildSectionContent(
+                                          user: user,
+                                          preferences: preferences,
+                                          isDark: isDark,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),
@@ -984,8 +505,1238 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ),
     );
   }
+
+  Future<void> _confirmLogout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Row(
+            children: [
+              Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 24),
+              SizedBox(width: 10),
+              Text('تسجيل الخروج', style: TextStyle(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          content: const Text('هل أنت متأكد من رغبتك في تسجيل الخروج من هذا الحساب؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+              ),
+              child: const Text('تسجيل الخروج'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true && mounted) {
+      await ref.read(authControllerProvider.notifier).logout();
+    }
+  }
+
+  Widget _buildSectionContent({
+    required AppUser user,
+    required UserPreferences preferences,
+    required bool isDark,
+  }) {
+    switch (_selectedSection) {
+      case _DesktopSettingsSection.profile:
+        return _buildProfileContent(user: user, isDark: isDark);
+      case _DesktopSettingsSection.appearance:
+        return _buildAppearanceContent(preferences: preferences, isDark: isDark);
+      case _DesktopSettingsSection.notifications:
+        return _buildNotificationsContent(preferences: preferences, isDark: isDark);
+      case _DesktopSettingsSection.storage:
+        return _buildStorageContent(preferences: preferences, isDark: isDark);
+      case _DesktopSettingsSection.smartTools:
+        return _buildSmartToolsContent(isDark: isDark);
+      case _DesktopSettingsSection.security:
+        return _buildSecurityContent(user: user, isDark: isDark);
+    }
+  }
+
+  // 1. Profile Section Content
+  Widget _buildProfileContent({required AppUser user, required bool isDark}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ProfileHero(
+          user: user,
+          uploadingAvatar: _uploadingAvatar,
+          onPickAvatar: _pickAvatar,
+        ),
+        const SizedBox(height: 24),
+
+        _InsetGroup(
+          title: 'المعلومات الأساسية والصلاحيات',
+          children: [
+            _InsetListTile(
+              icon: Icons.work_rounded,
+              iconColor: const Color(0xFF007AFF),
+              title: 'المسمى الوظيفي والفرع',
+              trailing: Text(
+                user.jobTitle.isNotEmpty ? user.jobTitle : 'غير محدد (يمكنك إضافته بالأسفل)',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: user.jobTitle.isNotEmpty
+                      ? (isDark ? Colors.white : const Color(0xFF1C2B3A))
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 52),
+            _InsetListTile(
+              icon: Icons.badge_rounded,
+              iconColor: const Color(0xFF34C759),
+              title: 'الدور والنظام',
+              trailing: Text(
+                user.role,
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 52),
+            _InsetListTile(
+              icon: Icons.alternate_email_rounded,
+              iconColor: const Color(0xFFFF9500),
+              title: 'اسم المستخدم',
+              trailing: Text(
+                user.username,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 52),
+            _InsetListTile(
+              icon: Icons.admin_panel_settings_rounded,
+              iconColor: const Color(0xFFAF52DE),
+              title: 'مستوى الصلاحيات',
+              trailing: Text(
+                user.can('canCreateUsers') ? 'صلاحيات إدارية متقدمة' : 'صلاحيات مستخدم قياسي',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: user.can('canCreateUsers')
+                      ? const Color(0xFFAF52DE)
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        Form(
+          key: _formKey,
+          child: _InsetGroup(
+            title: 'تحديث البيانات الشخصية والفرع',
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: TextFormField(
+                  controller: _fullNameController,
+                  style: const TextStyle(fontSize: 14),
+                  decoration: const InputDecoration(
+                    labelText: 'الاسم الكامل',
+                    prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().length < 2) {
+                      return 'الاسم الكامل مطلوب';
+                    }
+                    return null;
+                  },
+                ),
+              ),
+              const Divider(height: 0.5, indent: 52),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: TextFormField(
+                  controller: _jobTitleController,
+                  style: const TextStyle(fontSize: 14),
+                  decoration: const InputDecoration(
+                    labelText: 'المسمى الوظيفي + الفرع',
+                    hintText: 'مثال: محاسب - فرع شبرا أو مسؤول مبيعات - فرع الدقي',
+                    prefixIcon: Icon(Icons.work_outline_rounded, size: 20),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const Divider(height: 0.5, indent: 52),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: TextFormField(
+                  initialValue: user.username,
+                  enabled: false,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المستخدم (غير قابل للتعديل)',
+                    prefixIcon: Icon(Icons.lock_outline_rounded, size: 20),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const Divider(height: 0.5, indent: 52),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: TextFormField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  style: const TextStyle(fontSize: 14),
+                  decoration: InputDecoration(
+                    labelText: 'كلمة مرور جديدة',
+                    hintText: 'اتركها فارغة إذا كنت لا تريد تغييرها',
+                    prefixIcon: const Icon(Icons.key_rounded, size: 20),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        size: 20,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const Divider(height: 0.5),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _saving ? null : _saveProfile,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.check_circle_outline_rounded, size: 18),
+                    label: Text(
+                      _saving ? 'جارٍ الحفظ...' : 'حفظ التغييرات',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                      ),
+                    ),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 2. Appearance Section Content
+  Widget _buildAppearanceContent({
+    required UserPreferences preferences,
+    required bool isDark,
+  }) {
+    final currentMode = ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.system;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Mode Selector Cards
+        _InsetGroup(
+          title: 'نمط التطبيق العام (Theme Mode)',
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _ThemeModeCard(
+                      title: 'الوضع النهاري',
+                      icon: Icons.light_mode_rounded,
+                      iconColor: const Color(0xFFFF9500),
+                      isSelected: currentMode == ThemeMode.light,
+                      isDark: isDark,
+                      onTap: () => ref.read(themeModeControllerProvider.notifier).setThemeMode(ThemeMode.light),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _ThemeModeCard(
+                      title: 'الوضع الليلي',
+                      icon: Icons.dark_mode_rounded,
+                      iconColor: const Color(0xFF5856D6),
+                      isSelected: currentMode == ThemeMode.dark,
+                      isDark: isDark,
+                      onTap: () => ref.read(themeModeControllerProvider.notifier).setThemeMode(ThemeMode.dark),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _ThemeModeCard(
+                      title: 'تلقائي النظام',
+                      icon: Icons.brightness_auto_rounded,
+                      iconColor: const Color(0xFF007AFF),
+                      isSelected: currentMode == ThemeMode.system,
+                      isDark: isDark,
+                      onTap: () => ref.read(themeModeControllerProvider.notifier).setThemeMode(ThemeMode.system),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // Appearance Studio Direct Banner
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDark
+                  ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                  : [const Color(0xFFE0F2FE), const Color(0xFFF0F9FF)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF0284C7).withValues(alpha: 0.25),
+              width: 1.2,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0284C7).withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Center(
+                  child: Text('❄️', style: TextStyle(fontSize: 26)),
+                ),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'استوديو مظهر وثيمات الشات المتكامل',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'استكشف ثيم رأس السنة والجليد ❄️ مع تأثير الثلج على حواف الرسائل، وأناقة تلجرام، وثيمات راحة العين Zero Blue Light.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ChatAppearanceScreen()),
+                  );
+                },
+                icon: const Icon(Icons.palette_rounded, size: 18),
+                label: const Text('فتح الاستوديو'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // Chat Behavior Options
+        _InsetGroup(
+          title: 'سلوك صندوق المحادثة والإرسال',
+          children: [
+            SwitchListTile.adaptive(
+              value: preferences.enterSendsMessage,
+              onChanged: (value) => ref
+                  .read(userPreferencesControllerProvider.notifier)
+                  .setEnterSendsMessage(value),
+              title: const Text(
+                'زر Enter يرسل الرسالة فوراً',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+              subtitle: const Text(
+                'إذا تم التعطيل، زر Enter سينشئ سطرًا جديدًا والإرسال عبر زر السهم أو Ctrl+Enter.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 16),
+            SwitchListTile.adaptive(
+              value: preferences.autoSaveAfterScan,
+              onChanged: (value) => ref
+                  .read(userPreferencesControllerProvider.notifier)
+                  .setAutoSaveAfterScan(value),
+              title: const Text(
+                'حفظ تلقائي باسم افتراضي بعد المسح الضوئي',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+              ),
+              subtitle: const Text(
+                'إذا تم التعطيل، سيُطلب اسم الملف يدويًا قبل حفظ مستند الـ PDF.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // 3. Notifications Section Content
+  Widget _buildNotificationsContent({
+    required UserPreferences preferences,
+    required bool isDark,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _InsetGroup(
+          title: 'نغمة الإشعارات والتنبيه الصوتي',
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: preferences.notificationToneId,
+                      decoration: const InputDecoration(
+                        labelText: 'اختر نغمة التنبيه',
+                        prefixIcon: Icon(Icons.notifications_active_outlined, size: 20),
+                        border: InputBorder.none,
+                      ),
+                      items: NotificationTone.values
+                          .map(
+                            (tone) => DropdownMenuItem(
+                              value: tone.id,
+                              child: Text(tone.label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          ref
+                              .read(userPreferencesControllerProvider.notifier)
+                              .setNotificationTone(value);
+                          ref
+                              .read(localNotificationServiceProvider)
+                              .previewNotificationTone(value);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: () {
+                      ref
+                          .read(localNotificationServiceProvider)
+                          .previewNotificationTone(preferences.notificationToneId);
+                    },
+                    icon: const Icon(Icons.volume_up_rounded, size: 18),
+                    label: const Text('تجربة النغمة'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        _InsetGroup(
+          title: 'أسلوب ظهور التنبيهات على الشاشة (Banner Style)',
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: DropdownButtonFormField<String>(
+                value: preferences.notificationDisplayModeId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'طريقة عرض الإشعار',
+                  prefixIcon: Icon(Icons.visibility_outlined, size: 20),
+                  border: InputBorder.none,
+                ),
+                items: NotificationDisplayMode.values
+                    .map(
+                      (mode) => DropdownMenuItem(
+                        value: mode.id,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              mode.label,
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                            ),
+                            Text(
+                              mode.description,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    ref
+                        .read(userPreferencesControllerProvider.notifier)
+                        .setNotificationDisplayMode(value);
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // 4. Storage Section Content
+  Widget _buildStorageContent({
+    required UserPreferences preferences,
+    required bool isDark,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Cache Cleaner Card
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5856D6).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.cleaning_services_rounded,
+                  color: Color(0xFF5856D6),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'إدارة مساحة التخزين والذاكرة المؤقتة (Cache Cleaner)',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'تفريغ كاش التطبيق، ومصغرات الصور، والملفات المؤقتة لتسريع الأداء وتوفير المساحة.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DesktopStorageManagementScreen(),
+                    ),
+                  );
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF5856D6),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('إدارة الكاش والذاكرة'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        _InsetGroup(
+          title: 'مسارات الحفظ والتخزين على القرص الصلب',
+          children: [
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF34C759).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.picture_as_pdf_rounded,
+                  color: Color(0xFF34C759),
+                  size: 20,
+                ),
+              ),
+              title: const Text(
+                'مجلد ملفات المسح الضوئي (PDF)',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                preferences.scanSaveDirectoryPath ?? 'المسار الافتراضي للمنظومة',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontFamily: 'monospace',
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: _pickScanSaveDirectory,
+                child: const Text('تغيير المجلد'),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 52),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF9500).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.folder_rounded,
+                  color: Color(0xFFFF9500),
+                  size: 20,
+                ),
+              ),
+              title: const Text(
+                'مجلد تخزين الصور ومرفقات الشات',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                preferences.localStorageDirectoryPath ?? 'المسار الافتراضي للمنظومة',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontFamily: 'monospace',
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: _pickLocalStorageDirectory,
+                child: const Text('تغيير المجلد'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // 5. Smart Tools Section Content
+  Widget _buildSmartToolsContent({required bool isDark}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _InsetGroup(
+          title: 'أدوات الإنتاجية والشات المتقدمة',
+          children: [
+            ListTile(
+              leading: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.content_paste_go_rounded,
+                  color: Color(0xFF10B981),
+                  size: 20,
+                ),
+              ),
+              title: const Text(
+                'الحافظة المشتركة الفورية (الكمبيوتر ⇄ الموبايل)',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                'مزامنة النصوص والأكواد والروابط المنسوخة لحظياً بين جميع أجهزتك',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: () => showDesktopInstantClipboardSyncDialog(context, ref),
+                child: const Text('فتح الحافظة'),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 52),
+            ListTile(
+              leading: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.bolt_rounded,
+                  color: Color(0xFF2563EB),
+                  size: 20,
+                ),
+              ),
+              title: const Text(
+                'الردود السريعة والقوالب الجاهزة (/)',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                'قوالب رسائل جاهزة تظهر تلقائياً بمجرد كتابة / في صندوق الرسائل',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: () => showDesktopQuickRepliesDialog(context),
+                child: const Text('تخصيص الردود'),
+              ),
+            ),
+            const Divider(height: 0.5, indent: 52),
+            ListTile(
+              leading: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.notifications_active_rounded,
+                  color: Color(0xFFF59E0B),
+                  size: 20,
+                ),
+              ),
+              title: const Text(
+                'تذكيرات الرسائل المجدولة',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                'استعراض وإدارة التنبيهات المجدولة للرسائل والمهام الهامة',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: () => showDesktopRemindersListDialog(context),
+                child: const Text('عرض التذكيرات'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // 6. Security Section Content
+  Widget _buildSecurityContent({required AppUser user, required bool isDark}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _InsetGroup(
+          title: 'إدارة الجلسات والأجهزة النشطة',
+          children: [
+            ListTile(
+              leading: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0EA5E9).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.devices_rounded,
+                  color: Color(0xFF0EA5E9),
+                  size: 20,
+                ),
+              ),
+              title: const Text(
+                'الأجهزة المتصلة والجلسات المفتوحة',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                'عرض كافة الهواتف وأجهزة الكمبيوتر المسجلة حالياً وتسجيل الخروج منها عن بُعد',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: FilledButton.tonal(
+                onPressed: () => showDesktopActiveSessionsDialog(context),
+                child: const Text('إدارة الأجهزة'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // Danger Zone
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFFDC2626).withValues(alpha: isDark ? 0.08 : 0.04),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: const Color(0xFFDC2626).withValues(alpha: 0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDC2626).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.logout_rounded,
+                  color: Color(0xFFDC2626),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'تسجيل الخروج من الحساب',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFDC2626),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'سيتم إنهاء جلستك الحالية والعودة إلى شاشة تسجيل الدخول.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton(
+                onPressed: () => _confirmLogout(context),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC2626),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text('تسجيل الخروج'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sidebar Components
+// ─────────────────────────────────────────────────────────────────────────────
+class _SidebarUserHeader extends StatelessWidget {
+  const _SidebarUserHeader({
+    required this.user,
+    required this.isDark,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final AppUser user;
+  final bool isDark;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        color: isSelected
+            ? cs.primary.withValues(alpha: isDark ? 0.12 : 0.08)
+            : Colors.transparent,
+        child: Row(
+          children: [
+            SafeNetworkAvatar(
+              radius: 24,
+              backgroundColor: cs.primary.withValues(alpha: 0.12),
+              imageUrl: user.avatarUrl,
+              fallbackText: user.fullName.isNotEmpty
+                  ? user.fullName.trim().characters.first
+                  : user.username.characters.first,
+              fallbackTextStyle: TextStyle(
+                color: cs.primary,
+                fontWeight: FontWeight.w800,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    user.fullName.isNotEmpty ? user.fullName : user.username,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    user.jobTitle.isNotEmpty ? user.jobTitle : '@${user.username}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarNavTile extends StatelessWidget {
+  const _SidebarNavTile({
+    required this.section,
+    required this.isSelected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  final _DesktopSettingsSection section;
+  final bool isSelected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.5),
+      child: Material(
+        color: isSelected
+            ? (isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA))
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: section.accentColor.withValues(alpha: isSelected ? 0.22 : 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    section.icon,
+                    color: section.accentColor,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    section.title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected
+                          ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                          : cs.onSurface,
+                    ),
+                  ),
+                ),
+                if (isSelected)
+                  Container(
+                    width: 4,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: section.accentColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarFooter extends StatelessWidget {
+  const _SidebarFooter({
+    required this.isDark,
+    required this.onLogout,
+  });
+
+  final bool isDark;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'iSmart Messenger v1.0',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.white38 : Colors.black38,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          IconButton(
+            tooltip: 'تسجيل الخروج',
+            icon: const Icon(
+              Icons.logout_rounded,
+              size: 18,
+              color: Color(0xFFDC2626),
+            ),
+            onPressed: onLogout,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionTopHeader extends StatelessWidget {
+  const _SectionTopHeader({
+    required this.section,
+    required this.isDark,
+  });
+
+  final _DesktopSettingsSection section;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141416) : Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? const Color(0xFF262628) : const Color(0xFFEDEDF2),
+            width: 0.8,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: section.accentColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(
+              section.icon,
+              color: section.accentColor,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  section.title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  section.subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeModeCard extends StatelessWidget {
+  const _ThemeModeCard({
+    required this.title,
+    required this.icon,
+    required this.iconColor,
+    required this.isSelected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  final String title;
+  final IconData icon;
+  final Color iconColor;
+  final bool isSelected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? iconColor.withValues(alpha: isDark ? 0.18 : 0.10)
+              : (isDark ? const Color(0xFF252528) : const Color(0xFFF7F7FA)),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected ? iconColor : (isDark ? Colors.white12 : Colors.black12),
+            width: isSelected ? 1.5 : 0.8,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: iconColor, size: 28),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                fontSize: 13,
+                color: isSelected ? iconColor : cs.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reusable Inset Group & Hero Widgets
+// ─────────────────────────────────────────────────────────────────────────────
 class _ProfileHero extends StatelessWidget {
   const _ProfileHero({
     required this.user,
@@ -1085,7 +1836,6 @@ class _ProfileHero extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // User Full Name
           Text(
             user.fullName.isNotEmpty ? user.fullName : user.username,
             style: theme.textTheme.headlineSmall?.copyWith(
@@ -1094,7 +1844,6 @@ class _ProfileHero extends StatelessWidget {
             ),
           ),
 
-          // Job Title & Branch Badge
           if (user.jobTitle.isNotEmpty) ...[
             const SizedBox(height: 6),
             Container(
@@ -1122,7 +1871,6 @@ class _ProfileHero extends StatelessWidget {
           ],
 
           const SizedBox(height: 6),
-          // Presence Status Row
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1239,6 +1987,9 @@ class _InsetListTile extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive Image Cropper Dialog
+// ─────────────────────────────────────────────────────────────────────────────
 class _AvatarCropDialog extends StatefulWidget {
   const _AvatarCropDialog({
     required this.imageBytes,
@@ -1318,103 +2069,62 @@ class _AvatarCropDialogState extends State<_AvatarCropDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-      clipBehavior: Clip.antiAlias,
+      backgroundColor: isDark ? const Color(0xFF1E242B) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
+        constraints: const BoxConstraints(maxWidth: 440),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: cs.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(Icons.crop_rounded, color: cs.primary, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'تعديل وقص الصورة الشخصية',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
-                          ),
-                        ),
-                        Text(
-                          'اسحب وقرّب الصورة لتناسب الإطار الدائري',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+                  Text(
+                    'تعديل وتحديد الصورة الشخصية',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   IconButton(
-                    onPressed: () => Navigator.of(context).pop(null),
                     icon: const Icon(Icons.close_rounded, size: 20),
-                    padding: EdgeInsets.zero,
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-
-              // Circular Crop Viewport
-              Center(
-                child: Container(
-                  width: 260,
-                  height: 260,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.15),
-                        blurRadius: 16,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: RepaintBoundary(
-                      key: _boundaryKey,
-                      child: Container(
-                        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
-                        child: InteractiveViewer(
-                          transformationController: _transformController,
-                          minScale: 0.5,
-                          maxScale: 4.0,
-                          boundaryMargin: const EdgeInsets.all(180),
-                          clipBehavior: Clip.none,
-                          onInteractionUpdate: (details) {
-                            final scale = _transformController.value.getMaxScaleOnAxis();
-                            if ((scale - _zoomLevel).abs() > 0.05) {
-                              setState(() => _zoomLevel = scale.clamp(0.5, 4.0));
-                            }
-                          },
-                          child: Center(
-                            child: RotatedBox(
-                              quarterTurns: _rotationQuarterTurns,
-                              child: Image.memory(
-                                widget.imageBytes,
-                                fit: BoxFit.contain,
-                              ),
-                            ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: 260,
+                height: 260,
+                child: ClipOval(
+                  child: RepaintBoundary(
+                    key: _boundaryKey,
+                    child: Container(
+                      color: Colors.black,
+                      child: InteractiveViewer(
+                        transformationController: _transformController,
+                        minScale: 0.5,
+                        maxScale: 3.5,
+                        onInteractionUpdate: (details) {
+                          final currentScale =
+                              _transformController.value.getMaxScaleOnAxis();
+                          if ((_zoomLevel - currentScale).abs() > 0.05) {
+                            setState(() {
+                              _zoomLevel = currentScale.clamp(1.0, 3.0);
+                            });
+                          }
+                        },
+                        child: RotatedBox(
+                          quarterTurns: _rotationQuarterTurns,
+                          child: Image.memory(
+                            widget.imageBytes,
+                            fit: BoxFit.cover,
+                            width: 260,
+                            height: 260,
                           ),
                         ),
                       ),
@@ -1422,67 +2132,51 @@ class _AvatarCropDialogState extends State<_AvatarCropDialog> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // Zoom controls
+              const SizedBox(height: 16),
               Row(
                 children: [
-                  Icon(Icons.zoom_out_rounded, size: 18, color: cs.onSurfaceVariant),
+                  const Icon(Icons.zoom_out_rounded, size: 18),
                   Expanded(
-                    child: Slider(
-                      value: _zoomLevel.clamp(0.5, 4.0),
-                      min: 0.5,
-                      max: 4.0,
-                      onChanged: _onSliderZoomChanged,
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 3,
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      ),
+                      child: Slider(
+                        value: _zoomLevel.clamp(1.0, 3.0),
+                        min: 1.0,
+                        max: 3.0,
+                        onChanged: _onSliderZoomChanged,
+                      ),
                     ),
                   ),
-                  Icon(Icons.zoom_in_rounded, size: 18, color: cs.onSurfaceVariant),
+                  const Icon(Icons.zoom_in_rounded, size: 18),
                 ],
               ),
-
-              // Action buttons (Rotate, Reset)
+              const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  FilledButton.tonalIcon(
+                  TextButton.icon(
                     onPressed: _rotate,
-                    icon: const Icon(Icons.rotate_90_degrees_cw_rounded, size: 16),
-                    label: const Text('تدوير 90°', style: TextStyle(fontSize: 12)),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                    icon: const Icon(Icons.rotate_right_rounded, size: 18),
+                    label: const Text('تدوير 90°'),
                   ),
-                  const SizedBox(width: 10),
-                  FilledButton.tonalIcon(
+                  const SizedBox(width: 8),
+                  TextButton.icon(
                     onPressed: _reset,
-                    icon: const Icon(Icons.restart_alt_rounded, size: 16),
-                    label: const Text('إعادة ضبط', style: TextStyle(fontSize: 12)),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('إعادة ضبط'),
                   ),
                 ],
               ),
-              const SizedBox(height: 22),
-
-              // Confirmation / Cancel
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(null),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
+                      onPressed: () => Navigator.of(context).pop(),
                       child: const Text('إلغاء'),
                     ),
                   ),
@@ -1500,13 +2194,7 @@ class _AvatarCropDialogState extends State<_AvatarCropDialog> {
                               ),
                             )
                           : const Icon(Icons.check_rounded, size: 18),
-                      label: Text(_isProcessing ? 'جارٍ المعالجة...' : 'اعتماد الصورة'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
+                      label: Text(_isProcessing ? 'معالجة...' : 'اعتماد وحفظ'),
                     ),
                   ),
                 ],

@@ -618,6 +618,9 @@ class _WallpapersView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final festiveWallpapers = ChatAppearanceCatalog.wallpapers
+        .where((w) => w.category == 'festive')
+        .toList();
     final waWallpapers = ChatAppearanceCatalog.wallpapers
         .where((w) => w.category == 'whatsapp')
         .toList();
@@ -690,6 +693,40 @@ class _WallpapersView extends StatelessWidget {
         ),
 
         const SizedBox(height: 22),
+
+        // Section 0: Festive & Holidays
+        _SectionHeader(
+          title: 'خلفيات احتفالية ومناسبات (Festive)',
+          subtitle: 'أجواء رأس السنة والشتاء والهالوين مع الزخارف الاحتفالية',
+          icon: Icons.celebration_rounded,
+        ),
+        const SizedBox(height: 10),
+
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: festiveWallpapers.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.35,
+          ),
+          itemBuilder: (context, index) {
+            final wallpaper = festiveWallpapers[index];
+            final selected = preferences.wallpaperId == wallpaper.id;
+
+            return _WallpaperCard(
+              wallpaper: wallpaper,
+              selected: selected,
+              isDark: isDark,
+              showDoodles: preferences.doodles && wallpaper.hasDoodles,
+              onTap: () => onSave(preferences.copyWith(wallpaperId: wallpaper.id)),
+            );
+          },
+        ),
+
+        const SizedBox(height: 24),
 
         // Section 1: WhatsApp Classics
         _SectionHeader(
@@ -1011,6 +1048,8 @@ class _ThemesView extends StatelessWidget {
               borderColor: borderColor,
               onTap: () {
                 final wallpaperId = switch (theme.id) {
+                  'festive_winter' => 'wp_winter_snow',
+                  'festive_halloween' => 'wp_halloween',
                   'whatsapp' => 'wa_classic',
                   'ios' => 'wa_slate',
                   'classic' => 'wa_midnight',

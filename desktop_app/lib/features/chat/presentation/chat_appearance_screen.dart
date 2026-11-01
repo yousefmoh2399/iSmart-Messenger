@@ -1817,57 +1817,64 @@ class _DesktopLiveChatMockup extends StatelessWidget {
                       // 1. Incoming Message Bubble
                       Align(
                         alignment: AlignmentDirectional.centerStart,
-                        child: Container(
-                          constraints: const BoxConstraints(maxWidth: 320),
-                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-                          decoration: BoxDecoration(
-                            color: resolved.incomingBubbleColor,
-                            borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(16),
-                              topRight: Radius.circular(16),
-                              bottomLeft: Radius.circular(4),
-                              bottomRight: Radius.circular(16),
-                            ),
-                            border: Border.all(
-                              color: resolved.incomingBorderColor,
-                              width: 0.8,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(
-                                  alpha: isDark ? 0.25 : 0.05,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 320),
+                              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+                              decoration: BoxDecoration(
+                                color: resolved.incomingBubbleColor,
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(16),
+                                  topRight: Radius.circular(16),
+                                  bottomLeft: Radius.circular(4),
+                                  bottomRight: Radius.circular(16),
                                 ),
-                                blurRadius: 4,
-                                offset: const Offset(0, 1.5),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'مرحباً بك! 👋 جرب اختيار أي خلفية أو سمة من لوحة التحكم لتشاهد التحول الفوري أمامك الآن.',
-                                style: TextStyle(
-                                  color: resolved.incomingTextColor,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  height: 1.35,
+                                border: Border.all(
+                                  color: resolved.incomingBorderColor,
+                                  width: 0.8,
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Align(
-                                alignment: AlignmentDirectional.bottomEnd,
-                                child: Text(
-                                  '10:30 ص',
-                                  style: TextStyle(
-                                    color: resolved.incomingTextColor
-                                        .withValues(alpha: 0.55),
-                                    fontSize: 10,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(
+                                      alpha: isDark ? 0.25 : 0.05,
+                                    ),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1.5),
                                   ),
-                                ),
+                                ],
                               ),
-                            ],
-                          ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'مرحباً بك! 👋 جرب اختيار أي خلفية أو سمة من لوحة التحكم لتشاهد التحول الفوري أمامك الآن.',
+                                    style: TextStyle(
+                                      color: resolved.incomingTextColor,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Align(
+                                    alignment: AlignmentDirectional.bottomEnd,
+                                    child: Text(
+                                      '10:30 ص',
+                                      style: TextStyle(
+                                        color: resolved.incomingTextColor
+                                            .withValues(alpha: 0.55),
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (resolved.hasSnowCaps)
+                              const BubbleSnowCap(isMine: false),
+                          ],
                         ),
                       ),
 
@@ -1876,8 +1883,11 @@ class _DesktopLiveChatMockup extends StatelessWidget {
                       // 2. Outgoing Message Bubble with Reply Quote
                       Align(
                         alignment: AlignmentDirectional.centerEnd,
-                        child: Container(
-                          constraints: const BoxConstraints(maxWidth: 330),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              constraints: const BoxConstraints(maxWidth: 330),
                           padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
                           decoration: BoxDecoration(
                             gradient: resolved.hasOutgoingGradient
@@ -1988,8 +1998,11 @@ class _DesktopLiveChatMockup extends StatelessWidget {
                             ],
                           ),
                         ),
-                      ),
-
+                        if (resolved.hasSnowCaps)
+                          const BubbleSnowCap(isMine: true),
+                      ],
+                    ),
+                  ),
                       const SizedBox(height: 12),
 
                       // 3. Audio Voice Note Bubble

@@ -15,6 +15,7 @@ class ChatThemeOption {
     required this.outgoingDarkColor,
     required this.incomingDarkColor,
     this.badge,
+    this.hasSnowCaps = false,
   });
 
   final String id;
@@ -26,6 +27,7 @@ class ChatThemeOption {
   final Color outgoingDarkColor;
   final Color incomingDarkColor;
   final String? badge;
+  final bool hasSnowCaps;
 }
 
 class ChatWallpaperOption {
@@ -64,6 +66,7 @@ class ChatResolvedAppearance {
     required this.sparkleColor,
     required this.isDarkVariant,
     this.showDoodles = true,
+    this.hasSnowCaps = false,
   });
 
   final Color accent;
@@ -80,6 +83,7 @@ class ChatResolvedAppearance {
   final Color sparkleColor;
   final bool isDarkVariant;
   final bool showDoodles;
+  final bool hasSnowCaps;
 
   bool get hasOutgoingGradient =>
       outgoingBubbleColors.length > 1 &&
@@ -88,6 +92,30 @@ class ChatResolvedAppearance {
 
 class ChatAppearanceCatalog {
   static const themes = <ChatThemeOption>[
+    ChatThemeOption(
+      id: 'festive_winter',
+      title: 'رأس السنة والجليد ❄️',
+      description: 'أجواء احتفالية شتوية مع تراكم الثلج ورقاقات الجليد الأنيقة على حواف الرسائل',
+      color: Color(0xFF0284C7),
+      outgoingLightColor: Color(0xFF0284C7),
+      incomingLightColor: Color(0xFFFFFFFF),
+      outgoingDarkColor: Color(0xFF0284C7),
+      incomingDarkColor: Color(0xFF1E293B),
+      badge: 'احتفالي رأس السنة ❄️',
+      hasSnowCaps: true,
+    ),
+    ChatThemeOption(
+      id: 'festive_halloween',
+      title: 'هالوين الاحتفالي 🎃',
+      description: 'أجواء خريفية احتفالية دافئة بألوان اليقطين المتوهجة والظلال البنفسجية الهادئة',
+      color: Color(0xFFEA580C),
+      outgoingLightColor: Color(0xFFEA580C),
+      incomingLightColor: Color(0xFFFFFFFF),
+      outgoingDarkColor: Color(0xFFEA580C),
+      incomingDarkColor: Color(0xFF261B31),
+      badge: 'احتفالي الهالوين 🎃',
+      hasSnowCaps: false,
+    ),
     ChatThemeOption(
       id: 'whatsapp',
       title: 'واتساب الرسمي',
@@ -635,6 +663,76 @@ class ChatAppearanceCatalog {
       wallpaperColors: wallpaperColors,
       isDark: isDark,
     );
+
+    // 0. Festive Winter Snow (New Year & Winter with Snow Caps)
+    if (preferences.themeId == 'festive_winter') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFF0284C7),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFF0369A1), Color(0xFF0284C7)]
+            : const [Color(0xFF0284C7), Color(0xFF38BDF8)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF1E293B)
+            : const Color(0xFFFFFFFF),
+        outgoingTextColor: Colors.white,
+        incomingTextColor: isDark
+            ? const Color(0xFFF1F5F9)
+            : const Color(0xFF0F172A),
+        outgoingBorderColor: isDark
+            ? const Color(0xFF38BDF8).withValues(alpha: 0.4)
+            : const Color(0xFFBAE6FD),
+        incomingBorderColor: isDark
+            ? const Color(0xFF334155)
+            : const Color(0xFFE2E8F0),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF075985)
+            : const Color(0xFF0284C7).withValues(alpha: 0.25),
+        incomingReplyColor: isDark
+            ? const Color(0xFF0F172A)
+            : const Color(0xFFF0F9FF),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: Colors.white.withValues(alpha: isDark ? 0.08 : 0.04),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+        hasSnowCaps: true,
+      );
+    }
+
+    // 0b. Festive Halloween Spooky Theme
+    if (preferences.themeId == 'festive_halloween') {
+      return ChatResolvedAppearance(
+        accent: const Color(0xFFEA580C),
+        outgoingBubbleColors: isDark
+            ? const [Color(0xFFC2410C), Color(0xFFEA580C)]
+            : const [Color(0xFFEA580C), Color(0xFFFB923C)],
+        incomingBubbleColor: isDark
+            ? const Color(0xFF261B31)
+            : const Color(0xFFFFFFFF),
+        outgoingTextColor: Colors.white,
+        incomingTextColor: isDark
+            ? const Color(0xFFFDE047)
+            : const Color(0xFF1F122B),
+        outgoingBorderColor: isDark
+            ? const Color(0xFFFB923C).withValues(alpha: 0.4)
+            : const Color(0xFFFED7AA),
+        incomingBorderColor: isDark
+            ? const Color(0xFF3B264E)
+            : const Color(0xFFE2E8F0),
+        outgoingReplyColor: isDark
+            ? const Color(0xFF9A3412)
+            : const Color(0xFFEA580C).withValues(alpha: 0.25),
+        incomingReplyColor: isDark
+            ? const Color(0xFF191022)
+            : const Color(0xFFFFF7ED),
+        wallpaperColors: wallpaperColors,
+        patternColor: patternColor,
+        sparkleColor: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.06 : 0.03),
+        isDarkVariant: isDark,
+        showDoodles: preferences.doodles,
+        hasSnowCaps: false,
+      );
+    }
 
     // 1. WhatsApp Official Theme
     if (preferences.themeId == 'whatsapp') {
@@ -1357,7 +1455,7 @@ class WhatsAppDoodlePainter extends CustomPainter {
 
       for (int c = -1; c < cols; c++) {
         final x = c * cellW + xOffset + 24;
-        final iconType = ((r * 7) + c + 100) % 16;
+        final iconType = ((r * 7) + c + 100) % 18;
 
         canvas.save();
         canvas.translate(x, y);
@@ -1410,6 +1508,12 @@ class WhatsAppDoodlePainter extends CustomPainter {
             break;
           case 15:
             _drawLeaf(canvas, strokePaint);
+            break;
+          case 16:
+            _drawSnowflake(canvas, strokePaint);
+            break;
+          case 17:
+            _drawPumpkin(canvas, strokePaint);
             break;
         }
 
@@ -1605,8 +1709,142 @@ class WhatsAppDoodlePainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
+  void _drawSnowflake(Canvas canvas, Paint paint) {
+    for (int i = 0; i < 3; i++) {
+      final angle = i * math.pi / 3;
+      final dx = math.cos(angle) * 6.5;
+      final dy = math.sin(angle) * 6.5;
+      canvas.drawLine(Offset(-dx, -dy), Offset(dx, dy), paint);
+      final bdx = math.cos(angle + math.pi / 4) * 2.2;
+      final bdy = math.sin(angle + math.pi / 4) * 2.2;
+      canvas.drawLine(Offset(dx * 0.65 - bdx, dy * 0.65 - bdy), Offset(dx * 0.65, dy * 0.65), paint);
+      canvas.drawLine(Offset(dx * 0.65 + bdx, dy * 0.65 + bdy), Offset(dx * 0.65, dy * 0.65), paint);
+    }
+  }
+
+  void _drawPumpkin(Canvas canvas, Paint paint) {
+    canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 12, height: 9), paint);
+    canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 6, height: 9.5), paint);
+    canvas.drawLine(const Offset(0, -4.5), const Offset(1.2, -7.5), paint);
+  }
+
   @override
   bool shouldRepaint(covariant WhatsAppDoodlePainter oldDelegate) {
     return oldDelegate.doodleColor != doodleColor;
   }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bubble Snow Cap Widget & Painter
+// ─────────────────────────────────────────────────────────────────────────────
+class BubbleSnowCap extends StatelessWidget {
+  const BubbleSnowCap({
+    super.key,
+    required this.isMine,
+    this.cornerRadius = 18.0,
+  });
+
+  final bool isMine;
+  final double cornerRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: -3.5,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: CustomPaint(
+          size: const Size(double.infinity, 14),
+          painter: _BubbleSnowCapPainter(
+            isMine: isMine,
+            cornerRadius: cornerRadius,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BubbleSnowCapPainter extends CustomPainter {
+  const _BubbleSnowCapPainter({
+    required this.isMine,
+    required this.cornerRadius,
+  });
+
+  final bool isMine;
+  final double cornerRadius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    if (w <= 10) return;
+
+    final snowPaint = Paint()
+      ..color = const Color(0xFFFFFFFF)
+      ..style = PaintingStyle.fill;
+
+    final shadowPaint = Paint()
+      ..color = const Color(0x3390CAF9)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    final path = Path();
+    path.moveTo(0, cornerRadius * 0.5);
+    path.quadraticBezierTo(0, 0, cornerRadius, 0);
+
+    final segments = (w / 32.0).clamp(2, 8).toInt();
+    final segWidth = (w - (cornerRadius * 2)) / segments;
+
+    double currentX = cornerRadius;
+    for (int i = 0; i < segments; i++) {
+      final nextX = currentX + segWidth;
+      final moundHeight = (i % 2 == 0) ? 4.5 : 2.5;
+      path.quadraticBezierTo(
+        currentX + (segWidth * 0.5),
+        -moundHeight * 0.6,
+        nextX,
+        0,
+      );
+      currentX = nextX;
+    }
+
+    path.quadraticBezierTo(w, 0, w, cornerRadius * 0.5);
+    path.lineTo(w - 2, 4);
+
+    double backX = w - cornerRadius;
+    for (int i = segments - 1; i >= 0; i--) {
+      final prevX = backX - segWidth;
+      final dipY = (i % 2 == 0) ? 5.5 : 3.0;
+      path.quadraticBezierTo(
+        backX - (segWidth * 0.5),
+        dipY,
+        prevX,
+        3.0,
+      );
+      backX = prevX;
+    }
+    path.lineTo(0, 4);
+    path.close();
+
+    canvas.drawPath(path, shadowPaint);
+    canvas.drawPath(path, snowPaint);
+
+    final crystalPaint = Paint()
+      ..color = const Color(0xFFE0F2FE)
+      ..style = PaintingStyle.fill;
+
+    if (w > 60) {
+      canvas.drawCircle(Offset(cornerRadius + 6, 2), 1.2, crystalPaint);
+      canvas.drawCircle(Offset(w - cornerRadius - 8, 2.5), 1.0, crystalPaint);
+      if (w > 120) {
+        canvas.drawCircle(Offset(w * 0.5, 1.8), 1.3, crystalPaint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BubbleSnowCapPainter oldDelegate) =>
+      oldDelegate.isMine != isMine || oldDelegate.cornerRadius != cornerRadius;
 }

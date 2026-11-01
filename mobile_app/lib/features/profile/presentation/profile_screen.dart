@@ -492,7 +492,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   icon: CupertinoIcons.paintbrush_fill,
                   iconColor: const Color(0xFFAF52DE),
                   label: 'مظهر وألوان المحادثات',
-                  subtitle: 'تخصيص ثيمات الشات وفقاعات الرسائل',
+                  subtitle:
+                      'ثيم رأس السنة والجليد ❄️، وأناقة تلجرام، وحماية العين',
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(

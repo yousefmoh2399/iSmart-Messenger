@@ -5979,7 +5979,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                     mainAxisSize:
                                                         MainAxisSize.min,
                                                     children: [
-                                                      AnimatedContainer(
+                                                      Stack(
+                                                        clipBehavior: Clip.none,
+                                                        children: [
+                                                          AnimatedContainer(
                                                           duration:
                                                               const Duration(
                                                                 milliseconds: 180,
@@ -6744,6 +6747,10 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                             ],
                                                           ),
                                                         ),
+                                                      ),
+                                                          if (resolved.hasSnowCaps)
+                                                            BubbleSnowCap(isMine: isMine),
+                                                        ],
                                                       ),
                                                       if (_sortedReactionEntries(
                                                         message,

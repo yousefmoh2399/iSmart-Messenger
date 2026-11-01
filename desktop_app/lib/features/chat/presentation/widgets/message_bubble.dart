@@ -443,8 +443,11 @@ class _MessageBubbleState extends State<MessageBubble> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              margin: EdgeInsets.only(top: topMargin),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  margin: EdgeInsets.only(top: topMargin),
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 7),
               decoration: BoxDecoration(
                 color: widget.selected
@@ -794,6 +797,10 @@ class _MessageBubbleState extends State<MessageBubble> {
                   ),
                 ],
               ),
+            ),
+                if (resolved.hasSnowCaps)
+                  BubbleSnowCap(isMine: widget.isMine),
+              ],
             ),
             if (_sortedReactionEntries(widget.message).isNotEmpty)
               Transform.translate(
