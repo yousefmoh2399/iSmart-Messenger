@@ -46,11 +46,13 @@
   DetailPrint "Cleaning up legacy shortcuts and older installations..."
 
   ; Remove old shortcuts from Public/Common Desktop and Common Start Menu
-  Delete "$COMMONDESKTOP\iSmart Messenger.lnk"
-  Delete "$COMMONDESKTOP\ismart-messenger.lnk"
-  Delete "$COMMONPROGRAMS\iSmart Messenger.lnk"
-  Delete "$COMMONPROGRAMS\iSmart Messenger\iSmart Messenger.lnk"
-  RMDir "$COMMONPROGRAMS\iSmart Messenger"
+  SetShellVarContext all
+  Delete "$DESKTOP\iSmart Messenger.lnk"
+  Delete "$DESKTOP\ismart-messenger.lnk"
+  Delete "$SMPROGRAMS\iSmart Messenger.lnk"
+  Delete "$SMPROGRAMS\iSmart Messenger\iSmart Messenger.lnk"
+  RMDir "$SMPROGRAMS\iSmart Messenger"
+  SetShellVarContext current
 
   ; Clean legacy startup entry in HKLM
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "iSmart Messenger"
