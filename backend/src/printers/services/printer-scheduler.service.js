@@ -9,7 +9,7 @@ function startPrinterScheduler() {
 
   // Poll at midnight (00:00) for daily snapshot, and during business hours (09:00, 13:00, 16:30)
   // so branch printers that are powered off at night are reliably synced while active during workday.
-  const cronExpression = process.env.PRINTER_SYNC_CRON || "0 0,9,13,16 * * *";
+  const cronExpression = process.env.PRINTER_SYNC_CRON || "0 0,9,13,16,17 * * *";
 
   scheduledTask = cron.schedule(
     cronExpression,

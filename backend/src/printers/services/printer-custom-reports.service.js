@@ -313,16 +313,53 @@ async function exportCustomReport(actor, {
 
   const consumptionList = consumptionResult.consumption || [];
   
+  const rangeStartDate = new Date(fYear, (isAllMonths ? 1 : fMonth) - 1, 1);
+  const rangeEndDate = new Date(tYear, (isAllMonths ? 12 : tMonth), 1);
+
   const wasteStats = await WasteStatistic.find({
-    ...(branchId ? { branchId } : {})
-  }).lean();
+    ...(branchId ? { branchId } : {}),
+    calculatedAt: { $gte: rangeStartDate, $lt: rangeEndDate }
+  }).sort({ calculatedAt: 1 }).lean();
+
+  // Calculate delta waste (max - min) per printer within the requested period to prevent summing lifetime cumulative counters across syncs
+  const printerWasteMap = new Map();
+  for (const w of wasteStats) {
+    const pId = w.printerId?.toString();
+    if (!pId) continue;
+    if (!printerWasteMap.has(pId)) {
+      printerWasteMap.set(pId, {
+        min: Number(w.estimatedWastePages || 0),
+        max: Number(w.estimatedWastePages || 0),
+        branchId: w.branchId?.toString(),
+      });
+    } else {
+      const entry = printerWasteMap.get(pId);
+      entry.min = Math.min(entry.min, Number(w.estimatedWastePages || 0));
+      entry.max = Math.max(entry.max, Number(w.estimatedWastePages || 0));
+    }
+  }
+
+  function getPrinterDeltaWaste(pId) {
+    const entry = printerWasteMap.get(pId?.toString());
+    if (!entry) return 0;
+    return Math.max(0, entry.max - entry.min);
+  }
+
+  function getBranchDeltaWaste(bId) {
+    let sum = 0;
+    for (const [pId, entry] of printerWasteMap.entries()) {
+      if (entry.branchId === bId?.toString()) {
+        sum += Math.max(0, entry.max - entry.min);
+      }
+    }
+    return sum;
+  }
 
   let formattedData = [];
 
   if (type === "global") {
     formattedData = consumptionList.map((c, idx) => {
-      const branchWaste = wasteStats.filter(w => w.branchId?.toString() === c.branchId?.toString());
-      const wastePages = branchWaste.reduce((sum, w) => sum + (w.estimatedWastePages || 0), 0);
+      const wastePages = getBranchDeltaWaste(c.branchId);
       
       let scanPages = 0;
       if (c.printers) {
@@ -356,8 +393,7 @@ async function exportCustomReport(actor, {
     let globalIdx = 1;
     for (const c of consumptionList) {
        for (const p of (c.printers || [])) {
-          const printerWaste = wasteStats.filter(w => w.printerId?.toString() === p.printerId?.toString());
-          const wastePages = printerWaste.reduce((sum, w) => sum + (w.estimatedWastePages || 0), 0);
+          const wastePages = getPrinterDeltaWaste(p.printerId);
           const scanPages = p.scanPages || 0;
           
           const totalPaper = (p.totalPages || 0) + wastePages;
