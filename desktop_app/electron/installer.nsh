@@ -1,5 +1,11 @@
 !include "LogicLib.nsh"
 
+!macro customInit
+  ; Ensure all instances of old or new process are terminated
+  nsExec::Exec 'taskkill /IM "iSmart Messenger.exe" /F'
+  nsExec::Exec 'taskkill /IM "ismart-messenger.exe" /F'
+!macroend
+
 !macro customUnInit
   nsExec::ExecToLog 'taskkill /IM "iSmart Messenger.exe" /F'
 !macroend
@@ -35,6 +41,39 @@
 !macro customInstall
   ReadRegStr $R0 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" QuietUninstallString
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString "$R0"
+
+  ; Clean up legacy shortcuts and previous per-machine (Program Files) installation
+  DetailPrint "Cleaning up legacy shortcuts and older installations..."
+
+  ; Remove old shortcuts from Public/Common Desktop and Common Start Menu
+  Delete "$COMMONDESKTOP\iSmart Messenger.lnk"
+  Delete "$COMMONDESKTOP\ismart-messenger.lnk"
+  Delete "$COMMONPROGRAMS\iSmart Messenger.lnk"
+  Delete "$COMMONPROGRAMS\iSmart Messenger\iSmart Messenger.lnk"
+  RMDir "$COMMONPROGRAMS\iSmart Messenger"
+
+  ; Clean legacy startup entry in HKLM
+  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "iSmart Messenger"
+
+  ; If legacy uninstaller exists in Program Files, execute it silently
+  ${If} ${FileExists} "$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe"
+    DetailPrint "Uninstalling legacy 32-bit Program Files version..."
+    ExecWait '"$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe" /S _?=$PROGRAMFILES32\iSmart Messenger'
+    RMDir /r "$PROGRAMFILES32\iSmart Messenger"
+  ${EndIf}
+
+  ${If} ${FileExists} "$PROGRAMFILES64\iSmart Messenger\Uninstall iSmart Messenger.exe"
+    DetailPrint "Uninstalling legacy 64-bit Program Files version..."
+    ExecWait '"$PROGRAMFILES64\iSmart Messenger\Uninstall iSmart Messenger.exe" /S _?=$PROGRAMFILES64\iSmart Messenger'
+    RMDir /r "$PROGRAMFILES64\iSmart Messenger"
+  ${EndIf}
+
+  ; Clean legacy HKLM uninstall registry keys
+  SetRegView 64
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.ismart.messenger.webwrapper"
+  SetRegView 32
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.ismart.messenger.webwrapper"
+  SetRegView lastused
 
   ; Install system fonts only if running as Admin (standard users skip safely as fonts are bundled in web assets)
   ClearErrors

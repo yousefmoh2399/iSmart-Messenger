@@ -93,6 +93,17 @@ if (-not (Test-Path -LiteralPath `$sourceDir)) {
 Get-Process -Name `$processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 1200
 
+# Remove legacy shared shortcuts
+`$publicDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonDesktopDirectory)
+`$commonPrograms = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonPrograms)
+if (`$publicDesktop) {
+  Remove-Item (Join-Path `$publicDesktop ("{0}.lnk" -f `$appName)) -Force -ErrorAction SilentlyContinue
+}
+if (`$commonPrograms) {
+  Remove-Item (Join-Path `$commonPrograms ("{0}.lnk" -f `$appName)) -Force -ErrorAction SilentlyContinue
+  Remove-Item (Join-Path `$commonPrograms `$appName) -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 New-Item -ItemType Directory -Force -Path `$installDir | Out-Null
 New-Item -ItemType Directory -Force -Path `$startMenuDir | Out-Null
 

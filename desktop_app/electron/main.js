@@ -15,7 +15,7 @@ const {
   nativeTheme,
   safeStorage,
 } = require("electron");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
@@ -834,6 +834,55 @@ function ensureStartup(enabled = true) {
       ]
     : ["delete", STARTUP_REG_KEY, "/v", STARTUP_VALUE_NAME, "/f"];
   execFile("reg.exe", args, { windowsHide: true }, () => {});
+}
+
+function cleanLegacyInstallation() {
+  if (process.platform !== "win32") {
+    return;
+  }
+  try {
+    const currentExe = process.execPath;
+    const isPerUser = currentExe.toLowerCase().includes("appdata");
+    if (!isPerUser) {
+      return;
+    }
+
+    const psScript = `
+$pubDesk = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonDesktopDirectory)
+$comProg = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonPrograms)
+$pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
+$pf64 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+
+if ($pubDesk) {
+  Remove-Item (Join-Path $pubDesk "iSmart Messenger.lnk") -Force -ErrorAction SilentlyContinue
+  Remove-Item (Join-Path $pubDesk "ismart-messenger.lnk") -Force -ErrorAction SilentlyContinue
+}
+if ($comProg) {
+  Remove-Item (Join-Path $comProg "iSmart Messenger.lnk") -Force -ErrorAction SilentlyContinue
+  Remove-Item (Join-Path $comProg "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
+}
+$un1 = Join-Path $pf32 "iSmart Messenger\\Uninstall iSmart Messenger.exe"
+$un2 = Join-Path $pf64 "iSmart Messenger\\Uninstall iSmart Messenger.exe"
+if (Test-Path "$un1") { try { Start-Process -FilePath "$un1" -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue } catch {} }
+if (Test-Path "$un2") { try { Start-Process -FilePath "$un2" -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue } catch {} }
+Remove-Item (Join-Path $pf32 "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $pf64 "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
+`;
+    const child = spawn(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript],
+      {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }
+    );
+    child.unref();
+  } catch (err) {
+    if (typeof writeLog === "function") {
+      writeLog(`cleanLegacyInstallation error: ${err.message}`);
+    }
+  }
 }
 
 function showMainWindow() {
@@ -3792,6 +3841,36 @@ try {
     }
 }
 
+# 2.5 Clean up legacy shortcuts and previous Program Files installations
+Log-Msg "Cleaning up legacy shortcuts and older Program Files installations..."
+$publicDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonDesktopDirectory)
+$commonPrograms = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonPrograms)
+$pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
+$pf64 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
+
+if ($publicDesktop) {
+    Remove-Item (Join-Path $publicDesktop "iSmart Messenger.lnk") -Force -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $publicDesktop "$procName.lnk") -Force -ErrorAction SilentlyContinue
+}
+if ($commonPrograms) {
+    Remove-Item (Join-Path $commonPrograms "iSmart Messenger.lnk") -Force -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $commonPrograms "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $commonPrograms "$procName.lnk") -Force -ErrorAction SilentlyContinue
+}
+
+$legacyUninstallers = @(
+    (Join-Path $pf32 "iSmart Messenger\\Uninstall iSmart Messenger.exe"),
+    (Join-Path $pf64 "iSmart Messenger\\Uninstall iSmart Messenger.exe")
+)
+foreach ($uninst in $legacyUninstallers) {
+    if (Test-Path "$uninst") {
+        Log-Msg "Executing legacy uninstaller: $uninst"
+        try { Start-Process -FilePath "$uninst" -ArgumentList "/S" -Wait -ErrorAction SilentlyContinue } catch {}
+    }
+}
+Remove-Item (Join-Path $pf32 "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $pf64 "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
+
 # 3. Verify application launch and relaunch if not already started by installer
 Start-Sleep -s 2
 $running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
@@ -4020,6 +4099,7 @@ app.whenReady().then(async () => {
   app.setAppUserModelId("com.ismart.messenger.webwrapper");
   Menu.setApplicationMenu(null);
   ensureStartup(true);
+  cleanLegacyInstallation();
   const locale = app.getLocale();
   const startUrl = await startWebAppServer();
   const localizedUrl = `${startUrl}?lang=${locale}`;
