@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -54,6 +54,9 @@ class LocalNotificationService {
   Future<void> showIncomingMessage({
     required String title,
     required String body,
+    String? conversationId,
+    String? senderAvatarUrl,
+    String? senderName,
     bool requestAttention = true,
   }) async {
     await initialize();
@@ -88,6 +91,9 @@ class LocalNotificationService {
       await web_bridge.showBrowserNotification(
         title: effectiveTitle,
         body: effectiveBody,
+        conversationId: conversationId,
+        senderName: senderName ?? title,
+        avatarUrl: senderAvatarUrl,
         silent: true,
         soundAssetPath: soundAssetPath,
       );

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -132,7 +132,13 @@ class ChatRealtimeController extends Notifier<ChatRealtimeState> {
           final body = message.content.isNotEmpty
               ? message.content
               : (message.fileName ?? 'تم إرسال مرفق');
-          await notifications.showIncomingMessage(title: title, body: body);
+          await notifications.showIncomingMessage(
+            title: title,
+            body: body,
+            conversationId: message.conversationId,
+            senderAvatarUrl: message.sender?.avatarUrl,
+            senderName: message.sender?.displayName,
+          );
           break;
         case 'message_reaction_added':
           final authUser = ref.read(authControllerProvider).valueOrNull;

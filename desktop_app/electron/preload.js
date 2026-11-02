@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+﻿const { contextBridge, ipcRenderer } = require("electron");
 
 const TITLEBAR_HEIGHT = 34;
 
@@ -108,6 +108,24 @@ ipcRenderer.on("lan-receive-pending", (_event, payload) => {
   );
 });
 
+ipcRenderer.on("island:quick-reply", (_event, payload) => {
+  window.dispatchEvent(
+    new CustomEvent("electron-island-quick-reply", { detail: JSON.stringify(payload || {}) }),
+  );
+});
+
+ipcRenderer.on("island:open-conversation", (_event, conversationId) => {
+  window.dispatchEvent(
+    new CustomEvent("electron-island-open-conversation", { detail: String(conversationId || "") }),
+  );
+});
+
+ipcRenderer.on("island:settings-updated", (_event, payload) => {
+  window.dispatchEvent(
+    new CustomEvent("electron-island-settings-updated", { detail: JSON.stringify(payload || {}) }),
+  );
+});
+
 contextBridge.exposeInMainWorld("electronBridge", {
   isElectron: true,
   getDeviceInfo: () => ipcRenderer.invoke("app:get-device-info"),
@@ -182,5 +200,12 @@ contextBridge.exposeInMainWorld("electronBridge", {
   getStorageBreakdown: (payload) => ipcRenderer.invoke("storage:get-breakdown", payload),
   clearStorageCache: (payload) => ipcRenderer.invoke("storage:clear-cache", payload),
   probePeerStatus: (payload) => ipcRenderer.invoke("net:probe-peer-status", payload),
+  islandSyncChats: (chats) => ipcRenderer.invoke("island:sync-chats", chats),
+  islandSyncUser: (user) => ipcRenderer.invoke("island:sync-user", user),
+  islandTriggerWelcome: (userData) => ipcRenderer.invoke("island:trigger-welcome", userData),
+  islandTriggerProgress: (progressData) => ipcRenderer.invoke("island:trigger-progress", progressData),
+  islandGetSettings: () => ipcRenderer.invoke("island:get-settings"),
+  islandSaveSettings: (settings) => ipcRenderer.invoke("island:save-settings", settings),
+  islandTestNotification: () => ipcRenderer.invoke("island:test-notification"),
 });
 console.log("[preload] electronBridge exposed");

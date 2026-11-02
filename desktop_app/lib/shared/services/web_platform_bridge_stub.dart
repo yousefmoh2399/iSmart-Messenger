@@ -160,6 +160,9 @@ Future<void> showBrowserNotification({
   required String body,
   bool silent = true,
   String? soundAssetPath,
+  String? conversationId,
+  String? senderName,
+  String? avatarUrl,
 }) async {}
 
 bool isPageVisible() => false;
@@ -341,3 +344,18 @@ Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}
 
 Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async =>
     false;
+
+
+Future<Map<String, dynamic>?> islandGetSettings() async => null;
+
+Future<Map<String, dynamic>?> islandSaveSettings(Map<String, dynamic> settings) async => null;
+
+Future<bool> islandSyncChats(List<Map<String, dynamic>> chats) async => false;
+
+Future<bool> islandSyncUser(Map<String, dynamic> user) async => false;
+
+Future<bool> islandTriggerWelcome([Map<String, dynamic>? userData]) async => false;
+
+Future<bool> islandTriggerProgress(Map<String, dynamic> progressData) async => false;
+
+Future<bool> islandTestNotification() async => false;

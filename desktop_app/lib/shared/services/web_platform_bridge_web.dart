@@ -641,6 +641,9 @@ Future<void> showBrowserNotification({
   required String body,
   bool silent = true,
   String? soundAssetPath,
+  String? conversationId,
+  String? senderName,
+  String? avatarUrl,
 }) async {
   if (isElectron()) {
     try {
@@ -655,6 +658,12 @@ Future<void> showBrowserNotification({
         'silent': silent,
         if (soundAssetPath != null && soundAssetPath.trim().isNotEmpty)
           'soundAssetPath': soundAssetPath,
+        if (conversationId != null && conversationId.trim().isNotEmpty)
+          'conversationId': conversationId,
+        if (senderName != null && senderName.trim().isNotEmpty)
+          'senderName': senderName,
+        if (avatarUrl != null && avatarUrl.trim().isNotEmpty)
+          'avatarUrl': avatarUrl,
       });
     } catch (e) {
       try {
@@ -1208,4 +1217,68 @@ Future<bool> electronClearStorageCache({required String category, String? direct
     'directoryPath': directoryPath,
   }));
   return result['success'] == true;
+}
+
+
+Future<Map<String, dynamic>?> islandGetSettings() async {
+  try {
+    final result = await _callElectron('islandGetSettings');
+    return _asStringMap(result);
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<Map<String, dynamic>?> islandSaveSettings(Map<String, dynamic> settings) async {
+  try {
+    final result = await _callElectron('islandSaveSettings', settings);
+    return _asStringMap(result);
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<bool> islandSyncChats(List<Map<String, dynamic>> chats) async {
+  try {
+    final result = await _callElectron('islandSyncChats', chats);
+    return _asStringMap(result)['success'] == true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> islandSyncUser(Map<String, dynamic> user) async {
+  try {
+    final result = await _callElectron('islandSyncUser', user);
+    return _asStringMap(result)['success'] == true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> islandTriggerWelcome([Map<String, dynamic>? userData]) async {
+  try {
+    final result = await _callElectron('islandTriggerWelcome', userData ?? {});
+    return _asStringMap(result)['success'] == true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> islandTriggerProgress(Map<String, dynamic> progressData) async {
+  try {
+    final result = await _callElectron('islandTriggerProgress', progressData);
+    return _asStringMap(result)['success'] == true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> islandTestNotification() async {
+  try {
+    final result = await _callElectron('islandTestNotification');
+    return _asStringMap(result)['success'] == true;
+  } catch (_) {
+    return false;
+  }
 }

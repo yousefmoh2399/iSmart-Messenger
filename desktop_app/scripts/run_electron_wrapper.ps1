@@ -57,7 +57,7 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 Write-Host "Building Flutter web for Electron..."
 flutter build web --no-web-resources-cdn --no-tree-shake-icons --no-wasm-dry-run --pwa-strategy=none
 (Get-Content -LiteralPath (Join-Path $desktopRoot "build\web\index.html") -Raw -Encoding UTF8) `
-  -replace '<base href="/">', '<base href="./">' |
+  -replace '<base href="/"\s*/?>', '<base href="./">' |
   Set-Content -LiteralPath (Join-Path $desktopRoot "build\web\index.html") -Encoding UTF8
 
 $bootstrapPath = Join-Path $desktopRoot "build\web\flutter_bootstrap.js"

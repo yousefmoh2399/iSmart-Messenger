@@ -26,6 +26,7 @@ import '../../chat/presentation/widgets/desktop_quick_replies.dart';
 import '../../chat/presentation/widgets/instant_clipboard_sync_dialog.dart';
 import '../../updates/presentation/update_center_screen.dart';
 import 'active_sessions_dialog.dart';
+import '../../island/presentation/island_settings_view.dart';
 
 enum _DesktopSettingsSection {
   profile(
@@ -45,6 +46,12 @@ enum _DesktopSettingsSection {
     subtitle: 'نغمات التنبيه المخصصة وأسلوب الظهور على الشاشة',
     icon: Icons.notifications_active_rounded,
     accentColor: Color(0xFFFF9500),
+  ),
+  dynamicIsland(
+    title: 'الجزيرة التفاعلية (Dynamic Island)',
+    subtitle: 'شريط تفاعلي عائم أعلى الشاشة، إشعارات احترافية ورد سريع وتحكم كامل',
+    icon: Icons.view_stream_rounded,
+    accentColor: Color(0xFF00C7BE),
   ),
   storage(
     title: 'التخزين والملفات والذاكرة',
@@ -556,6 +563,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         return _buildAppearanceContent(preferences: preferences, isDark: isDark);
       case _DesktopSettingsSection.notifications:
         return _buildNotificationsContent(preferences: preferences, isDark: isDark);
+      case _DesktopSettingsSection.dynamicIsland:
+        return IslandSettingsView(isDark: isDark);
       case _DesktopSettingsSection.storage:
         return _buildStorageContent(preferences: preferences, isDark: isDark);
       case _DesktopSettingsSection.smartTools:

@@ -43,6 +43,9 @@ const https = require("https");
 const os = require("os");
 const path = require("path");
 
+const { DynamicIslandManager } = require("./island/island-manager");
+let islandManager = null;
+let lastDetectedApiBaseUrl = "http://127.0.0.1:3000";
 const { createPrintToolResolver } = require("./printing/print_tool_resolver");
 const { createPdfPrintService } = require("./printing/pdf_print_service");
 const { registerPrintIpcHandlers } = require("./printing/register_print_ipc_handlers");
@@ -119,6 +122,45 @@ function transferStorePath() {
 
 function secureStorePath() {
   return path.join(app.getPath("userData"), "secure-store.json");
+}
+
+function getActiveAuthToken() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const store = readSecureStore();
+    const encrypted = store["desktop_auth_session_v1"] || store["desktop_auth_token"];
+    if (!encrypted) return null;
+    const decrypted = safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+    if (decrypted && decrypted.trim().startsWith("{")) {
+      const parsed = JSON.parse(decrypted);
+      return parsed.accessToken || null;
+    }
+    return decrypted || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getActiveUser() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const store = readSecureStore();
+    const encrypted = store["desktop_auth_session_v1"];
+    if (!encrypted) return null;
+    const decrypted = safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+    if (decrypted && decrypted.trim().startsWith("{")) {
+      const parsed = JSON.parse(decrypted);
+      return {
+        id: parsed.userId,
+        fullName: parsed.fullName || parsed.username || "مستخدم iSmart",
+        username: parsed.username || "",
+        avatarUrl: parsed.avatarUrl || null,
+      };
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function debugLogPath() {
@@ -838,8 +880,9 @@ function ensureStartup(enabled = true) {
   startupEnabled = enabled === true;
   app.setLoginItemSettings({
     openAtLogin: startupEnabled,
-    openAsHidden: false,
+    openAsHidden: true,
     path: process.execPath,
+    args: ["--startup"],
   });
   const args = startupEnabled
     ? [
@@ -850,7 +893,7 @@ function ensureStartup(enabled = true) {
         "/t",
         "REG_SZ",
         "/d",
-        `"${process.execPath}"`,
+        `"${process.execPath}" --startup`,
         "/f",
       ]
     : ["delete", STARTUP_REG_KEY, "/v", STARTUP_VALUE_NAME, "/f"];
@@ -1010,7 +1053,7 @@ function createTray() {
   tray.setContextMenu(menu);
 }
 
-function createWindow(startUrl) {
+function createWindow(startUrl, startHidden = false) {
   lastStartUrl = startUrl || lastStartUrl;
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -1046,7 +1089,11 @@ function createWindow(startUrl) {
   });
   applyWindowTheme(currentWindowTheme);
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    if (!startHidden) {
+      mainWindow.show();
+    }
+  });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on("close", (event) => {
     // Hide to system tray instead of quitting unless user explicitly quits
@@ -1089,6 +1136,12 @@ function createWindow(startUrl) {
   mainWindow.webContents.session.setMaxListeners(10);
   const session = mainWindow.webContents.session;
   session.webRequest.onCompleted({ urls: ["http://*/*", "https://*/*"] }, (details) => {
+    if (details.url.includes("/api/")) {
+      try {
+        const parsedU = new URL(details.url);
+        lastDetectedApiBaseUrl = `${parsedU.protocol}//${parsedU.host}`;
+      } catch (_) {}
+    }
     if (details.url.includes("/api/auth/") || details.url.includes("/api/users/me")) {
       appendDebugLog("electron-webrequest", `${details.method} ${details.url}`, {
         statusCode: details.statusCode,
@@ -1131,6 +1184,15 @@ function emitLanTransferProgress(payload) {
     mainWindow.webContents.send("lan-transfer-progress", {
       ...payload,
       timestamp: new Date().toISOString(),
+    });
+  }
+  if (islandManager) {
+    const transferred = Number(payload.transferred || payload.transferredBytes || 0);
+    const total = Number(payload.total || payload.totalBytes || 1);
+    const percent = Math.min(100, Math.round((transferred / total) * 100));
+    islandManager.showProgress({
+      label: payload.fileName ? `نقل ملف: ${payload.fileName}` : "جاري نقل الملف عبر الشبكة...",
+      percent: isNaN(percent) ? 50 : percent,
     });
   }
 }
@@ -2745,6 +2807,17 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
   const soundAssetPath = String(payload.soundAssetPath || "").trim();
   const silent = true;
   try {
+    if (islandManager) {
+      islandManager.showNotification({
+        title,
+        body,
+        conversationId: payload.conversationId || payload.id,
+        senderName: payload.senderName || title,
+        senderId: payload.senderId,
+        avatarUrl: payload.avatarUrl,
+        soundAssetPath,
+      });
+    }
     console.log("[electron] notifications:show", {
       title,
       body,
@@ -4119,14 +4192,52 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
 app.whenReady().then(async () => {
   app.setAppUserModelId("com.ismart.messenger.webwrapper");
   Menu.setApplicationMenu(null);
-  ensureStartup(true);
   cleanLegacyInstallation();
   const locale = app.getLocale();
   const startUrl = await startWebAppServer();
   const localizedUrl = `${startUrl}?lang=${locale}`;
-  createWindow(localizedUrl);
+
+  islandManager = new DynamicIslandManager({
+    getAuthToken: getActiveAuthToken,
+    getApiBaseUrl: () => lastDetectedApiBaseUrl,
+    onOpenConversation: (conversationId) => {
+      showMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("island:open-conversation", conversationId);
+      }
+    },
+    onShowMainWindow: () => {
+      showMainWindow();
+    },
+    onToggleMainWindow: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow(lastStartUrl);
+        return;
+      }
+      if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+        mainWindow.hide();
+      } else {
+        showMainWindow();
+      }
+    },
+  });
+  islandManager.registerIpcHandlers();
+
+  const isStartupLaunch = process.argv.includes("--startup") || process.argv.includes("--hidden");
+  const shouldStartHidden = isStartupLaunch && islandManager.settings.startMinimizedOnBoot;
+
+  ensureStartup(startupEnabled);
+  createWindow(localizedUrl, shouldStartHidden);
   createTray();
   startLanTransferServer();
+
+  islandManager.setMainWindow(mainWindow);
+  islandManager.createIslandWindow(false);
+
+  setTimeout(() => {
+    const user = getActiveUser();
+    islandManager.showWelcome(user || {});
+  }, 1200);
 });
 
 app.on("before-quit", () => {

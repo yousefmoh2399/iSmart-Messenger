@@ -1,0 +1,978 @@
+/* ==========================================================================
+   iSmart Messenger - Dynamic Island Ultra Styles
+   Nova-Style Floating Island for Windows 7 (32-bit), 10, and 11
+   ========================================================================== */
+
+@font-face {
+  font-family: 'NotoSansArabic';
+  src: url('../build/NotoSansArabic-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'NotoSansArabic';
+  src: url('../build/NotoSansArabic-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+:root {
+  --font-family: 'NotoSansArabic', 'Segoe UI', -apple-system, BlinkMacSystemFont, Tahoma, sans-serif;
+  
+  /* Theme: Obsidian Black (Default Apple / Nova grade) */
+  --bg-primary: #0a0c12;
+  --bg-gradient: linear-gradient(180deg, #181c26 0%, #080a0f 100%);
+  --bg-surface: rgba(255, 255, 255, 0.08);
+  --bg-surface-hover: rgba(255, 255, 255, 0.16);
+  --border-color: rgba(255, 255, 255, 0.18);
+  --border-glow: rgba(59, 130, 246, 0.6);
+  --text-main: #ffffff;
+  --text-muted: #9ca3af;
+  --accent-color: #3b82f6;
+  --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  --accent-glow: rgba(59, 130, 246, 0.45);
+  --success-color: #10b981;
+  --danger-color: #ef4444;
+  --shadow-main: 0 10px 28px rgba(0, 0, 0, 0.75), 0 0 1px rgba(255, 255, 255, 0.25);
+  --spring-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --bounce-easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Color Themes */
+body.theme-midnight {
+  --bg-primary: #071124;
+  --bg-gradient: linear-gradient(180deg, #102142 0%, #050b17 100%);
+  --border-color: rgba(56, 189, 248, 0.28);
+  --accent-color: #38bdf8;
+  --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  --accent-glow: rgba(56, 189, 248, 0.45);
+}
+
+body.theme-neon {
+  --bg-primary: #0f0a1c;
+  --bg-gradient: linear-gradient(180deg, #22163d 0%, #080512 100%);
+  --border-color: rgba(192, 132, 252, 0.32);
+  --accent-color: #c084fc;
+  --accent-gradient: linear-gradient(135deg, #c084fc 0%, #7e22ce 100%);
+  --accent-glow: rgba(192, 132, 252, 0.45);
+}
+
+body.theme-emerald {
+  --bg-primary: #04140e;
+  --bg-gradient: linear-gradient(180deg, #0c2b1e 0%, #030d09 100%);
+  --border-color: rgba(52, 211, 153, 0.3);
+  --accent-color: #10b981;
+  --accent-gradient: linear-gradient(135deg, #10b981 0%, #047857 100%);
+  --accent-glow: rgba(16, 185, 129, 0.45);
+}
+
+body.theme-crimson {
+  --bg-primary: #18060a;
+  --bg-gradient: linear-gradient(180deg, #330d15 0%, #0d0305 100%);
+  --border-color: rgba(251, 113, 133, 0.3);
+  --accent-color: #f43f5e;
+  --accent-gradient: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+  --accent-glow: rgba(244, 63, 94, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--font-family);
+  direction: rtl;
+  color: var(--text-main);
+}
+
+/* The Capsule Fills the Entire Window */
+.island-capsule {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: var(--bg-primary);
+  background-image: var(--bg-gradient);
+  border: 1.5px solid var(--border-color);
+  box-shadow: var(--shadow-main);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  transition: border-radius 0.35s var(--spring-easing),
+              border-color 0.25s ease,
+              box-shadow 0.25s ease;
+}
+
+.island-capsule:hover {
+  border-color: var(--border-glow);
+  box-shadow: var(--shadow-main), 0 0 16px var(--accent-glow);
+}
+
+/* ==========================================================================
+   STATE 1: IDLE / COMPACT PILL
+   ========================================================================== */
+.island-capsule.state-idle {
+  border-radius: 9999px;
+  cursor: pointer;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.idle-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+}
+
+.idle-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.idle-logo-wrapper {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.idle-logo-img {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.idle-status-dot {
+  position: absolute;
+  bottom: -1px;
+  left: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success-color);
+  border: 1.5px solid #000;
+  box-shadow: 0 0 6px var(--success-color);
+  animation: pulse-dot 2.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.idle-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+
+.idle-right {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.idle-badge {
+  background: var(--accent-gradient);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 1px 7px;
+  border-radius: 12px;
+  min-width: 18px;
+  text-align: center;
+  box-shadow: 0 2px 6px var(--accent-glow);
+  display: none;
+}
+
+.idle-badge.visible {
+  display: inline-block;
+  animation: pop-in 0.3s var(--bounce-easing);
+}
+
+.idle-clock {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   STATE 2: WELCOME GREETING
+   ========================================================================== */
+.island-capsule.state-welcome {
+  border-radius: 24px;
+  padding: 12px 16px;
+  justify-content: center;
+}
+
+.welcome-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.welcome-avatar-container {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+}
+
+.welcome-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--accent-color);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+
+.welcome-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-color);
+  border-right-color: var(--accent-color);
+  animation: spin 3s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.welcome-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.welcome-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.welcome-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.welcome-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--success-color);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+/* ==========================================================================
+   STATE 3: NOTIFICATION (Incoming Message)
+   ========================================================================== */
+.island-capsule.state-notification {
+  border-radius: 22px;
+  padding: 12px 14px;
+  justify-content: center;
+}
+
+.notification-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.notification-avatar-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.notification-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--border-color);
+}
+
+.notification-unread-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  border: 2px solid #000;
+  box-shadow: 0 0 8px var(--accent-color);
+}
+
+.notification-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notification-sender {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notification-time {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.notification-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-icon {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-icon:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  transform: scale(1.08);
+}
+
+.btn-icon.btn-reply {
+  background: var(--accent-gradient);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.btn-icon.btn-reply:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+/* ==========================================================================
+   STATE 4: QUICK REPLY PANEL
+   ========================================================================== */
+.island-capsule.state-reply {
+  border-radius: 24px;
+  padding: 12px 14px;
+  justify-content: space-between;
+}
+
+.reply-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.reply-target-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reply-target-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.reply-target-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent-color);
+}
+
+.reply-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.2s;
+}
+
+.reply-close-btn:hover {
+  color: var(--text-main);
+}
+
+.reply-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 7px 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.reply-input-wrap:focus-within {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.reply-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-main);
+  direction: rtl;
+}
+
+.reply-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.reply-send-btn {
+  background: var(--accent-gradient);
+  border: none;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s var(--bounce-easing);
+}
+
+.reply-send-btn:hover {
+  transform: scale(1.1);
+}
+
+.reply-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   STATE 5: QUICK CHATS LIST (DRAWER)
+   ========================================================================== */
+.island-capsule.state-chats {
+  border-radius: 26px;
+  padding: 14px 16px;
+}
+
+.chats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chats-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chats-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.chats-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chats-list {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.chats-list::-webkit-scrollbar {
+  width: 4px;
+}
+.chats-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--bg-surface);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chat-item:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-color);
+  transform: translateX(-3px);
+}
+
+.chat-avatar-wrap {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.chat-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.chat-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-info-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.chat-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-time {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.chat-preview {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-unread-badge {
+  background: var(--accent-gradient);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 10px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.chats-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-open-app {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-open-app:hover {
+  background: var(--accent-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+/* ==========================================================================
+   STATE 6: PROGRESS / FILE UPLOAD
+   ========================================================================== */
+.island-capsule.state-progress {
+  border-radius: 20px;
+  padding: 10px 14px;
+  justify-content: center;
+}
+
+.progress-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.progress-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.progress-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.progress-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-percent {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent-color);
+  font-family: monospace, sans-serif;
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 4px;
+  width: 0%;
+  transition: width 0.25s linear;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* ==========================================================================
+   STATE 7: IN-ISLAND SETTINGS
+   ========================================================================== */
+.island-capsule.state-settings {
+  border-radius: 26px;
+  padding: 14px 16px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-scroll {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 2px;
+}
+
+.settings-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.settings-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.settings-group {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.settings-group-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--accent-color);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.setting-label-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setting-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.setting-desc {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* Switch Toggle */
+.toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: rgba(255, 255, 255, 0.18);
+  transition: 0.3s;
+  border-radius: 22px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent-gradient);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(18px);
+}
+
+/* Theme Color Dots */
+.theme-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.theme-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.theme-dot:hover {
+  transform: scale(1.15);
+}
+
+.theme-dot.active {
+  border-color: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  transform: scale(1.12);
+}
+
+.dot-obsidian { background: #0a0d14; border: 1px solid rgba(255,255,255,0.25); }
+.dot-midnight { background: #0284c7; }
+.dot-neon     { background: #a855f7; }
+.dot-emerald  { background: #10b981; }
+.dot-crimson  { background: #f43f5e; }
+
+/* Privacy Select */
+.setting-select {
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  outline: none;
+  direction: rtl;
+}
+
+.btn-test {
+  background: var(--accent-gradient);
+  border: none;
+  color: #fff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.btn-test:hover {
+  transform: scale(1.05);
+}
+
+/* Panels */
+.view-panel {
+  display: none;
+  animation: fade-in 0.2s ease-out forwards;
+  width: 100%;
+  height: 100%;
+}
+
+.view-panel.active {
+  display: flex;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pop-in {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
