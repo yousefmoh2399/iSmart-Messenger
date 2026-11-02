@@ -36,26 +36,32 @@
   ReadRegStr $R0 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" QuietUninstallString
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString "$R0"
 
-  ; Install Segoe UI Emoji font if missing on Windows (e.g. Windows 7 / POSReady / stripped Windows)
-  ${IfNot} ${FileExists} "$FONTS\seguiemj.ttf"
-    DetailPrint "Installing Segoe UI Emoji font..."
-    SetOutPath "$FONTS"
-    File /oname=seguiemj.ttf "${BUILD_RESOURCES_DIR}\seguiemj.ttf"
-    WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Segoe UI Emoji (TrueType)" "seguiemj.ttf"
-    System::Call "gdi32::AddFontResource(t '$FONTS\seguiemj.ttf') i .r0"
-    SendMessage 0xFFFF 0x001D 0 0
-  ${EndIf}
+  ; Install system fonts only if running as Admin (standard users skip safely as fonts are bundled in web assets)
+  ClearErrors
+  UserInfo::GetAccountType
+  Pop $0
+  ${If} $0 == "Admin"
+    ; Install Segoe UI Emoji font if missing on Windows (e.g. Windows 7 / POSReady / stripped Windows)
+    ${IfNot} ${FileExists} "$FONTS\seguiemj.ttf"
+      DetailPrint "Installing Segoe UI Emoji font..."
+      SetOutPath "$FONTS"
+      File /oname=seguiemj.ttf "${BUILD_RESOURCES_DIR}\seguiemj.ttf"
+      WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Segoe UI Emoji (TrueType)" "seguiemj.ttf"
+      System::Call "gdi32::AddFontResource(t '$FONTS\seguiemj.ttf') i .r0"
+      SendMessage 0xFFFF 0x001D 0 0
+    ${EndIf}
 
-  ; Install Noto Sans Arabic fonts for Windows 7 / POSReady to guarantee Arabic text rendering
-  ${IfNot} ${FileExists} "$FONTS\NotoSansArabic-Regular.ttf"
-    DetailPrint "Installing Arabic fonts..."
-    SetOutPath "$FONTS"
-    File /oname=NotoSansArabic-Regular.ttf "${BUILD_RESOURCES_DIR}\NotoSansArabic-Regular.ttf"
-    File /oname=NotoSansArabic-Bold.ttf "${BUILD_RESOURCES_DIR}\NotoSansArabic-Bold.ttf"
-    WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Noto Sans Arabic (TrueType)" "NotoSansArabic-Regular.ttf"
-    WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Noto Sans Arabic Bold (TrueType)" "NotoSansArabic-Bold.ttf"
-    System::Call "gdi32::AddFontResource(t '$FONTS\NotoSansArabic-Regular.ttf') i .r0"
-    System::Call "gdi32::AddFontResource(t '$FONTS\NotoSansArabic-Bold.ttf') i .r0"
-    SendMessage 0xFFFF 0x001D 0 0
+    ; Install Noto Sans Arabic fonts for Windows 7 / POSReady to guarantee Arabic text rendering
+    ${IfNot} ${FileExists} "$FONTS\NotoSansArabic-Regular.ttf"
+      DetailPrint "Installing Arabic fonts..."
+      SetOutPath "$FONTS"
+      File /oname=NotoSansArabic-Regular.ttf "${BUILD_RESOURCES_DIR}\NotoSansArabic-Regular.ttf"
+      File /oname=NotoSansArabic-Bold.ttf "${BUILD_RESOURCES_DIR}\NotoSansArabic-Bold.ttf"
+      WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Noto Sans Arabic (TrueType)" "NotoSansArabic-Regular.ttf"
+      WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Noto Sans Arabic Bold (TrueType)" "NotoSansArabic-Bold.ttf"
+      System::Call "gdi32::AddFontResource(t '$FONTS\NotoSansArabic-Regular.ttf') i .r0"
+      System::Call "gdi32::AddFontResource(t '$FONTS\NotoSansArabic-Bold.ttf') i .r0"
+      SendMessage 0xFFFF 0x001D 0 0
+    ${EndIf}
   ${EndIf}
 !macroend
