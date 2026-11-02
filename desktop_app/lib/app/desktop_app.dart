@@ -227,6 +227,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       }
 
       _setChatVisibility(isChatVisible);
+      ref.read(chatAppForegroundProvider.notifier).state = isForeground;
 
       if (!updatePresence) {
         return;
@@ -759,6 +760,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     }
 
     _setChatVisibility(isChatVisible);
+    ref.read(chatAppForegroundProvider.notifier).state = isForeground;
     _setPresenceStatus(isChatVisible && isForeground ? 'online' : 'idle');
 
     return null;

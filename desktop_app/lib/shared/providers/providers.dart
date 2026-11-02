@@ -582,6 +582,8 @@ final desktopUpdateAgentProvider = Provider<DesktopUpdateAgent>((ref) {
 
 final chatAppVisibilityProvider = StateProvider<bool>((ref) => true);
 
+final chatAppForegroundProvider = StateProvider<bool>((ref) => true);
+
 final chatSectionVisibleProvider = StateProvider<bool>((ref) => true);
 
 final activeConversationIdProvider = StateProvider<String?>((ref) => null);

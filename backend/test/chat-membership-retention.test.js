@@ -238,3 +238,57 @@ test("listMessagesForConversation: filters messages created after cutoffDate for
     Message.find = origMessageFind;
   }
 });
+
+test("incrementUnreadCounts increments unreadCount for legacy records missing membershipStatus and upserts missing members", async () => {
+  const { incrementUnreadCounts } = require("../src/chat/services/chat-member-state.service");
+  const origFind = ConversationMemberState.find;
+  const origUpdateMany = ConversationMemberState.updateMany;
+  const origBulkWrite = ConversationMemberState.bulkWrite;
+
+  const convId = "650000000000000000000099";
+  const legacyActiveId = "650000000000000000000010"; // Has doc, but membershipStatus is undefined
+  const removedId = "650000000000000000000020";      // Has doc, membershipStatus: "removed"
+  const brandNewId = "650000000000000000000030";     // No doc at all
+
+  ConversationMemberState.find = () => ({
+    select: () => ({
+      lean: async () => [
+        { userId: legacyActiveId, membershipStatus: undefined, isDeleted: false },
+        { userId: removedId, membershipStatus: "removed", isDeleted: false },
+      ],
+    }),
+  });
+
+  let capturedBulkWriteOps = null;
+  ConversationMemberState.bulkWrite = async (ops) => {
+    capturedBulkWriteOps = ops;
+  };
+
+  let capturedUpdateManyFilter = null;
+  let capturedUpdateManyUpdate = null;
+  ConversationMemberState.updateMany = async (filter, update) => {
+    capturedUpdateManyFilter = filter;
+    capturedUpdateManyUpdate = update;
+  };
+
+  try {
+    await incrementUnreadCounts(convId, [legacyActiveId, removedId, brandNewId], null);
+
+    // 1. brandNewId was missing and should be upserted with unreadCount: 1 and membershipStatus: "active"
+    assert.ok(capturedBulkWriteOps);
+    assert.equal(capturedBulkWriteOps.length, 1);
+    assert.equal(capturedBulkWriteOps[0].updateOne.filter.userId, brandNewId);
+    assert.equal(capturedBulkWriteOps[0].updateOne.update.$inc.unreadCount, 1);
+    assert.equal(capturedBulkWriteOps[0].updateOne.update.$set.membershipStatus, "active");
+
+    // 2. legacyActiveId had no membershipStatus, so it's NOT removed, and must be in eligible list for $inc
+    assert.ok(capturedUpdateManyFilter);
+    assert.deepEqual(capturedUpdateManyFilter.userId.$in, [legacyActiveId]);
+    assert.equal(capturedUpdateManyUpdate.$inc.unreadCount, 1);
+    assert.equal(capturedUpdateManyUpdate.$set.membershipStatus, "active");
+  } finally {
+    ConversationMemberState.find = origFind;
+    ConversationMemberState.updateMany = origUpdateMany;
+    ConversationMemberState.bulkWrite = origBulkWrite;
+  }
+});

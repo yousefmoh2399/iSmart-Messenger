@@ -1750,7 +1750,9 @@ async function listMessagesForConversation(
     const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
     const isCurrentlyInMembers = memberIdsList.includes(currentUserId);
     const isBlocked = (conversation.blockedMembers || []).some((b) => getObjectIdString(b) === currentUserId);
-    const isNonActive = !isCurrentlyInMembers || memberState?.membershipStatus !== "active" || isBlocked;
+    const effectiveStatus = memberState?.membershipStatus || (isCurrentlyInMembers ? "active" : "removed");
+    const isCurrentlyActiveMember = isCurrentlyInMembers && effectiveStatus === "active" && !isBlocked;
+    const isNonActive = !isCurrentlyActiveMember;
 
     const cutoffDate = isNonActive && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt)
       ? new Date(memberState.removedAt || memberState.leftAt || memberState.blockedAt)
@@ -3308,7 +3310,9 @@ async function searchMessages(
     const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
     const isCurrentlyInMembers = memberIdsList.includes(currentUserId);
     const isBlocked = (conversation.blockedMembers || []).some((b) => getObjectIdString(b) === currentUserId);
-    const isNonActive = !isCurrentlyInMembers || memberState?.membershipStatus !== "active" || isBlocked;
+    const effectiveStatus = memberState?.membershipStatus || (isCurrentlyInMembers ? "active" : "removed");
+    const isCurrentlyActiveMember = isCurrentlyInMembers && effectiveStatus === "active" && !isBlocked;
+    const isNonActive = !isCurrentlyActiveMember;
 
     const cutoffDate = isNonActive && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt)
       ? new Date(memberState.removedAt || memberState.leftAt || memberState.blockedAt)

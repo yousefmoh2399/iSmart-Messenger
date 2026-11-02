@@ -133,7 +133,11 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
       return;
     }
     ref.read(activeSectionProvider.notifier).state = section;
-    ref.read(chatSectionVisibleProvider.notifier).state = section == DesktopWorkspaceSection.chat;
+    final isChat = section == DesktopWorkspaceSection.chat;
+    ref.read(chatSectionVisibleProvider.notifier).state = isChat;
+    if (!isChat) {
+      ref.read(activeConversationIdProvider.notifier).state = null;
+    }
   }
 
 

@@ -151,7 +151,7 @@ async function syncConversationMemberStates(conversationId, memberIds) {
       {
         conversationId,
         userId: { $nin: normalized },
-        membershipStatus: "active",
+        membershipStatus: { $ne: "removed" },
       },
       {
         $set: {
@@ -173,17 +173,60 @@ async function incrementUnreadCounts(conversationId, recipientIds, exceptUserId 
     return;
   }
 
-  await ConversationMemberState.updateMany(
-    {
-      conversationId,
-      userId: { $in: filtered },
-      membershipStatus: "active",
-      isDeleted: { $ne: true },
-    },
-    {
-      $inc: { unreadCount: 1 },
-    }
-  );
+  const existing = await ConversationMemberState.find({
+    conversationId,
+    userId: { $in: filtered },
+  })
+    .select("userId membershipStatus isDeleted")
+    .lean();
+
+  const existingMap = new Map(existing.map((e) => [String(e.userId), e]));
+  const missingUserIds = filtered.filter((uid) => !existingMap.has(String(uid)));
+
+  if (missingUserIds.length > 0) {
+    const insertOps = missingUserIds.map((userId) => ({
+      updateOne: {
+        filter: { conversationId, userId },
+        update: {
+          $setOnInsert: {
+            conversationId,
+            userId,
+            joinedAt: new Date(),
+          },
+          $inc: { unreadCount: 1 },
+          $set: {
+            membershipStatus: "active",
+            isDeleted: false,
+            deletedAt: null,
+          },
+        },
+        upsert: true,
+      },
+    }));
+    await ConversationMemberState.bulkWrite(insertOps, { ordered: false });
+  }
+
+  const nonActiveStatuses = new Set(["removed", "left", "blocked"]);
+  const eligibleExistingIds = existing
+    .filter((e) => !nonActiveStatuses.has(e.membershipStatus))
+    .map((e) => e.userId);
+
+  if (eligibleExistingIds.length > 0) {
+    await ConversationMemberState.updateMany(
+      {
+        conversationId,
+        userId: { $in: eligibleExistingIds },
+      },
+      {
+        $inc: { unreadCount: 1 },
+        $set: {
+          membershipStatus: "active",
+          isDeleted: false,
+          deletedAt: null,
+        },
+      }
+    );
+  }
 }
 
 async function markConversationRead({ conversationId, userId, lastReadMessageId = null }) {

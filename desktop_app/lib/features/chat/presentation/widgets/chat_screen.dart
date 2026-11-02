@@ -583,7 +583,14 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<bool> _isConversationActuallyVisible() async {
+    final isSectionVisible = ref.read(chatSectionVisibleProvider);
+    if (!isSectionVisible) {
+      return false;
+    }
     if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        return web_bridge.isElectronWindowForegroundVisible();
+      }
       return web_bridge.isPageVisible();
     }
     try {
@@ -594,7 +601,8 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         final map = Map<Object?, Object?>.from(result);
         final isVisible = map['isVisible'] == true;
         final isMinimized = map['isMinimized'] == true;
-        return isVisible && !isMinimized;
+        final isForeground = map['isForeground'] == true;
+        return isVisible && !isMinimized && isForeground;
       }
     } catch (_) {}
     return false;

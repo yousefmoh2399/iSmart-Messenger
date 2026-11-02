@@ -95,11 +95,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
         widget.activeSection == DesktopWorkspaceSection.admin;
     final shouldShowTickets =
         widget.activeSection == DesktopWorkspaceSection.tickets;
-
-    if (_showAdminPanel == shouldShowAdmin &&
-        _showTicketsPanel == shouldShowTickets) {
-      return;
-    }
+    final isChatSection =
+        widget.activeSection == DesktopWorkspaceSection.chat;
 
     setState(() {
       _showAdminPanel = shouldShowAdmin;
@@ -112,8 +109,10 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
       }
     });
 
-    if (shouldShowAdmin || shouldShowTickets) {
+    if (!isChatSection || shouldShowAdmin || shouldShowTickets) {
       _setActiveConversation(null);
+    } else if (_selectedConversationId != null) {
+      _setActiveConversation(_selectedConversationId);
     }
   }
 
