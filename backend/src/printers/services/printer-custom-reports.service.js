@@ -59,7 +59,9 @@ async function buildCustomPdfReport(data, reportName, month, year, type) {
     doc.text(line3, 0, 90, { width: 841, align: "center" });
 
     const entityName = type === "global" ? "الفروع" : (data[0]?.branchName || "الفرع");
-    let titleText = `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
+    let titleText = typeof month === "string" && (month.includes("شهر") || month.includes("فترة"))
+      ? `استهلاك  ${entityName}  للورق ${month}`
+      : `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
     doc.fontSize(16).text(processArabicText(titleText), 0, 140, { width: 841, align: "center" });
 
     doc.moveDown(2);
@@ -187,7 +189,9 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   line3Cell.alignment = { horizontal: 'center', vertical: 'middle' };
 
   const entityName = type === "global" ? "الفروع" : (data[0]?.branchName || "الفرع");
-  let titleText = `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
+  let titleText = typeof month === "string" && (month.includes("شهر") || month.includes("فترة"))
+    ? `استهلاك  ${entityName}  للورق ${month}`
+    : `استهلاك  ${entityName}  للورق عن شهر ${month || ""} ${year || ""}`;
   
   const titleCell = sheet.getCell('C5');
   titleCell.value = titleText;
@@ -251,17 +255,59 @@ async function buildCustomExcelReport(data, reportName, month, year, type) {
   return workbook.xlsx.writeBuffer();
 }
 
-async function exportCustomReport(actor, { type = "global", format = "pdf", branchId = null, month = null, year = null, templateId = null, sheetsPerClient = 16 }) {
+async function exportCustomReport(actor, {
+  type = "global",
+  format = "pdf",
+  branchId = null,
+  month = null,
+  year = null,
+  fromMonth = null,
+  fromYear = null,
+  toMonth = null,
+  toYear = null,
+  templateId = null,
+  sheetsPerClient = 16,
+}) {
   const clientRatio = Number(sheetsPerClient) > 0 ? Number(sheetsPerClient) : 16;
   const printerService = require("./printer.service");
   
-  const m = month || new Date().getMonth() + 1;
-  const y = year || new Date().getFullYear();
+  const now = new Date();
+  const fMonth = fromMonth !== null && fromMonth !== undefined
+    ? Number(fromMonth)
+    : (month !== null && month !== undefined ? Number(month) : now.getMonth() + 1);
+  const fYear = fromYear !== null && fromYear !== undefined
+    ? Number(fromYear)
+    : (year !== null && year !== undefined ? Number(year) : now.getFullYear());
+  const tMonth = toMonth !== null && toMonth !== undefined ? Number(toMonth) : fMonth;
+  const tYear = toYear !== null && toYear !== undefined ? Number(toYear) : fYear;
+
+  const isSingleMonth = (fMonth === tMonth && fYear === tYear);
+  const isAllMonths = month !== null && month !== undefined && Number(month) === 0;
+
+  const monthNames = [
+    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+  ];
+  const fromMonthName = monthNames[fMonth - 1] || fMonth;
+  const toMonthName = monthNames[tMonth - 1] || tMonth;
+
+  let periodText = "";
+  if (isAllMonths) {
+    periodText = `لجميع شهور سنة ${fYear}`;
+  } else if (isSingleMonth) {
+    periodText = `عن شهر ${fromMonthName} ${fYear}`;
+  } else {
+    periodText = `للفترة من شهر ${fromMonthName} ${fYear} إلى ${toMonthName} ${tYear}`;
+  }
 
   let consumptionResult = await printerService.calculateMonthlyConsumption({
     branchId,
-    month: m,
-    year: y,
+    fromMonth: isAllMonths ? 1 : fMonth,
+    fromYear: fYear,
+    toMonth: isAllMonths ? 12 : tMonth,
+    toYear: tYear,
+    month: isAllMonths ? 0 : (isSingleMonth ? fMonth : null),
+    year: isSingleMonth ? fYear : null,
     sheetsPerClient: clientRatio,
   });
 
@@ -344,9 +390,11 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
   }
 
   let buffer;
-  const reportName = type === "global" ? "printer-global-report" : `printer-branch-report-${y}`;
+  const suffix = isSingleMonth ? `-${fYear}-${fMonth}` : `-${fYear}-${fMonth}-to-${tMonth}`;
+  const reportName = type === "global" ? `printer-global-report${suffix}` : `printer-branch-report${suffix}`;
   const entityName = type === "global" ? "الفروع" : (consumptionList[0]?.branchName || "الفرع");
-  const defaultTitle = `استهلاك ${entityName} للورق عن شهر ${m || ""} ${y || ""}`;
+  const defaultTitle = `استهلاك ${entityName} للورق ${periodText}`;
+  const dynamicMonthLabel = isAllMonths ? "جميع الشهور" : (isSingleMonth ? fromMonthName : `${fromMonthName} - ${toMonthName}`);
 
   try {
     const { getActiveTemplate } = require("../../reports/services/report-template.service");
@@ -358,8 +406,8 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
         template,
         data: formattedData,
         reportTitle: defaultTitle,
-        month: m,
-        year: y,
+        month: dynamicMonthLabel,
+        year: fYear,
         entityName,
       });
     } else {
@@ -367,17 +415,17 @@ async function exportCustomReport(actor, { type = "global", format = "pdf", bran
         template,
         data: formattedData,
         reportTitle: defaultTitle,
-        month: m,
-        year: y,
+        month: dynamicMonthLabel,
+        year: fYear,
         entityName,
       });
     }
   } catch (err) {
     console.error("Dynamic report generation fallback due to:", err);
     if (format === "xlsx") {
-      buffer = await buildCustomExcelReport(formattedData, reportName, m, y, type);
+      buffer = await buildCustomExcelReport(formattedData, reportName, periodText, fYear, type);
     } else {
-      buffer = await buildCustomPdfReport(formattedData, reportName, m, y, type);
+      buffer = await buildCustomPdfReport(formattedData, reportName, periodText, fYear, type);
     }
   }
 

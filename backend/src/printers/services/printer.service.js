@@ -1712,6 +1712,25 @@ async function ensurePrinterReplacementIndexes() {
 }
 
 async function exportReport(actor, { type = "global", format = "pdf", branchId = null, printerId = null, fromMonth = null, fromYear = null, toMonth = null, toYear = null, month = null, year = null, templateId = null, sheetsPerClient = SHEETS_PER_CLIENT }) {
+  const parsedFromMonth = fromMonth !== null && fromMonth !== undefined
+    ? Number(fromMonth)
+    : (month !== null && month !== undefined ? Number(month) : null);
+  const parsedFromYear = fromYear !== null && fromYear !== undefined
+    ? Number(fromYear)
+    : (year !== null && year !== undefined ? Number(year) : null);
+  const parsedToMonth = toMonth !== null && toMonth !== undefined
+    ? Number(toMonth)
+    : parsedFromMonth;
+  const parsedToYear = toYear !== null && toYear !== undefined
+    ? Number(toYear)
+    : parsedFromYear;
+  const parsedMonth = month !== null && month !== undefined
+    ? Number(month)
+    : parsedFromMonth;
+  const parsedYear = year !== null && year !== undefined
+    ? Number(year)
+    : parsedFromYear;
+
   if (type === "printer") {
     const printer = await Printer.findOne({ _id: printerId, deletedAt: null })
       .populate("branchId", "name code")
@@ -1723,13 +1742,38 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
       .lean();
 
     let monthlyConsumption = null;
-    if (fromMonth && fromYear) {
-      monthlyConsumption = await calculateMonthlyConsumption({ printerId, fromMonth, fromYear, toMonth, toYear, month, year, sheetsPerClient });
-    } else if (month && year) {
-      monthlyConsumption = await calculateMonthlyConsumption({ printerId, month, year, sheetsPerClient });
+    if (parsedFromMonth && parsedFromYear) {
+      monthlyConsumption = await calculateMonthlyConsumption({
+        printerId,
+        fromMonth: parsedFromMonth,
+        fromYear: parsedFromYear,
+        toMonth: parsedToMonth,
+        toYear: parsedToYear,
+        month: parsedMonth,
+        year: parsedYear,
+        sheetsPerClient,
+      });
+    } else if (parsedMonth && parsedYear) {
+      monthlyConsumption = await calculateMonthlyConsumption({
+        printerId,
+        month: parsedMonth,
+        year: parsedYear,
+        sheetsPerClient,
+      });
     }
 
-    return buildPrinterPdfReport({ printer, snapshots, actor, month, year, fromMonth, fromYear, toMonth, toYear, monthlyConsumption });
+    return buildPrinterPdfReport({
+      printer,
+      snapshots,
+      actor,
+      month: parsedMonth,
+      year: parsedYear,
+      fromMonth: parsedFromMonth,
+      fromYear: parsedFromYear,
+      toMonth: parsedToMonth,
+      toYear: parsedToYear,
+      monthlyConsumption,
+    });
   }
   const branch = branchId ? await PrinterBranch.findById(branchId).lean() : null;
   const printerQuery = { deletedAt: null };
@@ -1740,15 +1784,41 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
   }
 
   let monthlyConsumption = null;
-  if (fromMonth && fromYear) {
-    monthlyConsumption = await calculateMonthlyConsumption({ branchId, fromMonth, fromYear, toMonth, toYear, month, year, sheetsPerClient });
-  } else if (month && year) {
-    monthlyConsumption = await calculateMonthlyConsumption({ branchId, month, year, sheetsPerClient });
+  if (parsedFromMonth && parsedFromYear) {
+    monthlyConsumption = await calculateMonthlyConsumption({
+      branchId,
+      fromMonth: parsedFromMonth,
+      fromYear: parsedFromYear,
+      toMonth: parsedToMonth,
+      toYear: parsedToYear,
+      month: parsedMonth,
+      year: parsedYear,
+      sheetsPerClient,
+    });
+  } else if (parsedMonth && parsedYear) {
+    monthlyConsumption = await calculateMonthlyConsumption({
+      branchId,
+      month: parsedMonth,
+      year: parsedYear,
+      sheetsPerClient,
+    });
   }
 
   if (type === "global" || type === "branch") {
     const { exportCustomReport } = require("./printer-custom-reports.service");
-    return exportCustomReport(actor, { type, format, branchId, month, year, templateId, sheetsPerClient });
+    return exportCustomReport(actor, {
+      type,
+      format,
+      branchId,
+      month: parsedMonth,
+      year: parsedYear,
+      fromMonth: parsedFromMonth,
+      fromYear: parsedFromYear,
+      toMonth: parsedToMonth,
+      toYear: parsedToYear,
+      templateId,
+      sheetsPerClient,
+    });
   }
 
   const [branches, printers, snapshots, waste] = await Promise.all([
@@ -1757,7 +1827,22 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
     DailySnapshot.find(branchId ? { branchId } : {}).populate("printerId", "printerName").populate("branchId", "name").sort({ snapshotAt: -1 }).limit(1000).lean(),
     WasteStatistic.find(branchId ? { branchId } : {}).populate("printerId", "printerName").populate("branchId", "name").sort({ calculatedAt: -1 }).limit(1000).lean(),
   ]);
-  const data = { type, branch, branches, printers, snapshots, waste, actor, month, year, fromMonth, fromYear, toMonth, toYear, monthlyConsumption };
+  const data = {
+    type,
+    branch,
+    branches,
+    printers,
+    snapshots,
+    waste,
+    actor,
+    month: parsedMonth,
+    year: parsedYear,
+    fromMonth: parsedFromMonth,
+    fromYear: parsedFromYear,
+    toMonth: parsedToMonth,
+    toYear: parsedToYear,
+    monthlyConsumption,
+  };
   return format === "xlsx" ? buildExcelReport(data) : buildPdfReport(data);
 }
 

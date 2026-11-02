@@ -94,14 +94,29 @@ const listSyncLogsHandler = asyncHandler(async (req, res) => {
   sendChatResponse(res, { data: { logs }, legacy: { logs } });
 });
 
+function parseOptionalInt(val) {
+  if (val === undefined || val === null || val === "") return null;
+  const num = Number(val);
+  return Number.isFinite(num) ? num : null;
+}
+
 const getConsumptionHandler = asyncHandler(async (req, res) => {
+  const month = parseOptionalInt(req.query.month);
+  const year = parseOptionalInt(req.query.year);
+  const fromMonth = parseOptionalInt(req.query.fromMonth) ?? month;
+  const fromYear = parseOptionalInt(req.query.fromYear) ?? year;
+  const toMonth = parseOptionalInt(req.query.toMonth) ?? fromMonth;
+  const toYear = parseOptionalInt(req.query.toYear) ?? fromYear;
+
   const result = await calculateMonthlyConsumption({
     branchId: req.query.branchId || null,
     printerId: req.query.printerId || null,
-    fromMonth: req.query.fromMonth || null,
-    fromYear: req.query.fromYear || null,
-    toMonth: req.query.toMonth || null,
-    toYear: req.query.toYear || null,
+    fromMonth,
+    fromYear,
+    toMonth,
+    toYear,
+    month: month ?? fromMonth,
+    year: year ?? fromYear,
     templateId: req.query.templateId || null,
     sheetsPerClient: Number(req.query.sheetsPerClient || req.query.pagesPerClient) || 16,
   });
@@ -109,15 +124,24 @@ const getConsumptionHandler = asyncHandler(async (req, res) => {
 });
 
 const exportReportHandler = asyncHandler(async (req, res) => {
+  const month = parseOptionalInt(req.query.month);
+  const year = parseOptionalInt(req.query.year);
+  const fromMonth = parseOptionalInt(req.query.fromMonth) ?? month;
+  const fromYear = parseOptionalInt(req.query.fromYear) ?? year;
+  const toMonth = parseOptionalInt(req.query.toMonth) ?? fromMonth;
+  const toYear = parseOptionalInt(req.query.toYear) ?? fromYear;
+
   const { buffer, fileName } = await exportReport(req.user, {
     type: req.query.type === "printer" ? "printer" : req.query.type === "branch" ? "branch" : "global",
     format: req.query.format === "xlsx" ? "xlsx" : "pdf",
     branchId: req.query.branchId || null,
     printerId: req.query.printerId || null,
-    fromMonth: req.query.fromMonth || null,
-    fromYear: req.query.fromYear || null,
-    toMonth: req.query.toMonth || null,
-    toYear: req.query.toYear || null,
+    fromMonth,
+    fromYear,
+    toMonth,
+    toYear,
+    month: month ?? fromMonth,
+    year: year ?? fromYear,
     templateId: req.query.templateId || null,
     sheetsPerClient: Number(req.query.sheetsPerClient || req.query.pagesPerClient) || 16,
   });

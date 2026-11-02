@@ -829,6 +829,10 @@ async function buildPrinterPdfReport({
   actor,
   month,
   year,
+  fromMonth,
+  fromYear,
+  toMonth,
+  toYear,
   monthlyConsumption,
 }) {
   const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -850,14 +854,23 @@ async function buildPrinterPdfReport({
 
   withArabicFont(doc, true).fontSize(22).fillColor("#0F172A");
   let mainTitle = "تقرير تفصيلي للطابعة";
-  if (month && year) {
+  const effectiveMonth = month ?? fromMonth;
+  const effectiveYear = year ?? fromYear;
+  if (effectiveMonth && effectiveYear) {
     const monthNames = [
       "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
       "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
     ];
-    const isAllMonths = Number(month) === 0;
-    const monthName = isAllMonths ? "جميع الشهور" : (monthNames[Number(month) - 1] || month);
-    mainTitle = isAllMonths ? `تقرير الطابعة لجميع شهور سنة ${year}` : `تقرير الطابعة لشهر ${monthName} ${year}`;
+    const isAllMonths = Number(effectiveMonth) === 0;
+    const isRange = fromMonth && toMonth && (fromMonth !== toMonth || fromYear !== toYear);
+    if (isRange) {
+      const fromName = monthNames[Number(fromMonth) - 1] || fromMonth;
+      const toName = monthNames[Number(toMonth) - 1] || toMonth;
+      mainTitle = `تقرير الطابعة للفترة من شهر ${fromName} ${fromYear} إلى ${toName} ${toYear}`;
+    } else {
+      const monthName = isAllMonths ? "جميع الشهور" : (monthNames[Number(effectiveMonth) - 1] || effectiveMonth);
+      mainTitle = isAllMonths ? `تقرير الطابعة لجميع شهور سنة ${effectiveYear}` : `تقرير الطابعة لشهر ${monthName} ${effectiveYear}`;
+    }
   }
   pdfText(doc, mainTitle, { align: "right" });
 
