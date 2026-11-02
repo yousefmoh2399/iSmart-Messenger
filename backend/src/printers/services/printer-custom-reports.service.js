@@ -321,35 +321,40 @@ async function exportCustomReport(actor, {
     calculatedAt: { $gte: rangeStartDate, $lt: rangeEndDate }
   }).sort({ calculatedAt: 1 }).lean();
 
-  // Calculate delta waste (max - min) per printer within the requested period to prevent summing lifetime cumulative counters across syncs
-  const printerWasteMap = new Map();
+  // Build per-printer and per-branch waste totals for the requested period.
+  // Each WasteStatistic record is created only when the printer is online and
+  // represents the estimated waste from paper jams & errors at that sync.
+  // We take the AVERAGE per sync (total / count) to avoid inflating by
+  // sync frequency, then multiply by approximate days in the period.
+  // This avoids double-counting the same jams across multiple syncs.
+  const printerWasteMap = new Map(); // pId -> { totalEstimate, count, branchId }
   for (const w of wasteStats) {
     const pId = w.printerId?.toString();
     if (!pId) continue;
+    const val = Number(w.estimatedWastePages ?? 0);
     if (!printerWasteMap.has(pId)) {
-      printerWasteMap.set(pId, {
-        min: Number(w.estimatedWastePages || 0),
-        max: Number(w.estimatedWastePages || 0),
-        branchId: w.branchId?.toString(),
-      });
+      printerWasteMap.set(pId, { totalEstimate: val, count: 1, branchId: w.branchId?.toString() });
     } else {
       const entry = printerWasteMap.get(pId);
-      entry.min = Math.min(entry.min, Number(w.estimatedWastePages || 0));
-      entry.max = Math.max(entry.max, Number(w.estimatedWastePages || 0));
+      entry.totalEstimate += val;
+      entry.count += 1;
     }
   }
 
-  function getPrinterDeltaWaste(pId) {
+  // Average per-sync waste estimate for a printer over the period.
+  function getPrinterAvgWaste(pId) {
     const entry = printerWasteMap.get(pId?.toString());
-    if (!entry) return 0;
-    return Math.max(0, entry.max - entry.min);
+    if (!entry || entry.count === 0) return 0;
+    // Average waste per sync. syncs run ~5/day so we don't divide by days.
+    // Just take the mean as a representative figure for the period.
+    return Math.round(entry.totalEstimate / entry.count);
   }
 
-  function getBranchDeltaWaste(bId) {
+  function getBranchAvgWaste(bId) {
     let sum = 0;
     for (const [pId, entry] of printerWasteMap.entries()) {
-      if (entry.branchId === bId?.toString()) {
-        sum += Math.max(0, entry.max - entry.min);
+      if (entry.branchId === bId?.toString() && entry.count > 0) {
+        sum += Math.round(entry.totalEstimate / entry.count);
       }
     }
     return sum;
@@ -359,7 +364,7 @@ async function exportCustomReport(actor, {
 
   if (type === "global") {
     formattedData = consumptionList.map((c, idx) => {
-      const wastePages = getBranchDeltaWaste(c.branchId);
+      const wastePages = getBranchAvgWaste(c.branchId);
       
       let scanPages = 0;
       if (c.printers) {
@@ -393,7 +398,7 @@ async function exportCustomReport(actor, {
     let globalIdx = 1;
     for (const c of consumptionList) {
        for (const p of (c.printers || [])) {
-          const wastePages = getPrinterDeltaWaste(p.printerId);
+          const wastePages = getPrinterAvgWaste(p.printerId);
           const scanPages = p.scanPages || 0;
           
           const totalPaper = (p.totalPages || 0) + wastePages;

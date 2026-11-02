@@ -39,7 +39,7 @@ const NON_PRINTER_MODEL_REGEX =
 const SHEETS_PER_REAM = 500;
 const SHEETS_PER_CLIENT = 16;
 const MAX_BASELINE_AGE_MS = 36 * 60 * 60 * 1000;
-const HIGH_MONTHLY_PRINTER_PAGES = 100_000;
+const HIGH_MONTHLY_PRINTER_PAGES = 500_000; // raised: professional printers can exceed 100k pages/month
 const RESET_COUNTER_RATIO = 0.2;
 
 function sanitizeMonthlyCounterUsage({ totalPages, monoPages, colorPages }) {
@@ -49,14 +49,17 @@ function sanitizeMonthlyCounterUsage({ totalPages, monoPages, colorPages }) {
   const isSuspicious = rawTotalPages > HIGH_MONTHLY_PRINTER_PAGES;
 
   if (isSuspicious) {
+    // Flag as suspicious but keep the real value — do NOT zero it out.
+    // The admin can review rawTotalPages vs totalPages in the report.
     return {
-      totalPages: 0,
-      monoPages: 0,
-      colorPages: 0,
+      totalPages: rawTotalPages,
+      monoPages: rawMonoPages,
+      colorPages: rawColorPages,
       rawTotalPages,
       rawMonoPages,
       rawColorPages,
-      excludedFromTotals: true,
+      excludedFromTotals: false,
+      isSuspicious: true,
     };
   }
 
@@ -548,6 +551,10 @@ async function upsertDiscoveredPrinter(branch, payload) {
   // Restore printer to active if it was previously soft-deleted
   printer.deletedAt = null;
 
+  // Update IP if it has changed (printer moved to new IP / DHCP reassignment)
+  if (payload.ipAddress && payload.ipAddress !== printer.ipAddress) {
+    printer.ipAddress = payload.ipAddress;
+  }
   printer.hostname = payload.hostname || printer.hostname || "";
   printer.model = payload.model || printer.model || "";
   printer.serialNumber = payload.serialNumber || printer.serialNumber || "";
@@ -655,6 +662,9 @@ async function upsertDiscoveredPrinter(branch, payload) {
 }
 
 async function createSnapshotAndWaste(printer) {
+  // Always create a snapshot so the consumption baseline is preserved.
+  // For offline printers the counters are unchanged — this is intentional so
+  // that pages printed before going offline are captured in the last snapshot.
   await DailySnapshot.create({
     printerId: printer._id,
     branchId: printer.branchId,
@@ -666,22 +676,28 @@ async function createSnapshotAndWaste(printer) {
     status: printer.status,
   });
 
-  const errorMessages = Array.isArray(printer.maintenance?.errorMessages)
-    ? printer.maintenance.errorMessages
-    : [];
-  const errors = errorMessages.length;
-  const paperJams = Number(printer.maintenance?.paperJams || 0);
-  const estimatedWastePages =
-    paperJams * wasteConfig.paperJamWeight +
-    errors * wasteConfig.printerErrorWeight;
-  await WasteStatistic.create({
-    printerId: printer._id,
-    branchId: printer.branchId,
-    paperJams,
-    printerErrors: errors,
-    estimatedWastePages,
-    config: wasteConfig,
-  });
+  // Only create a waste record when the printer is online and we have fresh
+  // maintenance data.  Creating waste records for offline printers inflates the
+  // totals because the stale paperJams / errorMessages values are re-counted on
+  // every sync cycle.
+  if (printer.status === "online") {
+    const errorMessages = Array.isArray(printer.maintenance?.errorMessages)
+      ? printer.maintenance.errorMessages
+      : [];
+    const errors = errorMessages.length;
+    const paperJams = Number(printer.maintenance?.paperJams || 0);
+    const estimatedWastePages =
+      paperJams * wasteConfig.paperJamWeight +
+      errors * wasteConfig.printerErrorWeight;
+    await WasteStatistic.create({
+      printerId: printer._id,
+      branchId: printer.branchId,
+      paperJams,
+      printerErrors: errors,
+      estimatedWastePages,
+      config: wasteConfig,
+    });
+  }
 }
 
 async function createOperationalNotifications(printer) {
@@ -1500,15 +1516,15 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
       let startScan = 0;
 
       if (hasBaselineSnapshot) {
-        startTotal = baselineSnapshot.lifetimeCounters?.totalPages || baselineSnapshot.counters?.totalPages || 0;
-        startMono = baselineSnapshot.lifetimeCounters?.monoPages || baselineSnapshot.counters?.monoPages || 0;
-        startColor = baselineSnapshot.lifetimeCounters?.colorPages || baselineSnapshot.counters?.colorPages || 0;
-        startScan = baselineSnapshot.lifetimeCounters?.scanPages || baselineSnapshot.counters?.scanPages || 0;
+        startTotal = (baselineSnapshot.lifetimeCounters?.totalPages ?? baselineSnapshot.counters?.totalPages) ?? 0;
+        startMono = (baselineSnapshot.lifetimeCounters?.monoPages ?? baselineSnapshot.counters?.monoPages) ?? 0;
+        startColor = (baselineSnapshot.lifetimeCounters?.colorPages ?? baselineSnapshot.counters?.colorPages) ?? 0;
+        startScan = (baselineSnapshot.lifetimeCounters?.scanPages ?? baselineSnapshot.counters?.scanPages) ?? 0;
       } else if (monthlySnapshots.length > 0) {
-        startTotal = monthlySnapshots[0].lifetimeCounters?.totalPages || monthlySnapshots[0].counters?.totalPages || 0;
-        startMono = monthlySnapshots[0].lifetimeCounters?.monoPages || monthlySnapshots[0].counters?.monoPages || 0;
-        startColor = monthlySnapshots[0].lifetimeCounters?.colorPages || monthlySnapshots[0].counters?.colorPages || 0;
-        startScan = monthlySnapshots[0].lifetimeCounters?.scanPages || monthlySnapshots[0].counters?.scanPages || 0;
+        startTotal = (monthlySnapshots[0].lifetimeCounters?.totalPages ?? monthlySnapshots[0].counters?.totalPages) ?? 0;
+        startMono = (monthlySnapshots[0].lifetimeCounters?.monoPages ?? monthlySnapshots[0].counters?.monoPages) ?? 0;
+        startColor = (monthlySnapshots[0].lifetimeCounters?.colorPages ?? monthlySnapshots[0].counters?.colorPages) ?? 0;
+        startScan = (monthlySnapshots[0].lifetimeCounters?.scanPages ?? monthlySnapshots[0].counters?.scanPages) ?? 0;
       }
 
       let endTotal = startTotal;
@@ -1518,10 +1534,10 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
 
       if (monthlySnapshots.length > 0) {
         const lastSnapshot = monthlySnapshots[monthlySnapshots.length - 1];
-        endTotal = lastSnapshot.lifetimeCounters?.totalPages || lastSnapshot.counters?.totalPages || 0;
-        endMono = lastSnapshot.lifetimeCounters?.monoPages || lastSnapshot.counters?.monoPages || 0;
-        endColor = lastSnapshot.lifetimeCounters?.colorPages || lastSnapshot.counters?.colorPages || 0;
-        endScan = lastSnapshot.lifetimeCounters?.scanPages || lastSnapshot.counters?.scanPages || 0;
+        endTotal = (lastSnapshot.lifetimeCounters?.totalPages ?? lastSnapshot.counters?.totalPages) ?? 0;
+        endMono = (lastSnapshot.lifetimeCounters?.monoPages ?? lastSnapshot.counters?.monoPages) ?? 0;
+        endColor = (lastSnapshot.lifetimeCounters?.colorPages ?? lastSnapshot.counters?.colorPages) ?? 0;
+        endScan = (lastSnapshot.lifetimeCounters?.scanPages ?? lastSnapshot.counters?.scanPages) ?? 0;
       }
 
       // If this is the current ongoing month, check live printer counters:
@@ -1567,6 +1583,7 @@ async function calculateMonthlyConsumption({ branchId = null, printerId = null, 
           totalPages,
           monoPages,
           colorPages,
+          scanPages,
           rawTotalPages: usage.rawTotalPages,
           rawMonoPages: usage.rawMonoPages,
           rawColorPages: usage.rawColorPages,

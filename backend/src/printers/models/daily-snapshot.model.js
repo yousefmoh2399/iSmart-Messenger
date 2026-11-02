@@ -15,4 +15,10 @@ const dailySnapshotSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Compound indexes for efficient consumption queries:
+//   calculateMonthlyConsumption queries { printerId, snapshotAt: {$gte, $lt} }
+//   baseline query: { printerId, snapshotAt: {$lt} } sorted by snapshotAt desc
+dailySnapshotSchema.index({ printerId: 1, snapshotAt: 1 });
+dailySnapshotSchema.index({ branchId: 1, snapshotAt: 1 });
+
 module.exports = mongoose.model("DailySnapshot", dailySnapshotSchema);

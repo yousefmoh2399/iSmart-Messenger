@@ -15,4 +15,10 @@ const wasteStatisticSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Compound indexes for efficient report queries:
+//   exportCustomReport queries { branchId, calculatedAt: {$gte, $lt} }
+//   per-printer waste queries { printerId, calculatedAt: {$gte, $lt} }
+wasteStatisticSchema.index({ branchId: 1, calculatedAt: 1 });
+wasteStatisticSchema.index({ printerId: 1, calculatedAt: 1 });
+
 module.exports = mongoose.model("WasteStatistic", wasteStatisticSchema);
