@@ -16,6 +16,7 @@ const {
   listPrinters,
   listSyncLogs,
   syncPrinter,
+  transferPrinter,
   updateBranch,
   calculateMonthlyConsumption,
 } = require("../services/printer.service");
@@ -68,6 +69,14 @@ const syncPrinterHandler = asyncHandler(async (req, res) => {
 const deletePrinterHandler = asyncHandler(async (req, res) => {
   const result = await deletePrinter(req.params.id);
   sendChatResponse(res, { data: result, legacy: result });
+});
+
+const transferPrinterHandler = asyncHandler(async (req, res) => {
+  const printer = await transferPrinter(req.user, req.params.id, {
+    newBranchId: req.body.newBranchId,
+    newIpAddress: req.body.newIpAddress || null,
+  });
+  sendChatResponse(res, { data: { printer }, legacy: { printer } });
 });
 
 const fullSyncHandler = asyncHandler(async (req, res) => {
@@ -171,6 +180,7 @@ module.exports = {
   listPrintersHandler,
   listSyncLogsHandler,
   syncPrinterHandler,
+  transferPrinterHandler,
   updateBranchHandler,
   getConsumptionHandler,
 };

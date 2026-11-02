@@ -23,6 +23,7 @@ const {
   listPrintersHandler,
   listSyncLogsHandler,
   syncPrinterHandler,
+  transferPrinterHandler,
   updateBranchHandler,
   getConsumptionHandler,
 } = require("../controllers/printer.controller");
@@ -125,6 +126,17 @@ router.post(
   [param("id").isMongoId()],
   validateRequest,
   syncPrinterHandler,
+);
+router.post(
+  "/printers/:id/transfer",
+  requirePrinterManagementMiddleware,
+  [
+    param("id").isMongoId(),
+    body("newBranchId").isMongoId(),
+    body("newIpAddress").optional().isIP(),
+  ],
+  validateRequest,
+  transferPrinterHandler,
 );
 router.delete(
   "/printers/:id",

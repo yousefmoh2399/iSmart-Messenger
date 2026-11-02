@@ -457,6 +457,78 @@ async function deletePrinter(printerId) {
   return { deleted: true };
 }
 
+/**
+ * D2: Transfer a printer from its current branch to a new branch.
+ *
+ * When a physical printer is physically moved to a different branch it appears
+ * on a different IP/network, so the auto-discovery would normally try to create
+ * a duplicate document (same serial number, different branchId) and fail with a
+ * unique-key violation.  This API cleanly handles the transfer:
+ *  1. Validate both branches exist.
+ *  2. Soft-delete any existing printer at (newBranchId, newIpAddress) that is a
+ *     different physical device (prevent IP collision in new branch).
+ *  3. Move the printer record to the new branch + update IP + reset previousCounters
+ *     so the next sync doesn't misinterpret the lifetime counter delta.
+ *  4. Create a PrinterNotification so admins are notified.
+ */
+async function transferPrinter(actor, printerId, { newBranchId, newIpAddress }) {
+  const printer = await Printer.findOne({ _id: printerId, deletedAt: null });
+  if (!printer) throw new ApiError(404, "Printer not found.");
+
+  const newBranch = await PrinterBranch.findOne({ _id: newBranchId, deletedAt: null });
+  if (!newBranch) throw new ApiError(404, "Target branch not found.");
+
+  const oldBranch = await PrinterBranch.findOne({ _id: printer.branchId, deletedAt: null });
+  const oldBranchName = oldBranch?.name || printer.branchId?.toString();
+  const oldIpAddress = printer.ipAddress;
+
+  // If new IP is provided and differs, check for IP collision in target branch
+  if (newIpAddress && newIpAddress !== printer.ipAddress) {
+    const collision = await Printer.findOne({
+      branchId: newBranchId,
+      ipAddress: newIpAddress,
+      deletedAt: null,
+      _id: { $ne: printer._id },
+    });
+    if (collision) {
+      // Soft-delete the colliding printer (it's a different physical device)
+      collision.deletedAt = new Date();
+      collision.replacedAt = new Date();
+      collision.replacedByPrinterId = printer._id;
+      collision.replacementReason = `Replaced by transferred printer ${printer.serialNumber || printer.printerName}`;
+      collision.status = "offline";
+      await collision.save();
+      await PrinterNotification.create({
+        type: "printer_replaced",
+        severity: "warning",
+        title: "Printer replaced during transfer",
+        message: `${collision.printerName || collision.ipAddress} at ${newBranch.name} was replaced by transferred printer ${printer.printerName || printer.ipAddress}.`,
+        branchId: newBranchId,
+        printerId: collision._id,
+      });
+    }
+  }
+
+  // Perform the transfer
+  printer.branchId = newBranchId;
+  if (newIpAddress) printer.ipAddress = newIpAddress;
+  // Reset previousCounters so next sync doesn't produce a bogus delta
+  printer.previousCounters = { ...normalizeCounters(printer.counters) };
+  printer.lastSyncAt = new Date();
+  await printer.save();
+
+  await PrinterNotification.create({
+    type: "printer_transferred",
+    severity: "info",
+    title: "Printer transferred to new branch",
+    message: `${printer.printerName || printer.ipAddress} (${printer.serialNumber || "no serial"}) transferred from ${oldBranchName} (${oldIpAddress}) to ${newBranch.name} (${printer.ipAddress}).`,
+    branchId: newBranchId,
+    printerId: printer._id,
+  });
+
+  return serializePrinter(await Printer.findById(printer._id).populate("branchId", "name code").lean());
+}
+
 async function listPrinters(filters = {}) {
   const query = { deletedAt: null };
   if (filters.branchId) query.branchId = filters.branchId;
@@ -946,15 +1018,44 @@ async function syncBranchRegisteredPrinters(actor, branch, options = {}) {
     try {
       const payload = await probePrinter(printer.ipAddress, probeOptions);
       if (!payload) {
-        printer.status = "offline";
-        printer.lastSyncAt = new Date();
-        await printer.save();
-        await createSnapshotAndWaste(printer);
-        await createOperationalNotifications(printer);
-        offline += 1;
+        // D4: SNMP failed → attempt web scraping fallback before marking offline.
+        // Use a shorter timeout so we don't slow down the scheduled sync too much.
+        const webFallbackEnabled = process.env.PRINTER_SCHEDULED_WEB_FALLBACK !== "false";
+        let fallbackPayload = null;
+        if (webFallbackEnabled) {
+          try {
+            fallbackPayload = await probePrinter(printer.ipAddress, {
+              ...probeOptions,
+              skipWebDetails: false,           // allow web scraping
+              snmpTimeoutMs: 1000,             // fast SNMP check first
+              hostTimeoutMs: Number(process.env.PRINTER_WEB_FALLBACK_TIMEOUT_MS || 8000),
+            });
+          } catch (_) { /* web fallback failed — treat as offline */ }
+        }
+        if (!fallbackPayload) {
+          printer.status = "offline";
+          printer.lastSyncAt = new Date();
+          await printer.save();
+          await createSnapshotAndWaste(printer);
+          await createOperationalNotifications(printer);
+          offline += 1;
+          processed += 1;
+          options.onPrinterDone?.({ status: "offline", printer, branch });
+          logPrinterSync("registered_printer_sync.offline", {
+            branchId: branch._id.toString(),
+            branchCode: branch.code,
+            printerId: printer._id.toString(),
+            ipAddress: printer.ipAddress,
+            durationMs: Date.now() - printerStartedAt,
+          });
+          return;
+        }
+        // Web fallback succeeded — continue with that payload
+        await upsertDiscoveredPrinter(branch, fallbackPayload);
+        online += 1;
         processed += 1;
-        options.onPrinterDone?.({ status: "offline", printer, branch });
-        logPrinterSync("registered_printer_sync.offline", {
+        options.onPrinterDone?.({ status: "online", printer, branch, payload: fallbackPayload });
+        logPrinterSync("registered_printer_sync.web_fallback_success", {
           branchId: branch._id.toString(),
           branchCode: branch.code,
           printerId: printer._id.toString(),
@@ -1936,6 +2037,7 @@ module.exports = {
   listPrinters,
   listSyncLogs,
   syncPrinter,
+  transferPrinter,
   updateBranch,
   upsertDiscoveredPrinter,
   calculateMonthlyConsumption,
