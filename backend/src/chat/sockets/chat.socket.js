@@ -1141,34 +1141,38 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("presence:activity", async (payload = {}, ack) => {
-      const requestedStatus =
-        payload.status === "idle"
-          ? "idle"
-          : payload.status === "meeting"
-            ? "meeting"
-            : payload.status === "lunch"
-              ? "lunch"
-              : payload.status === "offline"
-                ? "offline"
-                : "online";
+      try {
+        const requestedStatus =
+          payload.status === "idle"
+            ? "idle"
+            : payload.status === "meeting"
+              ? "meeting"
+              : payload.status === "lunch"
+                ? "lunch"
+                : payload.status === "offline"
+                  ? "offline"
+                  : "online";
 
-      if (requestedStatus === "offline") {
-        socketPresence.set(socket.id, "offline");
-        await publishAggregatedPresence(io, currentUser.id, {
-          lastSeen: new Date().toISOString(),
+        if (requestedStatus === "offline") {
+          socketPresence.set(socket.id, "offline");
+          await publishAggregatedPresence(io, currentUser.id, {
+            lastSeen: new Date().toISOString(),
+          });
+        } else {
+          socketPresence.set(socket.id, requestedStatus);
+          await publishAggregatedPresence(io, currentUser.id, {
+            lastActiveAt: new Date().toISOString(),
+          });
+        }
+
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { status: requestedStatus },
         });
-      } else {
-        socketPresence.set(socket.id, requestedStatus);
-        await publishAggregatedPresence(io, currentUser.id, {
-          lastActiveAt: new Date().toISOString(),
-        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
       }
-
-      socketAck(ack, {
-        ok: true,
-        success: true,
-        data: { status: requestedStatus },
-      });
     });
 
     socket.on("printers:update", (payload = {}, ack) => {

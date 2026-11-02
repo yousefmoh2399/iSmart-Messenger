@@ -115,6 +115,13 @@ async function resolveConversationAudienceUserIds(conversationId) {
     }
   }
 
+  if (conversation.type === "broadcast") {
+    for (const p of conversation.broadcastPublisherIds || []) {
+      const pId = p?._id ? p._id.toString() : p?.toString?.() || String(p);
+      if (pId) userIds.add(pId);
+    }
+  }
+
   return [...userIds];
 }
 

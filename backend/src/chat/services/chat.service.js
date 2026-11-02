@@ -492,16 +492,27 @@ async function serializeConversation(conversation, currentUserId) {
   const blockedList = (conversation.blockedMembers || []).map(getObjectIdString).filter(Boolean);
   const isUserBlocked = blockedList.includes(currentUserIdStr) || memberState?.membershipStatus === "blocked";
 
-  const effectiveStatus = memberState?.membershipStatus || (isCurrentlyInMembers ? "active" : "removed");
-  const isCurrentlyActiveMember = isCurrentlyInMembers && effectiveStatus === "active" && !isUserBlocked;
-
   const publisherIdsList = (conversation.broadcastPublisherIds || []).map(getObjectIdString).filter(Boolean);
   const adminIdsList = (conversation.admins || []).map(getObjectIdString).filter(Boolean);
   const createdByIdStr = getObjectIdString(conversation.createdBy);
 
+  const isDept = conversation.type === "department";
+  const isBcast = conversation.type === "broadcast";
+  const isMemberOrValidAudience =
+    isCurrentlyInMembers ||
+    isDept ||
+    (isBcast && (
+      adminIdsList.includes(currentUserIdStr) ||
+      publisherIdsList.includes(currentUserIdStr) ||
+      createdByIdStr === currentUserIdStr
+    ));
+
+  const effectiveStatus = memberState?.membershipStatus || (isMemberOrValidAudience ? "active" : "removed");
+  const isCurrentlyActiveMember = (isMemberOrValidAudience || isCurrentlyInMembers) && effectiveStatus === "active" && !isUserBlocked;
+
   let canSend = isCurrentlyActiveMember && !isUserBlocked && conversation.isActive !== false;
-  if (conversation.type === "broadcast" && canSend) {
-    canSend = (
+  if (conversation.type === "broadcast") {
+    canSend = !isUserBlocked && conversation.isActive !== false && (
       adminIdsList.includes(currentUserIdStr) ||
       publisherIdsList.includes(currentUserIdStr) ||
       createdByIdStr === currentUserIdStr
@@ -1102,6 +1113,12 @@ async function listConversationsForUser(currentUser) {
       departmentId: { $in: userDeptIds },
     });
   }
+
+  query.$or.push(
+    { createdBy: currentUserId },
+    { admins: currentUserId },
+    { broadcastPublisherIds: currentUserId },
+  );
 
   const conversations = await Conversation.find(query)
     .sort({ updatedAt: -1 })
@@ -1750,8 +1767,11 @@ async function listMessagesForConversation(
     const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
     const isCurrentlyInMembers = memberIdsList.includes(currentUserId);
     const isBlocked = (conversation.blockedMembers || []).some((b) => getObjectIdString(b) === currentUserId);
-    const effectiveStatus = memberState?.membershipStatus || (isCurrentlyInMembers ? "active" : "removed");
-    const isCurrentlyActiveMember = isCurrentlyInMembers && effectiveStatus === "active" && !isBlocked;
+    const isDept = conversation.type === "department";
+    const isBcast = conversation.type === "broadcast";
+    const isMemberOrValidAudience = isCurrentlyInMembers || isDept || isBcast;
+    const effectiveStatus = memberState?.membershipStatus || (isMemberOrValidAudience ? "active" : "removed");
+    const isCurrentlyActiveMember = (isMemberOrValidAudience || isCurrentlyInMembers) && effectiveStatus === "active" && !isBlocked;
     const isNonActive = !isCurrentlyActiveMember;
 
     const cutoffDate = isNonActive && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt)
@@ -1842,7 +1862,31 @@ async function createMessage(currentUser, payload, file) {
       entry?._id ? entry._id.toString() : entry.toString(),
     ),
   );
-  if (!memberIds.has(currentUser.id)) {
+
+  let isDepartmentMember = false;
+  if (conversation.type === "department") {
+    const conversationDepartmentId =
+      conversation.departmentId?._id?.toString?.() ||
+      conversation.departmentId?.toString?.() ||
+      null;
+    const currentUserDepartmentId = getObjectIdString(currentUser.departmentId);
+    const currentUserDeptIds = [
+      ...(currentUserDepartmentId ? [currentUserDepartmentId] : []),
+      ...(Array.isArray(currentUser.departmentIds)
+        ? currentUser.departmentIds.map((d) => getObjectIdString(d)).filter(Boolean)
+        : []),
+    ];
+    if (currentUserDeptIds.includes(conversationDepartmentId)) {
+      isDepartmentMember = true;
+      if (!memberIds.has(currentUser.id)) {
+        conversation.members.push(currentUser.id);
+        await conversation.save().catch(() => {});
+      }
+    }
+  }
+
+  const isBroadcast = conversation.type === "broadcast";
+  if (!isBroadcast && !isDepartmentMember && !memberIds.has(currentUser.id)) {
     if (file?.path) {
       await deleteFileIfExists(file.path);
     }
@@ -3310,8 +3354,11 @@ async function searchMessages(
     const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
     const isCurrentlyInMembers = memberIdsList.includes(currentUserId);
     const isBlocked = (conversation.blockedMembers || []).some((b) => getObjectIdString(b) === currentUserId);
-    const effectiveStatus = memberState?.membershipStatus || (isCurrentlyInMembers ? "active" : "removed");
-    const isCurrentlyActiveMember = isCurrentlyInMembers && effectiveStatus === "active" && !isBlocked;
+    const isDept = conversation.type === "department";
+    const isBcast = conversation.type === "broadcast";
+    const isMemberOrValidAudience = isCurrentlyInMembers || isDept || isBcast;
+    const effectiveStatus = memberState?.membershipStatus || (isMemberOrValidAudience ? "active" : "removed");
+    const isCurrentlyActiveMember = (isMemberOrValidAudience || isCurrentlyInMembers) && effectiveStatus === "active" && !isBlocked;
     const isNonActive = !isCurrentlyActiveMember;
 
     const cutoffDate = isNonActive && (memberState?.removedAt || memberState?.leftAt || memberState?.blockedAt)

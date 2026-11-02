@@ -192,7 +192,7 @@ class AuthRepository {
       } catch (_) {}
     }
 
-    String appVersion = '1.2.6';
+    String appVersion = '1.2.7';
     try {
       final packageInfo = await PackageInfo.fromPlatform();
       if (packageInfo.version.trim().isNotEmpty) {
