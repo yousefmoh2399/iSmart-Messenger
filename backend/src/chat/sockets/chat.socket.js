@@ -272,11 +272,20 @@ async function publishAggregatedPresence(io, userId, extra = {}) {
   emitPresence(io, userId, aggregated.isOnline, aggregated.status, payload);
 }
 
+// Debounce map: userId → timestamp of last DB write (P3 performance fix)
+const _lastActivityWrite = new Map();
+const ACTIVITY_DEBOUNCE_MS = 30_000; // 30 seconds
+
 async function markActive(io, currentUser, socketId) {
   registerUserSocket(currentUser.id, socketId);
   socketPresence.set(socketId, "online");
   try {
-    await touchUserActivity(currentUser.id, "online");
+    const now = Date.now();
+    const lastWrite = _lastActivityWrite.get(currentUser.id) || 0;
+    if (now - lastWrite >= ACTIVITY_DEBOUNCE_MS) {
+      _lastActivityWrite.set(currentUser.id, now);
+      await touchUserActivity(currentUser.id, "online");
+    }
     await publishAggregatedPresence(io, currentUser.id, {
       lastActiveAt: new Date().toISOString(),
     });

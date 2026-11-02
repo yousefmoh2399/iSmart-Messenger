@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const fs = require("fs/promises");
@@ -935,11 +935,19 @@ async function deleteUser(actor, userId) {
   }
 
   const Conversation = require("../chat/models/conversation.model");
-  // Delete direct conversations where this user is a member
-  await Conversation.deleteMany({
+  const Message = require("../chat/models/message.model");
+  const ConversationMemberState = require("../chat/models/conversation-member-state.model");
+  // Delete direct conversations (cascade: messages + member states) so partner's chat is also cleaned
+  const directConvs = await Conversation.find({
     type: "direct",
     members: userId,
-  });
+  }).select("_id").lean();
+  if (directConvs.length > 0) {
+    const directConvIds = directConvs.map((c) => c._id);
+    await Message.deleteMany({ conversationId: { $in: directConvIds } });
+    await ConversationMemberState.deleteMany({ conversationId: { $in: directConvIds } });
+    await Conversation.deleteMany({ _id: { $in: directConvIds } });
+  }
 
   // Pull user from members, admins, and broadcastPublisherIds in non-direct conversations
   await Conversation.updateMany(

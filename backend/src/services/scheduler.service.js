@@ -1,4 +1,4 @@
-const Message = require("../chat/models/message.model");
+﻿const Message = require("../chat/models/message.model");
 const User = require("../models/user.model");
 const {
   getConversationById,
@@ -24,14 +24,16 @@ const logger = require("../utils/logger");
 async function processSingleScheduledMessage(msgData, io) {
   const now = new Date();
 
-  // 1. Update message: mark isScheduled as false and update timestamp to now so it lands chronologically
-  const message = await Message.findByIdAndUpdate(
-    msgData._id,
+  // 1. Atomically claim the message to prevent double-send race condition
+  const message = await Message.findOneAndUpdate(
+    { _id: msgData._id, isScheduled: true, isDeleted: { $ne: true } },
     {
-      isScheduled: false,
-      scheduledFor: null,
-      createdAt: now,
-      updatedAt: now,
+      $set: {
+        isScheduled: false,
+        scheduledFor: null,
+        createdAt: now,
+        updatedAt: now,
+      },
     },
     { new: true }
   ).populate(
@@ -39,6 +41,7 @@ async function processSingleScheduledMessage(msgData, io) {
     "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt"
   );
 
+  // If null, another caller already claimed/processed it — skip silently
   if (!message) return null;
 
   const sender = message.senderId;
@@ -86,6 +89,7 @@ async function processSingleScheduledMessage(msgData, io) {
 
   // 4. Update conversation lastMessage & lastActivityAt
   conversation.lastMessage = {
+    id: message._id,
     content: message.content || message.fileName || "",
     senderId,
     senderName: sender?.fullName || sender?.username || "User",

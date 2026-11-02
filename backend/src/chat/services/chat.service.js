@@ -1003,11 +1003,6 @@ async function assertConversationManagementAccess(currentUser, conversation) {
     return;
   }
 
-  const canCreateRooms = await userHasPermission(currentUser, "canCreateRooms");
-  if (canCreateRooms && conversation.type !== "direct") {
-    return;
-  }
-
   if (conversation.type === "broadcast") {
     const canSendBroadcast = await userHasPermission(
       currentUser,
@@ -2572,7 +2567,14 @@ async function deleteMessage(currentUser, messageId) {
   }
 
   if (message.storedFilePath) {
-    await deleteFileIfExists(message.storedFilePath);
+    const isReferencedElsewhere = await Message.exists({
+      _id: { $ne: message._id },
+      storedFilePath: message.storedFilePath,
+      isDeleted: { $ne: true },
+    });
+    if (!isReferencedElsewhere) {
+      await deleteFileIfExists(message.storedFilePath);
+    }
   }
 
   message.isDeleted = true;
@@ -2609,13 +2611,9 @@ async function updateMessage(currentUser, messageId, payload) {
   const conversation = await getConversationById(message.conversationId);
   await assertConversationAccess(currentUser, conversation);
 
-  const canDeleteAnyMessage = await userHasPermission(
-    currentUser,
-    "canDeleteMessages",
-  );
   const isOwnMessage = message.senderId.toString() === currentUser.id;
-  if (!isOwnMessage && !canDeleteAnyMessage) {
-    throw new ApiError(403, "Permission denied.");
+  if (!isOwnMessage) {
+    throw new ApiError(403, "You can only edit your own messages.");
   }
 
   if (message.fileUrl) {
@@ -2852,7 +2850,7 @@ async function joinConversation(currentUser, conversationId) {
   if (!conversation) {
     throw new ApiError(404, "Conversation not found.");
   }
-  if (conversation.type === "department" || conversation.type === "broadcast") {
+  if (conversation.type === "direct" || conversation.type === "department" || conversation.type === "broadcast") {
     throw new ApiError(400, "This conversation cannot be joined manually.");
   }
 
@@ -2889,6 +2887,17 @@ async function leaveConversation(currentUser, conversationId) {
   conversation.admins = (conversation.admins || []).filter(
     (entry) => entry.toString() !== currentUser.id,
   );
+
+  // Auto-promote first remaining member to admin if no admins left
+  if (
+    conversation.admins.length === 0 &&
+    conversation.members.length > 0 &&
+    conversation.type !== "direct"
+  ) {
+    const newAdminId = conversation.members[0];
+    conversation.admins = [newAdminId];
+  }
+
   await conversation.save();
   const leftAt = new Date();
   await markConversationMemberLeft(conversation._id, currentUser.id, leftAt);
@@ -2996,8 +3005,9 @@ async function removeConversationMember(currentUser, conversationId, userId) {
     isActive: true,
   }).exec();
   assertGroupOwnerAccess(currentUser, conversation);
-  if (String(userId) === currentUser.id) {
-    throw new ApiError(400, "Group creator cannot remove themselves.");
+  const creatorId = getObjectIdString(conversation.createdBy);
+  if (String(userId) === creatorId) {
+    throw new ApiError(403, "Cannot modify the original group creator.");
   }
 
   const memberIds = new Set(
@@ -3123,8 +3133,9 @@ async function demoteConversationAdmin(currentUser, conversationId, userId) {
     isActive: true,
   }).exec();
   assertGroupOwnerAccess(currentUser, conversation);
-  if (String(userId) === currentUser.id) {
-    throw new ApiError(400, "Group creator cannot be demoted.");
+  const creatorIdDemote = getObjectIdString(conversation.createdBy);
+  if (String(userId) === creatorIdDemote) {
+    throw new ApiError(403, "Cannot demote the original group creator.");
   }
 
   conversation.admins = (conversation.admins || []).filter(
@@ -3177,8 +3188,9 @@ async function blockConversationMember(currentUser, conversationId, userId) {
     isActive: true,
   }).exec();
   assertGroupOwnerAccess(currentUser, conversation);
-  if (String(userId) === currentUser.id) {
-    throw new ApiError(400, "Group creator cannot block themselves.");
+  const creatorIdBlock = getObjectIdString(conversation.createdBy);
+  if (String(userId) === creatorIdBlock) {
+    throw new ApiError(403, "Cannot block the original group creator.");
   }
 
   conversation.members = (conversation.members || []).filter(
@@ -3273,10 +3285,12 @@ async function searchMessages(
   let restrictedBroadcastConversationIds = [];
   let clearHistoryAt = null;
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
+  let conversation = null;
+  let memberState = null;
   if (conversationId) {
-    const conversation = await getConversationById(conversationId);
+    conversation = await getConversationById(conversationId);
     await assertConversationAccess(currentUser, conversation);
-    const memberState = await getConversationState(
+    memberState = await getConversationState(
       currentUser.id,
       conversationId,
     );
@@ -3704,8 +3718,9 @@ async function votePollMessage(currentUser, messageId, optionIds) {
     );
   }
 
-  // Add the user to the selected options
-  for (const optId of optionIds) {
+  // Add the user to the selected options (deduplicate optionIds first)
+  const uniqueOptionIds = [...new Set((optionIds || []).map(String))];
+  for (const optId of uniqueOptionIds) {
     const optionExists = metadata.options.find(
       (o) => String(o.id) === String(optId),
     );

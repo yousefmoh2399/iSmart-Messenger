@@ -1,8 +1,11 @@
-const Department = require("../models/department.model");
+﻿const Department = require("../models/department.model");
 const Conversation = require("../models/conversation.model");
+const Message = require("../models/message.model");
+const ConversationMemberState = require("../models/conversation-member-state.model");
 const User = require("../../models/user.model");
 const ApiError = require("../../utils/api-error");
 const { userHasPermission } = require("./role.service");
+const { deleteFileIfExists } = require("../../utils/file.util");
 
 function isDuplicateCodeError(error) {
   return (
@@ -180,6 +183,22 @@ async function deleteDepartment(actor, departmentId) {
     await Ticket.deleteMany({ _id: { $in: ticketIds } });
   }
 
+  // Cascade: delete messages (and their files) + member states before deleting conversations
+  const deptConvs = await Conversation.find({ departmentId: department._id }).select("_id").lean();
+  if (deptConvs.length > 0) {
+    const deptConvIds = deptConvs.map((c) => c._id);
+    // Delete physical files for messages with stored files
+    const fileMsgs = await Message.find({
+      conversationId: { $in: deptConvIds },
+      storedFilePath: { $ne: null },
+      isDeleted: { $ne: true },
+    }).select("storedFilePath").lean();
+    for (const msg of fileMsgs) {
+      await deleteFileIfExists(msg.storedFilePath);
+    }
+    await Message.deleteMany({ conversationId: { $in: deptConvIds } });
+    await ConversationMemberState.deleteMany({ conversationId: { $in: deptConvIds } });
+  }
   await Conversation.deleteMany({ departmentId: department._id });
   await Department.deleteOne({ _id: departmentId });
 }

@@ -52,6 +52,7 @@ const {
   getMessageReadReceipts,
   votePollMessage,
   exportPollToExcel,
+  assertConversationAccess,
 } = require("../services/chat.service");
 const { listAuditLogs } = require("../services/audit.service");
 const { listSystemErrors } = require("../services/system-error.service");
@@ -398,7 +399,20 @@ const deleteConversationAvatar = asyncHandler(async (req, res) => {
 });
 
 const downloadConversationAvatar = asyncHandler(async (req, res) => {
-  const filePath = await getConversationAvatarFilePath(req.params.id);
+  const { id } = req.params;
+  // Auth: user must be authenticated and a member of the conversation
+  const currentUser = req.user;
+  if (!currentUser) {
+    res.status(401);
+    throw new Error("Authentication required.");
+  }
+  const conversation = await getConversationById(id);
+  if (!conversation) {
+    res.status(404);
+    throw new Error("Conversation not found.");
+  }
+  await assertConversationAccess(currentUser, conversation);
+  const filePath = await getConversationAvatarFilePath(id);
   await sendUploadFile(res, filePath, {
     cacheControl: "private, max-age=300",
     disposition: "inline",
