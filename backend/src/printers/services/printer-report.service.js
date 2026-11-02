@@ -417,7 +417,7 @@ async function buildExcelReport({
         value: `${totalPaper.exactReams.toFixed(2)} رزمة (${totalPaper.fullReams} رزمة و ${totalPaper.remainingSheets} ورقة)`,
       },
       {
-        metric: "عدد العملاء التقديري (16 ورقة/عميل)",
+        metric: "عدد العملاء التقديري",
         value: `${totalPaper.estimatedClients} عميل`,
       },
       {
@@ -534,7 +534,7 @@ async function buildExcelReport({
       { header: "إجمالي الصفحات", key: "totalPages", width: 20 },
       { header: "استهلاك الرزم (500 ورقة/رزمة)", key: "reams", width: 28 },
       { header: "الرزم المطلوبة محاسبيًا", key: "requiredReams", width: 22 },
-      { header: "العملاء المفترضين (16 ورقة/عميل)", key: "estimatedClients", width: 28 },
+      { header: "العملاء المفترضين", key: "estimatedClients", width: 20 },
       { header: "متوسط صفحات/طابعة", key: "avgPagesPerPrinter", width: 18 },
       { header: "طابعات بقراءات جزئية", key: "partialPrintersCount", width: 22 },
       { header: "طابعات باستهلاك مرتفع جدًا", key: "suspiciousPrintersCount", width: 26 },
@@ -727,7 +727,7 @@ async function buildPdfReport({
       { label: isAllMonths ? `إجمالي الاستهلاك للفترة` : `إجمالي استهلاك شهر ${monthName}`, value: `${mTotal} صفحة` },
       { label: "إجمالي استهلاك الرزم (500 ورقة/رزمة)", value: `${mPaper.exactReams.toFixed(2)} رزمة (${mPaper.fullReams} رزمة و ${mPaper.remainingSheets} ورقة)` },
       { label: "الرزم المطلوبة محاسبيًا", value: mPaper.requiredReams },
-      { label: "عدد العملاء التقديري (16 ورقة/عميل)", value: `${mPaper.estimatedClients} عميل` },
+      { label: "عدد العملاء التقديري", value: `${mPaper.estimatedClients} عميل` },
       { label: "فروع تحتاج مراجعة القراءات", value: mPartialBranches },
       { label: isAllMonths ? "استهلاك أبيض وأسود للفترة" : "استهلاك أبيض وأسود للشهر", value: `${mMono} صفحة` },
       { label: isAllMonths ? "استهلاك ملون للفترة" : "استهلاك ملون للشهر", value: `${mColor} صفحة` }
@@ -829,6 +829,10 @@ async function buildPrinterPdfReport({
   actor,
   month,
   year,
+  fromMonth,
+  fromYear,
+  toMonth,
+  toYear,
   monthlyConsumption,
 }) {
   const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -850,14 +854,23 @@ async function buildPrinterPdfReport({
 
   withArabicFont(doc, true).fontSize(22).fillColor("#0F172A");
   let mainTitle = "تقرير تفصيلي للطابعة";
-  if (month && year) {
+  const effectiveMonth = month ?? fromMonth;
+  const effectiveYear = year ?? fromYear;
+  if (effectiveMonth && effectiveYear) {
     const monthNames = [
       "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
       "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
     ];
-    const isAllMonths = Number(month) === 0;
-    const monthName = isAllMonths ? "جميع الشهور" : (monthNames[Number(month) - 1] || month);
-    mainTitle = isAllMonths ? `تقرير الطابعة لجميع شهور سنة ${year}` : `تقرير الطابعة لشهر ${monthName} ${year}`;
+    const isAllMonths = Number(effectiveMonth) === 0;
+    const isRange = fromMonth && toMonth && (fromMonth !== toMonth || fromYear !== toYear);
+    if (isRange) {
+      const fromName = monthNames[Number(fromMonth) - 1] || fromMonth;
+      const toName = monthNames[Number(toMonth) - 1] || toMonth;
+      mainTitle = `تقرير الطابعة للفترة من شهر ${fromName} ${fromYear} إلى ${toName} ${toYear}`;
+    } else {
+      const monthName = isAllMonths ? "جميع الشهور" : (monthNames[Number(effectiveMonth) - 1] || effectiveMonth);
+      mainTitle = isAllMonths ? `تقرير الطابعة لجميع شهور سنة ${effectiveYear}` : `تقرير الطابعة لشهر ${monthName} ${effectiveYear}`;
+    }
   }
   pdfText(doc, mainTitle, { align: "right" });
 

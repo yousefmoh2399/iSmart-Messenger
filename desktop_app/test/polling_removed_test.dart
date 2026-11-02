@@ -36,6 +36,13 @@ void main() {
             source.contains("_timer = Timer.periodic")) {
           continue;
         }
+        // Scheduled messages list widget displays a countdown timer for UI refresh
+        if (path.endsWith(
+              'features/chat/presentation/widgets/scheduled_messages_list.dart',
+            ) &&
+            source.contains('_countdownTimer = Timer.periodic')) {
+          continue;
+        }
         offenders.add(path);
       }
     }

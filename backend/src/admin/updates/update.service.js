@@ -137,9 +137,18 @@ function normalizeLocalIp(value) {
   }
   const ipv4Match = raw.match(/(?:\d{1,3}\.){3}\d{1,3}/);
   if (ipv4Match && ipv4Match[0]) {
-    return ipv4Match[0].trim();
+    const ip = ipv4Match[0].trim();
+    if (
+      ip.startsWith("127.") ||
+      ip.startsWith("169.254.") ||
+      ip === "0.0.0.0" ||
+      ip === "255.255.255.255"
+    ) {
+      return null;
+    }
+    return ip;
   }
-  return raw || null;
+  return null;
 }
 
 function normalizePlatform(value, fallback = "desktop_windows") {
@@ -149,7 +158,13 @@ function normalizePlatform(value, fallback = "desktop_windows") {
   if (raw === "mobile" || raw === "android" || raw === "mobile_android") {
     return "mobile_android";
   }
-  if (raw === "desktop" || raw === "windows" || raw === "desktop_windows") {
+  if (
+    raw === "desktop" ||
+    raw === "windows" ||
+    raw === "desktop_windows" ||
+    raw === "desktop_electron" ||
+    raw === "electron"
+  ) {
     return "desktop_windows";
   }
   return fallback;
@@ -738,11 +753,21 @@ async function registerDeviceHeartbeat(actor, payload = {}, requestMeta = {}) {
 
   const baseUrlOverride = requestMeta.baseUrlOverride;
 
+  const latestReleaseDoc = await UpdateRelease.findOne({
+    platform: device.platform || "desktop_windows",
+    isEnabled: true,
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
   return {
     device: serializeDevice(device),
     pendingTasks: pendingTasks.map((task) =>
       serializeTask(task, task.releaseId, { baseUrlOverride }),
     ),
+    latestRelease: latestReleaseDoc
+      ? serializeRelease(latestReleaseDoc, { baseUrlOverride })
+      : null,
     heartbeatIntervalSeconds: 30,
     serverTime: nowIso(),
   };
@@ -943,7 +968,11 @@ async function createRelease(actor, payload = {}, artifactFile = null) {
       ? "installer"
       : payload.packageLayout === "apk"
         ? "apk"
-        : "bundle_zip";
+        : payload.packageLayout === "bundle_zip"
+          ? "bundle_zip"
+          : (resolvedInstallerKind === "exe" || resolvedInstallerKind === "msi")
+            ? "installer"
+            : (resolvedInstallerKind === "apk" ? "apk" : "bundle_zip");
   const entryExecutable =
     String(payload.entryExecutable || "")
       .trim()
@@ -1291,15 +1320,28 @@ async function listBranchPeerDevices(actor, options = {}) {
   const heartbeatCutoff = new Date(Date.now() - BRANCH_PEER_ACTIVE_WINDOW_MS);
 
   const query = {
-    isActive: true,
-    platform: "desktop_windows",
-    branchCode,
-    lastHeartbeatAt: { $gte: heartbeatCutoff },
+    platform: {
+      $in: [
+        "desktop_windows",
+        "desktop",
+        "windows",
+        "desktop_electron",
+        "electron",
+      ],
+    },
     localIp: { $nin: [null, ""] },
   };
+
   if (targetUserId) {
+    // When looking up a specific peer user (e.g. direct chat ping / RDP),
+    // do NOT filter by branchCode! Cross-branch direct chats must resolve.
     query.lastKnownUserId = toObjectId(targetUserId, "userId");
+  } else {
+    query.branchCode = branchCode;
+    query.isActive = true;
+    query.lastHeartbeatAt = { $gte: heartbeatCutoff };
   }
+
   if (!includeSelf) {
     query.lastKnownUserId = {
       ...(query.lastKnownUserId ? { $eq: query.lastKnownUserId } : {}),
@@ -1307,9 +1349,20 @@ async function listBranchPeerDevices(actor, options = {}) {
     };
   }
 
-  const devices = await UpdateDevice.find(query)
+  let devices = await UpdateDevice.find(query)
     .sort({ lastHeartbeatAt: -1, updatedAt: -1 })
     .lean();
+
+  // If a specific targetUserId was requested and no active device was found,
+  // do a relaxed lookup without strict platform check to get any known device IP.
+  if (targetUserId && devices.length === 0) {
+    devices = await UpdateDevice.find({
+      lastKnownUserId: toObjectId(targetUserId, "userId"),
+      localIp: { $nin: [null, ""] },
+    })
+      .sort({ lastHeartbeatAt: -1, updatedAt: -1 })
+      .lean();
+  }
 
   const seen = new Set();
   const items = [];

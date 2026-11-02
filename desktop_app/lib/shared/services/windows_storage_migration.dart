@@ -24,6 +24,7 @@ class WindowsStorageMigration {
     'prefs_scan_save_directory_path',
     'prefs_preferred_printer_name',
     'prefs_notification_tone_id',
+    'prefs_notification_display_mode',
   };
 
   static Future<void> migrateIfNeeded() async {

@@ -1,14 +1,48 @@
 const ConversationMemberState = require("../models/conversation-member-state.model");
 
+function extractObjectId(entry) {
+  if (!entry) return null;
+  if (typeof entry === "string") {
+    const trimmed = entry.trim();
+    if (/^[a-fA-F0-9]{24}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/['"]?_?id['"]?\s*[:=]\s*(?:new\s+ObjectId\(['"])?([a-fA-F0-9]{24})['"]?\)?/i);
+    if (match && match[1]) return match[1];
+    return null;
+  }
+  if (entry._id) {
+    const str = entry._id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (entry.id) {
+    const str = entry.id.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  if (typeof entry.toString === "function") {
+    const str = entry.toString();
+    if (/^[a-fA-F0-9]{24}$/.test(str)) return str;
+  }
+  return null;
+}
+
 async function ensureConversationMemberStates(conversationId, memberIds) {
-  if (!conversationId || !Array.isArray(memberIds) || memberIds.length === 0) {
+  const cleanMemberIds = Array.isArray(memberIds)
+    ? [...new Set(memberIds.map(extractObjectId).filter(Boolean))]
+    : [];
+  if (!conversationId || cleanMemberIds.length === 0) {
     return;
   }
 
-  const operations = memberIds.map((userId) => ({
+  const operations = cleanMemberIds.map((userId) => ({
     updateOne: {
       filter: { conversationId, userId },
       update: {
+        $set: {
+          membershipStatus: "active",
+          removedAt: null,
+          leftAt: null,
+          blockedAt: null,
+          isDeleted: false,
+        },
         $setOnInsert: {
           conversationId,
           userId,
@@ -25,42 +59,174 @@ async function ensureConversationMemberStates(conversationId, memberIds) {
   }
 }
 
+async function markConversationMemberRemoved(conversationId, userId, removedAt = new Date()) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: "removed",
+        removedAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId: cleanUserId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function markConversationMemberLeft(conversationId, userId, leftAt = new Date()) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: "left",
+        leftAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId: cleanUserId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function markConversationMemberBlocked(conversationId, userId, blockedAt = new Date()) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: "blocked",
+        blockedAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId: cleanUserId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+}
+
+async function markConversationMemberUnblocked(conversationId, userId, isMember = false) {
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId || !conversationId) return;
+  await ConversationMemberState.updateOne(
+    { conversationId, userId: cleanUserId },
+    {
+      $set: {
+        membershipStatus: isMember ? "active" : "removed",
+        blockedAt: null,
+      },
+    }
+  );
+}
+
 async function removeConversationMemberState(conversationId, userId) {
-  await ConversationMemberState.deleteOne({ conversationId, userId });
+  const cleanUserId = extractObjectId(userId);
+  if (!cleanUserId) return;
+  await ConversationMemberState.deleteOne({ conversationId, userId: cleanUserId });
 }
 
 async function syncConversationMemberStates(conversationId, memberIds) {
-  const normalized = [...new Set((memberIds || []).map(entry => {
-    if (!entry) return "";
-    if (typeof entry === "string") return entry;
-    if (entry._id) return entry._id.toString();
-    return entry.toString();
-  }).filter(Boolean))];
+  const normalized = [...new Set((memberIds || []).map(extractObjectId).filter(Boolean))];
 
   await ensureConversationMemberStates(conversationId, normalized);
-  await ConversationMemberState.deleteMany({
-    conversationId,
-    userId: { $nin: normalized },
-  });
+  if (normalized.length > 0) {
+    await ConversationMemberState.updateMany(
+      {
+        conversationId,
+        userId: { $nin: normalized },
+        membershipStatus: { $ne: "removed" },
+      },
+      {
+        $set: {
+          membershipStatus: "removed",
+          removedAt: new Date(),
+          unreadCount: 0,
+        },
+      }
+    );
+  }
 }
 
 async function incrementUnreadCounts(conversationId, recipientIds, exceptUserId = null) {
-  const filtered = (recipientIds || []).filter(
-    (userId) => String(userId) !== String(exceptUserId || "")
-  );
+  const exceptId = exceptUserId ? extractObjectId(exceptUserId) : null;
+  const filtered = (recipientIds || [])
+    .map(extractObjectId)
+    .filter((userId) => Boolean(userId) && userId !== exceptId);
   if (filtered.length === 0) {
     return;
   }
 
-  await ConversationMemberState.updateMany(
-    {
-      conversationId,
-      userId: { $in: filtered },
-    },
-    {
-      $inc: { unreadCount: 1 },
-    }
-  );
+  const existing = await ConversationMemberState.find({
+    conversationId,
+    userId: { $in: filtered },
+  })
+    .select("userId membershipStatus isDeleted")
+    .lean();
+
+  const existingMap = new Map(existing.map((e) => [String(e.userId), e]));
+  const missingUserIds = filtered.filter((uid) => !existingMap.has(String(uid)));
+
+  if (missingUserIds.length > 0) {
+    const insertOps = missingUserIds.map((userId) => ({
+      updateOne: {
+        filter: { conversationId, userId },
+        update: {
+          $setOnInsert: {
+            conversationId,
+            userId,
+            joinedAt: new Date(),
+          },
+          $inc: { unreadCount: 1 },
+          $set: {
+            membershipStatus: "active",
+            isDeleted: false,
+            deletedAt: null,
+          },
+        },
+        upsert: true,
+      },
+    }));
+    await ConversationMemberState.bulkWrite(insertOps, { ordered: false });
+  }
+
+  const nonActiveStatuses = new Set(["removed", "left", "blocked"]);
+  const eligibleExistingIds = existing
+    .filter((e) => !nonActiveStatuses.has(e.membershipStatus))
+    .map((e) => e.userId);
+
+  if (eligibleExistingIds.length > 0) {
+    await ConversationMemberState.updateMany(
+      {
+        conversationId,
+        userId: { $in: eligibleExistingIds },
+      },
+      {
+        $inc: { unreadCount: 1 },
+        $set: {
+          membershipStatus: "active",
+          isDeleted: false,
+          deletedAt: null,
+        },
+      }
+    );
+  }
 }
 
 async function markConversationRead({ conversationId, userId, lastReadMessageId = null }) {
@@ -82,7 +248,7 @@ async function markConversationRead({ conversationId, userId, lastReadMessageId 
 
 async function getUnreadCountsForUser(userId) {
   const states = await ConversationMemberState.find({ userId })
-    .select("conversationId unreadCount isMuted isArchived isPinned isFavorite")
+    .select("conversationId unreadCount isMuted mutedUntil isArchived isPinned isFavorite")
     .lean();
 
   return Object.fromEntries(
@@ -92,6 +258,26 @@ async function getUnreadCountsForUser(userId) {
 
 async function getConversationState(userId, conversationId) {
   return ConversationMemberState.findOne({ userId, conversationId }).lean();
+}
+
+async function deleteConversationForUser(conversationId, userId, deletedAt = new Date()) {
+  await ConversationMemberState.updateOne(
+    { conversationId, userId },
+    {
+      $set: {
+        isDeleted: true,
+        deletedAt: deletedAt,
+        clearHistoryAt: deletedAt,
+        unreadCount: 0,
+      },
+      $setOnInsert: {
+        conversationId,
+        userId,
+        joinedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
 }
 
 async function clearConversationHistoryForUser(conversationId, userId, clearAt = new Date()) {
@@ -118,6 +304,17 @@ async function updateConversationState(userId, conversationId, payload = {}) {
 
   if (Object.prototype.hasOwnProperty.call(payload, "isMuted")) {
     update.isMuted = Boolean(payload.isMuted);
+    if (!update.isMuted) {
+      update.mutedUntil = null;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "mutedUntil")) {
+    const rawDate = payload.mutedUntil ? new Date(payload.mutedUntil) : null;
+    const isValidDate = rawDate && !isNaN(rawDate.getTime());
+    update.mutedUntil = isValidDate ? rawDate : null;
+    if (update.mutedUntil) {
+      update.isMuted = true;
+    }
   }
   if (Object.prototype.hasOwnProperty.call(payload, "isArchived")) {
     update.isArchived = Boolean(payload.isArchived);
@@ -130,6 +327,12 @@ async function updateConversationState(userId, conversationId, payload = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(payload, "clearHistoryAt")) {
     update.clearHistoryAt = payload.clearHistoryAt || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "isDeleted")) {
+    update.isDeleted = Boolean(payload.isDeleted);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "deletedAt")) {
+    update.deletedAt = payload.deletedAt || null;
   }
 
   await ConversationMemberState.updateOne(
@@ -151,6 +354,10 @@ async function updateConversationState(userId, conversationId, payload = {}) {
 
 module.exports = {
   ensureConversationMemberStates,
+  markConversationMemberRemoved,
+  markConversationMemberLeft,
+  markConversationMemberBlocked,
+  markConversationMemberUnblocked,
   removeConversationMemberState,
   syncConversationMemberStates,
   incrementUnreadCounts,
@@ -158,5 +365,6 @@ module.exports = {
   getUnreadCountsForUser,
   getConversationState,
   clearConversationHistoryForUser,
+  deleteConversationForUser,
   updateConversationState,
 };

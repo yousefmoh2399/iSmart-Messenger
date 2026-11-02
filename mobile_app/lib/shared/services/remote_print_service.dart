@@ -175,4 +175,37 @@ class RemotePrintService {
       jobId: data['jobId']?.toString(),
     );
   }
+
+  Future<RemotePrintRequestResult> requestPrintFromHtml({
+    required String htmlContent,
+    String fileName = 'thermal_test_receipt.html',
+    String? preferredPrinterName,
+    String source = 'thermal_test_print',
+    String? clientRequestId,
+  }) async {
+    final bytes = utf8.encode(htmlContent);
+    final effectiveClientRequestId = clientRequestId ?? const Uuid().v4();
+    final response = await _socket.emitWithAck('print_request', {
+      'inlineFileBase64': base64Encode(bytes),
+      'fileName': fileName,
+      'mimeType': 'text/html',
+      'preferredPrinterName': preferredPrinterName,
+      'source': source,
+      'clientRequestId': effectiveClientRequestId,
+    });
+    final success = response['ok'] == true && response['success'] == true;
+    final data = response['data'] is Map
+        ? Map<String, dynamic>.from(response['data'] as Map)
+        : const <String, dynamic>{};
+    final message =
+        response['error']?.toString() ??
+        (success
+            ? 'تم إرسال أمر طباعة ورقة الاختبار بنجاح.'
+            : 'تعذر إرسال أمر الطباعة إلى طابعة الفرع.');
+    return RemotePrintRequestResult(
+      success: success,
+      message: message,
+      jobId: data['jobId']?.toString(),
+    );
+  }
 }

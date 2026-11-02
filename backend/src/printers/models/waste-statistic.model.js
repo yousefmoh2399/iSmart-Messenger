@@ -15,4 +15,14 @@ const wasteStatisticSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Compound indexes for efficient report queries:
+//   exportCustomReport queries { branchId, calculatedAt: {$gte, $lt} }
+//   per-printer waste queries { printerId, calculatedAt: {$gte, $lt} }
+wasteStatisticSchema.index({ branchId: 1, calculatedAt: 1 });
+wasteStatisticSchema.index({ printerId: 1, calculatedAt: 1 });
+
+// E4: TTL index — automatically purge waste records older than 2 years (730 days).
+// Prevents unbounded collection growth with no data-retention policy.
+wasteStatisticSchema.index({ calculatedAt: 1 }, { expireAfterSeconds: 730 * 24 * 60 * 60 });
+
 module.exports = mongoose.model("WasteStatistic", wasteStatisticSchema);

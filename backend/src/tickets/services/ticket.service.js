@@ -939,13 +939,9 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
   ];
 
   if (format === "pdf" || format === "xlsx") {
-    const {
-      buildCustomPdfReport,
-      buildCustomExcelReport,
-      formatDate,
-    } = require("./ticket-custom-reports.service");
+    const { formatDate } = require("./ticket-custom-reports.service");
 
-    const reportData = tickets.map((ticket) => {
+    const reportData = tickets.map((ticket, idx) => {
       const isResolved =
         ticket.status === "resolved" || ticket.status === "closed";
       const resolvedBy = isResolved
@@ -956,11 +952,13 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
         : "";
 
       return {
+        index: idx + 1,
         ticketNumber: ticket.ticketNumber || "",
         title: ticket.title || "",
         status: STATUS_AR[ticket.status] || ticket.status,
         priority: PRIORITY_AR[ticket.priority] || ticket.priority,
-        department: ticket.branchDepartmentId?.name || "",
+        department: ticket.targetDepartmentId?.name || ticket.branchDepartmentId?.name || "",
+        branch: ticket.branchDepartmentId?.name || "",
         createdBy:
           ticket.createdBy?.fullName || ticket.createdBy?.username || "",
         assignedTo:
@@ -973,30 +971,46 @@ async function exportTicketReport(currentUser, filters = {}, format = "csv") {
         lastUpdateAt: formatDate(ticket.lastUpdateAt),
         resolvedAt: formatDate(ticket.resolvedAt),
         closedAt: formatDate(ticket.closedAt),
-        minutesBetween: minutesBetween(
+        durationMinutes: minutesBetween(
           ticket.createdAt,
           ticket.resolvedAt || ticket.closedAt,
         ),
         updatesCount: countsByTicket.get(ticket._id.toString()) || 0,
         rating: ticket.rating ? `${ticket.rating} نجوم` : "لم يقيم",
-        lastPublicMessage: ticket.lastPublicMessage || "",
+        lastMessage: ticket.lastPublicMessage || "",
+        description: ticket.description || "",
+        ticketType: ticket.ticketType === 'complaint' ? 'شكوى' : ticket.ticketType === 'suggestion' ? 'مقترح' : 'تذكرة',
       };
     });
 
-    const reportTitle = `تقرير ${ticketType === "complaint" ? "الشكاوي" : ticketType === "suggestion" ? "المقترحات" : "التذاكر"}`;
+    const reportTitle = `تقرير ${ticketType === "complaint" ? "الشكاوى" : ticketType === "suggestion" ? "المقترحات" : "التذاكر"}`;
 
-    if (format === "pdf") {
-      return await buildCustomPdfReport(
-        reportData,
-        "tickets-report",
-        reportTitle,
-      );
-    } else {
-      return await buildCustomExcelReport(
-        reportData,
-        "tickets-report",
-        reportTitle,
-      );
+    try {
+      const { getActiveTemplate } = require("../../reports/services/report-template.service");
+      const { buildDynamicPdfReport, buildDynamicExcelReport } = require("../../reports/services/report-generator.service");
+      const template = await getActiveTemplate("tickets", filters.templateId);
+
+      if (format === "pdf") {
+        return await buildDynamicPdfReport({
+          template,
+          data: reportData,
+          reportTitle,
+        });
+      } else {
+        return await buildDynamicExcelReport({
+          template,
+          data: reportData,
+          reportTitle,
+        });
+      }
+    } catch (err) {
+      console.error("Dynamic ticket report generation error, using fallback:", err);
+      const { buildCustomPdfReport, buildCustomExcelReport } = require("./ticket-custom-reports.service");
+      if (format === "pdf") {
+        return await buildCustomPdfReport(reportData, "tickets-report", reportTitle);
+      } else {
+        return await buildCustomExcelReport(reportData, "tickets-report", reportTitle);
+      }
     }
   }
 

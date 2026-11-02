@@ -22,6 +22,8 @@ class ChatSocketService {
 
   Stream<ChatSocketEvent> get events => _eventsController.stream;
 
+  io.Socket? get socket => _socket;
+
   bool get isConnected => _socket?.connected == true;
 
   bool _isSessionExpiredError(Object? error) {
@@ -43,7 +45,7 @@ class ChatSocketService {
       return;
     }
 
-    disconnect();
+    disconnect(clearJoined: false);
     _connectedBaseUrl = baseUrl;
     _connectedToken = token;
     _presenceStatus = 'online';
@@ -195,6 +197,7 @@ class ChatSocketService {
     }
 
     bind('receive_message');
+    bind('scheduled_message_sent');
     bind('typing');
     bind('stop_typing');
     bind('message_seen');
@@ -230,6 +233,12 @@ class ChatSocketService {
     bind('ticket_updated');
     bind('tickets_updated');
     bind('ticket_settings_updated');
+    bind('stickers_updated');
+    bind('clipboard_synced');
+    bind('clipboard_history_updated');
+    bind('quick_replies_updated');
+    bind('reminders_updated');
+    bind('workspace_docs_updated');
 
     socket.connect();
     _socket = socket;
@@ -398,14 +407,16 @@ class ChatSocketService {
     }
   }
 
-  void disconnect() {
+  void disconnect({bool clearJoined = true}) {
     _manualDisconnect = true;
     _presenceStatus = 'offline';
     final socket = _socket;
     if (socket == null) {
       _connectedBaseUrl = null;
       _connectedToken = null;
-      _joinedConversationIds.clear();
+      if (clearJoined) {
+        _joinedConversationIds.clear();
+      }
       return;
     }
 
@@ -418,7 +429,9 @@ class ChatSocketService {
     _socket = null;
     _connectedBaseUrl = null;
     _connectedToken = null;
-    _joinedConversationIds.clear();
+    if (clearJoined) {
+      _joinedConversationIds.clear();
+    }
   }
 
   void dispose() {

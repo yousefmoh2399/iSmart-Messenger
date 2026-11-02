@@ -1,4 +1,9 @@
 const asyncHandler = require("../utils/async-handler");
+const { exportUsersReport } = require("../services/user-export.service");
+const {
+  batchGenerateBranchUsers,
+  DEFAULT_JOB_TEMPLATES,
+} = require("../services/user-batch-generator.service");
 const { sendChatResponse } = require("../chat/utils/chat-response");
 const { sendUploadFile } = require("../utils/send-upload-file");
 const {
@@ -16,6 +21,27 @@ const {
   registerCurrentPushDevice,
   unregisterCurrentPushDevice,
 } = require("../services/user.service");
+
+
+const exportUsersHandler = asyncHandler(async (req, res) => {
+  const { buffer, fileName, contentType } = await exportUsersReport(req.user, {
+    format: req.query.format === "pdf" ? "pdf" : "xlsx",
+    branchId: req.query.branchId || null,
+    departmentId: req.query.departmentId || null,
+    role: req.query.role || null,
+    status: req.query.status || null,
+    search: req.query.search || null,
+  });
+
+  res.set({
+    "Content-Type": contentType,
+    "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+    "Content-Length": buffer.length,
+    "Access-Control-Expose-Headers": "Content-Disposition",
+  });
+
+  res.status(200).send(buffer);
+});
 
 const getUsers = asyncHandler(async (req, res) => {
   const { users, pagination } = await listUsers(req.user, req.query);
@@ -37,6 +63,26 @@ const createManagedUser = asyncHandler(async (req, res) => {
     }
   }
   sendChatResponse(res, { status: 201, data: { user }, legacy: { user } });
+});
+
+const batchGenerateBranchUsersHandler = asyncHandler(async (req, res) => {
+  const result = await batchGenerateBranchUsers(req.user, req.body);
+  const io = req.app.get("io");
+  if (io) {
+    io.emit("users_updated", {});
+  }
+  sendChatResponse(res, {
+    status: 201,
+    data: result,
+    legacy: result,
+  });
+});
+
+const getBatchJobTemplatesHandler = asyncHandler(async (req, res) => {
+  sendChatResponse(res, {
+    data: { templates: DEFAULT_JOB_TEMPLATES },
+    legacy: { templates: DEFAULT_JOB_TEMPLATES },
+  });
 });
 
 const updateManagedUser = asyncHandler(async (req, res) => {
@@ -166,8 +212,11 @@ const deleteUserHandler = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  exportUsersHandler,
   getUsers,
   createManagedUser,
+  batchGenerateBranchUsersHandler,
+  getBatchJobTemplatesHandler,
   updateManagedUser,
   updateManagedUserStatus,
   resetManagedUserPassword,

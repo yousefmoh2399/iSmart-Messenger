@@ -6,6 +6,14 @@ class SystemMonitorRepository {
 
   final ApiClient _apiClient;
 
+  Future<SystemTelemetryStats> getSystemStats() async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      '/api/admin/system-monitor/stats',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>? ?? {};
+    return SystemTelemetryStats.fromJson(data);
+  }
+
   Future<PaginatedResponse<DeviceSession>> getConnections({
     int page = 1,
     int limit = 50,
@@ -29,7 +37,9 @@ class SystemMonitorRepository {
     final pagination = data['pagination'] as Map<String, dynamic>? ?? {};
 
     return PaginatedResponse<DeviceSession>(
-      items: sessionsList.map((e) => DeviceSession.fromJson(e as Map<String, dynamic>)).toList(),
+      items: sessionsList
+          .map((e) => DeviceSession.fromJson(e as Map<String, dynamic>))
+          .toList(),
       page: pagination['page'] as int? ?? page,
       limit: pagination['limit'] as int? ?? limit,
       total: pagination['total'] as int? ?? 0,
@@ -60,7 +70,9 @@ class SystemMonitorRepository {
     final pagination = data['pagination'] as Map<String, dynamic>? ?? {};
 
     return PaginatedResponse<ClientErrorLog>(
-      items: errorsList.map((e) => ClientErrorLog.fromJson(e as Map<String, dynamic>)).toList(),
+      items: errorsList
+          .map((e) => ClientErrorLog.fromJson(e as Map<String, dynamic>))
+          .toList(),
       page: pagination['page'] as int? ?? page,
       limit: pagination['limit'] as int? ?? limit,
       total: pagination['total'] as int? ?? 0,
@@ -72,7 +84,9 @@ class SystemMonitorRepository {
     final response = await _apiClient.dio.patch<Map<String, dynamic>>(
       '/api/admin/system-monitor/errors/$id/resolve',
     );
-    return ClientErrorLog.fromJson(response.data?['data'] as Map<String, dynamic>);
+    return ClientErrorLog.fromJson(
+      response.data?['data'] as Map<String, dynamic>,
+    );
   }
 
   Future<void> deleteAllErrors() async {

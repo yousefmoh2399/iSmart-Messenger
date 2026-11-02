@@ -121,6 +121,7 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
     String? priority,
     String? q,
     String format = 'xlsx',
+    String? templateId,
   }) {
     return _repository().exportTicketsReport(
       ticketType: ticketType,
@@ -128,6 +129,7 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
       priority: priority,
       q: q,
       format: format,
+      templateId: templateId,
     );
   }
 }

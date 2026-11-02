@@ -13,6 +13,8 @@ import '../../features/admin/data/announcement_repository.dart';
 import '../../features/admin/presentation/announcements_controller.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/chat/data/chat_local_cache.dart';
+import '../../features/chat/data/chat_outbox_service.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -28,7 +30,6 @@ import '../../features/printers/presentation/printer_controller.dart';
 import '../../features/scanner/data/image_processing_service.dart';
 import '../../features/scanner/data/local_document_store.dart';
 import '../../features/scanner/data/pdf_builder_service.dart';
-import '../../features/scanner/data/scanner_service.dart';
 import '../../features/scanner/data/signature_composer_service.dart';
 import '../../features/scanner/data/signature_storage_service.dart';
 import '../../features/scanner/presentation/scan_session_controller.dart';
@@ -267,6 +268,93 @@ class UserPreferencesController extends AsyncNotifier<UserPreferences> {
     final current = state.valueOrNull ?? UserPreferences.defaults();
     await savePreferences(current.copyWith(notificationToneId: value));
   }
+  Future<void> setNotificationDisplayMode(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationDisplayModeId: value));
+  }
+
+  Future<void> setNotificationsEnabled(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationsEnabled: value));
+  }
+
+  Future<void> setMessageNotificationsEnabled(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(messageNotificationsEnabled: value));
+  }
+
+  Future<void> setMessageVibrate(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(messageVibrate: value));
+  }
+
+  Future<void> setMessagePreview(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(messagePreview: value));
+  }
+
+  Future<void> setGroupNotificationsEnabled(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupNotificationsEnabled: value));
+  }
+
+  Future<void> setGroupTone(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupToneId: value));
+  }
+
+  Future<void> setGroupVibrate(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupVibrate: value));
+  }
+
+  Future<void> setGroupPreview(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupPreview: value));
+  }
+
+  Future<void> setGroupNotificationsByChat(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(groupNotificationsByChat: value));
+  }
+
+  Future<void> setInAppBanners(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(inAppBanners: value));
+  }
+
+  Future<void> setReactionNotifications(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(reactionNotifications: value));
+  }
+
+  Future<void> setAutoClearOnOpen(bool value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(autoClearOnOpen: value));
+  }
+
+  Future<void> resetNotificationPreferences() async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    final defaults = UserPreferences.defaults();
+    await savePreferences(
+      current.copyWith(
+        notificationsEnabled: defaults.notificationsEnabled,
+        notificationToneId: defaults.notificationToneId,
+        messageNotificationsEnabled: defaults.messageNotificationsEnabled,
+        messageVibrate: defaults.messageVibrate,
+        messagePreview: defaults.messagePreview,
+        groupNotificationsEnabled: defaults.groupNotificationsEnabled,
+        groupToneId: defaults.groupToneId,
+        groupVibrate: defaults.groupVibrate,
+        groupPreview: defaults.groupPreview,
+        groupNotificationsByChat: defaults.groupNotificationsByChat,
+        inAppBanners: defaults.inAppBanners,
+        reactionNotifications: defaults.reactionNotifications,
+        autoClearOnOpen: defaults.autoClearOnOpen,
+      ),
+    );
+  }
+
 }
 
 final apiBaseUrlStoreProvider = Provider<ApiBaseUrlStore>(
@@ -329,10 +417,6 @@ final pdfBuilderServiceProvider = Provider<PdfBuilderService>(
   (ref) => PdfBuilderService(),
 );
 
-final scannerServiceProvider = Provider<ScannerService>(
-  (ref) => ScannerService(),
-);
-
 final signatureStorageServiceProvider = Provider<SignatureStorageService>(
   (ref) => SignatureStorageService(),
 );
@@ -390,6 +474,17 @@ final announcementRepositoryProvider = Provider<AnnouncementRepository>((ref) {
   return AnnouncementRepository(ref.watch(authenticatedApiClientProvider));
 });
 
+final chatLocalCacheProvider = Provider<ChatLocalCache>((ref) {
+  return ChatLocalCache();
+});
+
+final chatOutboxServiceProvider = Provider<ChatOutboxService>((ref) {
+  final cache = ref.watch(chatLocalCacheProvider);
+  final service = ChatOutboxService(cache);
+  ref.onDispose(service.dispose);
+  return service;
+});
+
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
   return ChatRepository(
     ref.watch(authenticatedApiClientProvider),
@@ -397,6 +492,7 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
     authRepository: ref.watch(authRepositoryProvider),
+    cache: ref.watch(chatLocalCacheProvider),
   );
 });
 

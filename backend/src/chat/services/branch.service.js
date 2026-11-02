@@ -1,4 +1,4 @@
-const Branch = require("../models/branch.model");
+﻿const Branch = require("../models/branch.model");
 const User = require("../../models/user.model");
 const ApiError = require("../../utils/api-error");
 const { userHasPermission } = require("./role.service");
@@ -37,7 +37,7 @@ async function listBranches() {
 }
 
 async function createBranch(actor, payload) {
-  const allowed = await userHasPermission(actor, "canCreateDepartments");
+  const allowed = await userHasPermission(actor, "canManageBranches");
   if (!allowed) {
     throw new ApiError(403, "Permission denied.");
   }
@@ -76,7 +76,7 @@ async function createBranch(actor, payload) {
 }
 
 async function updateBranch(actor, branchId, payload) {
-  const allowed = await userHasPermission(actor, "canCreateDepartments");
+  const allowed = await userHasPermission(actor, "canManageBranches");
   if (!allowed) {
     throw new ApiError(403, "Permission denied.");
   }
@@ -119,7 +119,7 @@ async function updateBranch(actor, branchId, payload) {
 }
 
 async function deleteBranch(actor, branchId) {
-  const allowed = await userHasPermission(actor, "canCreateDepartments");
+  const allowed = await userHasPermission(actor, "canManageBranches");
   if (!allowed) {
     throw new ApiError(403, "Permission denied.");
   }

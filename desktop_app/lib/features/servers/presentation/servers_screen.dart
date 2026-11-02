@@ -12,6 +12,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import '../../../shared/providers/providers.dart';
@@ -72,6 +73,8 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
   int _connectTimeoutMs = 3000;
   int _requestTimeoutMs = 4000;
   int _autoRetries = 2;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
   bool _refreshInFlight = false;
   bool _refreshQueued = false;
   StreamSubscription<ChatSocketEvent>? _socketEventsSubscription;
@@ -136,6 +139,7 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
 
   @override
   void dispose() {
+    _searchController.dispose();
     _socketEventsSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -608,15 +612,47 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
     );
   }
 
+  Future<void> _openExternalBrowser(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر فتح الرابط في المتصفح الخارجي.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ أثناء فتح المتصفح: $e')),
+      );
+    }
+  }
+
   List<_ServerTarget> _visibleTargets() {
-    if (_filter == _ServersFilter.all) return _targets;
+    final query = _searchQuery.trim().toLowerCase();
     return _targets.where((target) {
       final idx = _targets.indexOf(target);
-      final status = _health[idx].status;
+      final status = idx >= 0 && idx < _health.length
+          ? _health[idx].status
+          : _ServerStatus.unknown;
       if (_filter == _ServersFilter.up) {
-        return status == _ServerStatus.up || status == _ServerStatus.degraded;
+        if (status != _ServerStatus.up && status != _ServerStatus.degraded) {
+          return false;
+        }
+      } else if (_filter == _ServersFilter.down) {
+        if (status != _ServerStatus.down) {
+          return false;
+        }
       }
-      return status == _ServerStatus.down;
+      if (query.isNotEmpty) {
+        final titleMatch = target.title.toLowerCase().contains(query);
+        final urlMatch = target.baseUrl.toLowerCase().contains(query);
+        return titleMatch || urlMatch;
+      }
+      return true;
     }).toList();
   }
 
@@ -643,538 +679,974 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
       await _requestRefresh(showLoading: false);
     });
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final visible = _visibleTargets();
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;
     final user = ref.watch(authControllerProvider).valueOrNull;
     final canOpenAdmin = user?.canManageChat == true;
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        body: SafeArea(
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    Material(
-                      color: Theme.of(context).colorScheme.surface,
-                      child: Row(
-                        children: [
-                          const Expanded(
-                            child: TabBar(
-                              tabs: [
-                                Tab(
-                                  icon: Icon(Icons.dns_outlined),
-                                  text: 'الحالة',
-                                ),
-                                Tab(
-                                  icon: Icon(Icons.web_outlined),
-                                  text: 'فتح سريع',
-                                ),
-                              ],
-                            ),
-                          ),
-                          PopupMenuButton<String>(
-                            tooltip: 'إعدادات متقدمة',
-                            onSelected: (value) {
-                              if (value == 'retry_settings') {
-                                unawaited(_openRetrySettingsDialog());
-                              } else if (value == 'export') {
-                                unawaited(_exportServersSettings());
-                              } else if (value == 'import') {
-                                unawaited(_importServersSettings());
-                              }
-                            },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
-                                value: 'retry_settings',
-                                child: Text('Retry Policy'),
-                              ),
-                              PopupMenuItem(
-                                value: 'export',
-                                child: Text('تصدير الإعدادات'),
-                              ),
-                              PopupMenuItem(
-                                value: 'import',
-                                child: Text('استيراد الإعدادات'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: TabBarView(
-                        children: [
-                          Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  14,
-                                  16,
-                                  8,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        children: [
-                                          ChoiceChip(
-                                            label: const Text('الكل'),
-                                            selected:
-                                                _filter == _ServersFilter.all,
-                                            onSelected: (_) => setState(
-                                              () =>
-                                                  _filter = _ServersFilter.all,
-                                            ),
-                                          ),
-                                          ChoiceChip(
-                                            label: const Text('المتاح'),
-                                            selected:
-                                                _filter == _ServersFilter.up,
-                                            onSelected: (_) => setState(
-                                              () => _filter = _ServersFilter.up,
-                                            ),
-                                          ),
-                                          ChoiceChip(
-                                            label: const Text('غير المتاح'),
-                                            selected:
-                                                _filter == _ServersFilter.down,
-                                            onSelected: (_) => setState(
-                                              () =>
-                                                  _filter = _ServersFilter.down,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        if (_lastRefreshAt != null)
-                                          Text(
-                                            'آخر فحص: ${_formatTime(_lastRefreshAt!)}',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                  color: cs.onSurfaceVariant,
-                                                ),
-                                          ),
-                                        const SizedBox(height: 6),
-                                        FilledButton.tonalIcon(
-                                          onPressed: _loading
-                                              ? null
-                                              : () => unawaited(
-                                                  _requestRefresh(),
-                                                ),
-                                          icon: _loading
-                                              ? const SizedBox(
-                                                  width: 16,
-                                                  height: 16,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                        strokeWidth: 2,
-                                                      ),
-                                                )
-                                              : const Icon(
-                                                  Icons.refresh_rounded,
-                                                ),
-                                          label: Text(
-                                            _loading
-                                                ? 'جاري الفحص'
-                                                : 'تحديث الحالة',
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: ListView.separated(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    16,
-                                    8,
-                                    16,
-                                    16,
-                                  ),
-                                  itemCount: visible.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(height: 10),
-                                  itemBuilder: (context, index) {
-                                    final target = visible[index];
-                                    final sourceIndex = _targets.indexOf(
-                                      target,
-                                    );
-                                    final health = _health[sourceIndex];
-                                    final statusColor = switch (health.status) {
-                                      _ServerStatus.degraded => const Color(
-                                        0xFFD97706,
-                                      ),
-                                      _ServerStatus.up => const Color(
-                                        0xFF16A34A,
-                                      ),
-                                      _ServerStatus.down => cs.error,
-                                      _ServerStatus.unknown => cs.outline,
-                                    };
-                                    final statusText = switch (health.status) {
-                                      _ServerStatus.degraded => 'تحذير',
-                                      _ServerStatus.up => 'متصل',
-                                      _ServerStatus.down => 'غير متاح',
-                                      _ServerStatus.unknown => 'جارٍ الفحص...',
-                                    };
-                                    final isDark =
-                                        Theme.of(context).brightness ==
-                                        Brightness.dark;
-                                    final cardBgColor = isDark
-                                        ? cs.surface.withValues(alpha: 0.65)
-                                        : Colors.white;
-                                    final cardBorderColor = isDark
-                                        ? cs.outlineVariant.withValues(
-                                            alpha: 0.35,
-                                          )
-                                        : cs.outlineVariant.withValues(
-                                            alpha: 0.55,
-                                          );
 
-                                    return Container(
-                                      decoration: BoxDecoration(
-                                        color: cardBgColor,
-                                        borderRadius: BorderRadius.circular(22),
-                                        border: Border.all(
-                                          color: cardBorderColor,
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: isDark ? 0.12 : 0.04,
-                                            ),
-                                            blurRadius: 16,
-                                            offset: const Offset(0, 6),
-                                          ),
-                                        ],
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(22),
-                                        child: InkWell(
-                                          onTap: () => _openServer(target),
-                                          borderRadius: BorderRadius.circular(
-                                            22,
-                                          ),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 18,
-                                              vertical: 16,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Container(
-                                                  width: 12,
-                                                  height: 12,
-                                                  decoration: BoxDecoration(
-                                                    color: statusColor,
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 14),
-                                                Expanded(
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Text(
-                                                        target.title,
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .titleMedium
-                                                            ?.copyWith(
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w800,
-                                                            ),
-                                                      ),
-                                                      const SizedBox(height: 4),
-                                                      Text(
-                                                        target.baseUrl,
-                                                        maxLines: 2,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .bodySmall
-                                                            ?.copyWith(
-                                                              color: cs
-                                                                  .onSurfaceVariant,
-                                                            ),
-                                                      ),
-                                                      if (health.activePort !=
-                                                          null)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                top: 6,
-                                                              ),
-                                                          child: Text(
-                                                            'أفضل بورت: ${health.activePort} - الاستقرار ${health.stabilityScore.toStringAsFixed(0)}%',
-                                                            style: Theme.of(context)
-                                                                .textTheme
-                                                                .labelSmall
-                                                                ?.copyWith(
-                                                                  color:
-                                                                      statusColor,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w700,
-                                                                ),
-                                                          ),
-                                                        ),
-                                                      const SizedBox(
-                                                        height: 10,
-                                                      ),
-                                                      Wrap(
-                                                        spacing: 8,
-                                                        runSpacing: 8,
-                                                        children: [
-                                                          for (final probe
-                                                              in health
-                                                                  .portsState)
-                                                            GestureDetector(
-                                                              onTap: () =>
-                                                                  _openServerWithPort(
-                                                                    target,
-                                                                    preferredPort:
-                                                                        probe
-                                                                            .port,
-                                                                  ),
-                                                              child: Container(
-                                                                padding:
-                                                                    const EdgeInsets.symmetric(
-                                                                      horizontal:
-                                                                          12,
-                                                                      vertical:
-                                                                          6,
-                                                                    ),
-                                                                decoration: BoxDecoration(
-                                                                  color:
-                                                                      probe
-                                                                          .isReachable
-                                                                      ? const Color(
-                                                                          0xFF16A34A,
-                                                                        ).withValues(
-                                                                          alpha:
-                                                                              0.12,
-                                                                        )
-                                                                      : cs.error.withValues(
-                                                                          alpha:
-                                                                              0.1,
-                                                                        ),
-                                                                  borderRadius:
-                                                                      BorderRadius.circular(
-                                                                        12,
-                                                                      ),
-                                                                  border: Border.all(
-                                                                    color:
-                                                                        probe
-                                                                            .isReachable
-                                                                        ? const Color(
-                                                                            0xFF16A34A,
-                                                                          ).withValues(
-                                                                            alpha:
-                                                                                0.3,
-                                                                          )
-                                                                        : cs.error.withValues(
-                                                                            alpha:
-                                                                                0.25,
-                                                                          ),
-                                                                  ),
-                                                                ),
-                                                                child: Text(
-                                                                  ':${probe.port} ${probe.isReachable ? 'متاح' : 'غير متاح'}${probe.latencyMs != null ? ' - ${probe.latencyMs}ms' : ''}',
-                                                                  style: Theme.of(context)
-                                                                      .textTheme
-                                                                      .labelSmall
-                                                                      ?.copyWith(
-                                                                        color:
-                                                                            probe.isReachable
-                                                                            ? const Color(
-                                                                                0xFF16A34A,
-                                                                              )
-                                                                            : cs.error,
-                                                                        fontWeight:
-                                                                            FontWeight.w700,
-                                                                      ),
-                                                                ),
-                                                              ),
-                                                            ),
-                                                        ],
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 14),
-                                                Text(
-                                                  statusText,
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .labelLarge
-                                                      ?.copyWith(
-                                                        color: statusColor,
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                      ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                const Icon(
-                                                  Icons.open_in_new_rounded,
-                                                  size: 20,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
+    final totalCount = _targets.length;
+    final upCount = _health
+        .where(
+          (h) =>
+              h.status == _ServerStatus.up ||
+              h.status == _ServerStatus.degraded,
+        )
+        .length;
+    final downCount =
+        _health.where((h) => h.status == _ServerStatus.down).length;
+
+    return Scaffold(
+      backgroundColor: isDark
+          ? const Color(0xFF0F1117)
+          : const Color(0xFFF8FAFC),
+      body: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 1. Header Bar
+                  _buildHeader(context, isDark, cs),
+                  // 2. Main Scrollable Dashboard
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // KPI Bento Cards
+                          Row(
+                            children: [
+                              _buildKpiCard(
+                                title: 'إجمالي الخوادم',
+                                count: '$totalCount',
+                                subtitle: 'الأنظمة المسجلة بالمؤسسة',
+                                icon: Icons.dns_rounded,
+                                color: const Color(0xFF3B82F6),
+                                isDark: isDark,
+                              ),
+                              const SizedBox(width: 14),
+                              _buildKpiCard(
+                                title: 'جاهز ومتصل',
+                                count: '$upCount',
+                                subtitle: 'تعمل بكفاءة واستقرار',
+                                icon: Icons.check_circle_rounded,
+                                color: const Color(0xFF10B981),
+                                isDark: isDark,
+                              ),
+                              const SizedBox(width: 14),
+                              _buildKpiCard(
+                                title: 'انقطاع أو تنبيه',
+                                count: '$downCount',
+                                subtitle: 'بحاجة للمراجعة أو غير متاح',
+                                icon: Icons.error_rounded,
+                                color: const Color(0xFFEF4444),
+                                isDark: isDark,
                               ),
                             ],
                           ),
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                DropdownButtonFormField<_ServerTarget>(
-                                  value: _selected,
-                                  decoration: const InputDecoration(
-                                    labelText: 'اختر سيرفر للفتح السريع',
-                                  ),
-                                  items: _targets
-                                      .map(
-                                        (s) => DropdownMenuItem<_ServerTarget>(
-                                          value: s,
-                                          child: Text(s.title),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (value) => setState(() {
-                                    _selected = value;
-                                    _selectedPort = null;
-                                  }),
-                                ),
-                                const SizedBox(height: 10),
-                                DropdownButtonFormField<int>(
-                                  value: _selectedPort,
-                                  decoration: const InputDecoration(
-                                    labelText: 'اختيار البورت (اختياري)',
-                                    hintText: 'Auto إذا تركتها فارغة',
-                                  ),
-                                  items: (_selected?.fallbackPorts ?? const <int>[])
-                                      .map((port) {
-                                        final index = _selected == null
-                                            ? -1
-                                            : _targets.indexOf(_selected!);
-                                        _PortProbe? probe;
-                                        if (index >= 0) {
-                                          for (final entry
-                                              in _health[index].portsState) {
-                                            if (entry.port == port) {
-                                              probe = entry;
-                                              break;
-                                            }
-                                          }
-                                        }
-                                        final status = probe == null
-                                            ? 'غير مفحوص'
-                                            : (probe.isReachable
-                                                  ? 'متاح${probe.latencyMs != null ? ' (${probe.latencyMs}ms)' : ''}'
-                                                  : 'غير متاح');
-                                        return DropdownMenuItem<int>(
-                                          value: port,
-                                          child: Text('Port $port - $status'),
-                                        );
-                                      })
-                                      .toList(),
-                                  onChanged: _selected == null
-                                      ? null
-                                      : (value) => setState(
-                                          () => _selectedPort = value,
-                                        ),
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: FilledButton.icon(
-                                        onPressed: _selected == null
-                                            ? null
-                                            : () {
-                                                if (_selectedPort == null) {
-                                                  _openServer(_selected!);
-                                                } else {
-                                                  _openServerWithPort(
-                                                    _selected!,
-                                                    preferredPort:
-                                                        _selectedPort!,
-                                                  );
-                                                }
-                                              },
-                                        icon: const Icon(
-                                          Icons.open_in_browser_outlined,
-                                        ),
-                                        label: const Text('فتح داخل التطبيق'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                          const SizedBox(height: 18),
+                          // Search & Filters Row
+                          _buildFilterAndSearchBar(
+                            isDark: isDark,
+                            cs: cs,
+                            totalCount: totalCount,
+                            upCount: upCount,
+                            downCount: downCount,
                           ),
+                          const SizedBox(height: 18),
+                          // Servers List
+                          if (visible.isEmpty)
+                            _buildEmptyState(isDark: isDark, cs: cs)
+                          else
+                            ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: visible.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 12),
+                              itemBuilder: (context, index) {
+                                final target = visible[index];
+                                final sourceIndex = _targets.indexOf(target);
+                                final health = sourceIndex >= 0 &&
+                                        sourceIndex < _health.length
+                                    ? _health[sourceIndex]
+                                    : _ServerHealth.unknown();
+                                return _buildServerCard(
+                                  context: context,
+                                  target: target,
+                                  health: health,
+                                  isDark: isDark,
+                                  cs: cs,
+                                );
+                              },
+                            ),
                         ],
                       ),
                     ),
+                  ),
+                ],
+              ),
+            ),
+            if (!widget.isWrapped)
+              DesktopWorkspaceSidebar(
+                user: user,
+                activeSection: DesktopWorkspaceSection.servers,
+                currentThemeMode: themeMode,
+                isDark: themeMode == ThemeMode.dark,
+                accentColor: Theme.of(context).colorScheme.primary,
+                onOpenChat: _goToChat,
+                onRefresh: _loading
+                    ? () {}
+                    : () => unawaited(_requestRefresh()),
+                onOpenFiles: _goToFiles,
+                onOpenServers: () {},
+                onOpenProfile: _goToProfile,
+                onOpenUpdates: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const UpdateCenterScreen(),
+                  ),
+                ),
+                onToggleTheme: () => ref
+                    .read(themeModeControllerProvider.notifier)
+                    .cycleThemeMode(),
+                onOpenTickets: _goToTicketsPanel,
+                onLogout: () =>
+                    ref.read(authControllerProvider.notifier).logout(),
+                onCreateConversation: _goToChat,
+                onOpenAdmin: canOpenAdmin ? _goToAdminPanel : null,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, bool isDark, ColorScheme cs) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(Icons.cloud_done_rounded, color: cs.primary, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'خوادم النظام والخدمات',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'متابعة الحالة التشغيلية والوصول المباشر للأنظمة والخدمات المركزية',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_lastRefreshAt != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : const Color(0xFFE2E8F0).withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.access_time_rounded,
+                    size: 13,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    'آخر فحص: ${_formatTime(_lastRefreshAt!)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          FilledButton.tonalIcon(
+            onPressed: _loading ? null : () => unawaited(_requestRefresh()),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: _loading
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(_loading ? 'جاري الفحص...' : 'تحديث الحالة'),
+          ),
+          const SizedBox(width: 6),
+          PopupMenuButton<String>(
+            tooltip: 'إعدادات متقدمة',
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : const Color(0xFFE2E8F0).withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.tune_rounded,
+                size: 18,
+                color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+              ),
+            ),
+            onSelected: (value) {
+              if (value == 'retry_settings') {
+                unawaited(_openRetrySettingsDialog());
+              } else if (value == 'export') {
+                unawaited(_exportServersSettings());
+              } else if (value == 'import') {
+                unawaited(_importServersSettings());
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'retry_settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.timer_outlined, size: 18),
+                    SizedBox(width: 10),
+                    Text('مهلة الاتصال وإعادة المحاولة'),
                   ],
                 ),
               ),
-              if (!widget.isWrapped)
-                DesktopWorkspaceSidebar(
-                  user: user,
-                  activeSection: DesktopWorkspaceSection.servers,
-                  currentThemeMode: themeMode,
-                  isDark: themeMode == ThemeMode.dark,
-                  accentColor: Theme.of(context).colorScheme.primary,
-                  onOpenChat: _goToChat,
-                  onRefresh: _loading
-                      ? () {}
-                      : () => unawaited(_requestRefresh()),
-                  onOpenFiles: _goToFiles,
-                  onOpenServers: () {},
-                  onOpenProfile: _goToProfile,
-                  onOpenUpdates: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const UpdateCenterScreen(),
+              PopupMenuItem(
+                value: 'export',
+                child: Row(
+                  children: [
+                    Icon(Icons.download_rounded, size: 18),
+                    SizedBox(width: 10),
+                    Text('تصدير إعدادات السيرفرات'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'import',
+                child: Row(
+                  children: [
+                    Icon(Icons.upload_rounded, size: 18),
+                    SizedBox(width: 10),
+                    Text('استيراد إعدادات السيرفرات'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKpiCard({
+    required String title,
+    required String count,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E2128) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    count,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      height: 1.1,
                     ),
                   ),
-                  onToggleTheme: () => ref
-                      .read(themeModeControllerProvider.notifier)
-                      .cycleThemeMode(),
-                  onOpenTickets: _goToTicketsPanel,
-                  onLogout: () =>
-                      ref.read(authControllerProvider.notifier).logout(),
-                  onCreateConversation: _goToChat,
-                  onOpenAdmin: canOpenAdmin ? _goToAdminPanel : null,
+                  const SizedBox(height: 2),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFF64748B),
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark
+                          ? const Color(0xFF64748B)
+                          : const Color(0xFF94A3B8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterAndSearchBar({
+    required bool isDark,
+    required ColorScheme cs,
+    required int totalCount,
+    required int upCount,
+    required int downCount,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E2128) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Row(
+        children: [
+          _buildFilterChip('الكل ($totalCount)', _ServersFilter.all, isDark, cs),
+          const SizedBox(width: 6),
+          _buildFilterChip('المتاح ($upCount)', _ServersFilter.up, isDark, cs),
+          const SizedBox(width: 6),
+          _buildFilterChip(
+            'غير المتاح ($downCount)',
+            _ServersFilter.down,
+            isDark,
+            cs,
+          ),
+          const Spacer(),
+          SizedBox(
+            width: 260,
+            height: 38,
+            child: TextField(
+              controller: _searchController,
+              onChanged: (val) => setState(() => _searchQuery = val),
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+              decoration: InputDecoration(
+                hintText: 'بحث باسم السيرفر أو الرابط...',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  color: isDark
+                      ? const Color(0xFF64748B)
+                      : const Color(0xFF94A3B8),
                 ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: isDark
+                      ? const Color(0xFF94A3B8)
+                      : const Color(0xFF64748B),
+                ),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 16),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                filled: true,
+                fillColor: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : const Color(0xFFF1F5F9),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(
+    String label,
+    _ServersFilter filter,
+    bool isDark,
+    ColorScheme cs,
+  ) {
+    final selected = _filter == filter;
+    return InkWell(
+      onTap: () => setState(() => _filter = filter),
+      borderRadius: BorderRadius.circular(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? cs.primary
+              : (isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : const Color(0xFFF1F5F9)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected
+                ? cs.onPrimary
+                : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildServerCard({
+    required BuildContext context,
+    required _ServerTarget target,
+    required _ServerHealth health,
+    required bool isDark,
+    required ColorScheme cs,
+  }) {
+    final statusColor = switch (health.status) {
+      _ServerStatus.up => const Color(0xFF10B981),
+      _ServerStatus.degraded => const Color(0xFFF59E0B),
+      _ServerStatus.down => const Color(0xFFEF4444),
+      _ServerStatus.unknown => const Color(0xFF94A3B8),
+    };
+    final statusText = switch (health.status) {
+      _ServerStatus.up => 'متصل وجاهز',
+      _ServerStatus.degraded => 'استقرار محدود',
+      _ServerStatus.down => 'غير متاح حالياً',
+      _ServerStatus.unknown => 'جارٍ الفحص...',
+    };
+
+    // Calculate latency
+    int? latency;
+    if (health.activePort != null) {
+      for (final probe in health.portsState) {
+        if (probe.port == health.activePort) {
+          latency = probe.latencyMs;
+          break;
+        }
+      }
+    }
+    latency ??= health.portsState
+        .where((p) => p.isReachable && p.latencyMs != null)
+        .map((p) => p.latencyMs!)
+        .fold<int?>(
+          null,
+          (min, val) => min == null ? val : (val < min ? val : min),
+        );
+
+    final hasMultiplePorts = target.fallbackPorts.length > 1;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E2128) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Top Row: Icon + Title/URL + Badges
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Server Icon
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.dns_rounded, color: statusColor, size: 24),
+                ),
+                const SizedBox(width: 14),
+                // Title and URL
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              target.title,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF0F172A),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          if (health.status == _ServerStatus.up ||
+                              health.status == _ServerStatus.degraded)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: statusColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '${health.stabilityScore.toStringAsFixed(0)}% استقرار',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: statusColor,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: SelectableText(
+                              target.baseUrl,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B),
+                                fontFamily: 'Consolas',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Tooltip(
+                            message: 'نسخ الرابط',
+                            child: InkWell(
+                              onTap: () {
+                                Clipboard.setData(
+                                  ClipboardData(text: target.baseUrl),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('تم نسخ رابط السيرفر'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(4),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.copy_rounded,
+                                  size: 14,
+                                  color: isDark
+                                      ? const Color(0xFF94A3B8)
+                                      : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 14),
+                // Badges (Latency & Status)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: statusColor.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: statusColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            statusText,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: statusColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (latency != null) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.bolt_rounded,
+                              size: 13,
+                              color: Color(0xFFF59E0B),
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              '$latency ms',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? const Color(0xFFCBD5E1)
+                                    : const Color(0xFF475569),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+            // Hairline separator
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Divider(
+                height: 1,
+                thickness: 0.5,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.06),
+              ),
+            ),
+            // Bottom Row: Ports info & Action Buttons
+            Row(
+              children: [
+                // Ports & Network info
+                Expanded(
+                  child: hasMultiplePorts
+                      ? Row(
+                          children: [
+                            Text(
+                              'المنافذ المتاحة:',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : const Color(0xFF64748B),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            for (final port in target.fallbackPorts) ...[
+                              _buildPortBadge(
+                                target: target,
+                                port: port,
+                                health: health,
+                                isDark: isDark,
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                          ],
+                        )
+                      : Text(
+                          health.activePort != null
+                              ? 'المنفذ النشط: :${health.activePort}'
+                              : 'المنفذ: :${target.fallbackPorts.firstOrNull ?? 80}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : const Color(0xFF64748B),
+                          ),
+                        ),
+                ),
+                // Action Buttons
+                OutlinedButton.icon(
+                  onPressed: () => _openExternalBrowser(target.baseUrl),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    side: BorderSide(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.12)
+                          : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  icon: const Icon(Icons.launch_rounded, size: 15),
+                  label: const Text('متصفح خارجي', style: TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: () => _openServer(target),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  icon: const Icon(Icons.open_in_browser_rounded, size: 17),
+                  label: const Text(
+                    'دخول النظام',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPortBadge({
+    required _ServerTarget target,
+    required int port,
+    required _ServerHealth health,
+    required bool isDark,
+  }) {
+    _PortProbe? probe;
+    for (final p in health.portsState) {
+      if (p.port == port) {
+        probe = p;
+        break;
+      }
+    }
+    final isReachable = probe?.isReachable ?? false;
+    final badgeColor = isReachable
+        ? const Color(0xFF10B981)
+        : (probe != null ? const Color(0xFFEF4444) : const Color(0xFF94A3B8));
+
+    return Tooltip(
+      message: 'فتح باستخدام المنفذ $port'
+          '${probe?.latencyMs != null ? ' (${probe!.latencyMs}ms)' : ''}',
+      child: InkWell(
+        onTap: () => _openServerWithPort(target, preferredPort: port),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: badgeColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: badgeColor.withValues(alpha: 0.25),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                ':$port',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: badgeColor,
+                ),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState({required bool isDark, required ColorScheme cs}) {
+    final isSearching = _searchQuery.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isSearching ? Icons.search_off_rounded : Icons.dns_outlined,
+              size: 32,
+              color: cs.primary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            isSearching
+                ? 'لا توجد خوادم مطابقة للبحث'
+                : 'لا توجد خوادم متاحة حالياً',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isSearching
+                ? 'جرّب البحث بكلمات أخرى أو مسح الفلتر'
+                : 'تأكد من إعدادات الاتصال أو قم بتحديث الصفحة',
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+            ),
+          ),
+          if (isSearching) ...[
+            const SizedBox(height: 14),
+            TextButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchQuery = '';
+                  _filter = _ServersFilter.all;
+                });
+              },
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('إعادة ضبط البحث'),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -98,6 +98,7 @@ class UserManagementRepository {
     required String password,
     required String role,
     String? departmentId,
+    List<String>? departmentIds,
     String? branchId,
     Map<String, bool>? permissions,
   }) async {
@@ -111,6 +112,8 @@ class UserManagementRepository {
         if (permissions != null) 'permissions': permissions,
         if (departmentId != null && departmentId.isNotEmpty)
           'departmentId': departmentId,
+        if (departmentIds != null && departmentIds.isNotEmpty)
+          'departmentIds': departmentIds,
         if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
       },
     );
@@ -125,6 +128,7 @@ class UserManagementRepository {
     String? password,
     String? role,
     String? departmentId,
+    List<String>? departmentIds,
     String? branchId,
     Map<String, bool>? permissions,
   }) async {
@@ -137,6 +141,7 @@ class UserManagementRepository {
         if (role != null) 'role': role,
         if (permissions != null) 'permissions': permissions,
         'departmentId': departmentId,
+        if (departmentIds != null) 'departmentIds': departmentIds,
         'branchId': branchId,
       },
     );

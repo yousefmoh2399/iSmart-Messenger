@@ -32,6 +32,10 @@ const conversationMemberStateSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    mutedUntil: {
+      type: Date,
+      default: null,
+    },
     isArchived: {
       type: Boolean,
       default: false,
@@ -48,9 +52,36 @@ const conversationMemberStateSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
     joinedAt: {
       type: Date,
       default: Date.now,
+    },
+    membershipStatus: {
+      type: String,
+      enum: ["active", "removed", "left", "blocked"],
+      default: "active",
+      index: true,
+    },
+    removedAt: {
+      type: Date,
+      default: null,
+    },
+    leftAt: {
+      type: Date,
+      default: null,
+    },
+    blockedAt: {
+      type: Date,
+      default: null,
     },
   },
   {

@@ -68,6 +68,23 @@ function translateApiErrorMessage(message, statusCode) {
 }
 
 function errorHandler(error, req, res, next) {
+  // Handle client-aborted requests (e.g. user cancelled upload, socket closed unexpectedly)
+  if (
+    error?.message === "Request aborted" ||
+    error?.code === "ECONNABORTED" ||
+    req.aborted ||
+    req.destroyed
+  ) {
+    logger.warn("request.aborted_by_client", {
+      path: req.originalUrl,
+      method: req.method,
+      actorId: req.user?.id || null,
+      ip: req.ip,
+      errorName: error?.name,
+      errorMessage: error?.message,
+    });
+    return;
+  }
   const requestMeta = {
     ip: req.ip,
     query: sanitizeObject(req.query),

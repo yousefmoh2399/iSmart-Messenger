@@ -13,6 +13,7 @@ import '../../../core/settings/user_preferences.dart';
 import '../../../features/auth/data/auth_repository.dart';
 import '../../../shared/services/local_media_storage_service.dart';
 import '../models/chat_models.dart';
+import 'chat_local_cache.dart';
 
 class ChatRepository {
   ChatRepository(
@@ -20,7 +21,11 @@ class ChatRepository {
     this._localStorage,
     this._preferences, {
     AuthRepository? authRepository,
-  }) : _authRepository = authRepository;
+    ChatLocalCache? cache,
+    Dio? downloadDio,
+  })  : _authRepository = authRepository,
+        _cache = cache ?? ChatLocalCache(),
+        _downloadDio = downloadDio;
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   static const int _maxConcurrentPreviewDownloads = 3;
@@ -30,11 +35,36 @@ class ChatRepository {
       <String, Future<Uint8List>>{};
   final Map<String, Future<Uint8List>> _attachmentPreviewInFlight =
       <String, Future<Uint8List>>{};
+  final Map<String, Future<String>> _downloadAttachmentInFlight =
+      <String, Future<String>>{};
+  static const int _maxPreviewMemoryEntries = 250;
+  final LinkedHashMap<String, Uint8List> _previewMemoryCache =
+      LinkedHashMap<String, Uint8List>();
+
+  Uint8List? getCachedPreviewMemory(String messageId) {
+    final value = _previewMemoryCache.remove(messageId);
+    if (value != null) {
+      _previewMemoryCache[messageId] = value;
+    }
+    return value;
+  }
+
+  void _putPreviewMemory(String messageId, Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    _previewMemoryCache.remove(messageId);
+    if (_previewMemoryCache.length >= _maxPreviewMemoryEntries) {
+      _previewMemoryCache.remove(_previewMemoryCache.keys.first);
+    }
+    _previewMemoryCache[messageId] = bytes;
+  }
 
   final ApiClient _apiClient;
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
   final AuthRepository? _authRepository;
+  final ChatLocalCache _cache;
+
+  ChatLocalCache get cache => _cache;
 
   /// Dedicated Dio instance for file downloads — no timeouts so large files
   /// never get aborted mid-transfer. The auth token is copied per-request.
@@ -72,24 +102,51 @@ class ChatRepository {
     return Duration(seconds: seconds);
   }
 
+  List<ChatConversation> _parseConversationsSafely(
+    List<Map<String, dynamic>> rawItems,
+  ) {
+    final parsed = <ChatConversation>[];
+    for (final item in rawItems) {
+      try {
+        final conv = ChatConversation.fromJson(item);
+        if (conv.id.isNotEmpty) {
+          parsed.add(conv);
+        }
+      } catch (_) {
+        // Ignore single malformed conversation so others still load
+      }
+    }
+    return parsed;
+  }
+
   Future<List<ChatConversation>> fetchConversations() async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations',
-    );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations',
+      );
+      final list = _parseConversationsSafely(
+        _extractList(response.data, 'conversations'),
+      );
+      if (list.isNotEmpty) {
+        unawaited(_cache.saveConversations(list));
+      }
+      return list;
+    } catch (e) {
+      final cached = await _cache.loadConversations();
+      if (cached != null && cached.isNotEmpty) {
+        return cached;
+      }
+      rethrow;
+    }
   }
 
   Future<List<ChatConversation>> fetchManageableConversations() async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/chat/admin/conversations',
     );
-    return _extractList(
-      response.data,
-      'conversations',
-    ).map(ChatConversation.fromJson).toList();
+    return _parseConversationsSafely(
+      _extractList(response.data, 'conversations'),
+    );
   }
 
   Future<ChatConversation> fetchConversation(String conversationId) async {
@@ -235,6 +292,7 @@ class ChatRepository {
     required String type,
     required String name,
     String description = '',
+    String? avatarUrl,
     List<String> memberIds = const [],
     List<String> adminIds = const [],
     String? departmentId,
@@ -245,6 +303,7 @@ class ChatRepository {
         'type': type,
         'name': name,
         'description': description,
+        if (avatarUrl != null && avatarUrl.isNotEmpty) 'avatarUrl': avatarUrl,
         'memberIds': memberIds,
         'adminIds': adminIds,
         if (departmentId != null && departmentId.isNotEmpty)
@@ -262,24 +321,57 @@ class ChatRepository {
     int limit = 40,
     bool isScheduled = false,
   }) async {
-    final response = await _apiClient.dio.get<Map<String, dynamic>>(
-      '/api/chat/conversations/$conversationId/messages',
-      queryParameters: {
-        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
-        'limit': limit,
-        if (isScheduled) 'isScheduled': 'true',
-      },
-    );
-    final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
-    return ChatMessagesPage(
-      messages: _extractList(
-        response.data,
-        'messages',
-      ).map(ChatMessage.fromJson).toList(),
-      nextCursor: meta['nextCursor'] as String?,
-      hasMore: meta['hasMore'] == true,
-      limit: meta['limit'] as int? ?? limit,
-    );
+    try {
+      final response = await _apiClient.dio.get<Map<String, dynamic>>(
+        '/api/chat/conversations/$conversationId/messages',
+        queryParameters: {
+          if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+          'limit': limit,
+          if (isScheduled) 'isScheduled': 'true',
+        },
+      );
+      final meta = response.data?['meta'] as Map<String, dynamic>? ?? const {};
+      if (cursor == null && !isScheduled && response.data != null) {
+        unawaited(_cache.saveRawJson('messages_$conversationId', response.data!));
+      }
+      return ChatMessagesPage(
+        messages: _extractList(
+          response.data,
+          'messages',
+        ).map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: meta['limit'] as int? ?? limit,
+      );
+    } catch (e) {
+      if (e is DioException && cursor == null && !isScheduled) {
+        final cached = await _cache.loadRawJson('messages_$conversationId');
+        if (cached != null) {
+          final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+          return ChatMessagesPage(
+            messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+            nextCursor: meta['nextCursor'] as String?,
+            hasMore: meta['hasMore'] == true,
+            limit: meta['limit'] as int? ?? limit,
+          );
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<ChatMessagesPage?> getCachedMessages(String conversationId) async {
+    final cached = await _cache.loadRawJson('messages_$conversationId');
+    if (cached != null) {
+      final meta = cached['meta'] as Map<String, dynamic>? ?? const {};
+      return ChatMessagesPage(
+        messages: _extractList(cached, 'messages').map(ChatMessage.fromJson).toList(),
+        nextCursor: meta['nextCursor'] as String?,
+        hasMore: meta['hasMore'] == true,
+        limit: (meta['limit'] as num?)?.toInt() ?? 40,
+      );
+    }
+    return null;
   }
 
   Future<ChatSearchResult> searchMessages({
@@ -374,6 +466,7 @@ class ChatRepository {
   Future<ChatPostResult> sendFileMessage({
     required String conversationId,
     required String filePath,
+    String? content,
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
@@ -390,6 +483,8 @@ class ChatRepository {
     final uploadTimeout = _uploadTimeoutForBytes(fileLength);
     final formData = FormData.fromMap({
       'conversationId': conversationId,
+      if (content != null && content.trim().isNotEmpty)
+        'content': content.trim(),
       if (replyToMessageId != null && replyToMessageId.isNotEmpty)
         'replyToMessageId': replyToMessageId,
       if (safeCustomName != null && safeCustomName.isNotEmpty)
@@ -504,6 +599,15 @@ class ChatRepository {
     );
   }
 
+  Future<ChatMessage> sendScheduledMessageNow(String messageId) async {
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/send-now',
+    );
+    final data = response.data?['data'] ?? response.data;
+    final msgJson = (data is Map<String, dynamic> ? data['message'] : null) ?? data;
+    return ChatMessage.fromJson(msgJson as Map<String, dynamic>);
+  }
+
   Future<void> removeMessage(String messageId) async {
     await _apiClient.dio.delete<Map<String, dynamic>>(
       '/api/chat/messages/$messageId',
@@ -519,6 +623,8 @@ class ChatRepository {
   Future<ChatConversation> updateConversationPreferences({
     required String conversationId,
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isArchived,
     bool? isPinned,
     bool? isFavorite,
@@ -527,6 +633,9 @@ class ChatRepository {
       '/api/chat/conversations/$conversationId/preferences',
       data: {
         if (isMuted != null) 'isMuted': isMuted,
+        if (mutedUntil != null)
+          'mutedUntil': mutedUntil.toUtc().toIso8601String(),
+        if (clearMutedUntil) 'mutedUntil': null,
         if (isArchived != null) 'isArchived': isArchived,
         if (isPinned != null) 'isPinned': isPinned,
         if (isFavorite != null) 'isFavorite': isFavorite,
@@ -575,6 +684,7 @@ class ChatRepository {
     String conversationId, {
     bool deleteForEveryone = false,
   }) async {
+    await cache.removeConversation(conversationId);
     final response = await _apiClient.dio.delete<Map<String, dynamic>>(
       '/api/chat/conversations/$conversationId',
       queryParameters: {'scope': deleteForEveryone ? 'global' : 'self'},
@@ -586,27 +696,129 @@ class ChatRepository {
     return null;
   }
 
-  Future<String> downloadAttachment(
-    ChatMessage message, {
-    void Function(int received, int total)? onProgress,
-  }) async {
-    final targetFile = await _fullAttachmentCacheFile(message);
-    if (await targetFile.exists()) return targetFile.path;
-    final downloadUrl = _downloadUrlFor(message.fileUrl!);
-    
-    await _downloadAttachmentFileWithRestore(
-      message,
-      downloadUrl,
-      targetFile.path,
-      onProgress: onProgress,
+  Future<ChatConversation?> clearConversationMessages(
+    String conversationId,
+  ) async {
+    await cache.clearConversationMessages(conversationId);
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId',
+      queryParameters: {'scope': 'clear'},
     );
+    final conversationData = response.data?['conversation'];
+    if (conversationData is Map<String, dynamic>) {
+      return ChatConversation.fromJson(conversationData);
+    }
+    return null;
+  }
 
-    return targetFile.path;
+  Future<String?> getCachedAttachmentPath(ChatMessage message) async {
+    final targetFile = await _fullAttachmentCacheFile(message);
+    if (await targetFile.exists()) {
+      final length = await targetFile.length();
+      if (length > 0) return targetFile.path;
+    }
+
+    final archive = _attachmentArchiveMetadata(message);
+    final sha256Hex = archive?['sha256']?.toString().trim().toLowerCase();
+    if (sha256Hex != null && RegExp(r'^[a-f0-9]{64}$').hasMatch(sha256Hex)) {
+      final sentArchive = await _localStorage.findSentChatArchive(
+        messageId: message.id,
+        sha256Hex: sha256Hex,
+        preferredPath: _preferences.localStorageDirectoryPath,
+      );
+      if (sentArchive != null && await sentArchive.exists()) {
+        final length = await sentArchive.length();
+        if (length > 0) return sentArchive.path;
+      }
+    }
+
+    final localPath = message.metadata?['localPath']?.toString();
+    if (localPath != null && localPath.isNotEmpty) {
+      final localFile = File(localPath);
+      if (await localFile.exists()) {
+        final length = await localFile.length();
+        if (length > 0) return localPath;
+      }
+    }
+
+    try {
+      final cacheDirectory = await _localStorage.chatDirectory(
+        preferredPath: _preferences.localStorageDirectoryPath,
+      );
+      if (await cacheDirectory.exists()) {
+        final prefix = '${message.id}_';
+        await for (final entry in cacheDirectory.list()) {
+          if (entry is File) {
+            final name = p.basename(entry.path);
+            if (name.startsWith(prefix) && await entry.length() > 0) {
+              return entry.path;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   Future<bool> isAttachmentCached(ChatMessage message) async {
+    final path = await getCachedAttachmentPath(message);
+    return path != null;
+  }
+
+  Future<String> downloadAttachment(
+    ChatMessage message, {
+    bool forceRefresh = false,
+    void Function(int received, int total)? onProgress,
+  }) async {
     final targetFile = await _fullAttachmentCacheFile(message);
-    return targetFile.exists();
+    if (!forceRefresh) {
+      final cachedPath = await getCachedAttachmentPath(message);
+      if (cachedPath != null) {
+        if (cachedPath == targetFile.path) {
+          return cachedPath;
+        }
+        try {
+          if (!await targetFile.exists()) {
+            await File(cachedPath).copy(targetFile.path);
+          }
+          return targetFile.path;
+        } catch (_) {
+          return cachedPath;
+        }
+      }
+    }
+
+    // In-flight deduplication: if already downloading, reuse existing future
+    final inFlight = _downloadAttachmentInFlight[message.id];
+    if (inFlight != null && !forceRefresh) {
+      return inFlight;
+    }
+
+    if (forceRefresh && await targetFile.exists()) {
+      try {
+        await targetFile.delete();
+      } catch (_) {}
+    }
+
+    final downloadUrl = _downloadUrlFor(message.fileUrl!);
+    
+    final future = () async {
+      await _downloadAttachmentFileWithRestore(
+        message,
+        downloadUrl,
+        targetFile.path,
+        onProgress: onProgress,
+      );
+      return targetFile.path;
+    }();
+
+    _downloadAttachmentInFlight[message.id] = future;
+    try {
+      return await future;
+    } finally {
+      _downloadAttachmentInFlight.remove(message.id);
+    }
   }
 
   Future<void> _downloadAttachmentFileWithRestore(
@@ -616,7 +828,10 @@ class ChatRepository {
     void Function(int received, int total)? onProgress,
     bool skipErrorLog = false,
   }) async {
-    const maxAttempts = 5;
+    final isAudio = message.isAudioMessage ||
+        message.messageType == 'audio' ||
+        message.metadata?['voiceNote'] == true;
+    final maxAttempts = isAudio ? 2 : 5;
 
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       int downloadedBytes = 0;
@@ -661,7 +876,11 @@ class ChatRepository {
         final stream = response.data?.stream;
         if (stream == null) throw Exception('No data stream');
 
-        await for (final chunk in stream) {
+        final chunkTimeout = isAudio
+            ? const Duration(seconds: 10)
+            : const Duration(seconds: 20);
+
+        await for (final chunk in stream.timeout(chunkTimeout)) {
           fileSink.add(chunk);
           downloadedBytes += chunk.length;
           if (onProgress != null && totalBytes > 0) {
@@ -673,51 +892,55 @@ class ChatRepository {
         await fileSink.close();
         fileSink = null;
         return; // success
-      } on DioException catch (error) {
+      } catch (error) {
         if (fileSink != null) {
-          await fileSink.flush();
-          await fileSink.close();
+          try {
+            await fileSink.flush();
+            await fileSink.close();
+          } catch (_) {}
+          fileSink = null;
         }
         
-        final statusCode = error.response?.statusCode ?? 0;
+        if (error is DioException) {
+          final statusCode = error.response?.statusCode ?? 0;
 
-        // 404 → file not on server, request rehydration then retry
-        if (statusCode == 404) {
-          if (attempt == 0) {
-            await requestAttachmentRehydrate(
-              message,
-              skipErrorLog: skipErrorLog,
-            );
+          // 404 → file not on server, request rehydration then retry
+          if (statusCode == 404) {
+            if (attempt == 0) {
+              await requestAttachmentRehydrate(
+                message,
+                skipErrorLog: skipErrorLog,
+              );
+            }
+            if (attempt < maxAttempts - 1) {
+              await Future<void>.delayed(
+                isAudio
+                    ? const Duration(milliseconds: 800)
+                    : const Duration(seconds: 3),
+              );
+              continue;
+            }
+            rethrow;
           }
-          if (attempt < maxAttempts - 1) {
-            await Future<void>.delayed(const Duration(seconds: 3));
-            continue;
+
+          // 416 → partial file is invalid/larger than server file
+          if (statusCode == 416) {
+            try {
+              if (await File(savePath).exists()) await File(savePath).delete();
+            } catch (_) {}
+            if (attempt < maxAttempts - 1) {
+              continue;
+            }
+            rethrow;
           }
-          rethrow;
         }
 
-        // 416 → partial file is invalid/larger than server file
-        if (statusCode == 416) {
-          try {
-            if (await File(savePath).exists()) await File(savePath).delete();
-          } catch (_) {}
-          if (attempt < maxAttempts - 1) {
-            continue;
-          }
-        }
-
-        // Connection reset / closed mid-download → retry automatically
-        final isConnectionReset =
-            error.type == DioExceptionType.unknown &&
-            (error.error is HttpException ||
-             error.error?.toString().contains('Connection closed') == true ||
-             error.error?.toString().contains('Connection reset') == true ||
-             error.error?.toString().contains('ECONNABORTED') == true ||
-             error.error?.toString().contains('SocketException') == true ||
-             error.error?.toString().contains('Software caused connection abort') == true);
-
-        if (isConnectionReset && attempt < maxAttempts - 1) {
-          await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
+        if (attempt < maxAttempts - 1) {
+          await Future<void>.delayed(
+            isAudio
+                ? const Duration(milliseconds: 800)
+                : Duration(seconds: 2 * (attempt + 1)),
+          );
           continue;
         }
 
@@ -782,13 +1005,23 @@ class ChatRepository {
   }
 
   Future<Uint8List> fetchAttachmentPreviewBytes(ChatMessage message) async {
+    final cachedInMemory = getCachedPreviewMemory(message.id);
+    if (cachedInMemory != null && cachedInMemory.isNotEmpty) {
+      return cachedInMemory;
+    }
+
     final localBytes = await _readLocalAttachmentBytes(message);
     if (localBytes != null) {
+      _putPreviewMemory(message.id, localBytes);
       return localBytes;
     }
     final cacheFile = await _previewAttachmentCacheFile(message);
     if (await cacheFile.exists()) {
-      return cacheFile.readAsBytes();
+      final diskBytes = await cacheFile.readAsBytes();
+      if (diskBytes.isNotEmpty) {
+        _putPreviewMemory(message.id, diskBytes);
+      }
+      return diskBytes;
     }
 
     final previewUrl = _inlineUrlFor(message.fileUrl!);
@@ -807,7 +1040,11 @@ class ChatRepository {
     );
     _attachmentPreviewInFlight[cacheKey] = future;
     try {
-      return await future;
+      final downloadedBytes = await future;
+      if (downloadedBytes.isNotEmpty) {
+        _putPreviewMemory(message.id, downloadedBytes);
+      }
+      return downloadedBytes;
     } finally {
       _attachmentPreviewInFlight.remove(cacheKey);
     }
@@ -981,10 +1218,20 @@ class ChatRepository {
   }
 
   Future<File> _fullAttachmentCacheFile(ChatMessage message) async {
-    final fileName = p.basename(message.fileName ?? 'attachment');
+    String fileName = p.basename(message.fileName ?? 'attachment');
+    if (fileName == 'attachment') {
+      if (message.isAudioMessage) {
+        fileName = 'voice_${message.id}.m4a';
+      } else if (message.isImageMessage) {
+        fileName = 'image_${message.id}.jpg';
+      }
+    } else if (message.isAudioMessage && !fileName.contains('.')) {
+      fileName = '$fileName.m4a';
+    }
     final cacheDirectory = await _localStorage.chatDirectory(
       preferredPath: _preferences.localStorageDirectoryPath,
     );
+    await cacheDirectory.create(recursive: true);
     return File(
       p.join(
         cacheDirectory.path,
@@ -1059,10 +1306,16 @@ class ChatRepository {
     required String name,
     required String code,
     String description = '',
+    List<String> managers = const [],
   }) async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/admin/departments',
-      data: {'name': name, 'code': code, 'description': description},
+      data: {
+        'name': name,
+        'code': code,
+        'description': description,
+        'managers': managers,
+      },
     );
     return DepartmentSummary.fromJson(
       response.data?['department'] as Map<String, dynamic>,
@@ -1166,6 +1419,58 @@ class ChatRepository {
 
   Future<void> deleteManagedConversation(String conversationId) async {
     await deleteConversation(conversationId, deleteForEveryone: true);
+  }
+
+Future<ChatConversation> uploadConversationAvatar({
+    required String conversationId,
+    String? filePath,
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
+    final token = await _authRepository?.getToken();
+    final resolvedFileName = fileName?.trim().isNotEmpty == true
+        ? fileName!.trim()
+        : (filePath != null ? p.basename(filePath) : 'avatar.jpg');
+
+    final MultipartFile multipartFile;
+    if (fileBytes != null) {
+      multipartFile = MultipartFile.fromBytes(fileBytes, filename: resolvedFileName);
+    } else if (filePath != null && filePath.isNotEmpty) {
+      multipartFile = await MultipartFile.fromFile(filePath, filename: resolvedFileName);
+    } else {
+      throw ArgumentError('Either filePath or fileBytes must be provided');
+    }
+
+    final response = await _apiClient.dio.post<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      data: FormData.fromMap({
+        'avatar': multipartFile,
+      }),
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        contentType: 'multipart/form-data',
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
+  }
+
+  Future<ChatConversation> removeConversationAvatar(String conversationId) async {
+    final token = await _authRepository?.getToken();
+    final response = await _apiClient.dio.delete<Map<String, dynamic>>(
+      '/api/chat/conversations/$conversationId/avatar',
+      options: Options(
+        headers: {
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ),
+    );
+    final raw = response.data?['data']?['conversation'] ??
+        response.data?['conversation'];
+    return ChatConversation.fromJson(raw as Map<String, dynamic>);
   }
 
   Future<ChatConversation> addGroupMembers({
@@ -1346,5 +1651,35 @@ class ChatRepository {
     final file = File(p.join(directory.path, filename));
     await file.writeAsBytes(bytes);
     return file;
+  }
+
+  Future<Map<String, dynamic>> fetchUserStickers() async {
+    final response =
+        await _apiClient.dio.get<Map<String, dynamic>>("/api/chat/stickers");
+    return response.data ?? const <String, dynamic>{};
+  }
+
+  Future<void> syncUserStickers({
+    required List<Map<String, dynamic>> stickers,
+    required List<Map<String, dynamic>> packs,
+  }) async {
+    await _apiClient.dio.put<void>(
+      "/api/chat/stickers",
+      data: {
+        "stickers": stickers,
+        "packs": packs,
+      },
+    );
+  }
+
+  Future<void> saveUserSticker(Map<String, dynamic> sticker) async {
+    await _apiClient.dio.post<void>(
+      "/api/chat/stickers",
+      data: sticker,
+    );
+  }
+
+  Future<void> deleteUserSticker(String stickerId) async {
+    await _apiClient.dio.delete<void>("/api/chat/stickers/$stickerId");
   }
 }

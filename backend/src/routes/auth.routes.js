@@ -6,6 +6,9 @@ const {
   me,
   refresh,
   logout,
+  getSessions,
+  revokeSession,
+  revokeOtherSessions,
 } = require("../controllers/auth.controller");
 const validateRequest = require("../middleware/validate.middleware");
 const { requireAuth } = require("../middleware/auth.middleware");
@@ -57,6 +60,9 @@ router.post(
     body("username").trim().notEmpty().withMessage("اسم المستخدم مطلوب."),
     body("password").notEmpty().withMessage("كلمة المرور مطلوبة."),
     body("deviceUid").optional().isString().trim(),
+    body("deviceName").optional().isString().trim(),
+    body("platform").optional().isString().trim(),
+    body("appVersion").optional().isString().trim(),
   ],
   validateRequest,
   login,
@@ -68,12 +74,30 @@ router.post(
   [
     body("refreshToken").notEmpty().withMessage("رمز تحديث الجلسة مطلوب."),
     body("deviceUid").optional().isString().trim(),
+    body("deviceName").optional().isString().trim(),
+    body("platform").optional().isString().trim(),
+    body("appVersion").optional().isString().trim(),
   ],
   validateRequest,
   refresh,
 );
 
 router.get("/me", requireAuth, me);
+
+router.get("/sessions", requireAuth, getSessions);
+
+router.post(
+  "/sessions/revoke-others",
+  requireAuth,
+  [
+    body("currentDeviceUid").optional().isString().trim(),
+    body("deviceUid").optional().isString().trim(),
+  ],
+  validateRequest,
+  revokeOtherSessions,
+);
+
+router.delete("/sessions/:deviceUid", requireAuth, revokeSession);
 
 router.post(
   "/logout",
