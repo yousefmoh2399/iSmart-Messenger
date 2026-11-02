@@ -133,6 +133,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   final Set<String> _cachedAttachmentIds = <String>{};
   final Set<String> _checkedAttachmentIds = <String>{};
 
+  Timer? _cachedSyncDebounceTimer;
+  final Set<String> _pendingCachedIds = <String>{};
+
+  void _scheduleCachedAttachmentStateUpdate(String messageId) {
+    _pendingCachedIds.add(messageId);
+    if (_cachedSyncDebounceTimer?.isActive ?? false) {
+      return;
+    }
+    _cachedSyncDebounceTimer = Timer(const Duration(milliseconds: 150), () {
+      if (!mounted || _pendingCachedIds.isEmpty) return;
+      setState(() {
+        _cachedAttachmentIds.addAll(_pendingCachedIds);
+        _pendingCachedIds.clear();
+      });
+    });
+  }
+
   void _syncCachedAttachments(List<ChatMessage> messages) {
     final repository = ref.read(chatRepositoryProvider);
     for (final message in messages) {
@@ -142,9 +159,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       _checkedAttachmentIds.add(message.id);
       repository.isAttachmentCached(message).then((isCached) {
         if (isCached && mounted && !_cachedAttachmentIds.contains(message.id)) {
-          setState(() {
-            _cachedAttachmentIds.add(message.id);
-          });
+          _scheduleCachedAttachmentStateUpdate(message.id);
         }
       }).catchError((_) {});
     }
@@ -157,12 +172,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _checkedAttachmentIds.add(message.id);
     ref.read(chatRepositoryProvider).isAttachmentCached(message).then((isCached) {
       if (isCached && mounted && !_cachedAttachmentIds.contains(message.id)) {
-        setState(() {
-          _cachedAttachmentIds.add(message.id);
-        });
+        _scheduleCachedAttachmentStateUpdate(message.id);
       }
     }).catchError((_) {});
   }
+
+
 
   bool get _isDownloadingAttachment => _downloadStates.isNotEmpty;
   double get _downloadProgress =>
@@ -641,6 +656,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     _recordingTicker?.cancel();
     _audioRecorder.dispose();
     _subscription?.cancel();
+    _cachedSyncDebounceTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -2312,13 +2328,28 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'لا يوجد تطبيق كمبيوتر متصل بنفس الحساب لتنفيذ الطباعة.',
+      final openDirectly = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('الطباعة'),
+          content: const Text(
+            'لا يوجد تطبيق كمبيوتر متصل حاليًا لتنفيذ الطباعة عن بُعد.\nهل ترغب بفتح الملف لطباعته عبر الهاتف؟',
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('فتح للطباعة'),
+            ),
+          ],
         ),
       );
+      if (openDirectly == true) {
+        await _downloadAttachment(message, openAfterDownload: true);
+      }
       return;
     }
 
@@ -2330,9 +2361,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    setState(() {
-      _printingItemIds.add(itemId);
-    });
+    _printingItemIds.add(itemId);
 
     final clientRequestId = _itemIdToClientRequestId.putIfAbsent(
       itemId,
@@ -2360,11 +2389,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(result.message)));
     } finally {
-      if (mounted) {
-        setState(() {
-          _printingItemIds.remove(itemId);
-        });
-      }
+      _printingItemIds.remove(itemId);
     }
   }
 
@@ -2497,6 +2522,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           );
         });
       }
+      var lastReportTime = DateTime.fromMillisecondsSinceEpoch(0);
+      var lastRatio = 0.0;
       final localPath = await repository.downloadAttachment(
         message,
         forceRefresh: forceRedownload,
@@ -2504,12 +2531,21 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           if (!mounted) {
             return;
           }
+          final ratio = total <= 0
+              ? 0.0
+              : (received / total).clamp(0, 1).toDouble();
+          final now = DateTime.now();
+          if (ratio < 1.0 &&
+              (ratio - lastRatio).abs() < 0.05 &&
+              now.difference(lastReportTime).inMilliseconds < 150) {
+            return;
+          }
+          lastRatio = ratio;
+          lastReportTime = now;
           setState(() {
             _downloadStates[message.id] = _MessageDownloadState(
               fileName: message.fileName ?? 'مرفق',
-              progress: total <= 0
-                  ? 0
-                  : (received / total).clamp(0, 1).toDouble(),
+              progress: ratio,
             );
           });
         },

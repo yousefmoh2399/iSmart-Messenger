@@ -575,7 +575,53 @@ try {
   }
   exit 0
 } catch {
-  # Fallback for image files when shell print association is missing.
+  # Fallback for Excel / spreadsheet files via Excel COM Automation
+  if (\$filePath -match '\\.(xlsx|xls|csv)\$') {
+    try {
+      \$excel = New-Object -ComObject Excel.Application -ErrorAction Stop
+      \$excel.Visible = \$false
+      \$excel.DisplayAlerts = \$false
+      \$wb = \$excel.Workbooks.Open(\$filePath)
+      if ([string]::IsNullOrWhiteSpace(\$printerName)) {
+        \$wb.PrintOut()
+      } else {
+        \$wb.PrintOut([Type]::Missing, [Type]::Missing, [Type]::Missing, [Type]::Missing, \$printerName)
+      }
+      \$wb.Close(\$false)
+      \$excel.Quit()
+      [System.Runtime.InteropServices.Marshal]::ReleaseComObject(\$excel) | Out-Null
+      exit 0
+    } catch {
+      if (\$excel) { try { \$excel.Quit() } catch {} }
+    }
+  }
+
+  # Fallback for image files using .NET PrintDocument or mspaint
+  if (\$filePath -match '\\.(png|jpg|jpeg|bmp|gif|tif|tiff)\$') {
+    try {
+      Add-Type -AssemblyName System.Drawing
+      \$doc = New-Object System.Drawing.Printing.PrintDocument
+      if (-not [string]::IsNullOrWhiteSpace(\$printerName)) {
+        \$doc.PrinterSettings.PrinterName = \$printerName
+      }
+      \$img = [System.Drawing.Image]::FromFile(\$filePath)
+      \$doc.add_PrintPage({
+        param(\$s, \$ev)
+        \$mb = \$ev.MarginBounds
+        \$scale = [Math]::Min(\$mb.Width / \$img.Width, \$mb.Height / \$img.Height)
+        \$w = [int](\$img.Width * \$scale)
+        \$h = [int](\$img.Height * \$scale)
+        \$x = \$mb.X + [int]((\$mb.Width - \$w) / 2)
+        \$y = \$mb.Y + [int]((\$mb.Height - \$h) / 2)
+        \$ev.Graphics.DrawImage(\$img, \$x, \$y, \$w, \$h)
+        \$ev.HasMorePages = \$false
+      })
+      \$doc.Print()
+      \$img.Dispose()
+      \$doc.Dispose()
+      exit 0
+    } catch {}
+  }
   if (\$filePath -match '\\.(png|jpg|jpeg|bmp|gif|tif|tiff)\$' -and (Get-Command mspaint.exe -ErrorAction SilentlyContinue)) {
     if ([string]::IsNullOrWhiteSpace(\$printerName)) {
       & mspaint.exe /p \$filePath | Out-Null
@@ -647,7 +693,7 @@ try {
               defaultPrinter?.trim().toLowerCase());
 
       final args = <String>[
-        '-silent',
+        if (printerName == null || printerName.isEmpty) '-print-dialog' else '-silent',
         '-print-settings',
         'fit',
         if (!isDefault) ...['-print-to', printerName] else '-print-to-default',

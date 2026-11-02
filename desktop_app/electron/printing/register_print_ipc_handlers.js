@@ -31,6 +31,41 @@ function registerPrintIpcHandlers({
     return candidate;
   }
 
+  function isImageFile(filePath, buffer) {
+    const ext = _path.extname(filePath || "").toLowerCase();
+    const imageExtensions = [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".svg"];
+    if (imageExtensions.includes(ext)) {
+      return true;
+    }
+    if (buffer && buffer.length >= 4) {
+      if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return true; // PNG
+      if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xd8) return true; // JPEG
+      if (buffer.length >= 6 && buffer.slice(0, 6).toString("ascii").startsWith("GIF")) return true; // GIF
+      if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) return true; // BMP
+      if (buffer.length >= 12 && buffer.slice(8, 12).toString("ascii") === "WEBP") return true; // WEBP
+    }
+    return false;
+  }
+
+  async function printImageFile(imagePath, printerName, jobId, tempDirectory) {
+    const htmlPath = _path.join(tempDirectory, `print_img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.html`);
+    const normalizedImgPath = imagePath.replace(/\\/g, "/");
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>@page{margin:0;}html,body{margin:0;padding:0;width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:#fff;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="file://${normalizedImgPath}" /></body></html>`;
+    _fs.writeFileSync(htmlPath, html, "utf8");
+    try {
+      const result = await htmlPrintService(
+        `file://${htmlPath.replace(/\\/g, "/")}`,
+        printerName || null,
+        { jobId: jobId || "image-job" }
+      );
+      return { success: true, executionState: "submitted", ...result };
+    } finally {
+      try {
+        _fs.unlinkSync(htmlPath);
+      } catch (_) {}
+    }
+  }
+
   ipcMain.handle("print:base64", async (_event, payload = {}) => {
     const tempDir = _path.join(app.getPath("temp"), "iSmart Messenger", "print_jobs");
     _fs.mkdirSync(tempDir, { recursive: true });
@@ -54,6 +89,21 @@ function registerPrintIpcHandlers({
           err.code = "INVALID_PDF_SIGNATURE";
           throw err;
         }
+
+        const isImg = isImageFile(fileName, buffer) || isImageFile(outputPath, buffer) || mime.startsWith("image/");
+        if (isImg) {
+          const result = await printImageFile(
+            outputPath,
+            payload.printerName || null,
+            payload.jobId,
+            tempDir
+          );
+          try {
+            _fs.unlinkSync(outputPath);
+          } catch (_) {}
+          return { success: true, executionState: "submitted", ...result };
+        }
+
         const text = buffer.toString("utf8");
         if (text.includes("<html") || text.includes("<body")) {
           const result = await htmlPrintService(
@@ -113,11 +163,36 @@ function registerPrintIpcHandlers({
     try {
       await downloadFileAndValidate(url, outputPath, token);
 
-      const isPdf = _fs.existsSync(outputPath) && 
-                    _fs.statSync(outputPath).size >= 5 && 
-                    _fs.readFileSync(outputPath).slice(0, 5).toString("utf8") === "%PDF-";
+      const exists = _fs.existsSync(outputPath);
+      const stat = exists ? _fs.statSync(outputPath) : null;
+      const fileBuffer = exists && stat && stat.size > 0 ? _fs.readFileSync(outputPath) : Buffer.alloc(0);
+
+      const isPdf = fileBuffer.length >= 5 && fileBuffer.slice(0, 5).toString("utf8") === "%PDF-";
 
       if (!isPdf) {
+        const mime = String(payload.mimeType || payload.contentType || "").trim().toLowerCase();
+        const isImg = isImageFile(fileName, fileBuffer) || isImageFile(outputPath, fileBuffer) || mime.startsWith("image/");
+        if (isImg) {
+          const result = await printImageFile(outputPath, printerName, payload.jobId, tempDir);
+          try {
+            _fs.unlinkSync(outputPath);
+          } catch (_) {}
+          return { success: true, ...result };
+        }
+
+        const text = fileBuffer.toString("utf8");
+        if (text.includes("<html") || text.includes("<body")) {
+          const result = await htmlPrintService(
+            `file://${outputPath.replace(/\\/g, "/")}`,
+            printerName,
+            { jobId: payload.jobId }
+          );
+          try {
+            _fs.unlinkSync(outputPath);
+          } catch (_) {}
+          return { success: true, ...result };
+        }
+
         const err = new Error("INVALID_PDF_SIGNATURE");
         err.code = "INVALID_PDF_SIGNATURE";
         throw err;

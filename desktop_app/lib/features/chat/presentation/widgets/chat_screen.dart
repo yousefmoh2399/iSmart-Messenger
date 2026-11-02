@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import 'package:swipe_to/swipe_to.dart';
 
 import '../../../../core/network/ip_address_utils.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../core/network/media_url_resolver.dart';
 import '../../../../shared/models/app_user.dart';
 import '../../../../shared/providers/providers.dart';
@@ -3458,14 +3459,147 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    final downloadUrl = _downloadUrlFor(fileUrl);
+    final printService = ref.read(desktopPrintServiceProvider);
+    final catalog = await printService.getPrinterCatalog();
+    if (!mounted) return;
+
     final prefs = ref.read(userPreferencesControllerProvider).valueOrNull;
-    final result = await ref.read(desktopPrintServiceProvider).executePrintJob({
+    final defaultPrinter = prefs?.preferredPrinterName ?? catalog.defaultPrinter;
+    String? selectedPrinter = defaultPrinter;
+
+    final shouldPrint = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.print_rounded, color: Color(0xFF007AFF), size: 24),
+                  SizedBox(width: 10),
+                  Text('طباعة المرفق', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+                ],
+              ),
+              content: SizedBox(
+                width: 440,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            message.isImageMessage
+                                ? Icons.image_rounded
+                                : (message.isPdfMessage ? Icons.picture_as_pdf_rounded : Icons.insert_drive_file_rounded),
+                            color: const Color(0xFF007AFF),
+                            size: 28,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  message.fileName ?? 'مرفق',
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (message.fileSizeBytes != null && message.fileSizeBytes! > 0)
+                                  Text(
+                                    formatFileSize(message.fileSizeBytes!),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text('اختر الطابعة:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.3)),
+                      ),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          RadioListTile<String?>(
+                            value: null,
+                            groupValue: selectedPrinter,
+                            title: const Text('طابعة النظام الافتراضية / نافذة الطباعة', style: TextStyle(fontSize: 13)),
+                            subtitle: const Text('فتح نافذة إعدادات الطابعة للطباعة', style: TextStyle(fontSize: 11)),
+                            onChanged: (val) => setDialogState(() => selectedPrinter = val),
+                          ),
+                          ...catalog.printers.map(
+                            (printer) => RadioListTile<String?>(
+                              value: printer,
+                              groupValue: selectedPrinter,
+                              title: Text(printer, style: const TextStyle(fontSize: 13)),
+                              subtitle: printer == catalog.defaultPrinter
+                                  ? const Text('طابعة النظام الافتراضية', style: TextStyle(fontSize: 11, color: Color(0xFF007AFF)))
+                                  : null,
+                              onChanged: (val) => setDialogState(() => selectedPrinter = val),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(false),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(dialogCtx).pop(true),
+                  icon: const Icon(Icons.print_rounded, size: 18),
+                  label: const Text('طباعة'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (shouldPrint != true || !mounted) {
+      return;
+    }
+
+    if (selectedPrinter != null) {
+      await ref
+          .read(userPreferencesControllerProvider.notifier)
+          .setPreferredPrinterName(selectedPrinter);
+    }
+
+    final downloadUrl = _downloadUrlFor(fileUrl);
+    final token = await ref.read(authRepositoryProvider).getValidToken();
+    final result = await printService.executePrintJob({
       'fileName': message.fileName ?? 'attachment',
       'mimeType': message.mimeType,
       'downloadUrl': downloadUrl,
+      'requestAuthToken': token,
       'source': 'chat_attachment_desktop',
-    }, preferredPrinterName: prefs?.preferredPrinterName);
+    }, preferredPrinterName: selectedPrinter);
     if (!mounted) {
       return;
     }
