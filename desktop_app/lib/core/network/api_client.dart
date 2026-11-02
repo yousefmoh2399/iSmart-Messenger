@@ -92,6 +92,7 @@ class ApiClient {
           );
 
           final isTransferEndpoint =
+              options.data is FormData ||
               requestPath.contains('/transfers') ||
               requestPath.contains('/upload') ||
               requestPath.contains('/download') ||
