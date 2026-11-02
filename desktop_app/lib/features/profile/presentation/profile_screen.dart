@@ -20,7 +20,6 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/safe_network_avatar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
-import '../../chat/presentation/chat_appearance.dart';
 import '../../chat/presentation/chat_appearance_screen.dart';
 import '../../chat/presentation/widgets/desktop_message_actions_dialogs.dart';
 import '../../chat/presentation/widgets/desktop_quick_replies.dart';

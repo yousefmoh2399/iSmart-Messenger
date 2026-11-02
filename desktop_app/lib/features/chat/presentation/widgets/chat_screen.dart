@@ -3522,9 +3522,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                if (message.fileSizeBytes != null && message.fileSizeBytes! > 0)
+                                if (message.fileSize != null && message.fileSize! > 0)
                                   Text(
-                                    formatFileSize(message.fileSizeBytes!),
+                                    formatFileSize(message.fileSize!),
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: Theme.of(context).colorScheme.onSurfaceVariant,
