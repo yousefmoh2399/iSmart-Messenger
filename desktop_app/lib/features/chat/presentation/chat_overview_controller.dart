@@ -732,12 +732,10 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final activeConversationId = ref.read(activeConversationIdProvider);
     final isAppVisible = ref.read(chatAppVisibilityProvider);
     final isChatSectionVisible = ref.read(chatSectionVisibleProvider);
-    final isForeground = ref.read(chatAppForegroundProvider);
     final isActiveConversation =
         activeConversationId == message.conversationId &&
         isAppVisible &&
-        isChatSectionVisible &&
-        isForeground;
+        isChatSectionVisible;
     final updated = [...current.conversations];
     final existing = updated[index];
     updated[index] = existing.copyWith(

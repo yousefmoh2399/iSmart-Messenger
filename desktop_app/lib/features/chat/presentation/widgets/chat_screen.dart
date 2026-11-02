@@ -589,7 +589,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
-        return web_bridge.isElectronWindowForegroundVisible();
+        final state = await web_bridge.getElectronWindowState();
+        if (state != null) {
+          final isVisible = state['isVisible'] != false;
+          final isMinimized = state['isMinimized'] == true;
+          return isVisible && !isMinimized;
+        }
       }
       return web_bridge.isPageVisible();
     }
@@ -599,13 +604,13 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       );
       if (result is Map) {
         final map = Map<Object?, Object?>.from(result);
-        final isVisible = map['isVisible'] == true;
+        final isVisible = map['isVisible'] != false;
         final isMinimized = map['isMinimized'] == true;
-        final isForeground = map['isForeground'] == true;
-        return isVisible && !isMinimized && isForeground;
+        return isVisible && !isMinimized;
       }
+      return true;
     } catch (_) {}
-    return false;
+    return true;
   }
 
   Future<void> _markSeenIfConversationIsVisible() async {

@@ -21,6 +21,7 @@ const {
 const { getEffectivePermissionsForUser } = require("../services/role.service");
 const {
   getUnreadCountsForUser,
+  getConversationState,
 } = require("../services/chat-member-state.service");
 const {
   setUserPresence,
@@ -475,11 +476,49 @@ async function emitUnreadCount(io, userId, conversationId) {
   });
 }
 
+async function getConversationMemberIds(conversation) {
+  if (!conversation) return [];
+  const memberIds = new Set(
+    (conversation.members || []).map((m) =>
+      m && m._id ? m._id.toString() : m ? m.toString() : "",
+    ).filter(Boolean),
+  );
+  if (conversation.type === "department" && conversation.departmentId) {
+    const deptId =
+      conversation.departmentId._id?.toString?.() ||
+      conversation.departmentId.toString?.();
+    if (deptId) {
+      try {
+        const departmentUsers = await User.find(
+          {
+            isActive: true,
+            $or: [
+              { departmentId: deptId },
+              { departmentIds: deptId },
+            ],
+          },
+          "_id",
+        ).lean();
+        for (const u of departmentUsers) {
+          if (u?._id) memberIds.add(u._id.toString());
+        }
+      } catch (_) {}
+    }
+  }
+  if (conversation.type === "broadcast") {
+    for (const p of conversation.broadcastPublisherIds || []) {
+      const pId = p && p._id ? p._id.toString() : p ? p.toString() : "";
+      if (pId) memberIds.add(pId);
+    }
+  }
+  return Array.from(memberIds);
+}
+
 function getTypingKey(conversationId, userId) {
   return `${conversationId}:${userId}`;
 }
 
-function setTyping(io, conversationId, userId) {
+function setTyping(io, conversationId, userId, memberIds = []) {
   const key = getTypingKey(conversationId, userId);
   typingState.set(key, Date.now());
   const existingTimer = typingTimeouts.get(key);
@@ -489,7 +528,13 @@ function setTyping(io, conversationId, userId) {
   const timer = setTimeout(() => {
     typingState.delete(key);
     typingTimeouts.delete(key);
-    io.to(getConversationRoom(conversationId)).emit("stop_typing", {
+    let stopTarget = io.to(getConversationRoom(conversationId));
+    for (const mId of memberIds) {
+      if (mId && mId !== userId) {
+        stopTarget = stopTarget.to(`user:${mId}`);
+      }
+    }
+    stopTarget.emit("stop_typing", {
       conversationId,
       userId,
     });
@@ -797,9 +842,14 @@ function initializeChatSocketServer(httpServer) {
         const isBlocked = (conversation.blockedMembers || []).some(
           (entry) => (entry._id ? entry._id.toString() : entry.toString()) === currentUser.id,
         ) || memberState?.membershipStatus === "blocked";
-        const isActiveMember = (conversation.members || []).some(
+        const isRemoved = memberState?.membershipStatus === "removed" || memberState?.membershipStatus === "left";
+        const isMemberInArray = (conversation.members || []).some(
           (entry) => (entry._id ? entry._id.toString() : entry.toString()) === currentUser.id,
-        ) && (memberState?.membershipStatus === "active" || !memberState?.membershipStatus);
+        );
+        const isActiveMember =
+          (isMemberInArray || conversation.type === "department" || conversation.type === "broadcast") &&
+          !isRemoved &&
+          (memberState?.membershipStatus === "active" || !memberState?.membershipStatus);
 
         let deliveredMessageIds = [];
         if (isActiveMember && !isBlocked) {
@@ -809,7 +859,12 @@ function initializeChatSocketServer(httpServer) {
             payload.conversationId,
           );
           if (deliveredMessageIds.length) {
-            io.to(getConversationRoom(payload.conversationId)).emit(
+            const allMemberIds = await getConversationMemberIds(conversation);
+            let deliveryTarget = io.to(getConversationRoom(payload.conversationId));
+            for (const mId of allMemberIds) {
+              deliveryTarget = deliveryTarget.to(`user:${mId}`);
+            }
+            deliveryTarget.emit(
               "message_delivered",
               {
                 conversationId: payload.conversationId,
@@ -837,30 +892,50 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("leave_conversation", async (payload = {}, ack) => {
-      socket.leave(getConversationRoom(payload.conversationId));
-      clearTyping(payload.conversationId, currentUser.id);
-      socket
-        .to(getConversationRoom(payload.conversationId))
-        .emit("stop_typing", {
+      try {
+        socket.leave(getConversationRoom(payload.conversationId));
+        clearTyping(payload.conversationId, currentUser.id);
+        const conversation = await getConversationById(payload.conversationId);
+        let stopTarget = socket.to(getConversationRoom(payload.conversationId));
+        if (conversation) {
+          const allMemberIds = await getConversationMemberIds(conversation);
+          for (const mId of allMemberIds) {
+            if (mId !== currentUser.id) {
+              stopTarget = stopTarget.to(`user:${mId}`);
+            }
+          }
+        }
+        stopTarget.emit("stop_typing", {
           conversationId: payload.conversationId,
           userId: currentUser.id,
         });
-      socketAck(ack, {
-        ok: true,
-        success: true,
-        data: { conversationId: payload.conversationId },
-      });
+        socketAck(ack, {
+          ok: true,
+          success: true,
+          data: { conversationId: payload.conversationId },
+        });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("send_message", async (payload = {}, ack) => {
       try {
         clearTyping(payload.conversationId, currentUser.id);
-        socket
-          .to(getConversationRoom(payload.conversationId))
-          .emit("stop_typing", {
-            conversationId: payload.conversationId,
-            userId: currentUser.id,
-          });
+        const conversationPre = await getConversationById(payload.conversationId);
+        let stopTargetPre = socket.to(getConversationRoom(payload.conversationId));
+        if (conversationPre) {
+          const allMemberIdsPre = await getConversationMemberIds(conversationPre);
+          for (const mId of allMemberIdsPre) {
+            if (mId !== currentUser.id) {
+              stopTargetPre = stopTargetPre.to(`user:${mId}`);
+            }
+          }
+        }
+        stopTargetPre.emit("stop_typing", {
+          conversationId: payload.conversationId,
+          userId: currentUser.id,
+        });
         const result = await createMessage(currentUser, payload, null);
         if (result.alreadyExists) {
           socketAck(ack, {
@@ -949,23 +1024,50 @@ function initializeChatSocketServer(httpServer) {
 
     socket.on("typing", async (payload = {}, ack) => {
       try {
+        if (!payload.conversationId) {
+          socketAck(ack, { ok: false, success: false, error: "Missing conversationId" });
+          return;
+        }
         const conversation = await getConversationById(payload.conversationId);
         await assertConversationAccess(currentUser, conversation);
-        const memberIds = (conversation?.members || []).map((m) =>
-          (m._id ? m._id.toString() : m.toString()),
-        );
+
+        const memberState = await getConversationState(currentUser.id, payload.conversationId);
         const isBlocked = (conversation?.blockedMembers || []).some(
           (m) => (m._id ? m._id.toString() : m.toString()) === currentUser.id,
-        );
-        if (!memberIds.includes(currentUser.id) || isBlocked) {
+        ) || memberState?.membershipStatus === "blocked";
+        const isRemoved = memberState?.membershipStatus === "removed" || memberState?.membershipStatus === "left";
+
+        if (isBlocked || isRemoved || conversation?.isActive === false) {
           socketAck(ack, { ok: false, success: false, error: "Not allowed" });
           return;
         }
-        setTyping(io, payload.conversationId, currentUser.id);
-        socket.to(getConversationRoom(payload.conversationId)).emit("typing", {
+
+        if (conversation.type === "broadcast") {
+          const publisherIds = (conversation.broadcastPublisherIds || []).map((m) =>
+            m._id ? m._id.toString() : m.toString(),
+          );
+          const isPublisher =
+            publisherIds.includes(currentUser.id) ||
+            currentUser.role === "admin" ||
+            (conversation.createdBy && String(conversation.createdBy) === currentUser.id);
+          if (!isPublisher) {
+            socketAck(ack, { ok: false, success: false, error: "Not allowed" });
+            return;
+          }
+        }
+
+        const allMemberIds = await getConversationMemberIds(conversation);
+        setTyping(io, payload.conversationId, currentUser.id, allMemberIds);
+        let typingTarget = socket.to(getConversationRoom(payload.conversationId));
+        for (const mId of allMemberIds) {
+          if (mId !== currentUser.id) {
+            typingTarget = typingTarget.to(`user:${mId}`);
+          }
+        }
+        typingTarget.emit("typing", {
           conversationId: payload.conversationId,
           userId: currentUser.id,
-          fullName: currentUser.fullName,
+          fullName: currentUser.fullName || currentUser.username || "User",
         });
         socketAck(ack, { ok: true, success: true });
       } catch (error) {
@@ -974,14 +1076,30 @@ function initializeChatSocketServer(httpServer) {
     });
 
     socket.on("stop_typing", async (payload = {}, ack) => {
-      clearTyping(payload.conversationId, currentUser.id);
-      socket
-        .to(getConversationRoom(payload.conversationId))
-        .emit("stop_typing", {
+      try {
+        if (!payload.conversationId) {
+          socketAck(ack, { ok: true, success: true });
+          return;
+        }
+        clearTyping(payload.conversationId, currentUser.id);
+        const conversation = await getConversationById(payload.conversationId);
+        let stopTarget = socket.to(getConversationRoom(payload.conversationId));
+        if (conversation) {
+          const allMemberIds = await getConversationMemberIds(conversation);
+          for (const mId of allMemberIds) {
+            if (mId !== currentUser.id) {
+              stopTarget = stopTarget.to(`user:${mId}`);
+            }
+          }
+        }
+        stopTarget.emit("stop_typing", {
           conversationId: payload.conversationId,
           userId: currentUser.id,
         });
-      socketAck(ack, { ok: true, success: true });
+        socketAck(ack, { ok: true, success: true });
+      } catch (error) {
+        socketAck(ack, { ok: false, success: false, error: error.message });
+      }
     });
 
     socket.on("message_seen", async (payload = {}, ack) => {
@@ -991,12 +1109,10 @@ function initializeChatSocketServer(httpServer) {
           payload.conversationId,
         );
         const conversation = await getConversationById(payload.conversationId);
-        const memberIds = (conversation?.members || []).map((m) =>
-          m._id ? m._id.toString() : m.toString(),
-        );
+        const allMemberIds = await getConversationMemberIds(conversation);
 
         let seenTarget = io.to(getConversationRoom(payload.conversationId));
-        for (const mId of memberIds) {
+        for (const mId of allMemberIds) {
           seenTarget = seenTarget.to(`user:${mId}`);
         }
         seenTarget.emit("message_seen", {
