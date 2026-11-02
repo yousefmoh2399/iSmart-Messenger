@@ -3721,6 +3721,7 @@ ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   const appDirNormalized = appDir.replace(/\\/g, "/");
   const exePathNormalized = exePath.replace(/\\/g, "/");
   const logPathNormalized = path.join(tempDir, "update_log.txt").replace(/\\/g, "/");
+  const silentArgs = (meta.silentInstallArgs || (payload && payload.silentInstallArgs) || "/S").trim();
 
   const psScriptPath = path.join(app.getPath("temp"), "apply_update.ps1");
   let psScriptContent = "";
@@ -3728,16 +3729,16 @@ ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   if (isExe) {
     // -------------------------------------------------------------
     // Direct Executable Installer (.exe) - Electron NSIS setup
-    // Requests Windows Administrator privileges (RunAs / UAC),
-    // closes the application, installs into Program Files, and relaunches.
+    // Runs in user context without UAC or admin elevation prompts.
     // -------------------------------------------------------------
-    writeLog("Generating PowerShell script for Executable Installer (RunAs / UAC elevation)...");
+    writeLog(`Generating PowerShell script for Executable Installer (Silent: "${silentArgs}")...`);
     psScriptContent = `
 $logPath = "${logPathNormalized}"
 $installerPath = "${packagePathNormalized}"
 $procName = "${procName}"
 $parentPid = ${parentPid}
 $exePath = "${exePathNormalized}"
+$silentArgs = "${silentArgs}"
 
 function Log-Msg($msg) {
     $logParent = [System.IO.Path]::GetDirectoryName($logPath)
@@ -3753,6 +3754,7 @@ Log-Msg "Installer path: $installerPath"
 Log-Msg "Parent PID: $parentPid"
 Log-Msg "Process Name: $procName"
 Log-Msg "Exe Path: $exePath"
+Log-Msg "Silent Args: $silentArgs"
 
 # 1. Wait for current Electron application to exit
 Log-Msg "Waiting for parent process $parentPid to exit..."
@@ -3771,31 +3773,41 @@ Log-Msg "Terminating any lingering instances of $procName or electron..."
 Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -m 600
 
-# 2. Launch the installer executable with Administrator rights (triggers Windows UAC prompt!)
-Log-Msg "Launching installer with Administrator privileges (Verb: RunAs)..."
+# 2. Launch the installer executable without UAC elevation (No -Verb RunAs)
+Log-Msg "Launching installer in silent per-user mode..."
 try {
-    # Launching with -Verb RunAs prompts Windows UAC for administrator elevation
-    $inst = Start-Process -FilePath "$installerPath" -Verb RunAs -PassThru -Wait
-    Log-Msg "Installer process finished with exit code: $($inst.ExitCode)"
+    if ($silentArgs) {
+        $inst = Start-Process -FilePath "$installerPath" -ArgumentList "$silentArgs" -PassThru -Wait
+    } else {
+        $inst = Start-Process -FilePath "$installerPath" -ArgumentList "/S" -PassThru -Wait
+    }
+    Log-Msg "Silent installer process finished with exit code: $($inst.ExitCode)"
 } catch {
-    Log-Msg "Installer execution notice/exception (e.g. UAC prompt outcome): $($_.Exception.Message)"
+    Log-Msg "Silent installer notice: $($_.Exception.Message). Falling back to direct user launch..."
+    try {
+        $inst = Start-Process -FilePath "$installerPath" -PassThru -Wait
+        Log-Msg "Standard installer process finished with exit code: $($inst.ExitCode)"
+    } catch {
+        Log-Msg "All installer attempts failed: $($_.Exception.Message)"
+    }
 }
 
 # 3. Verify application launch and relaunch if not already started by installer
 Start-Sleep -s 2
 $running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
 if (-not $running) {
-    Log-Msg "Application not running yet. Searching for installed executable in Program Files..."
+    Log-Msg "Application not running yet. Searching for installed executable..."
+    $localApp = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
     $pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
     $pf64 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
-    $localApp = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
 
     $candidates = @(
+        (Join-Path $localApp "Programs\iSmart Messenger\$procName.exe"),
+        (Join-Path $localApp "iSmart Messenger\$procName.exe"),
         (Join-Path $pf32 "iSmart Messenger\$procName.exe"),
         (Join-Path $pf64 "iSmart Messenger\$procName.exe"),
         (Join-Path $pf32 "$procName\$procName.exe"),
         (Join-Path $pf64 "$procName\$procName.exe"),
-        (Join-Path $localApp "Programs\iSmart Messenger\$procName.exe"),
         "$exePath"
     )
     $launched = $false
@@ -3808,7 +3820,7 @@ if (-not $running) {
         }
     }
     if (-not $launched) {
-        Log-Msg "Could not find Program Files executable, attempting original exePath: $exePath"
+        Log-Msg "Could not find installed executable, attempting original exePath: $exePath"
         if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
     }
 } else {
@@ -3850,7 +3862,7 @@ Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Forc
 Start-Sleep -m 600
 
 try {
-    $inst = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$installerPath\`" /passive /norestart" -Verb RunAs -PassThru -Wait
+    $inst = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$installerPath\`" /qn /norestart" -PassThru -Wait
     Log-Msg "msiexec finished with exit code: $($inst.ExitCode)"
 } catch {
     Log-Msg "MSI install error: $($_.Exception.Message)"

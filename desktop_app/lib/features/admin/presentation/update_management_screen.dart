@@ -46,7 +46,7 @@ class _UpdateManagementScreenState
   final _versionController = TextEditingController();
   final _notesController = TextEditingController();
   final _externalUrlController = TextEditingController();
-  final _silentArgsController = TextEditingController(text: '');
+  final _silentArgsController = TextEditingController(text: '/S');
   final _targetBranchesController = TextEditingController();
   final _noteController = TextEditingController();
 
