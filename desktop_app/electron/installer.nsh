@@ -35,7 +35,6 @@
   RMDir "$APPDATA\iSmart Messenger"
 
   DetailPrint "Keeping local chat and document storage..."
-  RMDir "$LOCALAPPDATA\iSmart Messenger"
 !macroend
 
 !macro customInstall
@@ -57,17 +56,10 @@
   ; Clean legacy startup entry in HKLM
   DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "iSmart Messenger"
 
-  ; If legacy uninstaller exists in Program Files, execute it silently
+  ; Directly delete legacy uninstaller in Program Files (x86) if present, WITHOUT executing it
   ${If} ${FileExists} "$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe"
-    DetailPrint "Uninstalling legacy 32-bit Program Files version..."
-    ExecWait '"$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe" /S _?=$PROGRAMFILES32\iSmart Messenger'
+    Delete "$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe"
     RMDir /r "$PROGRAMFILES32\iSmart Messenger"
-  ${EndIf}
-
-  ${If} ${FileExists} "$PROGRAMFILES64\iSmart Messenger\Uninstall iSmart Messenger.exe"
-    DetailPrint "Uninstalling legacy 64-bit Program Files version..."
-    ExecWait '"$PROGRAMFILES64\iSmart Messenger\Uninstall iSmart Messenger.exe" /S _?=$PROGRAMFILES64\iSmart Messenger'
-    RMDir /r "$PROGRAMFILES64\iSmart Messenger"
   ${EndIf}
 
   ; Clean legacy HKLM uninstall registry keys
