@@ -359,3 +359,9 @@ Future<bool> islandTriggerWelcome([Map<String, dynamic>? userData]) async => fal
 Future<bool> islandTriggerProgress(Map<String, dynamic> progressData) async => false;
 
 Future<bool> islandTestNotification() async => false;
+
+Future<bool> islandSyncAudio(Map<String, dynamic> audioData) async => false;
+
+void setIslandAudioActionHandlers({void Function()? onToggle, void Function()? onStop}) {}
+
+void setIslandOpenConversationHandler(void Function(String conversationId)? handler) {}

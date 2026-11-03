@@ -475,8 +475,30 @@ class ChatRepository {
         sendTimeout: uploadTimeout,
         receiveTimeout: uploadTimeout,
       ),
-      onSendProgress: onProgress,
+      onSendProgress: (sent, total) {
+        if (onProgress != null) {
+          onProgress(sent, total);
+        }
+        if (kIsWeb && total > 0) {
+          final pct = ((sent / total) * 100).clamp(0, 100).round();
+          unawaited(
+            web_bridge.islandTriggerProgress({
+              'label': 'جاري رفع: $resolvedFileName',
+              'percent': pct,
+            }),
+          );
+        }
+      },
     );
+
+    if (kIsWeb) {
+      unawaited(
+        web_bridge.islandTriggerProgress({
+          'label': 'اكتمل رفع: $resolvedFileName',
+          'percent': 100,
+        }),
+      );
+    }
 
     final result = ChatPostResult(
       conversation: ChatConversation.fromJson(

@@ -1282,3 +1282,40 @@ Future<bool> islandTestNotification() async {
     return false;
   }
 }
+
+StreamSubscription<html.Event>? _islandToggleAudioSub;
+StreamSubscription<html.Event>? _islandStopAudioSub;
+
+void setIslandAudioActionHandlers({void Function()? onToggle, void Function()? onStop}) {
+  _islandToggleAudioSub?.cancel();
+  _islandStopAudioSub?.cancel();
+  if (onToggle != null) {
+    _islandToggleAudioSub = html.window.on['island-toggle-audio'].listen((_) => onToggle());
+  }
+  if (onStop != null) {
+    _islandStopAudioSub = html.window.on['island-stop-audio'].listen((_) => onStop());
+  }
+}
+
+Future<bool> islandSyncAudio(Map<String, dynamic> audioData) async {
+  try {
+    final result = await _callElectron('islandSyncAudio', audioData);
+    return _asStringMap(result)['success'] == true;
+  } catch (_) {
+    return false;
+  }
+}
+
+StreamSubscription<html.Event>? _islandOpenConversationSub;
+
+void setIslandOpenConversationHandler(void Function(String conversationId)? handler) {
+  _islandOpenConversationSub?.cancel();
+  _islandOpenConversationSub = null;
+  if (handler == null) return;
+  _islandOpenConversationSub = html.window.on['electron-island-open-conversation'].listen((event) {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      handler(detail.trim());
+    }
+  });
+}

@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/web_platform_bridge.dart' as bridge;
 import '../data/chat_repository.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
@@ -1522,6 +1524,7 @@ Future<ChatConversation> uploadConversationAvatar({
 
   void _setStateAndCache(ChatOverviewData data, {bool immediate = false}) {
     state = AsyncData(data);
+    _syncToIsland(data.conversations);
     _overviewCacheDebounceTimer?.cancel();
     if (immediate) {
       _saveStateToCache(data);
@@ -1530,6 +1533,61 @@ Future<ChatConversation> uploadConversationAvatar({
         _saveStateToCache(data);
       });
     }
+  }
+
+  void _syncToIsland(List<ChatConversation> conversations) {
+    if (!kIsWeb) return;
+    try {
+      final authUser = ref.read(currentUserProvider);
+      final myId = _currentUserId.isNotEmpty ? _currentUserId : (authUser?.id.trim() ?? '');
+      final token = ref.read(authTokenProvider).valueOrNull;
+      final baseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ?? AppConfig.defaultApiBaseUrl;
+
+      if (authUser != null) {
+        unawaited(bridge.islandSyncUser({
+          'id': authUser.id,
+          'name': authUser.fullName.isNotEmpty ? authUser.fullName : authUser.username,
+          'avatarUrl': authUser.avatarUrl,
+          'token': token,
+          'apiBaseUrl': baseUrl,
+        }));
+      }
+
+      final list = conversations.take(30).map((c) {
+        final title = c.displayTitle(myId);
+        final snippet = c.lastMessage?.content.trim().isNotEmpty == true
+            ? c.lastMessage!.content
+            : c.description;
+
+        final otherMember = c.type == 'direct'
+            ? c.members.where((m) => m.id != myId).firstOrNull
+            : null;
+        final avatar = c.avatarUrl ?? otherMember?.avatarUrl;
+
+        return <String, dynamic>{
+          'id': c.id,
+          'name': title,
+          'title': title,
+          'avatarUrl': avatar,
+          'unreadCount': c.unreadCount,
+          'snippet': snippet,
+          'lastMessage': c.lastMessage != null
+              ? <String, dynamic>{
+                  'id': c.lastMessage!.id,
+                  'content': c.lastMessage!.content,
+                  'messageType': c.lastMessage!.messageType,
+                  'senderId': c.lastMessage!.senderId,
+                  'senderName': c.lastMessage!.senderName,
+                  'createdAt': c.lastMessage!.createdAt?.toIso8601String() ?? c.updatedAt.toIso8601String(),
+                }
+              : null,
+          'isGroup': c.type != 'direct',
+          'type': c.type,
+          'updatedAt': c.updatedAt.toIso8601String(),
+        };
+      }).toList();
+      unawaited(bridge.islandSyncChats(list));
+    } catch (_) {}
   }
 }
 

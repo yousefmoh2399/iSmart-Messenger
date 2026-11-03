@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../shared/providers/providers.dart';
 import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
@@ -71,6 +72,10 @@ class _IslandSettingsViewState extends ConsumerState<IslandSettingsView> {
     });
 
     try {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('desktop_notification_display_mode', nextPrivacy == 'full' ? 'full' : 'hideDetails');
+      } catch (_) {}
       await web_bridge.islandSaveSettings({
         'enabled': nextEnabled,
         'privacyMode': nextPrivacy,

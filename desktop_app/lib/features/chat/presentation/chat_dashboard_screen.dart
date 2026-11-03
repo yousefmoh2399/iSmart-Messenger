@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/models/managed_user.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../files/presentation/files_dashboard_screen.dart';
@@ -124,6 +125,13 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     _showTicketsPanel = !widget.openAdminOnStart && widget.openTicketsOnStart;
     _sidebarSearchController.addListener(_onSearchChanged);
     desktopJumpToMessageNotifier.addListener(_onJumpToMessageRequested);
+    web_bridge.setIslandOpenConversationHandler((conversationId) {
+      if (!mounted) return;
+      desktopJumpToMessageNotifier.value = (
+        conversationId: conversationId,
+        messageId: '',
+      );
+    });
     _chatEventsSubscription = ref.read(chatSocketServiceProvider).events.listen(
       (event) {
         if (!mounted) {
@@ -195,6 +203,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
 
   @override
   void dispose() {
+    web_bridge.setIslandOpenConversationHandler(null);
     desktopJumpToMessageNotifier.removeListener(_onJumpToMessageRequested);
     _chatEventsSubscription?.cancel();
     for (final timer in _typingPreviewTimers.values) {
@@ -212,6 +221,16 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     if (target == null || !mounted) return;
     desktopJumpToMessageNotifier.value = null;
 
+    if (widget.onSectionChanged != null &&
+        widget.activeSection != DesktopWorkspaceSection.chat) {
+      widget.onSectionChanged!(DesktopWorkspaceSection.chat);
+    }
+    setState(() {
+      _showAdminPanel = false;
+      _showTicketsPanel = false;
+      _showClosedTicketsPanel = false;
+    });
+
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     if (overview == null) return;
     ChatConversation? targetConv;
@@ -224,7 +243,8 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
     if (targetConv != null) {
       _selectConversation(
         targetConv,
-        targetMessageId: target.messageId,
+        targetMessageId:
+            target.messageId.isNotEmpty ? target.messageId : null,
       );
     }
   }

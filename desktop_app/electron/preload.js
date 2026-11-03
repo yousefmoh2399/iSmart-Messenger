@@ -1,4 +1,4 @@
-﻿const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 const TITLEBAR_HEIGHT = 34;
 
@@ -94,6 +94,13 @@ ipcRenderer.on("updater-progress", (_event, payload) => {
   window.dispatchEvent(
     new CustomEvent("electron-updater-progress", { detail: JSON.stringify(payload || {}) }),
   );
+});
+
+ipcRenderer.on("island:toggle-audio", () => {
+  window.dispatchEvent(new CustomEvent("island-toggle-audio"));
+});
+ipcRenderer.on("island:stop-audio", () => {
+  window.dispatchEvent(new CustomEvent("island-stop-audio"));
 });
 
 ipcRenderer.on("lan-transfer-progress", (_event, payload) => {
@@ -207,5 +214,39 @@ contextBridge.exposeInMainWorld("electronBridge", {
   islandGetSettings: () => ipcRenderer.invoke("island:get-settings"),
   islandSaveSettings: (settings) => ipcRenderer.invoke("island:save-settings", settings),
   islandTestNotification: () => ipcRenderer.invoke("island:test-notification"),
+  islandSyncAudio: (audioData) => ipcRenderer.invoke("island:sync-audio", audioData),
+  islandToggleAudio: () => ipcRenderer.invoke("island:toggle-audio"),
+  islandStopAudio: () => ipcRenderer.invoke("island:stop-audio"),
+  islandSyncCall: (callData) => ipcRenderer.invoke("island:sync-call", callData),
+  onIslandToggleAudio: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("island:toggle-audio", handler);
+    return () => ipcRenderer.removeListener("island:toggle-audio", handler);
+  },
+  onIslandStopAudio: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("island:stop-audio", handler);
+    return () => ipcRenderer.removeListener("island:stop-audio", handler);
+  },
+  onIslandSetAudioSpeed: (callback) => {
+    const handler = (_event, speed) => callback(speed);
+    ipcRenderer.on("island:set-audio-speed", handler);
+    return () => ipcRenderer.removeListener("island:set-audio-speed", handler);
+  },
+  onIslandSeekAudio: (callback) => {
+    const handler = (_event, position) => callback(position);
+    ipcRenderer.on("island:seek-audio", handler);
+    return () => ipcRenderer.removeListener("island:seek-audio", handler);
+  },
+  onIslandAcceptCall: (callback) => {
+    const handler = (_event, callId) => callback(callId);
+    ipcRenderer.on("island:accept-call", handler);
+    return () => ipcRenderer.removeListener("island:accept-call", handler);
+  },
+  onIslandDeclineCall: (callback) => {
+    const handler = (_event, callId) => callback(callId);
+    ipcRenderer.on("island:decline-call", handler);
+    return () => ipcRenderer.removeListener("island:decline-call", handler);
+  },
 });
 console.log("[preload] electronBridge exposed");

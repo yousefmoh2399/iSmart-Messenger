@@ -58,21 +58,26 @@ class DesktopAudioPlaybackCoordinator {
     try {
       final player = AudioPlayer();
       _sharedPlayer = player;
+      _ensureIslandListeners();
       player.playerStateStream.listen((state) {
         isPlayingNotifier.value = state.playing;
+        _syncIslandAudio();
         if (state.processingState == ProcessingState.completed) {
           player.seek(Duration.zero);
           player.pause();
           positionNotifier.value = Duration.zero;
           isPlayingNotifier.value = false;
+          _syncIslandAudio();
         }
       });
       player.positionStream.listen((pos) {
         positionNotifier.value = pos;
+        _syncIslandAudioThrottle();
       });
       player.durationStream.listen((dur) {
         if (dur != null && dur > Duration.zero) {
           durationNotifier.value = dur;
+          _syncIslandAudio();
         }
       });
       return player;
@@ -199,9 +204,69 @@ class DesktopAudioPlaybackCoordinator {
     isPlayingNotifier.value = false;
     positionNotifier.value = Duration.zero;
     durationNotifier.value = Duration.zero;
+    _syncIslandAudio();
     try {
       await _sharedPlayer?.stop();
     } catch (_) {}
+  }
+
+  static bool _islandListenersRegistered = false;
+  static void _ensureIslandListeners() {
+    if (_islandListenersRegistered) return;
+    _islandListenersRegistered = true;
+    if (kIsWeb && web_bridge.isElectron()) {
+      web_bridge.setIslandAudioActionHandlers(
+        onToggle: () => toggleCurrent(),
+        onStop: () => stopAndDismiss(),
+      );
+    }
+  }
+
+  static DateTime _lastIslandSync = DateTime.fromMillisecondsSinceEpoch(0);
+  static void _syncIslandAudioThrottle() {
+    final now = DateTime.now();
+    if (now.difference(_lastIslandSync).inMilliseconds > 400) {
+      _lastIslandSync = now;
+      _syncIslandAudio();
+    }
+  }
+
+  static void _syncIslandAudio() {
+    if (!kIsWeb || !web_bridge.isElectron()) return;
+    final session = activeSessionNotifier.value;
+    final isPlaying = isPlayingNotifier.value;
+    final pos = positionNotifier.value;
+    final dur = durationNotifier.value;
+
+    if (session == null && !isPlaying) {
+      web_bridge.islandSyncAudio({
+        'active': false,
+        'isPlaying': false,
+      });
+      return;
+    }
+
+    final posStr = _formatDuration(pos);
+    final durStr = dur > Duration.zero ? _formatDuration(dur) : '--:--';
+    final progress = dur.inMilliseconds > 0
+        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    web_bridge.islandSyncAudio({
+      'active': true,
+      'isPlaying': isPlaying,
+      'senderName': session?.senderName ?? 'تسجيل صوتي',
+      'avatarUrl': session?.message.sender?.avatarUrl,
+      'currentTime': posStr,
+      'totalTime': durStr,
+      'progress': progress,
+    });
+  }
+
+  static String _formatDuration(Duration d) {
+    final mins = d.inMinutes;
+    final secs = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$mins:$secs';
   }
 }
 

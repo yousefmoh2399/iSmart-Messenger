@@ -81,12 +81,12 @@ class LocalNotificationService {
         return;
       }
 
-      final effectiveTitle = displayMode == NotificationDisplayMode.hideDetails
-          ? (appName.isEmpty ? 'iSmart Messenger' : appName)
-          : (title.isEmpty ? appName : title);
-      final effectiveBody = displayMode == NotificationDisplayMode.hideDetails
-          ? 'لديك رسالة جديدة'
-          : (body.isEmpty ? 'لديك رسالة جديدة' : body);
+      final effectiveTitle = (web_bridge.isElectron() || displayMode != NotificationDisplayMode.hideDetails)
+          ? (title.isEmpty ? appName : title)
+          : (appName.isEmpty ? 'iSmart Messenger' : appName);
+      final effectiveBody = (web_bridge.isElectron() || displayMode != NotificationDisplayMode.hideDetails)
+          ? (body.isEmpty ? 'لديك رسالة جديدة' : body)
+          : 'لديك رسالة جديدة';
 
       await web_bridge.showBrowserNotification(
         title: effectiveTitle,

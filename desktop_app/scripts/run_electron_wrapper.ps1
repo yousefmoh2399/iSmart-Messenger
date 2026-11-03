@@ -24,7 +24,7 @@ if ($pubspecContent -match 'version:\s*([^\s#]+)') {
 Write-Host "Updating Electron package.json to match version $appVersion..."
 $packageJsonPath = Join-Path $electronRoot "package.json"
 if (Test-Path $packageJsonPath) {
-    $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
+    $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $packageJson.version = $appVersion
     $packageJsonJson = $packageJson | ConvertTo-Json -Depth 10
     
