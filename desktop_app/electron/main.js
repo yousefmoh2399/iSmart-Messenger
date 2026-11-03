@@ -1,28 +1,6 @@
 process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-// Windows 7 / Electron 22 compatibility: Apply GPU/sandbox flags early (before app 'ready').
-// These prevent crashes on Windows 7 which lacks modern GPU compositing APIs.
-if (process.platform === 'win32') {
-  const os = require('os');
-  const release = os.release(); // e.g. "6.1.7601" for Win7, "6.2.xxxx" for Win8+
-  const major = parseInt(release.split('.')[0], 10);
-  const minor = parseInt(release.split('.')[1], 10);
-  const isWin7OrOlder = major < 6 || (major === 6 && minor < 2);
-  if (isWin7OrOlder) {
-    // Disable GPU sandbox — Windows 7 sandbox layer is incompatible with Chromium 108+
-    app.commandLine.appendSwitch('disable-gpu-sandbox');
-    // Fall back to software rendering if D3D11 is unavailable on Win7
-    app.commandLine.appendSwitch('disable-software-rasterizer');
-    // Disable Direct2D font rendering (uses GDI fallback on Win7)
-    app.commandLine.appendSwitch('disable-directwrite-for-ui');
-    // Force disable GPU compositing — prevents blank/white screens on Win7 GPU drivers
-    app.commandLine.appendSwitch('disable-gpu-compositing');
-    // Disable DX12 (not available on Win7)
-    app.commandLine.appendSwitch('use-angle', 'gl');
-  }
-}
-
 const {
   app,
   BrowserWindow,
@@ -42,6 +20,27 @@ const http = require("http");
 const https = require("https");
 const os = require("os");
 const path = require("path");
+
+// Windows 7 / Electron 22 compatibility: Apply GPU/sandbox flags early (before app 'ready').
+// These prevent crashes on Windows 7 which lacks modern GPU compositing APIs.
+if (process.platform === 'win32') {
+  const release = os.release(); // e.g. "6.1.7601" for Win7, "6.2.xxxx" for Win8+
+  const major = parseInt(release.split('.')[0], 10);
+  const minor = parseInt(release.split('.')[1], 10);
+  const isWin7OrOlder = major < 6 || (major === 6 && minor < 2);
+  if (isWin7OrOlder) {
+    // Disable GPU sandbox — Windows 7 sandbox layer is incompatible with Chromium 108+
+    app.commandLine.appendSwitch('disable-gpu-sandbox');
+    // Fall back to software rendering if D3D11 is unavailable on Win7
+    app.commandLine.appendSwitch('disable-software-rasterizer');
+    // Disable Direct2D font rendering (uses GDI fallback on Win7)
+    app.commandLine.appendSwitch('disable-directwrite-for-ui');
+    // Force disable GPU compositing — prevents blank/white screens on Win7 GPU drivers
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+    // Disable DX12 (not available on Win7)
+    app.commandLine.appendSwitch('use-angle', 'gl');
+  }
+}
 
 const { createPrintToolResolver } = require("./printing/print_tool_resolver");
 const { createPdfPrintService } = require("./printing/pdf_print_service");
