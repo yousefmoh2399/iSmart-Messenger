@@ -1145,6 +1145,19 @@ async function listConversationsForUser(currentUser) {
       if (memberState?.isDeleted) {
         continue;
       }
+
+      // Hide empty direct conversations:
+      // A direct conversation should only appear once it has at least one real message.
+      if (conversation.type === "direct") {
+        const hasMessages = Boolean(
+          conversation.lastMessage &&
+          (conversation.lastMessage.id || conversation.lastMessage.createdAt)
+        );
+        if (!hasMessages) {
+          continue;
+        }
+      }
+
       const serialized = await serializeConversation(
         conversation,
         currentUser.id,

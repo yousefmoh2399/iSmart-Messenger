@@ -325,7 +325,11 @@ const getManageableConversations = asyncHandler(async (req, res) => {
 const createChatConversation = asyncHandler(async (req, res) => {
   const conversation = await createConversation(req.user, req.body);
   const io = req.app.get("io");
-  if (io) {
+  const hasMessages = Boolean(
+    conversation.lastMessage &&
+    (conversation.lastMessage.id || conversation.lastMessage.createdAt)
+  );
+  if (io && (conversation.type !== "direct" || hasMessages)) {
     emitConversationToMembers(io, conversation.id);
   }
   sendChatResponse(res, {
