@@ -3771,10 +3771,13 @@ async function exportPollToExcel(currentUser, messageId) {
 
   const isAdmin =
     currentUser.role === "admin" || currentUser.role === "superadmin";
+  const isManager = currentUser.role === "manager";
+  const isPrivileged = isAdmin || isManager;
   const senderIdStr = message.senderId ? String(message.senderId._id || message.senderId) : "";
   const currentUserIdStr = String(currentUser._id || currentUser.id || "");
   const isCreator = Boolean(senderIdStr && senderIdStr === currentUserIdStr);
-  if (!isAdmin && !isCreator) {
+
+  if (!isPrivileged && !isCreator) {
     throw new ApiError(403, "ليس لديك صلاحية لتصدير نتائج هذا الاستطلاع.");
   }
 
@@ -3783,60 +3786,243 @@ async function exportPollToExcel(currentUser, messageId) {
   const options = metadata.options || [];
   const votes = metadata.votes || {};
   const isAnonymous = metadata.isAnonymous === true;
+  const isMultipleChoice = metadata.isMultipleChoice === true;
+  const isClosed = metadata.isClosed === true;
 
-  const workbook = new exceljs.Workbook();
-  const sheet = workbook.addWorksheet("نتائج الاستطلاع");
+  // Collect all unique voter IDs
+  const allVoterIdsSet = new Set();
+  for (const opt of options) {
+    const vIds = votes[String(opt.id)] || [];
+    for (const vid of vIds) {
+      if (vid) allVoterIdsSet.add(String(vid));
+    }
+  }
+  const allVoterIds = Array.from(allVoterIdsSet);
 
-  sheet.addRow(["السؤال:", question]);
-  sheet.addRow(["مجهول:", isAnonymous ? "نعم" : "لا"]);
-  sheet.addRow([]);
+  // Fetch full details of all voters from DB
+  const voters = await User.find({ _id: { $in: allVoterIds } })
+    .populate("departmentId", "name")
+    .select("fullName username jobTitle role departmentId branchCode")
+    .lean();
 
-  // Header row
-  if (isAnonymous) {
-    sheet.addRow(["الخيار", "عدد الأصوات", "النسبة"]);
-  } else {
-    sheet.addRow(["الخيار", "عدد الأصوات", "النسبة", "المصوتون"]);
+  const voterMap = new Map();
+  voters.forEach((v) => {
+    voterMap.set(String(v._id), v);
+  });
+
+  function formatRole(role) {
+    if (role === "admin" || role === "superadmin") return "مسؤول النظام";
+    if (role === "manager") return "مدير";
+    return "موظف / مستخدم";
   }
 
-  // formatting header
-  const headerRow = sheet.lastRow;
-  headerRow.font = { bold: true };
-  headerRow.fill = {
-    type: "pattern",
-    pattern: "solid",
-    fgColor: { argb: "FFD3D3D3" },
-  };
+  function formatDateTime(dt) {
+    if (!dt) return "-";
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleString("ar-EG", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  const workbook = new exceljs.Workbook();
+  workbook.creator = "iSmart Messenger";
+  workbook.lastModifiedBy = currentUser.fullName || currentUser.username || "iSmart System";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  // ==========================================
+  // SHEET 1: Summary Sheet ("ملخص الاستطلاع")
+  // ==========================================
+  const summarySheet = workbook.addWorksheet("ملخص الاستطلاع");
+  summarySheet.views = [{ rightToLeft: true }];
+
+  // Title Banner
+  summarySheet.mergeCells("A1:E1");
+  const titleCell = summarySheet.getCell("A1");
+  titleCell.value = "تقرير نتائج استطلاع الرأي - iSmart Messenger";
+  titleCell.font = { name: "Arial", size: 14, bold: true, color: { argb: "FFFFFFFF" } };
+  titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
+  titleCell.alignment = { horizontal: "center", vertical: "middle" };
+  summarySheet.getRow(1).height = 36;
+
+  // Metadata rows
+  const metaRows = [
+    ["سؤال الاستطلاع:", question],
+    ["المحادثة:", conversation?.title || conversation?.name || "محادثة"],
+    ["أنشئ بواسطة:", message.senderId?.fullName || message.senderId?.username || "غير محدد"],
+    ["تاريخ الإنشاء:", formatDateTime(message.createdAt)],
+    ["نوع الاستطلاع:", isMultipleChoice ? "اختيارات متعددة" : "اختيار فردي واحد"],
+    ["حالة الاستطلاع:", isClosed ? "مغلق (انتهى التصويت)" : "نشط ومتاح للتصويت"],
+    [
+      "طبيعة التصويت:",
+      isAnonymous
+        ? (isPrivileged ? "مجهول (تم إظهار أسماء المصوتين لصلاحيات الإدارة والمدراء فقط)" : "مجهول للجميع")
+        : "علني لجميع الأعضاء",
+    ],
+    ["إجمالي المشاركين (المصوتين):", allVoterIds.length],
+    ["تاريخ ووقت التصدير:", formatDateTime(new Date())],
+    ["مصدّر التقرير:", `${currentUser.fullName || currentUser.username} (${formatRole(currentUser.role)})`],
+  ];
+
+  metaRows.forEach((r) => {
+    const row = summarySheet.addRow(r);
+    row.getCell(1).font = { name: "Arial", bold: true, color: { argb: "FF374151" } };
+    row.getCell(1).alignment = { horizontal: "right", vertical: "middle" };
+    row.getCell(2).font = { name: "Arial", bold: false, color: { argb: "FF111827" } };
+    row.getCell(2).alignment = { horizontal: "right", vertical: "middle" };
+  });
+
+  summarySheet.addRow([]); // Blank separator
+
+  // Options Summary Table Header
+  const summaryHeaderRow = summarySheet.addRow([
+    "م",
+    "خيار الاستطلاع",
+    "عدد الأصوات",
+    "النسبة المئوية",
+    isAnonymous && !isPrivileged ? "المصوتون (مجهول)" : "أسماء المصوتين",
+  ]);
+  summaryHeaderRow.height = 26;
+  summaryHeaderRow.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" } };
+  summaryHeaderRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } };
+  summaryHeaderRow.alignment = { horizontal: "center", vertical: "middle" };
 
   let totalVotes = 0;
   for (const opt of options) {
     totalVotes += (votes[String(opt.id)] || []).length;
   }
 
-  // Populate data
-  for (const opt of options) {
+  // Populate options rows
+  options.forEach((opt, idx) => {
     const voterIds = votes[String(opt.id)] || [];
     const count = voterIds.length;
-    const percentage =
-      totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) + "%" : "0%";
+    const percentage = totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) + "%" : "0%";
 
-    if (isAnonymous) {
-      sheet.addRow([opt.text, count, percentage]);
+    let voterNames = "-";
+    if (!isAnonymous || isPrivileged) {
+      const names = voterIds.map((vid) => {
+        const u = voterMap.get(String(vid));
+        return u ? (u.fullName || u.username) : "مستخدم";
+      });
+      voterNames = names.length > 0 ? names.join("، ") : "لا يوجد مصوتين";
     } else {
-      // Need to fetch user names
-      const users = await User.find({ _id: { $in: voterIds } })
-        .select("fullName username")
-        .lean();
-      const userNames = users.map((u) => u.fullName || u.username).join(", ");
-      sheet.addRow([opt.text, count, percentage, userNames]);
+      voterNames = "تصويت مجهول";
     }
-  }
 
-  sheet.columns.forEach((column) => {
-    column.width = 30;
-    column.alignment = { wrapText: true, vertical: "top", horizontal: "right" };
+    const row = summarySheet.addRow([idx + 1, opt.text, count, percentage, voterNames]);
+    row.height = 24;
+    row.alignment = { vertical: "middle", horizontal: "right" };
+    row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+    row.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+    row.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
+
+    if (idx % 2 === 1) {
+      row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
+    }
   });
 
-  sheet.views = [{ rightToLeft: true }];
+  // Total Summary Row
+  const totalRow = summarySheet.addRow(["", "الإجمالي الكلي", totalVotes, totalVotes > 0 ? "100%" : "0%", ""]);
+  totalRow.height = 24;
+  totalRow.font = { name: "Arial", bold: true, color: { argb: "FF1E3A8A" } };
+  totalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF6FF" } };
+  totalRow.getCell(2).alignment = { horizontal: "right", vertical: "middle" };
+  totalRow.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+  totalRow.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
+
+  summarySheet.columns = [
+    { width: 8 },  // م
+    { width: 32 }, // خيار الاستطلاع
+    { width: 16 }, // عدد الأصوات
+    { width: 16 }, // النسبة
+    { width: 55 }, // أسماء المصوتين
+  ];
+
+  // ==========================================
+  // SHEET 2: Detailed Voter Records ("سجل تصويت الأعضاء")
+  // Available if privileged (admin/manager) or not anonymous
+  // ==========================================
+  if (isPrivileged || !isAnonymous) {
+    const detailSheet = workbook.addWorksheet("سجل تصويت الأعضاء");
+    detailSheet.views = [{ rightToLeft: true }];
+
+    // Banner
+    detailSheet.mergeCells("A1:H1");
+    const detailTitleCell = detailSheet.getCell("A1");
+    detailTitleCell.value = "سجل تصويت المشاركين التفصيلي - من صوت وماذا اختار";
+    detailTitleCell.font = { name: "Arial", size: 13, bold: true, color: { argb: "FFFFFFFF" } };
+    detailTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF065F46" } };
+    detailTitleCell.alignment = { horizontal: "center", vertical: "middle" };
+    detailSheet.getRow(1).height = 34;
+
+    const detailHeaderRow = detailSheet.addRow([
+      "م",
+      "اسم العضو الكامل",
+      "اسم المستخدم",
+      "الخيار الذي تم التصويت له",
+      "المسمى الوظيفي",
+      "القسم / الإدارة",
+      "الصلاحية في النظام",
+      "الفرع",
+    ]);
+    detailHeaderRow.height = 26;
+    detailHeaderRow.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" } };
+    detailHeaderRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF059669" } };
+    detailHeaderRow.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Build list of all vote instances
+    let voteIndex = 1;
+    for (const opt of options) {
+      const vIds = votes[String(opt.id)] || [];
+      for (const vid of vIds) {
+        const u = voterMap.get(String(vid));
+        const row = detailSheet.addRow([
+          voteIndex++,
+          u?.fullName || "مستخدم غير مسجل",
+          u?.username || "-",
+          opt.text,
+          u?.jobTitle || "-",
+          u?.departmentId?.name || "-",
+          formatRole(u?.role),
+          u?.branchCode || "-",
+        ]);
+        row.height = 22;
+        row.alignment = { vertical: "middle", horizontal: "right" };
+        row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+        row.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+        row.getCell(7).alignment = { horizontal: "center", vertical: "middle" };
+        row.getCell(8).alignment = { horizontal: "center", vertical: "middle" };
+
+        if (voteIndex % 2 === 1) {
+          row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
+        }
+      }
+    }
+
+    if (voteIndex === 1) {
+      const emptyRow = detailSheet.addRow(["-", "لم يقم أي عضو بالتصويت في هذا الاستطلاع حتى الآن.", "", "", "", "", "", ""]);
+      detailSheet.mergeCells(`B${emptyRow.number}:H${emptyRow.number}`);
+      emptyRow.getCell(2).font = { name: "Arial", italic: true, color: { argb: "FF6B7280" } };
+      emptyRow.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
+    }
+
+    detailSheet.columns = [
+      { width: 8 },  // م
+      { width: 30 }, // اسم العضو الكامل
+      { width: 18 }, // اسم المستخدم
+      { width: 32 }, // الخيار المختار
+      { width: 24 }, // المسمى الوظيفي
+      { width: 22 }, // القسم / الإدارة
+      { width: 18 }, // الصلاحية
+      { width: 12 }, // الفرع
+    ];
+  }
 
   const buffer = await workbook.xlsx.writeBuffer();
   return {

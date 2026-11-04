@@ -4684,6 +4684,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                               'canDeleteMessages',
                                             ) ==
                                             true);
+                                final isPrivilegedPollExporter =
+                                    widget.currentUser?.role == 'admin' ||
+                                    widget.currentUser?.role == 'superadmin' ||
+                                    widget.currentUser?.role == 'manager';
+                                final canExportPoll =
+                                    isMine || isPrivilegedPollExporter;
 
                                 final messageLocalDate =
                                     message.createdAt.toLocal();
@@ -4920,6 +4926,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                           _votePoll(message.id, options),
                                       onExportPoll: () =>
                                           _exportPoll(message.id),
+                                      canExportPoll: canExportPoll,
                                       onSaveAttachment:
                                           message.hasAttachment &&
                                               message.attachmentDownloadAllowed

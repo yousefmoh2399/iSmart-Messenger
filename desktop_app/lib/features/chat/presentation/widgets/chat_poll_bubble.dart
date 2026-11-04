@@ -6,6 +6,7 @@ class ChatPollBubble extends StatefulWidget {
   final String currentUserId;
   final Future<void> Function(List<String>) onVote;
   final VoidCallback onExport;
+  final bool canExport;
 
   const ChatPollBubble({
     super.key,
@@ -14,6 +15,7 @@ class ChatPollBubble extends StatefulWidget {
     required this.currentUserId,
     required this.onVote,
     required this.onExport,
+    this.canExport = false,
   });
 
   @override
@@ -548,7 +550,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                if (widget.isMine && totalVotes > 0 && !isChecklist)
+                if ((widget.isMine || widget.canExport) && totalVotes > 0 && !isChecklist)
                   TextButton.icon(
                     onPressed: widget.onExport,
                     icon: Icon(

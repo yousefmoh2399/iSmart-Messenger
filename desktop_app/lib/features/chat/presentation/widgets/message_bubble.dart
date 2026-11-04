@@ -49,6 +49,7 @@ class MessageBubble extends StatefulWidget {
     this.onLongPress,
     this.onVotePoll,
     this.onExportPoll,
+    this.canExportPoll = false,
     this.avatarUrl,
     this.replyPreview,
     this.replyPreviewSender,
@@ -93,6 +94,7 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onLongPress;
   final Future<void> Function(List<String>)? onVotePoll;
   final VoidCallback? onExportPoll;
+  final bool canExportPoll;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final VoidCallback? onPin;
@@ -676,6 +678,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                         : widget.message.metadata ?? {},
                                     currentUserId: widget.currentUserId,
                                     isMine: widget.isMine,
+                                    canExport: widget.canExportPoll,
                                     onVote: widget.onVotePoll ?? (_) async {},
                                     onExport: widget.onExportPoll ?? () {},
                                   ),
