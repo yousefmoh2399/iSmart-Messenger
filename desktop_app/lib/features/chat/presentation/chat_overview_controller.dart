@@ -1000,12 +1000,13 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final updated = [...current.conversations];
     final index = updated.indexWhere((entry) => entry.id == conversation.id);
     if (index == -1) {
-      // Do not insert an empty direct conversation with no messages into the sidebar
+      // Do not insert an empty direct conversation into the sidebar for the recipient
       if (conversation.type == 'direct') {
         final hasMessages = conversation.lastMessage != null &&
             ((conversation.lastMessage!.id?.isNotEmpty ?? false) ||
                 conversation.lastMessage!.content.isNotEmpty);
-        if (!hasMessages) {
+        final isMine = conversation.createdBy == _effectiveCurrentUserId;
+        if (!hasMessages && !isMine) {
           return;
         }
       }

@@ -1147,14 +1147,18 @@ async function listConversationsForUser(currentUser) {
       }
 
       // Hide empty direct conversations:
-      // A direct conversation should only appear once it has at least one real message.
+      // The recipient must NEVER see an empty direct conversation before any message is sent.
+      // Only the initiator (createdBy) can see it while active so they can open and send the first message.
       if (conversation.type === "direct") {
         const hasMessages = Boolean(
           conversation.lastMessage &&
           (conversation.lastMessage.id || conversation.lastMessage.createdAt)
         );
         if (!hasMessages) {
-          continue;
+          const isCreator = String(conversation.createdBy?._id || conversation.createdBy) === currentUserId;
+          if (!isCreator) {
+            continue;
+          }
         }
       }
 
@@ -1325,6 +1329,17 @@ async function createConversation(currentUser, payload) {
         { conversationId: existing._id, userId: currentUser.id },
         { $set: { isDeleted: false, deletedAt: null } }
       );
+      const hasMessages = Boolean(
+        existing.lastMessage &&
+        (existing.lastMessage.id || existing.lastMessage.createdAt)
+      );
+      if (!hasMessages) {
+        await Conversation.updateOne(
+          { _id: existing._id },
+          { $set: { createdBy: currentUser.id, updatedAt: new Date() } }
+        );
+        existing.createdBy = currentUser.id;
+      }
       return serializeConversation(existing, currentUser.id);
     }
 
