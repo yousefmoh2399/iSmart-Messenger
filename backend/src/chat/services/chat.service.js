@@ -3827,10 +3827,11 @@ async function exportPollToExcel(currentUser, messageId) {
   }
   const allVoterIds = Array.from(allVoterIdsSet);
 
-  // Fetch full details of all voters from DB
+  // Fetch full details of all voters including branch name
   const voters = await User.find({ _id: { $in: allVoterIds } })
     .populate("departmentId", "name")
-    .select("fullName username jobTitle role departmentId branchCode")
+    .populate("branchId", "name code")
+    .select("fullName username jobTitle role departmentId branchId branchCode")
     .lean();
 
   const voterMap = new Map();
@@ -3839,9 +3840,10 @@ async function exportPollToExcel(currentUser, messageId) {
   });
 
   function formatRole(role) {
-    if (role === "admin" || role === "superadmin") return "مسؤول النظام";
+    if (role === "superadmin") return "مسؤول رئيسي";
+    if (role === "admin") return "مسؤول النظام";
     if (role === "manager") return "مدير";
-    return "موظف / مستخدم";
+    return "موظف";
   }
 
   function formatDateTime(dt) {
@@ -3858,79 +3860,237 @@ async function exportPollToExcel(currentUser, messageId) {
     });
   }
 
-  const workbook = new exceljs.Workbook();
-  workbook.creator = "iSmart Messenger";
-  workbook.lastModifiedBy = currentUser.fullName || currentUser.username || "iSmart System";
-  workbook.created = new Date();
-  workbook.modified = new Date();
+  function getBranchName(u) {
+    if (u?.branchId?.name) return u.branchId.name;
+    if (u?.branchCode) return u.branchCode;
+    return "-";
+  }
 
-  // ==========================================
-  // SHEET 1: Summary Sheet ("ملخص الاستطلاع")
-  // ==========================================
-  const summarySheet = workbook.addWorksheet("ملخص الاستطلاع");
-  summarySheet.views = [{ rightToLeft: true }];
+  function getDeptName(u) {
+    if (u?.departmentId?.name) return u.departmentId.name;
+    return "-";
+  }
 
-  // Title Banner
-  summarySheet.mergeCells("A1:E1");
-  const titleCell = summarySheet.getCell("A1");
-  titleCell.value = "تقرير نتائج استطلاع الرأي - iSmart Messenger";
-  titleCell.font = { name: "Arial", size: 14, bold: true, color: { argb: "FFFFFFFF" } };
-  titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
-  titleCell.alignment = { horizontal: "center", vertical: "middle" };
-  summarySheet.getRow(1).height = 36;
+  // Color palette
+  const C = {
+    headerBg:    "FF1E3A8A", // Dark blue
+    headerFont:  "FFFFFFFF",
+    subHeaderBg: "FF2563EB", // Mid blue
+    greenBg:     "FF065F46", // Dark green
+    greenMid:    "FF059669", // Mid green
+    rowAlt:      "FFF0F4FF", // Light blue alt row
+    rowAlt2:     "FFF0FDF4", // Light green alt row
+    totalBg:     "FFEFF6FF",
+    totalFont:   "FF1E3A8A",
+    labelFont:   "FF1E3A8A",
+    valueFont:   "FF111827",
+    mutedFont:   "FF6B7280",
+    sectionBg:   "FFE0E7FF", // Section divider
+    winnerBg:    "FFFBBF24", // Gold for winner
+    winnerFont:  "FF78350F",
+  };
 
-  // Metadata rows
-  const metaRows = [
-    ["سؤال الاستطلاع:", question],
-    ["المحادثة:", conversation?.title || conversation?.name || "محادثة"],
-    ["أنشئ بواسطة:", message.senderId?.fullName || message.senderId?.username || "غير محدد"],
-    ["تاريخ الإنشاء:", formatDateTime(message.createdAt)],
-    ["نوع الاستطلاع:", isMultipleChoice ? "اختيارات متعددة" : "اختيار فردي واحد"],
-    ["حالة الاستطلاع:", isClosed ? "مغلق (انتهى التصويت)" : "نشط ومتاح للتصويت"],
-    [
-      "طبيعة التصويت:",
-      isAnonymous
-        ? (isPrivileged ? "مجهول (تم إظهار أسماء المصوتين لصلاحيات الإدارة والمدراء فقط)" : "مجهول للجميع")
-        : "علني لجميع الأعضاء",
-    ],
-    ["إجمالي المشاركين (المصوتين):", allVoterIds.length],
-    ["تاريخ ووقت التصدير:", formatDateTime(new Date())],
-    ["مصدّر التقرير:", `${currentUser.fullName || currentUser.username} (${formatRole(currentUser.role)})`],
-  ];
+  function applyHeaderStyle(cell, bgArgb, fontArgb, fontSize) {
+    cell.font = { name: "Arial", size: fontSize || 11, bold: true, color: { argb: fontArgb } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgArgb } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  }
 
-  metaRows.forEach((r) => {
-    const row = summarySheet.addRow(r);
-    row.getCell(1).font = { name: "Arial", bold: true, color: { argb: "FF374151" } };
-    row.getCell(1).alignment = { horizontal: "right", vertical: "middle" };
-    row.getCell(2).font = { name: "Arial", bold: false, color: { argb: "FF111827" } };
-    row.getCell(2).alignment = { horizontal: "right", vertical: "middle" };
-  });
+  function applyLabelStyle(cell) {
+    cell.font = { name: "Arial", bold: true, size: 10, color: { argb: C.labelFont } };
+    cell.alignment = { horizontal: "right", vertical: "middle" };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDFD" } };
+  }
 
-  summarySheet.addRow([]); // Blank separator
+  function applyValueStyle(cell) {
+    cell.font = { name: "Arial", bold: false, size: 10, color: { argb: C.valueFont } };
+    cell.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+  }
 
-  // Options Summary Table Header
-  const summaryHeaderRow = summarySheet.addRow([
-    "م",
-    "خيار الاستطلاع",
-    "عدد الأصوات",
-    "النسبة المئوية",
-    isAnonymous && !isPrivileged ? "المصوتون (مجهول)" : "أسماء المصوتين",
-  ]);
-  summaryHeaderRow.height = 26;
-  summaryHeaderRow.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" } };
-  summaryHeaderRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } };
-  summaryHeaderRow.alignment = { horizontal: "center", vertical: "middle" };
-
+  // Compute totals
   let totalVotes = 0;
   for (const opt of options) {
     totalVotes += (votes[String(opt.id)] || []).length;
   }
 
-  // Populate options rows
+  // Find winner(s)
+  let maxVotes = 0;
+  for (const opt of options) {
+    const cnt = (votes[String(opt.id)] || []).length;
+    if (cnt > maxVotes) maxVotes = cnt;
+  }
+
+  // Safe filename from question
+  const safeQuestion = question
+    .replace(/[\/:*?"<>|]/g, "")
+    .replace(/\s+/g, "_")
+    .slice(0, 40);
+  const exportDate = new Date();
+  const dateStr = exportDate.toISOString().slice(0, 10);
+  const filename = `استطلاع_${safeQuestion}_${dateStr}.xlsx`;
+
+  // ============================================================
+  const workbook = new exceljs.Workbook();
+  workbook.creator = "iSmart Messenger";
+  workbook.lastModifiedBy = currentUser.fullName || currentUser.username || "iSmart System";
+  workbook.created = exportDate;
+  workbook.modified = exportDate;
+
+  // ============================================================
+  // SHEET 1: معلومات الاستطلاع (Poll Info)
+  // ============================================================
+  const infoSheet = workbook.addWorksheet("معلومات الاستطلاع", {
+    pageSetup: { orientation: "portrait", fitToPage: true },
+  });
+  infoSheet.views = [{ rightToLeft: true }];
+
+  // === Big Title ===
+  infoSheet.mergeCells("A1:D1");
+  const t1 = infoSheet.getCell("A1");
+  t1.value = "🗳️  تقرير استطلاع الرأي";
+  applyHeaderStyle(t1, C.headerBg, C.headerFont, 16);
+  infoSheet.getRow(1).height = 44;
+
+  // Sub-title: system name
+  infoSheet.mergeCells("A2:D2");
+  const t2 = infoSheet.getCell("A2");
+  t2.value = "iSmart Messenger — نظام المراسلات الذكية";
+  t2.font = { name: "Arial", size: 10, italic: true, color: { argb: "FFFFFFFF" } };
+  t2.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1D4ED8" } };
+  t2.alignment = { horizontal: "center", vertical: "middle" };
+  infoSheet.getRow(2).height = 24;
+
+  // Blank row
+  infoSheet.addRow([]);
+
+  // === Section: Poll Details ===
+  infoSheet.mergeCells("A4:D4");
+  const secPoll = infoSheet.getCell("A4");
+  secPoll.value = "📋  تفاصيل الاستطلاع";
+  applyHeaderStyle(secPoll, C.sectionBg, C.labelFont, 11);
+  infoSheet.getRow(4).height = 28;
+
+  const infoRows = [
+    ["سؤال الاستطلاع", question],
+    ["المحادثة / المجموعة", conversation?.title || conversation?.name || "محادثة"],
+    ["أنشئ بواسطة", message.senderId?.fullName || message.senderId?.username || "غير محدد"],
+    ["تاريخ الإنشاء", formatDateTime(message.createdAt)],
+    ["نوع الاستطلاع", isMultipleChoice ? "✅ اختيارات متعددة" : "🔘 اختيار واحد فقط"],
+    ["حالة الاستطلاع", isClosed ? "🔒 مغلق — انتهى التصويت" : "🟢 نشط — التصويت مفتوح"],
+    ["طبيعة التصويت", isAnonymous
+      ? (isPrivileged ? "🔐 مجهول (مكشوف للإدارة)" : "🔐 مجهول للجميع")
+      : "👁️  علني — أسماء المصوتين ظاهرة"],
+    ["عدد الخيارات", options.length],
+    ["إجمالي المصوتين", allVoterIds.length],
+    ["إجمالي أصوات المسجلة", totalVotes],
+  ];
+
+  infoRows.forEach(([label, value], i) => {
+    const rowNum = 5 + i;
+    const row = infoSheet.getRow(rowNum);
+    row.height = 26;
+    const lc = row.getCell(1);
+    const vc = row.getCell(2);
+    // Merge value across B-D
+    infoSheet.mergeCells(`B${rowNum}:D${rowNum}`);
+    lc.value = label;
+    vc.value = value;
+    applyLabelStyle(lc);
+    applyValueStyle(vc);
+    // Alternate row bg
+    if (i % 2 === 0) {
+      vc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFBFF" } };
+    }
+  });
+
+  // === Section: Export Info ===
+  const exportSectionRow = 5 + infoRows.length + 1;
+  infoSheet.mergeCells(`A${exportSectionRow}:D${exportSectionRow}`);
+  const secExport = infoSheet.getCell(`A${exportSectionRow}`);
+  secExport.value = "📤  معلومات التصدير";
+  applyHeaderStyle(secExport, C.sectionBg, C.labelFont, 11);
+  infoSheet.getRow(exportSectionRow).height = 28;
+
+  const exportRows = [
+    ["صدّره", `${currentUser.fullName || currentUser.username} — ${formatRole(currentUser.role)}`],
+    ["تاريخ التصدير", formatDateTime(exportDate)],
+    ["اسم الملف", filename],
+  ];
+
+  exportRows.forEach(([label, value], i) => {
+    const rowNum = exportSectionRow + 1 + i;
+    infoSheet.mergeCells(`B${rowNum}:D${rowNum}`);
+    const row = infoSheet.getRow(rowNum);
+    row.height = 24;
+    const lc = row.getCell(1);
+    const vc = row.getCell(2);
+    lc.value = label;
+    vc.value = value;
+    applyLabelStyle(lc);
+    applyValueStyle(vc);
+  });
+
+  infoSheet.columns = [
+    { width: 26 },
+    { width: 50 },
+    { width: 10 },
+    { width: 10 },
+  ];
+
+  // ============================================================
+  // SHEET 2: نتائج التصويت (Voting Results)
+  // ============================================================
+  const resultsSheet = workbook.addWorksheet("نتائج التصويت", {
+    pageSetup: { orientation: "landscape", fitToPage: true },
+  });
+  resultsSheet.views = [{ rightToLeft: true }];
+
+  // Title
+  resultsSheet.mergeCells("A1:F1");
+  const rt = resultsSheet.getCell("A1");
+  rt.value = "📊  نتائج الاستطلاع — توزيع الأصوات على الخيارات";
+  applyHeaderStyle(rt, C.headerBg, C.headerFont, 14);
+  resultsSheet.getRow(1).height = 40;
+
+  // Question row
+  resultsSheet.mergeCells("A2:F2");
+  const rq = resultsSheet.getCell("A2");
+  rq.value = `السؤال: ${question}`;
+  rq.font = { name: "Arial", size: 11, bold: true, color: { argb: C.labelFont } };
+  rq.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C.sectionBg } };
+  rq.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+  resultsSheet.getRow(2).height = 32;
+
+  resultsSheet.addRow([]);
+
+  // Header row
+  const rHeader = resultsSheet.addRow([
+    "م",
+    "خيار الاستطلاع",
+    "عدد الأصوات",
+    "النسبة المئوية",
+    "شريط الأداء",
+    "أسماء المصوتين",
+  ]);
+  rHeader.height = 30;
+  rHeader.eachCell((cell) => {
+    applyHeaderStyle(cell, C.subHeaderBg, C.headerFont, 11);
+    cell.border = {
+      bottom: { style: "medium", color: { argb: C.headerBg } },
+    };
+  });
+
+  // Data rows
   options.forEach((opt, idx) => {
     const voterIds = votes[String(opt.id)] || [];
     const count = voterIds.length;
-    const percentage = totalVotes > 0 ? ((count / totalVotes) * 100).toFixed(1) + "%" : "0%";
+    const pct = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
+    const pctStr = pct.toFixed(1) + "%";
+    const isWinner = maxVotes > 0 && count === maxVotes;
+
+    // Build bar (▓ chars) max 20 chars wide
+    const barLen = Math.round((pct / 100) * 20);
+    const bar = "▓".repeat(barLen) + "░".repeat(20 - barLen) + `  ${pctStr}`;
 
     let voterNames = "-";
     if (!isAnonymous || isPrivileged) {
@@ -3938,124 +4098,227 @@ async function exportPollToExcel(currentUser, messageId) {
         const u = voterMap.get(String(vid));
         return u ? (u.fullName || u.username) : "مستخدم";
       });
-      voterNames = names.length > 0 ? names.join("، ") : "لا يوجد مصوتين";
+      voterNames = names.length > 0 ? names.join("،  ") : "لا يوجد مصوتين";
     } else {
-      voterNames = "تصويت مجهول";
+      voterNames = "🔐 مجهول";
     }
 
-    const row = summarySheet.addRow([idx + 1, opt.text, count, percentage, voterNames]);
-    row.height = 24;
-    row.alignment = { vertical: "middle", horizontal: "right" };
+    const row = resultsSheet.addRow([
+      idx + 1,
+      (isWinner && totalVotes > 0 ? "🥇 " : "") + opt.text,
+      count,
+      pctStr,
+      bar,
+      voterNames,
+    ]);
+    row.height = 28;
+
+    // Winner gets gold background
+    if (isWinner && totalVotes > 0) {
+      row.eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C.winnerBg } };
+        cell.font = { name: "Arial", size: 10, bold: true, color: { argb: C.winnerFont } };
+      });
+    } else if (idx % 2 === 0) {
+      row.eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C.rowAlt } };
+        cell.font = { name: "Arial", size: 10 };
+      });
+    } else {
+      row.eachCell((cell) => {
+        cell.font = { name: "Arial", size: 10 };
+      });
+    }
+
     row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+    row.getCell(2).alignment = { horizontal: "right", vertical: "middle", wrapText: true };
     row.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
     row.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
-
-    if (idx % 2 === 1) {
-      row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
-    }
+    row.getCell(5).alignment = { horizontal: "left", vertical: "middle" };
+    row.getCell(5).font = { name: "Courier New", size: 9, color: { argb: "FF1E3A8A" } };
+    row.getCell(6).alignment = { horizontal: "right", vertical: "middle", wrapText: true };
   });
 
-  // Total Summary Row
-  const totalRow = summarySheet.addRow(["", "الإجمالي الكلي", totalVotes, totalVotes > 0 ? "100%" : "0%", ""]);
-  totalRow.height = 24;
-  totalRow.font = { name: "Arial", bold: true, color: { argb: "FF1E3A8A" } };
-  totalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEFF6FF" } };
+  // Total row
+  const totalRow = resultsSheet.addRow([
+    "",
+    "✅ الإجمالي الكلي",
+    totalVotes,
+    "100%",
+    "",
+    `${allVoterIds.length} مشارك`,
+  ]);
+  totalRow.height = 28;
+  totalRow.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C.totalBg } };
+    cell.font = { name: "Arial", size: 10, bold: true, color: { argb: C.totalFont } };
+    cell.border = { top: { style: "medium", color: { argb: C.headerBg } } };
+  });
   totalRow.getCell(2).alignment = { horizontal: "right", vertical: "middle" };
   totalRow.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
   totalRow.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
+  totalRow.getCell(6).alignment = { horizontal: "center", vertical: "middle" };
 
-  summarySheet.columns = [
-    { width: 8 },  // م
-    { width: 32 }, // خيار الاستطلاع
-    { width: 16 }, // عدد الأصوات
-    { width: 16 }, // النسبة
-    { width: 55 }, // أسماء المصوتين
+  resultsSheet.columns = [
+    { width: 6 },
+    { width: 36 },
+    { width: 14 },
+    { width: 14 },
+    { width: 28 },
+    { width: 50 },
   ];
 
-  // ==========================================
-  // SHEET 2: Detailed Voter Records ("سجل تصويت الأعضاء")
-  // Available if privileged (admin/manager) or not anonymous
-  // ==========================================
+  // ============================================================
+  // SHEET 3: سجل المصوتين (Detailed Voter Records) — privileged only
+  // ============================================================
   if (isPrivileged || !isAnonymous) {
-    const detailSheet = workbook.addWorksheet("سجل تصويت الأعضاء");
+    const detailSheet = workbook.addWorksheet("سجل المصوتين التفصيلي", {
+      pageSetup: { orientation: "landscape", fitToPage: true },
+    });
     detailSheet.views = [{ rightToLeft: true }];
 
-    // Banner
-    detailSheet.mergeCells("A1:H1");
-    const detailTitleCell = detailSheet.getCell("A1");
-    detailTitleCell.value = "سجل تصويت المشاركين التفصيلي - من صوت وماذا اختار";
-    detailTitleCell.font = { name: "Arial", size: 13, bold: true, color: { argb: "FFFFFFFF" } };
-    detailTitleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF065F46" } };
-    detailTitleCell.alignment = { horizontal: "center", vertical: "middle" };
-    detailSheet.getRow(1).height = 34;
+    // Title
+    detailSheet.mergeCells("A1:I1");
+    const dt = detailSheet.getCell("A1");
+    dt.value = "👥  سجل المصوتين التفصيلي — من صوت وماذا اختار وبيانات كل مشارك";
+    applyHeaderStyle(dt, C.greenBg, C.headerFont, 13);
+    detailSheet.getRow(1).height = 40;
 
-    const detailHeaderRow = detailSheet.addRow([
+    // Sub header info
+    detailSheet.mergeCells("A2:I2");
+    const ds = detailSheet.getCell("A2");
+    ds.value = isAnonymous
+      ? "⚠️  هذا الاستطلاع مجهول — الأسماء مكشوفة لك فقط بصلاحيات الإدارة والمدراء"
+      : "👁️  استطلاع علني — الأسماء ظاهرة لجميع الأعضاء";
+    ds.font = { name: "Arial", size: 10, italic: true, color: { argb: "FFFFFFFF" } };
+    ds.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isAnonymous ? "FF7C3AED" : C.greenMid } };
+    ds.alignment = { horizontal: "center", vertical: "middle" };
+    detailSheet.getRow(2).height = 24;
+
+    detailSheet.addRow([]);
+
+    // Header
+    const dHeader = detailSheet.addRow([
       "م",
-      "اسم العضو الكامل",
+      "الاسم الكامل",
       "اسم المستخدم",
-      "الخيار الذي تم التصويت له",
+      "الخيار الذي اختاره",
       "المسمى الوظيفي",
       "القسم / الإدارة",
-      "الصلاحية في النظام",
       "الفرع",
+      "الصلاحية",
+      "ملاحظات",
     ]);
-    detailHeaderRow.height = 26;
-    detailHeaderRow.font = { name: "Arial", bold: true, color: { argb: "FFFFFFFF" } };
-    detailHeaderRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF059669" } };
-    detailHeaderRow.alignment = { horizontal: "center", vertical: "middle" };
+    dHeader.height = 30;
+    dHeader.eachCell((cell) => {
+      applyHeaderStyle(cell, C.greenMid, C.headerFont, 10);
+      cell.border = {
+        bottom: { style: "medium", color: { argb: C.greenBg } },
+      };
+    });
 
-    // Build list of all vote instances
-    let voteIndex = 1;
+    // Build rows grouped by option
+    let rowIdx = 1;
     for (const opt of options) {
       const vIds = votes[String(opt.id)] || [];
+      if (vIds.length === 0) continue;
+
+      // Option divider row
+      const divRow = detailSheet.addRow([
+        "", `◀ ${opt.text}`, `(${vIds.length} صوت)`, "", "", "", "", "", ""
+      ]);
+      detailSheet.mergeCells(`B${divRow.number}:C${divRow.number}`);
+      divRow.height = 24;
+      divRow.eachCell((cell, colNum) => {
+        if (colNum >= 2) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1FAE5" } };
+          cell.font = { name: "Arial", size: 10, bold: true, color: { argb: C.greenBg } };
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+        }
+      });
+      divRow.getCell(3).alignment = { horizontal: "left", vertical: "middle" };
+
       for (const vid of vIds) {
         const u = voterMap.get(String(vid));
+        const isCurrentExporter = String(vid) === currentUserIdStr;
+        const note = isCurrentExporter ? "📤 مصدّر التقرير" : "";
+
         const row = detailSheet.addRow([
-          voteIndex++,
+          rowIdx++,
           u?.fullName || "مستخدم غير مسجل",
           u?.username || "-",
           opt.text,
           u?.jobTitle || "-",
-          u?.departmentId?.name || "-",
+          getDeptName(u),
+          getBranchName(u),
           formatRole(u?.role),
-          u?.branchCode || "-",
+          note,
         ]);
-        row.height = 22;
-        row.alignment = { vertical: "middle", horizontal: "right" };
+        row.height = 24;
+
+        const bg = rowIdx % 2 === 0 ? C.rowAlt2 : "FFFFFFFF";
+        row.eachCell((cell, colNum) => {
+          cell.font = { name: "Arial", size: 10, color: { argb: C.valueFont } };
+          cell.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+          if (bg !== "FFFFFFFF") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+          }
+        });
         row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
         row.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
         row.getCell(7).alignment = { horizontal: "center", vertical: "middle" };
         row.getCell(8).alignment = { horizontal: "center", vertical: "middle" };
-
-        if (voteIndex % 2 === 1) {
-          row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
-        }
+        row.getCell(9).alignment = { horizontal: "center", vertical: "middle" };
+        row.getCell(9).font = { name: "Arial", size: 9, italic: true, color: { argb: "FF7C3AED" } };
       }
     }
 
-    if (voteIndex === 1) {
-      const emptyRow = detailSheet.addRow(["-", "لم يقم أي عضو بالتصويت في هذا الاستطلاع حتى الآن.", "", "", "", "", "", ""]);
-      detailSheet.mergeCells(`B${emptyRow.number}:H${emptyRow.number}`);
-      emptyRow.getCell(2).font = { name: "Arial", italic: true, color: { argb: "FF6B7280" } };
+    if (rowIdx === 1) {
+      const emptyRow = detailSheet.addRow([
+        "-",
+        "لم يقم أي عضو بالتصويت في هذا الاستطلاع حتى الآن.",
+        "", "", "", "", "", "", ""
+      ]);
+      detailSheet.mergeCells(`B${emptyRow.number}:I${emptyRow.number}`);
+      emptyRow.getCell(2).font = { name: "Arial", italic: true, color: { argb: C.mutedFont } };
       emptyRow.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
     }
 
+    // Summary footer
+    detailSheet.addRow([]);
+    const footerRow = detailSheet.addRow([
+      "", `إجمالي المصوتين: ${allVoterIds.length} مشارك`,
+      `إجمالي الأصوات المسجلة: ${totalVotes}`,
+      "", "", "", "", "", ""
+    ]);
+    detailSheet.mergeCells(`B${footerRow.number}:C${footerRow.number}`);
+    footerRow.height = 26;
+    footerRow.eachCell((cell, colNum) => {
+      if (colNum >= 2) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: C.totalBg } };
+        cell.font = { name: "Arial", size: 10, bold: true, color: { argb: C.totalFont } };
+        cell.alignment = { horizontal: "right", vertical: "middle" };
+        cell.border = { top: { style: "thin", color: { argb: C.headerBg } } };
+      }
+    });
+
     detailSheet.columns = [
-      { width: 8 },  // م
-      { width: 30 }, // اسم العضو الكامل
-      { width: 18 }, // اسم المستخدم
-      { width: 32 }, // الخيار المختار
-      { width: 24 }, // المسمى الوظيفي
-      { width: 22 }, // القسم / الإدارة
-      { width: 18 }, // الصلاحية
-      { width: 12 }, // الفرع
+      { width: 6 },
+      { width: 28 },
+      { width: 18 },
+      { width: 32 },
+      { width: 22 },
+      { width: 22 },
+      { width: 18 },
+      { width: 14 },
+      { width: 18 },
     ];
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
   return {
     buffer,
-    filename: `Poll_${Date.now()}.xlsx`,
+    filename,
   };
 }
 
