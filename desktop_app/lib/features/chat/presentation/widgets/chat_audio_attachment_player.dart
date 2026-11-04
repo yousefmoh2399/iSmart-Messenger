@@ -182,6 +182,23 @@ class DesktopAudioPlaybackCoordinator {
     } catch (_) {}
   }
 
+  static Future<void> setSpeed(double targetSpeed) async {
+    final speed = (targetSpeed > 0.0) ? targetSpeed : 1.0;
+    speedNotifier.value = speed;
+    try {
+      await _sharedPlayer?.setSpeed(speed);
+    } catch (_) {}
+    _syncIslandAudio();
+  }
+
+  static Future<void> seekProgress(double progressRatio) async {
+    final dur = durationNotifier.value;
+    if (dur > Duration.zero) {
+      final targetMs = (dur.inMilliseconds * progressRatio.clamp(0.0, 1.0)).round();
+      await seek(Duration(milliseconds: targetMs));
+    }
+  }
+
   static Future<void> cycleSpeed() async {
     final current = speedNotifier.value;
     final double next;
@@ -192,10 +209,7 @@ class DesktopAudioPlaybackCoordinator {
     } else {
       next = 1.0;
     }
-    speedNotifier.value = next;
-    try {
-      await _sharedPlayer?.setSpeed(next);
-    } catch (_) {}
+    await setSpeed(next);
   }
 
   static Future<void> stopAndDismiss() async {
@@ -218,6 +232,8 @@ class DesktopAudioPlaybackCoordinator {
       web_bridge.setIslandAudioActionHandlers(
         onToggle: () => toggleCurrent(),
         onStop: () => stopAndDismiss(),
+        onSetSpeed: (speed) => setSpeed(speed),
+        onSeek: (position) => seekProgress(position),
       );
     }
   }
@@ -237,6 +253,7 @@ class DesktopAudioPlaybackCoordinator {
     final isPlaying = isPlayingNotifier.value;
     final pos = positionNotifier.value;
     final dur = durationNotifier.value;
+    final speed = speedNotifier.value;
 
     if (session == null && !isPlaying) {
       web_bridge.islandSyncAudio({
@@ -260,6 +277,8 @@ class DesktopAudioPlaybackCoordinator {
       'currentTime': posStr,
       'totalTime': durStr,
       'progress': progress,
+      'percent': (progress * 100).clamp(0.0, 100.0),
+      'speed': speed,
     });
   }
 

@@ -35,7 +35,7 @@
   --accent-glow: rgba(56, 189, 248, 0.4);
   --success-color: #10b981;
   --danger-color: #f43f5e;
-  --shadow-main: 0 12px 32px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 255, 255, 0.2);
+  --shadow-main: none;
   --apple-spring-open: cubic-bezier(0.16, 1, 0.3, 1);
   --apple-spring-close: cubic-bezier(0.32, 0.72, 0, 1);
   --spring-physics: cubic-bezier(0.16, 1, 0.3, 1);
@@ -106,6 +106,11 @@ body.theme-titanium {
   -webkit-user-select: none;
 }
 
+input, textarea, [contenteditable="true"] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -126,7 +131,11 @@ html, body {
   position: absolute;
   top: 0;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  perspective: 1000px;
+  will-change: width, height;
   transform-origin: top center;
   width: 260px;
   height: 42px;
@@ -135,7 +144,7 @@ html, body {
   background-image: var(--bg-gradient);
   border: 1px solid var(--border-color);
   border-top: none; /* Seamless MacBook Notch edge touching screen top */
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.85), 0 2px 10px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -146,7 +155,6 @@ html, body {
               height 0.36s var(--apple-spring-open),
               border-radius 0.36s var(--apple-spring-open),
               border-color 0.25s ease,
-              box-shadow 0.32s ease,
               background 0.3s ease;
 }
 
@@ -155,7 +163,6 @@ html, body {
               height 0.28s var(--apple-spring-close),
               border-radius 0.28s var(--apple-spring-close),
               border-color 0.2s ease,
-              box-shadow 0.2s ease,
               background 0.2s ease !important;
 }
 
@@ -163,8 +170,8 @@ html, body {
   border-color: rgba(255, 255, 255, 0.22);
 }
 
-.island-capsule:active:not(.state-chats):not(.state-chatview) {
-  transform: translateX(-50%) scale(0.985);
+.island-capsule:active:not(.state-chats):not(.state-chatview):not(.state-reply) {
+  transform: translate3d(-50%, 0, 0) scale(0.985);
 }
 
 /* State Radiuses - MacBook Notch Design (Flat top touching screen, rounded bottom) */
@@ -236,6 +243,7 @@ html, body {
   pointer-events: auto;
   transform: scale(1) translateY(0);
   transition-delay: 0.06s;
+  z-index: 10;
 }
 
 #view-idle {
@@ -740,6 +748,8 @@ html, body {
 
 .reply-input {
   flex: 1;
+  transform: translateZ(0);
+  -webkit-font-smoothing: antialiased;
   background: transparent;
   border: none;
   outline: none;
@@ -1105,6 +1115,7 @@ html, body {
 
 .chatview-messages-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1313,6 +1324,19 @@ html, body {
   transform: scale(0.95);
 }
 
+.chatview-error-pill {
+  margin: 0 4px 6px;
+  padding: 6px 12px;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  color: #fca5a5;
+  font-size: 11px;
+  text-align: center;
+  direction: rtl;
+  animation: appleFadeIn 0.22s ease-out;
+}
+
 .chatview-input-bar {
   display: flex;
   align-items: center;
@@ -1330,6 +1354,8 @@ html, body {
 
 .chatview-input {
   flex: 1;
+  transform: translateZ(0);
+  -webkit-font-smoothing: antialiased;
   background: transparent;
   border: none;
   outline: none;
@@ -1448,6 +1474,8 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
+  z-index: 5;
 }
 
 .btn-audio-control {
@@ -1483,6 +1511,10 @@ html, body {
   font-weight: 700;
   padding: 3px 8px;
   cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  position: relative;
+  z-index: 5;
   transition: all 0.2s var(--spring-physics);
 }
 
@@ -1911,4 +1943,55 @@ input:checked + .toggle-slider:before {
   background: var(--accent-gradient);
   border-color: transparent;
   box-shadow: 0 0 10px var(--accent-glow);
+}
+
+
+.chatview-send-btn svg,
+.reply-send-btn svg {
+  pointer-events: none;
+}
+
+.chatview-quick-chips {
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.chatview-chip {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.chatview-input-bar {
+  flex-shrink: 0;
+  cursor: text;
+  pointer-events: auto;
+  position: relative;
+  z-index: 20;
+}
+
+.chatview-input {
+  flex: 1;
+  cursor: text;
+  pointer-events: auto;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  position: relative;
+  z-index: 21;
+}
+
+.reply-input-wrap {
+  cursor: text;
+  pointer-events: auto;
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+.reply-input {
+  cursor: text;
+  pointer-events: auto;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  position: relative;
+  z-index: 21;
 }

@@ -9,16 +9,16 @@
   // State definitions and exact window dimensions (Apple Fluid Architecture)
   const WINDOW_WIDTH = 440;
   const STATE_DIMENSIONS = {
-    idle: { width: 260, height: 42, winHeight: 52 },
-    welcome: { width: 390, height: 110, winHeight: 124 },
-    notification: { width: 400, height: 92, winHeight: 106 },
-    reply: { width: 410, height: 175, winHeight: 190 },
-    chats: { width: 420, height: 430, winHeight: 446 },
-    chatview: { width: 420, height: 480, winHeight: 496 },
-    audio: { width: 410, height: 72, winHeight: 86 },
-    call: { width: 390, height: 72, winHeight: 86 },
-    progress: { width: 380, height: 80, winHeight: 96 },
-    settings: { width: 420, height: 460, winHeight: 476 },
+    idle: { width: 260, height: 42, winWidth: 264, winHeight: 44 },
+    welcome: { width: 390, height: 110, winWidth: 440, winHeight: 124 },
+    notification: { width: 400, height: 92, winWidth: 440, winHeight: 106 },
+    reply: { width: 410, height: 175, winWidth: 440, winHeight: 190 },
+    chats: { width: 420, height: 430, winWidth: 440, winHeight: 446 },
+    chatview: { width: 420, height: 480, winWidth: 440, winHeight: 496 },
+    audio: { width: 410, height: 72, winWidth: 440, winHeight: 86 },
+    call: { width: 390, height: 72, winWidth: 440, winHeight: 86 },
+    progress: { width: 380, height: 80, winWidth: 440, winHeight: 96 },
+    settings: { width: 420, height: 460, winWidth: 440, winHeight: 476 },
   };
 
   let currentState = "idle";
@@ -254,6 +254,30 @@
   }
 
   /**
+   * Gentle Apple-style error buzz for rejected or failed sends
+   */
+  function playErrorBuzz() {
+    if (!currentSettings.soundEnabled) return;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.setValueAtTime(110, now + 0.08);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.06, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.22);
+    } catch (_) {}
+  }
+
+  /**
    * Calm Success Glass Ping (Progress completed)
    */
   function playSuccessChime() {
@@ -383,8 +407,8 @@
       callTimerInterval = null;
     }
 
-    const prevDim = STATE_DIMENSIONS[previousState] || { width: 260, height: 42, winHeight: 52 };
-    const targetDim = STATE_DIMENSIONS[mode];
+    const prevDim = STATE_DIMENSIONS[previousState] || { width: 260, height: 42, winWidth: 264, winHeight: 44 };
+    const targetDim = STATE_DIMENSIONS[mode] || { width: 260, height: 42, winWidth: 264, winHeight: 44 };
 
     if (mode !== "idle") {
       try { window.focus(); } catch (_) {}
@@ -414,9 +438,8 @@
         if (currentState === "idle") {
           capsule.classList.remove("is-collapsing");
           if (window.islandBridge?.resizeWindow) {
-            window.islandBridge.resizeWindow(WINDOW_WIDTH, targetDim.winHeight);
+            window.islandBridge.resizeWindow(targetDim.winWidth || 264, targetDim.winHeight || 44);
           }
-          window.islandBridge?.setInteractive(false);
         }
       };
 
@@ -426,12 +449,12 @@
       // EXPAND / MORPH FLOW
       capsule.classList.remove("is-collapsing");
 
-      // Expand window height immediately so capsule can blossom downwards smoothly
-      const targetWinHeight = Math.max(prevDim.winHeight || 52, targetDim.winHeight);
+      // Expand window bounds immediately so capsule can blossom downwards smoothly
+      const targetWinHeight = Math.max(prevDim.winHeight || 44, targetDim.winHeight);
+      const targetWinWidth = targetDim.winWidth || WINDOW_WIDTH;
       if (window.islandBridge?.resizeWindow) {
-        window.islandBridge.resizeWindow(WINDOW_WIDTH, targetWinHeight);
+        window.islandBridge.resizeWindow(targetWinWidth, targetWinHeight);
       }
-      window.islandBridge?.setInteractive(true);
 
       // Morph capsule width, height & border-radius seamlessly
       capsule.className = "island-capsule state-" + mode;
@@ -471,7 +494,10 @@
 
       case "reply":
         renderReply(data);
-        setTimeout(() => replyInput?.focus(), 150);
+        setTimeout(() => {
+          window.islandBridge?.focusWindow?.();
+          replyInput?.focus();
+        }, 120);
         break;
 
       case "chats":
@@ -480,6 +506,10 @@
 
       case "chatview":
         renderChatView(data);
+        setTimeout(() => {
+          window.islandBridge?.focusWindow?.();
+          chatviewInput?.focus();
+        }, 120);
         break;
 
       case "audio":
@@ -585,8 +615,17 @@
     if (audioTime) audioTime.textContent = `${current} / ${total}`;
 
     // Update progress bar
-    if (audioProgressBar && data.percent !== undefined) {
-      audioProgressBar.style.width = `${Math.min(100, Math.max(0, data.percent))}%`;
+    const pct = data.percent !== undefined ? data.percent : (data.progress !== undefined ? data.progress * 100 : undefined);
+    if (audioProgressBar && pct !== undefined) {
+      audioProgressBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    }
+
+    // Sync speed display if passed
+    if (data.speed !== undefined && audioSpeedBtn) {
+      const num = Number(data.speed) || 1.0;
+      const speedStr = `${num.toFixed(1)}x`;
+      currentAudioSpeed = speedStr;
+      audioSpeedBtn.textContent = speedStr;
     }
 
     setSafeAvatar(audioAvatar, audioAvatarFallback, data.avatarUrl, "🎙️");
@@ -753,7 +792,11 @@
     const conversationId = chat.id || chat._id;
     if (chatviewInput) {
       chatviewInput.value = "";
-      setTimeout(() => chatviewInput.focus(), 150);
+      chatviewInput.disabled = false;
+      setTimeout(() => {
+        window.islandBridge?.focusWindow?.();
+        chatviewInput.focus();
+      }, 100);
     }
 
     // 1. Instant Cache Display: Render cached or preview messages immediately (zero empty screen)
@@ -864,10 +907,10 @@
         msg.isMine ||
         (myId && sId && sId === myId)
       );
-      bubble.className = `mini-msg ${isOutgoing ? "outgoing" : "incoming"}`;
+      bubble.className = `mini-msg ${isOutgoing ? "outgoing" : "incoming"}${msg.sending ? " is-sending" : ""}`;
 
       const content = msg.content || msg.text || "";
-      const time = msg.createdAt ? formatTime(new Date(msg.createdAt)) : "";
+      const time = msg.sending ? "جاري الإرسال..." : (msg.createdAt ? formatTime(new Date(msg.createdAt)) : "");
       const senderName = msg.senderName || msg.sender?.displayName || msg.sender?.fullName || "";
       const isGroup = Boolean(activeChat?.isGroup || activeChat?.type !== "direct");
 
@@ -956,45 +999,148 @@
     chatviewMessagesContainer.scrollTop = chatviewMessagesContainer.scrollHeight;
   }
 
+  let chatViewErrorTimeout = null;
+  function showChatViewError(message) {
+    const errorPill = document.getElementById("chatview-error-pill");
+    if (!errorPill) return;
+    if (chatViewErrorTimeout) {
+      clearTimeout(chatViewErrorTimeout);
+      chatViewErrorTimeout = null;
+    }
+    errorPill.textContent = message || "فشل إرسال الرسالة.";
+    errorPill.style.display = "block";
+    if (chatviewStatusText) {
+      chatviewStatusText.textContent = "فشل الإرسال";
+      chatviewStatusText.style.color = "var(--danger-color)";
+    }
+    chatViewErrorTimeout = setTimeout(() => {
+      errorPill.style.display = "none";
+      if (chatviewStatusText && currentState === "chatview") {
+        chatviewStatusText.textContent = "نشط الآن";
+        chatviewStatusText.style.color = "";
+      }
+    }, 4000);
+  }
+
+  let isSendingMiniMsg = false;
   async function submitMiniChatMessage(customText = null) {
+    if (isSendingMiniMsg) return;
     const text = (customText || chatviewInput?.value || "").trim();
-    if (!text || !activeChat) return;
+    if (!text) return;
+
+    if (!activeChat) {
+      if (cachedChats && cachedChats.length > 0) {
+        activeChat = cachedChats[0];
+      }
+    }
+
+    if (!activeChat) {
+      showChatViewError("يرجى اختيار محادثة أولاً من القائمة.");
+      return;
+    }
 
     const conversationId = activeChat.id || activeChat._id;
-    if (!conversationId) return;
+    if (!conversationId) {
+      showChatViewError("معرف المحادثة غير صالح.");
+      return;
+    }
 
-    if (!customText && chatviewInput) chatviewInput.value = "";
+    isSendingMiniMsg = true;
+    if (!customText && chatviewInput) {
+      chatviewInput.value = "";
+    }
+    const sendBtn = document.getElementById("chatview-send-btn");
+    if (sendBtn) sendBtn.disabled = true;
+    if (chatviewStatusText) {
+      chatviewStatusText.textContent = "جاري الإرسال...";
+      chatviewStatusText.style.color = "var(--accent-blue)";
+    }
 
-    const newMsg = {
-      id: "temp_" + Date.now(),
+    const tempId = "temp_" + Date.now();
+    const tempMsg = {
+      id: tempId,
       content: text,
       messageType: "text",
       createdAt: new Date().toISOString(),
       isOutgoing: true,
       isMine: true,
       senderName: currentUserName || "أنا",
+      sending: false,
     };
 
-    // Store in local cache so leaving and re-entering the chat keeps the message!
     const existing = conversationMessagesCache.get(conversationId) || [];
-    existing.push(newMsg);
-    conversationMessagesCache.set(conversationId, existing);
-
-    // Also update snippet in cachedChats
-    if (activeChat) {
-      activeChat.snippet = text;
-      activeChat.lastMessage = { content: text, messageType: "text" };
-    }
-
+    existing.push(tempMsg);
     renderMiniChatMessages(existing);
 
+    const safetyTimer = setTimeout(() => {
+      isSendingMiniMsg = false;
+      if (sendBtn) sendBtn.disabled = false;
+      if (chatviewStatusText && chatviewStatusText.textContent === "جاري الإرسال...") {
+        chatviewStatusText.textContent = "نشط الآن";
+        chatviewStatusText.style.color = "";
+      }
+    }, 4000);
+
     try {
-      await window.islandBridge?.sendReply({
+      const res = await window.islandBridge?.sendReply({
         conversationId,
         content: text,
       });
-      playSentPop();
-    } catch (_) {}
+
+      if (res && res.success !== false) {
+        playSentPop();
+        if (chatviewStatusText) {
+          chatviewStatusText.textContent = "تم الإرسال ✓";
+          chatviewStatusText.style.color = "var(--success-color)";
+          setTimeout(() => {
+            if (currentState === "chatview" && chatviewStatusText) {
+              chatviewStatusText.textContent = "نشط الآن";
+              chatviewStatusText.style.color = "";
+            }
+          }, 1500);
+        }
+
+        const confirmedMsg = res.message || {
+          ...tempMsg,
+          id: "srv_" + Date.now(),
+          sending: false,
+        };
+        confirmedMsg.sending = false;
+        const idx = existing.findIndex((m) => m.id === tempId);
+        if (idx !== -1) {
+          existing[idx] = confirmedMsg;
+        }
+        conversationMessagesCache.set(conversationId, existing);
+        if (activeChat) {
+          activeChat.snippet = text;
+          activeChat.lastMessage = confirmedMsg;
+        }
+        renderMiniChatMessages(existing);
+      } else {
+        playErrorBuzz();
+        if (!customText && chatviewInput) chatviewInput.value = text;
+        const filtered = existing.filter((m) => m.id !== tempId);
+        conversationMessagesCache.set(conversationId, filtered);
+        renderMiniChatMessages(filtered);
+
+        showChatViewError(res?.error || "فشل إرسال الرسالة، يرجى المحاولة ثانية.");
+      }
+    } catch (err) {
+      playErrorBuzz();
+      if (!customText && chatviewInput) chatviewInput.value = text;
+      const filtered = existing.filter((m) => m.id !== tempId);
+      conversationMessagesCache.set(conversationId, filtered);
+      renderMiniChatMessages(filtered);
+      showChatViewError("خطأ في الاتصال بالشبكة.");
+    } finally {
+      clearTimeout(safetyTimer);
+      isSendingMiniMsg = false;
+      if (sendBtn) sendBtn.disabled = false;
+      if (chatviewInput) {
+        chatviewInput.disabled = false;
+        chatviewInput.focus();
+      }
+    }
   }
 
   // =========================================================================
@@ -1033,7 +1179,9 @@
   // =========================================================================
   // Reply Actions
   // =========================================================================
+  let isSendingQuickReply = false;
   async function submitQuickReply(customText = null) {
+    if (isSendingQuickReply) return;
     const text = customText || replyInput?.value?.trim();
     if (!text) return;
 
@@ -1043,12 +1191,21 @@
       return;
     }
 
-    if (replyInput) replyInput.disabled = true;
+    isSendingQuickReply = true;
+    if (!customText && replyInput) {
+      replyInput.value = "";
+    }
     if (replySubmitBtn) replySubmitBtn.disabled = true;
     if (replyStatus) {
       replyStatus.textContent = "جاري الإرسال...";
       replyStatus.style.color = "var(--accent-color)";
     }
+
+    const replySafetyTimer = setTimeout(() => {
+      isSendingQuickReply = false;
+      if (replyInput) replyInput.disabled = false;
+      if (replySubmitBtn) replySubmitBtn.disabled = false;
+    }, 4000);
 
     try {
       const res = await window.islandBridge?.sendReply({
@@ -1066,19 +1223,27 @@
           if (currentState === "reply") setMode("idle");
         }, 1100);
       } else {
+        playErrorBuzz();
+        if (!customText && replyInput) replyInput.value = text;
         if (replyStatus) {
           replyStatus.textContent = res?.error || "فشل الإرسال";
           replyStatus.style.color = "var(--danger-color)";
         }
-        if (replyInput) replyInput.disabled = false;
-        if (replySubmitBtn) replySubmitBtn.disabled = false;
       }
     } catch (err) {
+      playErrorBuzz();
+      if (!customText && replyInput) replyInput.value = text;
       if (replyStatus) {
         replyStatus.textContent = "خطأ في الشبكة";
         replyStatus.style.color = "var(--danger-color)";
       }
-      if (replyInput) replyInput.disabled = false;
+    } finally {
+      clearTimeout(replySafetyTimer);
+      isSendingQuickReply = false;
+      if (replyInput) {
+        replyInput.disabled = false;
+        replyInput.focus();
+      }
       if (replySubmitBtn) replySubmitBtn.disabled = false;
     }
   }
@@ -1120,7 +1285,11 @@
     // =========================================================================
     // Auto-Dismiss when clicking outside anywhere on the computer screen
     // =========================================================================
-    function handleOutsideDismiss() {
+    function handleOutsideDismiss(source = "outside") {
+      // In interactive typing modes (chatview or reply), DO NOT auto-collapse on window blur or background signals!
+      if ((currentState === "chatview" || currentState === "reply") && source === "blur") {
+        return;
+      }
       const dismissableModes = ["chats", "chatview", "reply", "settings", "welcome", "notification"];
       if (dismissableModes.includes(currentState)) {
         if (activeAudioState && activeAudioState.isPlaying) {
@@ -1136,19 +1305,19 @@
     window.addEventListener("blur", () => {
       setTimeout(() => {
         if (!document.hasFocus()) {
-          handleOutsideDismiss();
+          handleOutsideDismiss("blur");
         }
-      }, 100);
+      }, 300);
     });
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        handleOutsideDismiss();
+        handleOutsideDismiss("escape");
       }
     });
 
     window.islandBridge?.onCollapseRequested?.(() => {
-      handleOutsideDismiss();
+      handleOutsideDismiss("blur");
     });
     // Hover interactivity on capsule
     capsule.addEventListener("mouseenter", () => {
@@ -1168,37 +1337,21 @@
       }
     });
 
-    // Dynamic mouse interactivity: when idle, ignore mouse clicks outside the 260px capsule
-    let isMouseOverCapsule = false;
-    window.addEventListener("mousemove", (e) => {
+    // Clicking idle capsule opens chats drawer with instant response (no mouse forwarding latency)
+    capsule.addEventListener("click", (e) => {
       if (currentState === "idle") {
-        const rect = capsule.getBoundingClientRect();
-        const isOver = e.clientX >= rect.left && e.clientX <= rect.right &&
-                       e.clientY >= rect.top && e.clientY <= rect.bottom;
-        if (isOver !== isMouseOverCapsule) {
-          isMouseOverCapsule = isOver;
-          window.islandBridge?.setInteractive(isOver);
-        }
-      } else {
-        if (!isMouseOverCapsule) {
-          isMouseOverCapsule = true;
-          window.islandBridge?.setInteractive(true);
-        }
+        e.stopPropagation();
+        playAppleChime();
+        setMode("chats");
       }
     });
 
-    document.addEventListener("mouseleave", () => {
-      if (currentState === "idle") {
-        isMouseOverCapsule = false;
-        window.islandBridge?.setInteractive(false);
-      }
-    });
-
-    // Clicking idle capsule opens chats drawer
     views.idle?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      playAppleChime();
-      setMode("chats");
+      if (currentState === "idle") {
+        e.stopPropagation();
+        playAppleChime();
+        setMode("chats");
+      }
     });
 
     // Dismiss when clicking on the transparent staging canvas outside the capsule
@@ -1264,15 +1417,7 @@
 
     replySubmitBtn?.addEventListener("click", () => submitQuickReply());
 
-    replyInput?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        submitQuickReply();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        setMode("idle");
-      }
-    });
+    // First replyInput keydown removed (consolidated below)
 
     // Quick Emojis
     document.querySelectorAll(".emoji-chip").forEach((btn) => {
@@ -1340,15 +1485,42 @@
       setMode("idle");
     });
 
-    chatviewSendBtn?.addEventListener("click", () => submitMiniChatMessage());
+    document.querySelector(".island-capsule")?.addEventListener("mousedown", () => {
+      window.islandBridge?.focusWindow?.();
+    });
+
+    chatviewInput?.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+    });
+
+    replyInput?.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+    });
+
+    chatviewSendBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      submitMiniChatMessage();
+    });
 
     chatviewInput?.addEventListener("keydown", (e) => {
+      e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
         submitMiniChatMessage();
       } else if (e.key === "Escape") {
         e.preventDefault();
         setMode("chats");
+      }
+    });
+
+    replyInput?.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitQuickReply();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setMode("idle");
       }
     });
 
@@ -1361,19 +1533,30 @@
     });
 
     // Audio actions
-    audioPlayPauseBtn?.addEventListener("click", () => {
+    audioPlayPauseBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
       window.islandBridge?.toggleAudio();
     });
 
-    audioSpeedBtn?.addEventListener("click", () => {
+    audioSpeedBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
       const speeds = ["1.0x", "1.5x", "2.0x"];
-      const nextIdx = (speeds.indexOf(currentAudioSpeed) + 1) % speeds.length;
+      let idx = speeds.indexOf(currentAudioSpeed);
+      if (idx === -1) {
+        const num = parseFloat(currentAudioSpeed);
+        if (num >= 1.9) idx = 2;
+        else if (num >= 1.4) idx = 1;
+        else idx = 0;
+      }
+      const nextIdx = (idx + 1) % speeds.length;
       currentAudioSpeed = speeds[nextIdx];
       if (audioSpeedBtn) audioSpeedBtn.textContent = currentAudioSpeed;
-      window.islandBridge?.setAudioSpeed?.(parseFloat(currentAudioSpeed));
+      const numSpeed = parseFloat(currentAudioSpeed);
+      window.islandBridge?.setAudioSpeed?.(numSpeed);
     });
 
     audioProgressScrubber?.addEventListener("click", (e) => {
+      e.stopPropagation();
       const rect = audioProgressScrubber.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const pct = Math.max(0, Math.min(1, clickX / rect.width));
@@ -1381,7 +1564,8 @@
       window.islandBridge?.seekAudio?.(pct);
     });
 
-    document.getElementById("audio-close-btn")?.addEventListener("click", () => {
+    document.getElementById("audio-close-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
       window.islandBridge?.stopAudio();
       setMode("idle");
     });
@@ -1599,15 +1783,61 @@
 
     // Active User updated
     window.islandBridge.onActiveUserUpdated?.((user) => {
+      const prevId = currentUserId;
       if (user && typeof user === "object") {
-        if (user.id || user._id || user.userId) {
-          currentUserId = String(user.id || user._id || user.userId);
+        const newId = String(user.id || user._id || user.userId || "");
+        if (newId && prevId && newId !== prevId) {
+          // Account switch detected! Reset conversation messages cache and chats
+          conversationMessagesCache.clear();
+          cachedChats = [];
+          if (currentState === "chatview") {
+            setMode("chats");
+          }
         }
+        currentUserId = newId;
         if (user.name || user.fullName || user.username || user.displayName) {
           currentUserName = user.name || user.fullName || user.username || user.displayName;
         }
         if (welcomeUserEl) welcomeUserEl.textContent = `مرحباً بك، ${currentUserName || "مهندس يوسف"}`;
         setSafeAvatar(welcomeAvatarEl, welcomeAvatarFallback, user.avatarUrl, getInitial(currentUserName || "م"));
+      } else {
+        // User logged out
+        currentUserId = "";
+        currentUserName = "";
+        conversationMessagesCache.clear();
+        cachedChats = [];
+        if (currentState !== "idle") {
+          setMode("idle");
+        }
+      }
+    });
+
+    // Real-time message added from manager
+    window.islandBridge.onMessageAdded?.(({ conversationId, message }) => {
+      if (!conversationId || !message) return;
+      const convId = String(conversationId);
+      const existing = conversationMessagesCache.get(convId) || [];
+      // Prevent duplicate if message with same ID already exists
+      if (existing.some((m) => m.id === message.id)) return;
+      // Prevent duplicate if message has same content from me sent very recently
+      const dupIdx = existing.findIndex((m) =>
+        (m.isOutgoing || m.isMine) &&
+        m.content === message.content &&
+        Math.abs(new Date(m.createdAt || 0) - new Date(message.createdAt || 0)) < 4000
+      );
+      if (dupIdx !== -1) {
+        existing[dupIdx] = message;
+        conversationMessagesCache.set(convId, existing);
+        if (activeChat && (String(activeChat.id) === convId || String(activeChat._id) === convId)) {
+          renderMiniChatMessages(existing);
+        }
+        return;
+      }
+      existing.push(message);
+      existing.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+      conversationMessagesCache.set(convId, existing);
+      if (activeChat && (String(activeChat.id) === convId || String(activeChat._id) === convId)) {
+        renderMiniChatMessages(existing);
       }
     });
   }

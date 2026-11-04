@@ -1285,15 +1285,43 @@ Future<bool> islandTestNotification() async {
 
 StreamSubscription<html.Event>? _islandToggleAudioSub;
 StreamSubscription<html.Event>? _islandStopAudioSub;
+StreamSubscription<html.Event>? _islandSetAudioSpeedSub;
+StreamSubscription<html.Event>? _islandSeekAudioSub;
 
-void setIslandAudioActionHandlers({void Function()? onToggle, void Function()? onStop}) {
+void setIslandAudioActionHandlers({
+  void Function()? onToggle,
+  void Function()? onStop,
+  void Function(double speed)? onSetSpeed,
+  void Function(double position)? onSeek,
+}) {
   _islandToggleAudioSub?.cancel();
   _islandStopAudioSub?.cancel();
+  _islandSetAudioSpeedSub?.cancel();
+  _islandSeekAudioSub?.cancel();
+
   if (onToggle != null) {
     _islandToggleAudioSub = html.window.on['island-toggle-audio'].listen((_) => onToggle());
   }
   if (onStop != null) {
     _islandStopAudioSub = html.window.on['island-stop-audio'].listen((_) => onStop());
+  }
+  if (onSetSpeed != null) {
+    _islandSetAudioSpeedSub = html.window.on['island-set-audio-speed'].listen((event) {
+      final detail = (event as dynamic).detail;
+      if (detail != null) {
+        final speed = double.tryParse(detail.toString()) ?? 1.0;
+        onSetSpeed(speed);
+      }
+    });
+  }
+  if (onSeek != null) {
+    _islandSeekAudioSub = html.window.on['island-seek-audio'].listen((event) {
+      final detail = (event as dynamic).detail;
+      if (detail != null) {
+        final pos = double.tryParse(detail.toString()) ?? 0.0;
+        onSeek(pos);
+      }
+    });
   }
 }
 
@@ -1307,6 +1335,43 @@ Future<bool> islandSyncAudio(Map<String, dynamic> audioData) async {
 }
 
 StreamSubscription<html.Event>? _islandOpenConversationSub;
+StreamSubscription<html.Event>? _islandQuickReplySub;
+
+void setIslandQuickReplyHandler(Future<bool> Function(String conversationId, String content)? handler) {
+  _islandQuickReplySub?.cancel();
+  _islandQuickReplySub = null;
+  if (handler == null) return;
+  _islandQuickReplySub = html.window.on['electron-island-quick-reply'].listen((event) async {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      try {
+        final data = jsonDecode(detail) as Map<String, dynamic>;
+        final convId = data['conversationId']?.toString();
+        final content = data['content']?.toString();
+        if (convId != null && content != null && content.trim().isNotEmpty) {
+          await handler(convId.trim(), content.trim());
+        }
+      } catch (_) {}
+    }
+  });
+}
+
+
+StreamSubscription<html.Event>? _islandChatRefreshSub;
+
+void setIslandChatRefreshHandler(void Function(String conversationId)? handler) {
+  _islandChatRefreshSub?.cancel();
+  _islandChatRefreshSub = null;
+  if (handler == null) return;
+  _islandChatRefreshSub = html.window.on['electron-chat-refresh'].listen((event) {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      handler(detail.trim());
+    }
+  });
+}
+
+
 
 void setIslandOpenConversationHandler(void Function(String conversationId)? handler) {
   _islandOpenConversationSub?.cancel();

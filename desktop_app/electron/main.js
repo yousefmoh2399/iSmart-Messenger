@@ -1082,7 +1082,7 @@ function createWindow(startUrl, startHidden = false) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       webSecurity: false,
       allowRunningInsecureContent: true,
       defaultFontFamily: {
@@ -2669,6 +2669,33 @@ ipcMain.handle("secure-store:set", async (_event, payload = {}) => {
   const store = readSecureStore();
   store[key] = encrypted.toString("base64");
   writeSecureStore(store);
+
+  if (islandManager) {
+    if (key === "desktop_auth_session_v1") {
+      try {
+        const user = getActiveUser();
+        const token = getActiveAuthToken();
+        if (user) {
+          islandManager.syncActiveUser({ ...user, token });
+        }
+      } catch (_) {}
+    } else if (key === "desktop_auth_token") {
+      try {
+        const token = getActiveAuthToken();
+        const user = getActiveUser();
+        islandManager.syncActiveUser(user ? { ...user, token } : null);
+      } catch (_) {}
+    } else if (key === "desktop_api_base_url_v2" || key === "desktop_api_base_url") {
+      try {
+        const decrypted = safeStorage.decryptString(Buffer.from(store[key], "base64"));
+        if (decrypted && decrypted.trim().startsWith("http")) {
+          lastDetectedApiBaseUrl = decrypted.trim().replace(/\/+$/, "");
+          islandManager.apiBaseUrl = lastDetectedApiBaseUrl;
+        }
+      } catch (_) {}
+    }
+  }
+
   return { success: true };
 });
 
@@ -2704,6 +2731,13 @@ ipcMain.handle("secure-store:delete", async (_event, keyValue) => {
   const store = readSecureStore();
   delete store[key];
   writeSecureStore(store);
+
+  if (islandManager && (key === "desktop_auth_session_v1" || key === "desktop_auth_token")) {
+    try {
+      islandManager.syncActiveUser(null);
+    } catch (_) {}
+  }
+
   return { success: true };
 });
 

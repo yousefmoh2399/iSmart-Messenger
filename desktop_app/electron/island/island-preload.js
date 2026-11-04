@@ -42,6 +42,11 @@ contextBridge.exposeInMainWorld("islandBridge", {
     ipcRenderer.on("island:user-updated", handler);
     return () => ipcRenderer.removeListener("island:user-updated", handler);
   },
+  onMessageAdded: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("island:message-added", handler);
+    return () => ipcRenderer.removeListener("island:message-added", handler);
+  },
   onCollapseRequested: (callback) => {
     const handler = () => callback();
     ipcRenderer.on("island:collapse", handler);
@@ -49,6 +54,7 @@ contextBridge.exposeInMainWorld("islandBridge", {
   },
 
   // Actions to Main Process
+  focusWindow: () => ipcRenderer.invoke("island:focus-window"),
   sendReply: (payload) => ipcRenderer.invoke("island:send-reply", payload),
   openConversation: (conversationId) => ipcRenderer.invoke("island:open-conversation", conversationId),
   showMainWindow: () => ipcRenderer.invoke("island:show-main-window"),

@@ -519,10 +519,51 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       web_bridge.setElectronTrayActionHandler((action) {
         unawaited(_handleTrayAction(<String, String>{'action': action}));
       });
+      web_bridge.setIslandChatRefreshHandler((conversationId) {
+        try {
+          ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+          ref.read(conversationMessagesControllerProvider(conversationId).notifier).refresh();
+        } catch (_) {}
+      });
+      web_bridge.setIslandQuickReplyHandler((conversationId, content) async {
+        try {
+          final notifier = ref.read(
+            conversationMessagesControllerProvider(conversationId).notifier,
+          );
+          await notifier.sendText(content);
+          ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+          return true;
+        } catch (_) {
+          try {
+            await ref.read(chatRepositoryProvider).sendTextMessage(
+              conversationId: conversationId,
+              content: content,
+            );
+            ref.read(chatOverviewControllerProvider.notifier).refresh(showLoader: false);
+            ref.read(conversationMessagesControllerProvider(conversationId).notifier).refresh();
+            return true;
+          } catch (_) {
+            return false;
+          }
+        }
+      });
+      try {
+        final currentUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull ?? AppConfig.defaultApiBaseUrl;
+        unawaited(web_bridge.secureStoreSet('desktop_api_base_url_v2', currentUrl));
+      } catch (_) {}
     }
     _listenToDesktopEvents();
     _listenToUpdateAgentEvents();
     _listenToLanTransfers();
+    ref.listenManual<AsyncValue<String>>(
+      apiBaseUrlControllerProvider,
+      (_, next) {
+        final url = next.valueOrNull;
+        if (url != null && url.isNotEmpty) {
+          unawaited(web_bridge.secureStoreSet('desktop_api_base_url_v2', url));
+        }
+      },
+    );
     _preferencesSubscription = ref.listenManual<AsyncValue<UserPreferences>>(
       userPreferencesControllerProvider,
       (_, next) {
@@ -556,6 +597,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _windowChannel.setMethodCallHandler(null);
     if (kIsWeb && web_bridge.isElectron()) {
       web_bridge.setElectronTrayActionHandler(null);
+      web_bridge.setIslandChatRefreshHandler(null);
+      web_bridge.setIslandQuickReplyHandler(null);
     }
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

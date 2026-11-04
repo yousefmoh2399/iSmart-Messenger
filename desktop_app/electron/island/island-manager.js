@@ -99,7 +99,7 @@ class DynamicIslandManager {
       this.mainWindow.on("focus", () => {
         if (this.islandWindow && !this.islandWindow.isDestroyed() && this.islandWindow.isVisible()) {
           try {
-            this.islandWindow.setAlwaysOnTop(true, "screen-saver");
+            this.islandWindow.setAlwaysOnTop(true, "floating");
           } catch (_) {
             try { this.islandWindow.setAlwaysOnTop(true); } catch (__) {}
           }
@@ -107,6 +107,28 @@ class DynamicIslandManager {
         }
       });
     }
+  }
+
+  async resolveAuthCredentials() {
+    let token = this.authToken;
+    if (!token && typeof this.getAuthToken === "function") {
+      try { token = await this.getAuthToken(); } catch (_) {}
+    }
+
+    let user = this.activeUser;
+    if (!user && typeof this.getActiveUser === "function") {
+      try { user = await this.getActiveUser(); } catch (_) {}
+    }
+
+    let baseUrl = this.apiBaseUrl;
+    if (!baseUrl && typeof this.getApiBaseUrl === "function") {
+      try { baseUrl = this.getApiBaseUrl(); } catch (_) {}
+    }
+    if (!baseUrl) {
+      baseUrl = "http://172.17.100.253:5000";
+    }
+
+    return { token, user, baseUrl };
   }
 
   createIslandWindow(startHidden = false) {
@@ -123,8 +145,9 @@ class DynamicIslandManager {
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const bounds = primaryDisplay.bounds;
-    const initialWidth = 440;
-    const initialHeight = 52;
+    // Initial size matches idle capsule exactly (264x44) to prevent transparent dead-click areas
+    const initialWidth = 264;
+    const initialHeight = 44;
     this.currentWidth = initialWidth;
     this.currentHeight = initialHeight;
 
@@ -157,7 +180,7 @@ class DynamicIslandManager {
 
     // Make sure it sits on top of all windows
     try {
-      this.islandWindow.setAlwaysOnTop(true, "screen-saver");
+      this.islandWindow.setAlwaysOnTop(true, "floating");
     } catch (_) {
       try {
         this.islandWindow.setAlwaysOnTop(true, "floating");
@@ -173,12 +196,11 @@ class DynamicIslandManager {
     const indexPath = path.join(__dirname, "index.html");
     this.islandWindow.loadFile(indexPath);
 
-
     const showIsland = () => {
       if (this.islandWindow && !this.islandWindow.isDestroyed() && !this.islandWindow.isVisible()) {
         this.islandWindow.show();
         try {
-          this.islandWindow.setAlwaysOnTop(true, "screen-saver");
+          this.islandWindow.setAlwaysOnTop(true, "floating");
         } catch (_) {
           try { this.islandWindow.setAlwaysOnTop(true); } catch (__) {}
         }
@@ -209,9 +231,11 @@ class DynamicIslandManager {
     });
 
     this.islandWindow.on("blur", () => {
-      if (this.islandWindow && !this.islandWindow.isDestroyed()) {
-        this.islandWindow.webContents.send("island:collapse");
-      }
+      setTimeout(() => {
+        if (this.islandWindow && !this.islandWindow.isDestroyed() && !this.islandWindow.isFocused()) {
+          this.islandWindow.webContents.send("island:collapse");
+        }
+      }, 400);
     });
 
     this.islandWindow.on("closed", () => {
@@ -224,16 +248,20 @@ class DynamicIslandManager {
   resize(width, height) {
     if (!this.islandWindow || this.islandWindow.isDestroyed()) return;
 
-    const WINDOW_CANVAS_WIDTH = 440;
-    const targetWidth = WINDOW_CANVAS_WIDTH;
-    const targetHeight = Math.max(Math.round(height || 52), 52);
+    // Use content-driven width: 264px when idle, 440px when expanded
+    const targetWidth = Math.max(Math.round(width || 264), 200);
+    const targetHeight = Math.max(Math.round(height || 44), 36);
 
     this.currentWidth = targetWidth;
     this.currentHeight = targetHeight;
 
     try {
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const bounds = primaryDisplay.bounds;
+      let bounds = { x: 0, y: 0, width: 1920, height: 1080 };
+      try {
+        if (screen && typeof screen.getPrimaryDisplay === "function") {
+          bounds = screen.getPrimaryDisplay()?.bounds || bounds;
+        }
+      } catch (_) {}
       const fixedX = Math.round(bounds.x + (bounds.width - targetWidth) / 2);
       const offset = typeof this.settings.yOffset === "number" ? this.settings.yOffset : 0;
       const fixedY = Math.round(bounds.y + offset);
@@ -254,24 +282,29 @@ class DynamicIslandManager {
         });
       }
 
+      // Keep window interactive at all times so clicks never forward or pass through to underlying apps
+      try {
+        this.islandWindow.setIgnoreMouseEvents(false);
+      } catch (_) {}
+
       if (targetHeight > 60) {
         try {
+          app.focus({ steal: true });
           if (!this.islandWindow.isFocused()) {
             this.islandWindow.focus();
           }
+          this.islandWindow.webContents.focus();
         } catch (_) {}
       }
     } catch (_) {}
   }
 
-  setInteractive(interactive) {
+  setInteractive(_interactive) {
     if (!this.islandWindow || this.islandWindow.isDestroyed()) return;
     try {
-      if (interactive) {
-        this.islandWindow.setIgnoreMouseEvents(false);
-      } else {
-        this.islandWindow.setIgnoreMouseEvents(true, { forward: true });
-      }
+      // In the content-bound architecture, the window is sized to the capsule,
+      // so clicks are 100% intercepted by the island and never leak to apps behind it!
+      this.islandWindow.setIgnoreMouseEvents(false);
     } catch (_) {}
   }
 
@@ -415,6 +448,25 @@ class DynamicIslandManager {
   }
 
   syncActiveUser(user) {
+    const prevUser = this.activeUser || (typeof this.getActiveUser === "function" ? this.getActiveUser() : null);
+    const prevUserId = prevUser?.id || prevUser?._id || prevUser?.userId;
+    const newUserId = user?.id || user?._id || user?.userId;
+
+    const isDifferentUser = Boolean(prevUserId && newUserId && String(prevUserId) !== String(newUserId));
+    const isLogout = !user || !newUserId;
+    const isInitialLoginWithExistingCache = Boolean(newUserId && !prevUserId && (this.cachedChats?.length > 0 || this.conversationMessagesCache?.size > 0));
+
+    if (isDifferentUser || isLogout || isInitialLoginWithExistingCache) {
+      // User switched, logged out, or newly logged in: wipe sensitive cached chat data and reset
+      this.cachedChats = [];
+      if (this.conversationMessagesCache) {
+        this.conversationMessagesCache.clear();
+      }
+      if (this._mediaBase64Cache) {
+        this._mediaBase64Cache.clear();
+      }
+    }
+
     if (user && typeof user === "object") {
       this.activeUser = user;
       if (user.apiBaseUrl) {
@@ -423,8 +475,15 @@ class DynamicIslandManager {
       if (user.token) {
         this.authToken = String(user.token).trim();
       }
-      if (this.islandWindow && !this.islandWindow.isDestroyed()) {
-        this.islandWindow.webContents.send("island:user-updated", user);
+    } else {
+      this.activeUser = null;
+      this.authToken = null;
+    }
+
+    if (this.islandWindow && !this.islandWindow.isDestroyed()) {
+      this.islandWindow.webContents.send("island:user-updated", this.activeUser);
+      if (this.cachedChats.length === 0) {
+        this.islandWindow.webContents.send("island:chats-updated", []);
       }
     }
   }
@@ -434,17 +493,15 @@ class DynamicIslandManager {
       return this.cachedChats;
     }
 
-    const token = this.authToken || (await this.getAuthToken());
-    const baseUrl = this.apiBaseUrl || (typeof this.getApiBaseUrl === "function" ? this.getApiBaseUrl() : null);
-
+    const { token, user, baseUrl } = await this.resolveAuthCredentials();
     if (!token || !baseUrl) {
       return [];
     }
 
     const myId = String(
-      this.activeUser?.id ||
-      this.activeUser?._id ||
-      this.activeUser?.userId ||
+      user?.id ||
+      user?._id ||
+      user?.userId ||
       (typeof this.getUserId === "function" ? this.getUserId() : "") ||
       ""
     );
@@ -463,13 +520,16 @@ class DynamicIslandManager {
               Accept: "application/json",
               Authorization: `Bearer ${token}`,
             },
-            timeout: 6000,
+            timeout: 8000,
           },
           (res) => {
             let body = "";
             res.on("data", (chunk) => (body += chunk));
             res.on("end", () => {
               try {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                  return resolve([]);
+                }
                 const parsed = JSON.parse(body);
                 const convs = parsed.data?.conversations || parsed.conversations || [];
                 const formatted = convs.map((c) => {
@@ -521,14 +581,13 @@ class DynamicIslandManager {
     }
     const cachedMessages = this.conversationMessagesCache.get(convId) || [];
 
-    const token = this.authToken || (await this.getAuthToken());
-    const baseUrl = this.apiBaseUrl || (typeof this.getApiBaseUrl === "function" ? this.getApiBaseUrl() : null);
+    const { token, user, baseUrl } = await this.resolveAuthCredentials();
     if (!token || !baseUrl) return cachedMessages;
 
     const myId = String(
-      this.activeUser?.id ||
-      this.activeUser?._id ||
-      this.activeUser?.userId ||
+      user?.id ||
+      user?._id ||
+      user?.userId ||
       (typeof this.getUserId === "function" ? this.getUserId() : "") ||
       ""
     );
@@ -593,20 +652,8 @@ class DynamicIslandManager {
                   };
                 });
 
-                // Merge fetched messages with local pending/sent messages from cache
-                const localPending = cachedMessages.filter((m) =>
-                  String(m.id).startsWith("client_") || String(m.id).startsWith("temp_")
-                );
-                const merged = [...formatted];
-                for (const pending of localPending) {
-                  if (!merged.some((m) => m.content === pending.content && Math.abs(new Date(m.createdAt || 0) - new Date(pending.createdAt || 0)) < 60000)) {
-                    merged.push(pending);
-                  }
-                }
-                merged.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-
-                this.conversationMessagesCache.set(convId, merged);
-                resolve(merged);
+                this.conversationMessagesCache.set(convId, formatted);
+                resolve(formatted);
               } catch (_) {
                 resolve(cachedMessages);
               }
@@ -624,72 +671,42 @@ class DynamicIslandManager {
 
   async sendReply(payload = {}) {
     const { conversationId, content } = payload;
-    if (!conversationId || !content) {
-      return { success: false, error: "بيانات الرد غير مكتملة." };
+    if (!conversationId || !content || !String(content).trim()) {
+      return { success: false, error: "محتوى الرسالة مطلوب." };
     }
 
-    const convId = String(conversationId);
-    if (!this.conversationMessagesCache) {
-      this.conversationMessagesCache = new Map();
-    }
-    const myId = String(
-      this.activeUser?.id ||
-      this.activeUser?._id ||
-      this.activeUser?.userId ||
-      (typeof this.getUserId === "function" ? this.getUserId() : "") ||
-      ""
-    );
-    const existing = this.conversationMessagesCache.get(convId) || [];
-    const clientMsg = {
-      id: "client_" + Date.now(),
-      content: content,
+    const convId = String(conversationId).trim();
+    const cleanContent = String(content).trim();
+
+    const { token, user, baseUrl } = await this.resolveAuthCredentials();
+
+    const myId = String(user?.id || user?._id || user?.userId || "");
+    const myName = user?.fullName || user?.displayName || user?.name || "أنا";
+    const myAvatar = user?.avatarUrl || null;
+
+    const confirmedMsg = {
+      id: "srv_" + Date.now(),
+      content: cleanContent,
       messageType: "text",
       fileName: null,
       fileUrl: null,
       fileSize: 0,
       mimeType: null,
       senderId: myId,
-      senderName: this.activeUser?.displayName || this.activeUser?.fullName || this.activeUser?.name || "أنا",
-      senderAvatar: this.activeUser?.avatarUrl || null,
+      senderName: myName,
+      senderAvatar: myAvatar,
       createdAt: new Date().toISOString(),
       isOutgoing: true,
       isMine: true,
+      sending: false,
     };
-    this.conversationMessagesCache.set(convId, [...existing, clientMsg]);
 
-    // Also update cachedChats snippet if exists
-    if (Array.isArray(this.cachedChats)) {
-      const targetChat = this.cachedChats.find((c) => String(c.id) === convId);
-      if (targetChat) {
-        targetChat.snippet = content;
-        targetChat.lastMessage = {
-          id: clientMsg.id,
-          content: content,
-          messageType: "text",
-          createdAt: clientMsg.createdAt,
-          isOutgoing: true,
-        };
-        targetChat.updatedAt = clientMsg.createdAt;
-      }
-    }
-
-    // 1. Notify mainWindow to send message via live session
-    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      this.mainWindow.webContents.send("island:quick-reply", {
-        conversationId,
-        content,
-      });
-    }
-
-    // 2. Direct API request fallback
-    const token = this.authToken || (await this.getAuthToken());
-    const baseUrl = this.apiBaseUrl || (typeof this.getApiBaseUrl === "function" ? this.getApiBaseUrl() : null);
-
+    // Primary attempt: Direct backend HTTP API call if token & baseUrl available
     if (token && baseUrl) {
       try {
         const postData = JSON.stringify({
-          conversationId,
-          content,
+          conversationId: convId,
+          content: cleanContent,
           messageType: "text",
         });
 
@@ -697,7 +714,7 @@ class DynamicIslandManager {
         const isHttps = parsedUrl.protocol === "https:";
         const client = isHttps ? https : http;
 
-        return await new Promise((resolve) => {
+        const apiResult = await new Promise((resolve) => {
           const req = client.request(
             parsedUrl,
             {
@@ -707,37 +724,102 @@ class DynamicIslandManager {
                 "Content-Length": Buffer.byteLength(postData),
                 Authorization: `Bearer ${token}`,
               },
-              timeout: 10000,
+              timeout: 4500,
             },
             (res) => {
               let body = "";
               res.on("data", (chunk) => (body += chunk));
               res.on("end", () => {
+                let parsedBody = null;
+                try { parsedBody = JSON.parse(body); } catch (_) {}
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                  resolve({ success: true });
+                  const messageObj = parsedBody?.data?.message || parsedBody?.message || parsedBody?.data || null;
+                  resolve({ success: true, message: messageObj });
+                } else if (res.statusCode === 401) {
+                  resolve({ success: false, error: "انتهت جلسة تسجيل الدخول، يرجى تسجيل الدخول مجدداً." });
+                } else if (res.statusCode === 403) {
+                  resolve({ success: false, error: "ليس لديك صلاحية لإرسال رسائل في هذه المحادثة." });
                 } else {
                   resolve({
                     success: false,
-                    error: `فشل الإرسال (${res.statusCode})`,
+                    error: parsedBody?.message || parsedBody?.error || `فشل الإرسال (${res.statusCode})`,
                   });
                 }
               });
-            },
+            }
           );
 
           req.on("error", (err) => {
-            resolve({ success: false, error: err.message || "خطأ في الشبكة" });
+            resolve({ success: false, error: err.message || "خطأ في الاتصال بالشبكة" });
+          });
+
+          req.on("timeout", () => {
+            req.destroy();
+            resolve({ success: false, error: "انتهت مهلة الاتصال بالخادم." });
           });
 
           req.write(postData);
           req.end();
         });
+
+        if (apiResult.success) {
+          const srvMsg = apiResult.message || confirmedMsg;
+          srvMsg.isOutgoing = true;
+          srvMsg.isMine = true;
+          srvMsg.sending = false;
+
+          // Update local conversation cache and chats list
+          if (!this.conversationMessagesCache) {
+            this.conversationMessagesCache = new Map();
+          }
+          const existing = this.conversationMessagesCache.get(convId) || [];
+          this.conversationMessagesCache.set(convId, [...existing, srvMsg]);
+
+          if (Array.isArray(this.cachedChats)) {
+            const chatIdx = this.cachedChats.findIndex((c) => String(c.id) === convId);
+            if (chatIdx !== -1) {
+              const chat = this.cachedChats[chatIdx];
+              chat.snippet = cleanContent;
+              chat.lastMessage = srvMsg;
+              chat.updatedAt = srvMsg.createdAt;
+              this.cachedChats.splice(chatIdx, 1);
+              this.cachedChats.unshift(chat);
+            }
+          }
+
+          // Notify Flutter to refresh conversation so both windows stay in 100% sync
+          if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send("chat:refresh-conversation", convId);
+          }
+
+          return { success: true, message: srvMsg };
+        } else if (apiResult.error && (apiResult.error.includes("جلسة") || apiResult.error.includes("صلاحية"))) {
+          return apiResult;
+        }
       } catch (err) {
-        return { success: false, error: err.message };
+        console.error("[DynamicIsland] sendReply direct API error:", err);
       }
     }
 
-    return { success: true, queued: true };
+    // Secondary / Fallback engine: Notify Flutter main window to send the message
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("island:quick-reply", {
+        conversationId: convId,
+        content: cleanContent,
+      });
+      this.mainWindow.webContents.send("chat:refresh-conversation", convId);
+
+      // Update local cache
+      if (!this.conversationMessagesCache) {
+        this.conversationMessagesCache = new Map();
+      }
+      const existing = this.conversationMessagesCache.get(convId) || [];
+      this.conversationMessagesCache.set(convId, [...existing, confirmedMsg]);
+
+      return { success: true, message: confirmedMsg };
+    }
+
+    return { success: false, error: "يرجى تسجيل الدخول أو تشغيل التطبيق أولاً." };
   }
 
   
@@ -786,8 +868,9 @@ class DynamicIslandManager {
     if (!targetUrl || typeof targetUrl !== "string") {
       return { success: false, message: "No URL" };
     }
-    const token = this.authToken || (await this.getAuthToken());
-    const baseUrl = this.apiBaseUrl || (typeof this.getApiBaseUrl === "function" ? this.getApiBaseUrl() : null);
+    const creds = await this.resolveAuthCredentials();
+    const token = creds.token;
+    const baseUrl = creds.baseUrl;
     let fullUrl = targetUrl.trim();
     if (!fullUrl.startsWith("http://") && !fullUrl.startsWith("https://") && baseUrl) {
       try {
@@ -939,6 +1022,19 @@ class DynamicIslandManager {
 
     ipcMain.on("island:set-interactive", (_event, interactive) => {
       this.setInteractive(interactive);
+    });
+
+    ipcMain.handle("island:focus-window", () => {
+      if (this.islandWindow && !this.islandWindow.isDestroyed()) {
+        try { app.focus({ steal: true }); } catch (_) {}
+        if (!this.islandWindow.isVisible()) {
+          this.islandWindow.show();
+        }
+        try { this.islandWindow.focus(); } catch (_) {}
+        try { this.islandWindow.webContents.focus(); } catch (_) {}
+        try { this.islandWindow.moveTop(); } catch (_) {}
+      }
+      return { success: true };
     });
 
     ipcMain.handle("island:open-conversation", (_event, conversationId) => {

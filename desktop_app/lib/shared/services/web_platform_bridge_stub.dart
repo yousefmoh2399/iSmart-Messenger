@@ -362,6 +362,15 @@ Future<bool> islandTestNotification() async => false;
 
 Future<bool> islandSyncAudio(Map<String, dynamic> audioData) async => false;
 
-void setIslandAudioActionHandlers({void Function()? onToggle, void Function()? onStop}) {}
+void setIslandAudioActionHandlers({
+  void Function()? onToggle,
+  void Function()? onStop,
+  void Function(double speed)? onSetSpeed,
+  void Function(double position)? onSeek,
+}) {}
 
 void setIslandOpenConversationHandler(void Function(String conversationId)? handler) {}
+
+void setIslandChatRefreshHandler(void Function(String conversationId)? handler) {}
+
+void setIslandQuickReplyHandler(Future<bool> Function(String conversationId, String content)? handler) {}

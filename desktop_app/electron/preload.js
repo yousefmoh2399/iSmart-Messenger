@@ -102,6 +102,12 @@ ipcRenderer.on("island:toggle-audio", () => {
 ipcRenderer.on("island:stop-audio", () => {
   window.dispatchEvent(new CustomEvent("island-stop-audio"));
 });
+ipcRenderer.on("island:set-audio-speed", (_event, speed) => {
+  window.dispatchEvent(new CustomEvent("island-set-audio-speed", { detail: String(speed) }));
+});
+ipcRenderer.on("island:seek-audio", (_event, position) => {
+  window.dispatchEvent(new CustomEvent("island-seek-audio", { detail: String(position) }));
+});
 
 ipcRenderer.on("lan-transfer-progress", (_event, payload) => {
   window.dispatchEvent(
@@ -118,6 +124,12 @@ ipcRenderer.on("lan-receive-pending", (_event, payload) => {
 ipcRenderer.on("island:quick-reply", (_event, payload) => {
   window.dispatchEvent(
     new CustomEvent("electron-island-quick-reply", { detail: JSON.stringify(payload || {}) }),
+  );
+});
+
+ipcRenderer.on("chat:refresh-conversation", (_event, conversationId) => {
+  window.dispatchEvent(
+    new CustomEvent("electron-chat-refresh", { detail: String(conversationId || "") }),
   );
 });
 
