@@ -3771,7 +3771,9 @@ async function exportPollToExcel(currentUser, messageId) {
 
   const isAdmin =
     currentUser.role === "admin" || currentUser.role === "superadmin";
-  const isCreator = String(message.senderId._id) === currentUser.id;
+  const senderIdStr = message.senderId ? String(message.senderId._id || message.senderId) : "";
+  const currentUserIdStr = String(currentUser._id || currentUser.id || "");
+  const isCreator = Boolean(senderIdStr && senderIdStr === currentUserIdStr);
   if (!isAdmin && !isCreator) {
     throw new ApiError(403, "ليس لديك صلاحية لتصدير نتائج هذا الاستطلاع.");
   }

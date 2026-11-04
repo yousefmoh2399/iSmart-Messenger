@@ -1445,16 +1445,15 @@ Future<ChatConversation> uploadConversationAvatar({
     return response.data?["data"] as Map<String, dynamic>? ?? {};
   }
 
-  Future<File> downloadPollExport(String messageId) async {
+  Future<String> downloadPollExport(String messageId) async {
     final response = await _apiClient.dio.get<List<int>>(
       "/api/chat/messages/$messageId/poll/export",
       options: Options(responseType: ResponseType.bytes),
     );
     final bytes = response.data;
-    if (bytes == null) throw Exception("Failed to download export");
-    final directory = await _localStorage.chatDirectory(
-      preferredPath: _preferences.localStorageDirectoryPath,
-    );
+    if (bytes == null || bytes.isEmpty) {
+      throw Exception("ملف نتائج الاستطلاع فارغ أو تعذر تحميله.");
+    }
     final disposition = response.headers.value("content-disposition") ?? "";
     String filename = "poll_export_$messageId.xlsx";
     if (disposition.contains("filename=")) {
@@ -1463,10 +1462,29 @@ Future<ChatConversation> uploadConversationAvatar({
           .last
           .replaceAll("\"", "")
           .trim();
+      try {
+        filename = Uri.decodeComponent(filename);
+      } catch (_) {}
     }
-    final file = File(p.join(directory.path, filename));
-    await file.writeAsBytes(bytes);
-    return file;
+
+    if (kIsWeb) {
+      final savedPath = await web_bridge.downloadBytes(
+        bytes: Uint8List.fromList(bytes),
+        fileName: filename,
+        mimeType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+      );
+      return savedPath ?? filename;
+    }
+
+    final directory = await _localStorage.chatDirectory(
+      preferredPath: _preferences.localStorageDirectoryPath,
+    );
+    final targetPath = p.join(directory.path, filename);
+    final file = File(targetPath);
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
   }
 
   Future<Map<String, dynamic>> fetchUserStickers() async {

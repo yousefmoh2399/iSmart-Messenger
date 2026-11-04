@@ -2389,14 +2389,63 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _exportPoll(String messageId) async {
     try {
-      final file = await ref
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('جاري تصدير نتائج الاستطلاع... ⏳'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      final filePathOrName = await ref
           .read(chatRepositoryProvider)
           .downloadPollExport(messageId);
-      final result = await OpenFilex.open(file.path);
+
+      if (kIsWeb) {
+        if (web_bridge.isElectron()) {
+          final opened = await web_bridge.openElectronLocalFile(filePathOrName);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  opened
+                      ? 'تم تصدير وفتح ملف النتائج بنجاح! 📊'
+                      : 'تم حفظ ملف النتائج في مجلد التنزيلات: $filePathOrName',
+                ),
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('تم تنزيل ملف النتائج بنجاح! 📊'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+        return;
+      }
+
+      final result = await OpenFilex.open(filePathOrName);
       if (result.type != ResultType.done) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not open file: ${result.message}')),
+            SnackBar(
+              content: Text(
+                'تم حفظ الملف بنجاح ولكن تعذر فتحه تلقائياً: ${result.message}',
+              ),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم تصدير وفتح ملف النتائج بنجاح! 📊'),
+            ),
           );
         }
       }
@@ -2404,7 +2453,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Failed to export: $e')));
+        ).showSnackBar(SnackBar(content: Text('فشل تصدير الاستطلاع: $e')));
       }
     }
   }
