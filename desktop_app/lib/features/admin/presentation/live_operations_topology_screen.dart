@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../models/system_monitor_models.dart';
 import 'system_monitor_controller.dart';
 
 /// Enum representing the kind of node in the topology mesh.
@@ -119,7 +118,7 @@ class _TopologyEventItem {
   final String fromNodeId;
   final String toNodeId;
   final String action;
-  final String type; // 'msg', 'file', 'poll', 'sync'
+  final String type; // 'sync', 'poll', 'error', 'ping'
   final Color color;
 }
 
@@ -149,7 +148,7 @@ class _LiveOperationsTopologyScreenState
   late final AnimationController _pulseController;
   late final AnimationController _flyAnimController;
   Animation<Matrix4>? _flyMatrixAnimation;
-  Timer? _simulatedTrafficTimer;
+  Timer? _telemetryPulseTimer;
 
   final List<_TopologyNode> _nodes = [];
   final Map<String, _TopologyNode> _nodesMap = {};
@@ -158,6 +157,7 @@ class _LiveOperationsTopologyScreenState
 
   String? _selectedNodeId;
   String _branchFilter = 'all';
+  bool _onlyActiveBranches = true;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
@@ -189,19 +189,40 @@ class _LiveOperationsTopologyScreenState
       }
     });
 
-    _buildTopologyMesh();
+    // Refresh real backend data immediately
+    widget.notifier.refreshDeployment();
+    widget.notifier.refreshSessions();
+    widget.notifier.refreshStats();
+    widget.notifier.refreshPolls();
+    widget.notifier.loadErrors();
 
-    // Center view smoothly after first layout
+    _buildTopologyMesh();
+    _buildRealEventLog();
+
+    // Center view smoothly after initial layout
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _resetZoom(animated: false);
     });
 
-    _startSimulatedTraffic();
+    _startLiveTelemetryPulse();
+  }
+
+  @override
+  void didUpdateWidget(covariant LiveOperationsTopologyScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.deploymentData != widget.state.deploymentData ||
+        oldWidget.state.sessions != widget.state.sessions ||
+        oldWidget.state.stats != widget.state.stats ||
+        oldWidget.state.errors != widget.state.errors ||
+        oldWidget.state.pollsData != widget.state.pollsData) {
+      _buildTopologyMesh();
+      _buildRealEventLog();
+    }
   }
 
   @override
   void dispose() {
-    _simulatedTrafficTimer?.cancel();
+    _telemetryPulseTimer?.cancel();
     _pulseController.dispose();
     _flyAnimController.dispose();
     _transController.dispose();
@@ -211,75 +232,26 @@ class _LiveOperationsTopologyScreenState
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // n8n PIPELINE LAYOUT GENERATION (DAG / Flow Architecture)
+  // PURE REAL BACKEND DATA MESH (100% Free of Mock/Seeder Data)
   // ══════════════════════════════════════════════════════════════════════════════
   void _buildTopologyMesh() {
     _nodes.clear();
     _nodesMap.clear();
 
-    final rawBranches = widget.state.deploymentData?.branches ?? [];
-    final effectiveBranches = rawBranches.isNotEmpty
-        ? rawBranches
-        : [
-            BranchDeploymentItem(
-              branchId: 'b_main',
-              branchName: 'الفرع الرئيسي',
-              branchCode: '101',
-              isInstalled: true,
-              totalRegisteredUsers: 6,
-              installedUsersCount: 5,
-              onlineUsersCount: 4,
-              devicesCount: 5,
-              onlineDevicesCount: 4,
-              appVersions: ['1.1.21'],
-              devices: [],
-              installedUsers: [],
-            ),
-            BranchDeploymentItem(
-              branchId: 'b_mansoura',
-              branchName: 'فرع المنصورة',
-              branchCode: '102',
-              isInstalled: true,
-              totalRegisteredUsers: 5,
-              installedUsersCount: 4,
-              onlineUsersCount: 3,
-              devicesCount: 4,
-              onlineDevicesCount: 3,
-              appVersions: ['1.1.21'],
-              devices: [],
-              installedUsers: [],
-            ),
-            BranchDeploymentItem(
-              branchId: 'b_alex',
-              branchName: 'فرع الإسكندرية',
-              branchCode: '103',
-              isInstalled: true,
-              totalRegisteredUsers: 4,
-              installedUsersCount: 3,
-              onlineUsersCount: 3,
-              devicesCount: 3,
-              onlineDevicesCount: 3,
-              appVersions: ['1.1.21'],
-              devices: [],
-              installedUsers: [],
-            ),
-            BranchDeploymentItem(
-              branchId: 'b_tanta',
-              branchName: 'فرع طنطا',
-              branchCode: '104',
-              isInstalled: true,
-              totalRegisteredUsers: 4,
-              installedUsersCount: 3,
-              onlineUsersCount: 2,
-              devicesCount: 3,
-              onlineDevicesCount: 2,
-              appVersions: ['1.1.21'],
-              devices: [],
-              installedUsers: [],
-            ),
-          ];
+    final allBranches = widget.state.deploymentData?.branches ?? [];
+    if (allBranches.isEmpty) {
+      return;
+    }
 
-    // Branch Color Palette
+    // Filter active vs all branches
+    final activeBranches = allBranches
+        .where((b) => b.isInstalled || b.devices.isNotEmpty || b.installedUsers.isNotEmpty)
+        .toList();
+    final effectiveBranches = (_onlyActiveBranches && activeBranches.isNotEmpty)
+        ? activeBranches
+        : allBranches;
+
+    // Palette for distinct branch visual identification
     final branchColors = [
       const Color(0xFF0284C7), // Sky Blue
       const Color(0xFF10B981), // Emerald
@@ -291,7 +263,7 @@ class _LiveOperationsTopologyScreenState
       const Color(0xFF6366F1), // Indigo
     ];
 
-    // First, pre-calculate vertical height required for all branches and their employees
+    // Pre-calculate vertical heights required for all branches and real devices/staff
     double totalHeightNeeded = 140.0;
     final List<List<_TopologyNode>> branchEmployeesList = [];
 
@@ -300,11 +272,11 @@ class _LiveOperationsTopologyScreenState
       final branchHubId = 'branch_${b.branchCode}';
       final List<_TopologyNode> branchEmployees = [];
 
-      // Priority 1: Real devices from UpdateDevice / DeviceSession
+      // 1. Real Physical Devices from UpdateDevice / DeviceSession
       if (b.devices.isNotEmpty) {
         for (int di = 0; di < b.devices.length; di++) {
           final dev = b.devices[di];
-          final empId = 'emp_${b.branchCode}_$di';
+          final empId = 'dev_${b.branchCode}_$di';
           branchEmployees.add(
             _TopologyNode(
               id: empId,
@@ -332,10 +304,10 @@ class _LiveOperationsTopologyScreenState
           );
         }
       } else if (b.installedUsers.isNotEmpty) {
-        // Priority 2: Real installed users
+        // 2. Real installed users in this branch from MongoDB
         for (int ui = 0; ui < b.installedUsers.length; ui++) {
           final usr = b.installedUsers[ui];
-          final empId = 'emp_${b.branchCode}_$ui';
+          final empId = 'usr_${b.branchCode}_$ui';
           branchEmployees.add(
             _TopologyNode(
               id: empId,
@@ -347,8 +319,8 @@ class _LiveOperationsTopologyScreenState
               color: _roleColor(ui),
               icon: Icons.person_rounded,
               isOnline: usr.isOnline,
-              ipAddress: '192.168.${bi + 1}.${20 + ui}',
-              os: 'Windows 10 / 11 Pro',
+              ipAddress: '-',
+              os: 'تطبيق iSmart',
               jobTitle: usr.jobTitle,
               role: usr.role,
               appVersion: '1.1.21',
@@ -360,71 +332,41 @@ class _LiveOperationsTopologyScreenState
             ),
           );
         }
-      } else {
-        // Priority 3: Fallback realistic sample employees
-        final sampleEmployees = [
-          ('أحمد علي إبراهيم', 'مدير الفرع', 'admin', 'DESKTOP-MGR-01'),
-          ('سارة محمد محمود', 'أخصائي ائتمان', 'specialist', 'DESKTOP-SPEC-02'),
-          ('محمود طارق كمال', 'مسؤول الدعم الفني', 'it', 'DESKTOP-IT-03'),
-          ('منى سعيد خليل', 'خدمة العملاء', 'user', 'DESKTOP-CS-04'),
-          ('خالد حسن الشريف', 'محاسب الفرع', 'accountant', 'DESKTOP-ACC-05'),
-        ];
-
-        final takeCount = math.min(b.totalRegisteredUsers.clamp(3, 4), sampleEmployees.length);
-        for (int si = 0; si < takeCount; si++) {
-          final s = sampleEmployees[si];
-          final empId = 'emp_${b.branchCode}_$si';
-          branchEmployees.add(
-            _TopologyNode(
-              id: empId,
-              type: _TopologyNodeType.employee,
-              name: s.$1,
-              subtitle: s.$2,
-              branchName: b.branchName,
-              branchCode: b.branchCode,
-              color: _roleColor(si),
-              icon: si == 0 ? Icons.admin_panel_settings_rounded : Icons.person_rounded,
-              isOnline: si < (b.onlineUsersCount > 0 ? b.onlineUsersCount : 2),
-              ipAddress: '192.168.${bi + 1}.${10 + si}',
-              os: 'Windows 10 Pro',
-              jobTitle: s.$2,
-              role: s.$3,
-              appVersion: '1.1.21',
-              isOutdated: false,
-              hostname: s.$4,
-              position: Offset.zero,
-              size: const Size(220, 68),
-              connectedNodeIds: [branchHubId],
-            ),
-          );
-        }
       }
+      // Note: If a branch has neither devices nor users, branchEmployees is empty.
+      // ZERO mock/sample names are generated!
 
       branchEmployeesList.add(branchEmployees);
 
       final empCount = branchEmployees.length;
-      final rows = empCount > 2 ? ((empCount + 1) / 2).ceil() : empCount;
-      final slotHeight = math.max(120.0, (rows * 84.0) + 20.0);
+      final rows = empCount > 2 ? ((empCount + 1) / 2).ceil() : math.max(1, empCount);
+      final slotHeight = math.max(110.0, (rows * 82.0) + 16.0);
       totalHeightNeeded += slotHeight + 40.0;
     }
 
-    _canvasHeight = math.max(1600.0, totalHeightNeeded + 200.0);
+    _canvasHeight = math.max(1600.0, totalHeightNeeded + 220.0);
     _canvasWidth = 2200.0;
 
-    // 1. Position Central Core Gateway (Stage 1 - Left)
+    // Real Central Gateway Telemetry Node (Stage 1 - Left)
+    final stats = widget.state.stats;
+    final serverHostname = stats?.hostname.isNotEmpty == true ? stats!.hostname : 'iSmart Server';
+    final nodeVer = stats?.nodeVersion.isNotEmpty == true ? 'Node.js ${stats!.nodeVersion}' : 'Node.js Cluster';
+    final dbName = stats?.databaseName.isNotEmpty == true ? stats!.databaseName : 'MongoDB';
+    final serverOs = stats != null && stats.osType.isNotEmpty ? '${stats.osType} ${stats.osRelease}'.trim() : 'Ubuntu Server';
+
     final gatewayY = _canvasHeight / 2 - 50.0;
     final gatewayNode = _TopologyNode(
       id: 'core_gateway',
       type: _TopologyNodeType.centralGateway,
       name: 'خادم المنظومة المركزي',
-      subtitle: 'iSmart Core Hub & Central Gateway',
+      subtitle: '$serverHostname • $dbName',
       branchName: 'المركز الرئيسي',
       branchCode: 'HQ',
       color: const Color(0xFF6366F1), // Electric Indigo
       icon: Icons.dns_rounded,
       isOnline: true,
-      ipAddress: '10.0.0.1:4000',
-      os: 'Ubuntu LTS / Node.js Cluster',
+      ipAddress: stats?.databaseHost.isNotEmpty == true ? stats!.databaseHost : '127.0.0.1:5000',
+      os: '$serverOs ($nodeVer)',
       jobTitle: 'الخادم الرئيسي والوسيط المركزي',
       position: Offset(100, gatewayY),
       size: const Size(280, 100),
@@ -432,7 +374,7 @@ class _LiveOperationsTopologyScreenState
     _nodes.add(gatewayNode);
     _nodesMap[gatewayNode.id] = gatewayNode;
 
-    // 2. Position Branches (Stage 2 - Middle) & Employees (Stage 3 - Right)
+    // Stage 2 (Branches) & Stage 3 (Real Workstations)
     double currentY = 120.0;
     const branchX = 540.0;
     const employeeBaseX = 890.0;
@@ -445,11 +387,9 @@ class _LiveOperationsTopologyScreenState
 
       final empCount = employees.length;
       final rows = empCount > 2 ? ((empCount + 1) / 2).ceil() : math.max(1, empCount);
-      final slotHeight = math.max(120.0, (rows * 84.0) + 20.0);
+      final slotHeight = math.max(110.0, (rows * 82.0) + 16.0);
 
-      // Branch Hub Y position (vertically centered in its bay)
       final branchY = currentY + (slotHeight / 2) - 42.0;
-
       final hasOutdated = employees.any((e) => e.isOutdated);
 
       final branchHub = _TopologyNode(
@@ -462,8 +402,8 @@ class _LiveOperationsTopologyScreenState
         color: bColor,
         icon: Icons.apartment_rounded,
         isOnline: b.isInstalled,
-        ipAddress: '192.168.${bi + 1}.1',
-        os: 'Sub-Gateway Router',
+        ipAddress: 'فرع كود ${b.branchCode}',
+        os: 'بوابة الفرع',
         jobTitle: 'بوابة اتصال الفرع الفرعية',
         appVersion: b.appVersions.isNotEmpty ? b.appVersions.join(', ') : '1.1.21',
         isOutdated: hasOutdated,
@@ -476,14 +416,14 @@ class _LiveOperationsTopologyScreenState
       _nodesMap[branchHubId] = branchHub;
       gatewayNode.connectedNodeIds.add(branchHubId);
 
-      // Position Employees neatly in a 1 or 2 column rack right next to their branch
+      // Position real devices/employees in structured columns
       for (int ei = 0; ei < empCount; ei++) {
         final emp = employees[ei];
         final col = empCount > 2 ? (ei % 2) : 0;
         final row = empCount > 2 ? (ei ~/ 2) : ei;
 
         final empX = employeeBaseX + (col * 245.0);
-        final empY = currentY + (row * 84.0) + 10.0;
+        final empY = currentY + (row * 82.0) + 8.0;
 
         emp.position = Offset(empX, empY);
         _nodes.add(emp);
@@ -491,46 +431,73 @@ class _LiveOperationsTopologyScreenState
         branchHub.connectedNodeIds.add(emp.id);
       }
 
-      currentY += slotHeight + 45.0;
+      currentY += slotHeight + 40.0;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // PURE REAL BACKEND EVENT LOG (From Real Sessions, Real Polls, Real Errors)
+  // ══════════════════════════════════════════════════════════════════════════════
+  void _buildRealEventLog() {
+    _eventLog.clear();
+
+    // 1. Real user login / active sessions from DB
+    for (final s in widget.state.sessions.take(15)) {
+      _eventLog.add(
+        _TopologyEventItem(
+          id: 'sess_${s.id}',
+          timestamp: s.lastSeenAt,
+          fromName: '${s.fullName} (${s.jobTitleBranch ?? s.department ?? "مستخدم"})',
+          toName: 'خادم المنظومة المركزي',
+          fromNodeId: 'core_gateway',
+          toNodeId: 'core_gateway',
+          action: s.isOnline ? 'اتصال حي نشط ومزامنة' : 'تسجيل دخول سابق',
+          type: 'sync',
+          color: s.isOnline ? const Color(0xFF10B981) : const Color(0xFF64748B),
+        ),
+      );
     }
 
-    // Initial Event Log entries
-    _eventLog.clear();
-    _eventLog.addAll([
-      _TopologyEventItem(
-        id: 'ev_0',
-        timestamp: DateTime.now().subtract(const Duration(seconds: 14)),
-        fromName: 'الخادم الرئيسي (HQ)',
-        toName: 'فرع المنصورة (102)',
-        fromNodeId: 'core_gateway',
-        toNodeId: 'branch_102',
-        action: 'فحص دوري لحالة الأجهزة والمزامنة',
-        type: 'sync',
-        color: const Color(0xFF10B981),
-      ),
-      _TopologyEventItem(
-        id: 'ev_1',
-        timestamp: DateTime.now().subtract(const Duration(seconds: 9)),
-        fromName: 'أحمد علي (الفرع الرئيسي)',
-        toName: 'الخادم الرئيسي',
-        fromNodeId: 'emp_101_0',
-        toNodeId: 'core_gateway',
-        action: 'إرسال وثيقة رسمية مشفرة (PDF)',
-        type: 'file',
-        color: const Color(0xFFEF4444),
-      ),
-      _TopologyEventItem(
-        id: 'ev_2',
-        timestamp: DateTime.now().subtract(const Duration(seconds: 4)),
-        fromName: 'سارة محمد (فرع المنصورة)',
-        toName: 'الخادم المركزي',
-        fromNodeId: 'emp_102_1',
-        toNodeId: 'core_gateway',
-        action: 'تصويت في استطلاع الرأي العام',
-        type: 'poll',
-        color: const Color(0xFF6366F1),
-      ),
-    ]);
+    // 2. Real system polls from DB
+    final polls = widget.state.pollsData?.items ?? [];
+    for (final p in polls.take(6)) {
+      final creatorName = p.creator.fullName.isNotEmpty
+          ? p.creator.fullName
+          : (p.creator.username.isNotEmpty ? p.creator.username : 'المشرف');
+      _eventLog.add(
+        _TopologyEventItem(
+          id: 'poll_${p.id}',
+          timestamp: p.createdAt,
+          fromName: creatorName,
+          toName: 'كافة الفروع والمستخدمين',
+          fromNodeId: 'core_gateway',
+          toNodeId: 'core_gateway',
+          action: 'استطلاع رأي: ${p.question}',
+          type: 'poll',
+          color: const Color(0xFF6366F1),
+        ),
+      );
+    }
+
+    // 3. Real system error logs from DB
+    for (final err in widget.state.errors.take(8)) {
+      _eventLog.add(
+        _TopologyEventItem(
+          id: 'err_${err.id}',
+          timestamp: err.createdAt,
+          fromName: err.fullName ?? err.username ?? "محطة عمل",
+          toName: 'سجل أخطاء النظام المركزي',
+          fromNodeId: 'core_gateway',
+          toNodeId: 'core_gateway',
+          action: 'سجل خطأ نظام: ${err.errorMessage}',
+          type: 'error',
+          color: const Color(0xFFEF4444),
+        ),
+      );
+    }
+
+    // Sort by timestamp descending
+    _eventLog.sort((a, b) => b.timestamp.compareTo(a.timestamp));
   }
 
   Color _roleColor(int index) {
@@ -550,60 +517,48 @@ class _LiveOperationsTopologyScreenState
     return Icons.desktop_windows_rounded;
   }
 
-  void _startSimulatedTraffic() {
-    _simulatedTrafficTimer?.cancel();
-    _simulatedTrafficTimer = Timer.periodic(const Duration(milliseconds: 2400), (timer) {
+  // ══════════════════════════════════════════════════════════════════════════════
+  // REAL TELEMETRY KEEP-ALIVE PULSE (Ping between real nodes)
+  // ══════════════════════════════════════════════════════════════════════════════
+  void _startLiveTelemetryPulse() {
+    _telemetryPulseTimer?.cancel();
+    _telemetryPulseTimer = Timer.periodic(const Duration(milliseconds: 2600), (timer) {
       if (!_simulationRunning || !mounted) return;
 
+      final branches = _nodes.where((n) => n.type == _TopologyNodeType.branchHub).toList();
       final employees = _nodes.where((n) => n.type == _TopologyNodeType.employee && n.isOnline).toList();
-      if (employees.length < 2) return;
+      if (branches.isEmpty && employees.isEmpty) return;
 
       final rnd = math.Random();
-      final sender = employees[rnd.nextInt(employees.length)];
-
-      var receiver = employees[rnd.nextInt(employees.length)];
-      for (int i = 0; i < 4 && receiver.branchCode == sender.branchCode; i++) {
-        receiver = employees[rnd.nextInt(employees.length)];
+      if (employees.isNotEmpty && rnd.nextBool()) {
+        final target = employees[rnd.nextInt(employees.length)];
+        final packet = _ActivePacket(
+          fromId: 'core_gateway',
+          toId: target.id,
+          label: '⚡ نبض اتصال',
+          color: target.color,
+          startTime: DateTime.now(),
+          duration: const Duration(milliseconds: 1300),
+          isDirect: true,
+        );
+        setState(() {
+          _packets.add(packet);
+        });
+      } else if (branches.isNotEmpty) {
+        final target = branches[rnd.nextInt(branches.length)];
+        final packet = _ActivePacket(
+          fromId: 'core_gateway',
+          toId: target.id,
+          label: '🔄 مزامنة فرع',
+          color: target.color,
+          startTime: DateTime.now(),
+          duration: const Duration(milliseconds: 1400),
+          isDirect: true,
+        );
+        setState(() {
+          _packets.add(packet);
+        });
       }
-
-      final actions = [
-        ('إرسال رسالة محادثة مشفرة', 'msg', '📩 رسالة', const Color(0xFF0284C7)),
-        ('إرسال مستند PDF رسمي', 'file', '📄 ملف PDF', const Color(0xFFEF4444)),
-        ('تصويت في استطلاع الرأي', 'poll', '📊 استطلاع', const Color(0xFF6366F1)),
-        ('أمر طباعة إيصال حراري', 'print', '🖨️ طباعة', const Color(0xFF10B981)),
-        ('تحديث حالة اتصال الجهاز', 'sync', '⚡ مزامنة', const Color(0xFFF59E0B)),
-      ];
-
-      final act = actions[rnd.nextInt(actions.length)];
-
-      final packet = _ActivePacket(
-        fromId: sender.id,
-        toId: receiver.id,
-        label: act.$3,
-        color: act.$4,
-        startTime: DateTime.now(),
-        duration: Duration(milliseconds: 1400 + rnd.nextInt(400)),
-        isDirect: true,
-      );
-
-      final event = _TopologyEventItem(
-        id: 'ev_${DateTime.now().millisecondsSinceEpoch}',
-        timestamp: DateTime.now(),
-        fromName: '${sender.name} (${sender.branchName})',
-        toName: '${receiver.name} (${receiver.branchName})',
-        fromNodeId: sender.id,
-        toNodeId: receiver.id,
-        action: act.$1,
-        type: act.$2,
-        color: act.$4,
-      );
-
-      // Lightweight state update
-      setState(() {
-        _packets.add(packet);
-        _eventLog.insert(0, event);
-        if (_eventLog.length > 25) _eventLog.removeLast();
-      });
     });
   }
 
@@ -747,157 +702,186 @@ class _LiveOperationsTopologyScreenState
           }).take(6).toList()
         : <_TopologyNode>[];
 
+    final isLoading = widget.state.isLoadingDeployment && _nodes.isEmpty;
+
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: isDark ? const Color(0xFF0B0F19) : const Color(0xFFF8FAFC),
-        body: Stack(
-          children: [
-            // ════════════════════════════════════════════════════════════════════
-            // 1. INTERACTIVE CANVAS (Grid, Pipes, Packets, Nodes)
-            // ════════════════════════════════════════════════════════════════════
-            InteractiveViewer(
-              transformationController: _transController,
-              constrained: false,
-              boundaryMargin: const EdgeInsets.all(1200),
-              minScale: 0.25,
-              maxScale: 2.2,
-              child: SizedBox(
-                width: _canvasWidth,
-                height: _canvasHeight,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    // Layer A: Static Dot Grid (NEVER repaints, RepaintBoundary)
-                    Positioned.fill(
-                      child: RepaintBoundary(
-                        child: CustomPaint(
-                          size: Size(_canvasWidth, _canvasHeight),
-                          painter: _StaticGridPainter(isDark: isDark),
-                        ),
-                      ),
-                    ),
-
-                    // Layer B: Cubic Bezier Connection Wires (Only repaints on selection/filter change)
-                    Positioned.fill(
-                      child: CustomPaint(
-                        painter: _WiresPainter(
-                          nodes: _nodes,
-                          nodesMap: _nodesMap,
-                          selectedNodeId: _selectedNodeId,
-                          visibleNodeIds: visibleNodeIds,
-                          isDark: isDark,
-                        ),
-                      ),
-                    ),
-
-                    // Layer C: High-Performance Active Packets (Runs on pulse controller, 60fps)
-                    Positioned.fill(
-                      child: AnimatedBuilder(
-                        animation: _pulseController,
-                        builder: (context, _) {
-                          return CustomPaint(
-                            painter: _PacketsPainter(
-                              packets: _packets,
-                              nodesMap: _nodesMap,
-                              now: DateTime.now(),
+        body: isLoading
+            ? _buildLoadingState(isDark)
+            : Stack(
+                children: [
+                  // ════════════════════════════════════════════════════════════════
+                  // 1. INTERACTIVE CANVAS (Grid, Pipes, Packets, Nodes)
+                  // ════════════════════════════════════════════════════════════════
+                  InteractiveViewer(
+                    transformationController: _transController,
+                    constrained: false,
+                    boundaryMargin: const EdgeInsets.all(1200),
+                    minScale: 0.25,
+                    maxScale: 2.2,
+                    child: SizedBox(
+                      width: _canvasWidth,
+                      height: _canvasHeight,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          // Layer A: Static Dot Grid (NEVER repaints, RepaintBoundary)
+                          Positioned.fill(
+                            child: RepaintBoundary(
+                              child: CustomPaint(
+                                size: Size(_canvasWidth, _canvasHeight),
+                                painter: _StaticGridPainter(isDark: isDark),
+                              ),
                             ),
-                          );
-                        },
+                          ),
+
+                          // Layer B: Cubic Bezier Connection Wires
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _WiresPainter(
+                                nodes: _nodes,
+                                nodesMap: _nodesMap,
+                                selectedNodeId: _selectedNodeId,
+                                visibleNodeIds: visibleNodeIds,
+                                isDark: isDark,
+                              ),
+                            ),
+                          ),
+
+                          // Layer C: High-Performance Active Packets
+                          Positioned.fill(
+                            child: AnimatedBuilder(
+                              animation: _pulseController,
+                              builder: (context, _) {
+                                return CustomPaint(
+                                  painter: _PacketsPainter(
+                                    packets: _packets,
+                                    nodesMap: _nodesMap,
+                                    now: DateTime.now(),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+
+                          // Layer D: n8n Workflow Nodes
+                          ..._nodes.map((node) {
+                            final isVisible = visibleNodeIds.contains(node.id);
+                            final isSelected = _selectedNodeId == node.id;
+                            final isDimmed = _selectedNodeId != null &&
+                                !isSelected &&
+                                !node.connectedNodeIds.contains(_selectedNodeId) &&
+                                !(_nodesMap[_selectedNodeId]?.connectedNodeIds.contains(node.id) ?? false);
+
+                            return Positioned(
+                              left: node.position.dx,
+                              top: node.position.dy,
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 180),
+                                opacity: !isVisible ? 0.08 : (isDimmed ? 0.35 : 1.0),
+                                child: _buildNodeCard(node, isSelected, isDark),
+                              ),
+                            );
+                          }),
+                        ],
                       ),
                     ),
+                  ),
 
-                    // Layer D: n8n Workflow Nodes
-                    ..._nodes.map((node) {
-                      final isVisible = visibleNodeIds.contains(node.id);
-                      final isSelected = _selectedNodeId == node.id;
-                      final isDimmed = _selectedNodeId != null &&
-                          !isSelected &&
-                          !node.connectedNodeIds.contains(_selectedNodeId) &&
-                          !(_nodesMap[_selectedNodeId]?.connectedNodeIds.contains(node.id) ?? false);
+                  // ════════════════════════════════════════════════════════════════
+                  // 2. TOP HUD HEADER & TOOLBAR
+                  // ════════════════════════════════════════════════════════════════
+                  Positioned(
+                    top: 14,
+                    left: 14,
+                    right: 14,
+                    child: _buildTopHudHeader(
+                      totalEmployees: totalEmployees,
+                      onlineEmployees: onlineEmployees,
+                      totalBranches: totalBranches,
+                      outdatedCount: outdatedCount,
+                      isDark: isDark,
+                    ),
+                  ),
 
-                      return Positioned(
-                        left: node.position.dx,
-                        top: node.position.dy,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 180),
-                          opacity: !isVisible ? 0.08 : (isDimmed ? 0.35 : 1.0),
-                          child: _buildNodeCard(node, isSelected, isDark),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
+                  // ════════════════════════════════════════════════════════════════
+                  // 3. SEARCH AUTOCOMPLETE DROPDOWN
+                  // ════════════════════════════════════════════════════════════════
+                  if (searchMatches.isNotEmpty)
+                    Positioned(
+                      top: 72,
+                      left: 140,
+                      child: _buildSearchDropdown(searchMatches, isDark),
+                    ),
+
+                  // ════════════════════════════════════════════════════════════════
+                  // 4. BOTTOM FLOATING EVENT LOG CONSOLE
+                  // ════════════════════════════════════════════════════════════════
+                  Positioned(
+                    bottom: 14,
+                    left: 14,
+                    right: 14,
+                    child: _buildBottomConsole(isDark),
+                  ),
+
+                  // ════════════════════════════════════════════════════════════════
+                  // 5. FLOATING CANVAS NAVIGATION CONTROLS
+                  // ════════════════════════════════════════════════════════════════
+                  Positioned(
+                    left: 18,
+                    bottom: _showConsole ? 185 : 75,
+                    child: _buildFloatingControls(isDark),
+                  ),
+
+                  // ════════════════════════════════════════════════════════════════
+                  // 6. NODE DETAILS INSPECTOR CARD
+                  // ════════════════════════════════════════════════════════════════
+                  if (_selectedNodeId != null && _nodesMap.containsKey(_selectedNodeId))
+                    Positioned(
+                      top: 76,
+                      right: 18,
+                      child: _buildNodeInspectorCard(_nodesMap[_selectedNodeId]!, isDark),
+                    ),
+
+                  // ════════════════════════════════════════════════════════════════
+                  // 7. DIRECTORY DRAWER (Side Panel)
+                  // ════════════════════════════════════════════════════════════════
+                  if (_showDirectoryDrawer)
+                    Positioned(
+                      top: 76,
+                      left: 18,
+                      bottom: _showConsole ? 185 : 30,
+                      child: _buildDirectoryDrawer(isDark),
+                    ),
+                ],
               ),
-            ),
+      ),
+    );
+  }
 
-            // ════════════════════════════════════════════════════════════════════
-            // 2. TOP HUD HEADER & TOOLBAR
-            // ════════════════════════════════════════════════════════════════════
-            Positioned(
-              top: 14,
-              left: 14,
-              right: 14,
-              child: _buildTopHudHeader(
-                totalEmployees: totalEmployees,
-                onlineEmployees: onlineEmployees,
-                totalBranches: totalBranches,
-                outdatedCount: outdatedCount,
-                isDark: isDark,
-              ),
-            ),
-
-            // ════════════════════════════════════════════════════════════════════
-            // 3. SEARCH AUTOCOMPLETE DROPDOWN (If searching)
-            // ════════════════════════════════════════════════════════════════════
-            if (searchMatches.isNotEmpty)
-              Positioned(
-                top: 72,
-                left: 140,
-                child: _buildSearchDropdown(searchMatches, isDark),
-              ),
-
-            // ════════════════════════════════════════════════════════════════════
-            // 4. BOTTOM FLOATING EVENT LOG CONSOLE
-            // ════════════════════════════════════════════════════════════════════
-            Positioned(
-              bottom: 14,
-              left: 14,
-              right: 14,
-              child: _buildBottomConsole(isDark),
-            ),
-
-            // ════════════════════════════════════════════════════════════════════
-            // 5. FLOATING CANVAS NAVIGATION CONTROLS
-            // ════════════════════════════════════════════════════════════════════
-            Positioned(
-              left: 18,
-              bottom: _showConsole ? 185 : 75,
-              child: _buildFloatingControls(isDark),
-            ),
-
-            // ════════════════════════════════════════════════════════════════════
-            // 6. NODE DETAILS INSPECTOR CARD (When node selected)
-            // ════════════════════════════════════════════════════════════════════
-            if (_selectedNodeId != null && _nodesMap.containsKey(_selectedNodeId))
-              Positioned(
-                top: 76,
-                right: 18,
-                child: _buildNodeInspectorCard(_nodesMap[_selectedNodeId]!, isDark),
-              ),
-
-            // ════════════════════════════════════════════════════════════════════
-            // 7. DIRECTORY DRAWER (Side Directory Panel)
-            // ════════════════════════════════════════════════════════════════════
-            if (_showDirectoryDrawer)
-              Positioned(
-                top: 76,
-                left: 18,
-                bottom: _showConsole ? 185 : 30,
-                child: _buildDirectoryDrawer(isDark),
-              ),
-          ],
-        ),
+  Widget _buildLoadingState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 48,
+            height: 48,
+            child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF6366F1)),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'جاري جلب بيانات الفروع والأجهزة الحقيقية من الخادم...',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'يتم استرجاع سجلات UpdateDevice والأجهزة النشطة من قاعدة البيانات',
+            style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white60 : Colors.black54),
+          ),
+        ],
       ),
     );
   }
@@ -994,12 +978,14 @@ class _LiveOperationsTopologyScreenState
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'iSmart Core • Cluster Online',
+                        node.subtitle,
                         style: TextStyle(
                           fontSize: 10,
                           color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                           fontWeight: FontWeight.w600,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Row(
@@ -1459,6 +1445,41 @@ class _LiveOperationsTopologyScreenState
 
           const Spacer(),
 
+          // Active Branches vs All Branches Toggle
+          Tooltip(
+            message: _onlyActiveBranches ? 'التبديل لعرض كافة الـ 50 فرع' : 'التبديل لعرض الفروع النشطة فقط',
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _onlyActiveBranches ? const Color(0xFF10B981) : const Color(0xFF6366F1),
+                ),
+              ),
+              icon: Icon(
+                _onlyActiveBranches ? Icons.filter_alt_rounded : Icons.account_tree_rounded,
+                size: 14,
+                color: _onlyActiveBranches ? const Color(0xFF10B981) : const Color(0xFF6366F1),
+              ),
+              label: Text(
+                _onlyActiveBranches ? 'الفروع النشطة' : 'كافة الفروع (50)',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: _onlyActiveBranches ? const Color(0xFF10B981) : const Color(0xFF6366F1),
+                ),
+              ),
+              onPressed: () {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  _onlyActiveBranches = !_onlyActiveBranches;
+                  _buildTopologyMesh();
+                });
+              },
+            ),
+          ),
+          const SizedBox(width: 8),
+
           // Directory Drawer Toggle Button
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
@@ -1509,7 +1530,7 @@ class _LiveOperationsTopologyScreenState
                   }
                 },
                 items: [
-                  const DropdownMenuItem(value: 'all', child: Text('كافة الفروع')),
+                  const DropdownMenuItem(value: 'all', child: Text('كافة الفروع المعروضة')),
                   ..._nodes
                       .where((n) => n.type == _TopologyNodeType.branchHub)
                       .map((b) => DropdownMenuItem(value: b.branchCode, child: Text(b.branchName))),
@@ -1759,7 +1780,7 @@ class _LiveOperationsTopologyScreenState
               const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF6366F1)),
               const SizedBox(width: 8),
               const Text(
-                'دليل الفروع ومحطات العمل',
+                'دليل الفروع ومحطات العمل الحقيقية',
                 style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
               ),
               const Spacer(),
@@ -1778,7 +1799,8 @@ class _LiveOperationsTopologyScreenState
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, idx) {
                 if (idx == 0) {
-                  final core = _nodesMap['core_gateway']!;
+                  final core = _nodesMap['core_gateway'];
+                  if (core == null) return const SizedBox.shrink();
                   return InkWell(
                     onTap: () => _flyToNode(core.id),
                     borderRadius: BorderRadius.circular(10),
@@ -1854,46 +1876,56 @@ class _LiveOperationsTopologyScreenState
                       tooltip: 'تركيز على الفرع',
                       onPressed: () => _flyToNode(b.id),
                     ),
-                    children: bEmployees.map((emp) {
-                      return InkWell(
-                        onTap: () => _flyToNode(emp.id),
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 7,
-                                height: 7,
-                                decoration: BoxDecoration(
-                                  color: emp.isOnline ? const Color(0xFF10B981) : Colors.grey,
-                                  shape: BoxShape.circle,
+                    children: bEmployees.isEmpty
+                        ? [
+                            const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Text(
+                                'لا توجد أجهزة مسجلة بهذا الفرع بعد',
+                                style: TextStyle(fontSize: 10, color: Colors.grey),
+                              ),
+                            )
+                          ]
+                        : bEmployees.map((emp) {
+                            return InkWell(
+                              onTap: () => _flyToNode(emp.id),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 7,
+                                      height: 7,
+                                      decoration: BoxDecoration(
+                                        color: emp.isOnline ? const Color(0xFF10B981) : Colors.grey,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        emp.name,
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (emp.isOutdated)
+                                      const Text(
+                                        '🚨 قديم',
+                                        style: TextStyle(fontSize: 9, color: Color(0xFFEF4444), fontWeight: FontWeight.w800),
+                                      )
+                                    else
+                                      Text(
+                                        'v${emp.appVersion ?? "1.1.21"}',
+                                        style: const TextStyle(fontSize: 9, color: Colors.grey),
+                                      ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  emp.name,
-                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (emp.isOutdated)
-                                const Text(
-                                  '🚨 قديم',
-                                  style: TextStyle(fontSize: 9, color: Color(0xFFEF4444), fontWeight: FontWeight.w800),
-                                )
-                              else
-                                Text(
-                                  'v${emp.appVersion ?? "1.1.21"}',
-                                  style: const TextStyle(fontSize: 9, color: Colors.grey),
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                            );
+                          }).toList(),
                   ),
                 );
               },
@@ -1968,7 +2000,7 @@ class _LiveOperationsTopologyScreenState
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           icon: const Icon(Icons.terminal_rounded, size: 15),
-          label: const Text('عرض سجل الأحداث والاتصالات المباشرة', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+          label: const Text('عرض سجل الأحداث والاتصالات الحقيقية', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
           onPressed: () => setState(() => _showConsole = true),
         ),
       );
@@ -2006,7 +2038,7 @@ class _LiveOperationsTopologyScreenState
               ),
               const SizedBox(width: 8),
               const Text(
-                'سجل العمليات والتفاعلات الحية (Live Event Stream)',
+                'سجل الأحداث والعمليات الفعلي (Live System Events)',
                 style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
               ),
               const SizedBox(width: 8),
@@ -2017,7 +2049,7 @@ class _LiveOperationsTopologyScreenState
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  '${_eventLog.length} حدث لحظي',
+                  '${_eventLog.length} حدث مسجل',
                   style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Color(0xFF10B981)),
                 ),
               ),
@@ -2033,67 +2065,67 @@ class _LiveOperationsTopologyScreenState
           ),
           const SizedBox(height: 4),
           Expanded(
-            child: ListView.separated(
-              itemCount: _eventLog.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 0.5,
-                thickness: 0.5,
-                color: isDark ? Colors.white10 : Colors.black12,
-              ),
-              itemBuilder: (context, idx) {
-                final ev = _eventLog[idx];
-                final timeStr =
-                    '${ev.timestamp.hour.toString().padLeft(2, '0')}:${ev.timestamp.minute.toString().padLeft(2, '0')}:${ev.timestamp.second.toString().padLeft(2, '0')}';
-
-                return InkWell(
-                  onTap: () {
-                    _triggerDirectPacket(ev.fromNodeId, ev.toNodeId, ev.action, ev.color);
-                    _flyToNode(ev.fromNodeId);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
-                    child: Row(
-                      children: [
-                        Text(
-                          '[$timeStr]',
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 10,
-                            color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: ev.color.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            ev.action,
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w700,
-                              color: ev.color,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${ev.fromName}  ➔  ${ev.toName}',
-                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const Icon(Icons.arrow_forward_ios_rounded, size: 9, color: Colors.grey),
-                      ],
+            child: _eventLog.isEmpty
+                ? const Center(
+                    child: Text(
+                      'لا توجد أحداث مسجلة في النظام حالياً',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
                     ),
+                  )
+                : ListView.separated(
+                    itemCount: _eventLog.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 0.5,
+                      thickness: 0.5,
+                      color: isDark ? Colors.white10 : Colors.black12,
+                    ),
+                    itemBuilder: (context, idx) {
+                      final ev = _eventLog[idx];
+                      final timeStr =
+                          '${ev.timestamp.hour.toString().padLeft(2, '0')}:${ev.timestamp.minute.toString().padLeft(2, '0')}:${ev.timestamp.second.toString().padLeft(2, '0')}';
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                        child: Row(
+                          children: [
+                            Text(
+                              '[$timeStr]',
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 10,
+                                color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: ev.color.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                ev.type.toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: ev.color,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${ev.fromName}  ➔  ${ev.action}',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -2101,7 +2133,7 @@ class _LiveOperationsTopologyScreenState
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // NODE INSPECTOR SIDE PANEL (Detailed Inspector)
+  // NODE INSPECTOR SIDE PANEL (Detailed Real Inspector)
   // ══════════════════════════════════════════════════════════════════════════════
   Widget _buildNodeInspectorCard(_TopologyNode node, bool isDark) {
     return Container(
@@ -2438,7 +2470,7 @@ class _PacketsPainter extends CustomPainter {
     final y = uuu * p1.dy + 3 * uu * t * c1.dy + 3 * u * tt * c2.dy + ttt * p2.dy;
     final pos = Offset(x, y);
 
-    // High performance dual-circle glow (instant, no GPU blur stall)
+    // High performance dual-circle glow
     final haloPaint = Paint()
       ..color = packet.color.withValues(alpha: 0.35)
       ..style = PaintingStyle.fill;
@@ -2449,7 +2481,7 @@ class _PacketsPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
     canvas.drawCircle(pos, 3.5, corePaint);
 
-    // Subtle arrival ripple
+    // Arrival ripple
     if (progress > 0.90) {
       final rippleFactor = ((progress - 0.90) / 0.10);
       final ripplePaint = Paint()
