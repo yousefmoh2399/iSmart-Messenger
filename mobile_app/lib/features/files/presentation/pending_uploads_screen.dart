@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -123,6 +124,39 @@ class _PendingUploadsScreenState extends ConsumerState<PendingUploadsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('تم حذف الملف المحلي بنجاح')),
     );
+  }
+
+  Future<void> _openFileSafely(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('الملف غير موجود على مساحة التخزين المحلية.'),
+          ),
+        );
+        return;
+      }
+      final result = await OpenFilex.open(filePath);
+      if (result.type != ResultType.done && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('تعذر فتح الملف، تأكد من تثبيت تطبيق يدعم هذا الملف على هاتفك.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('حدث خطأ أثناء فتح الملف: $e'),
+        ),
+      );
+    }
   }
 
   @override
@@ -457,7 +491,7 @@ class _PendingUploadsScreenState extends ConsumerState<PendingUploadsScreen> {
                       isDark: isDark,
                       cardBg: cardBg,
                       borderCol: borderCol,
-                      onOpen: () => OpenFilex.open(item.filePath),
+                      onOpen: () => _openFileSafely(item.filePath),
                       onUploadAndShare: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute(

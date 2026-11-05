@@ -4016,6 +4016,39 @@ class _ServerWebViewScreenState extends State<_ServerWebViewScreen> {
     return ordered;
   }
 
+  Future<void> _openLocalFileSafely(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('الملف غير موجود على القرص المحلي.'),
+          ),
+        );
+        return;
+      }
+      final result = await OpenFilex.open(filePath);
+      if (result.type != ResultType.done && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('تعذر فتح الملف، تأكد من تثبيت برنامج يدعم هذا الملف على جهازك.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('حدث خطأ أثناء فتح الملف: $e'),
+        ),
+      );
+    }
+  }
+
   Future<void> _openDownloadsSheet() async {
     await _refreshDownloadedFiles();
     if (!mounted) return;
@@ -4058,7 +4091,7 @@ class _ServerWebViewScreenState extends State<_ServerWebViewScreen> {
                               ? IconButton(
                                   tooltip: 'فتح الملف',
                                   onPressed: () =>
-                                      OpenFilex.open(job.savedPath!),
+                                      _openLocalFileSafely(job.savedPath!),
                                   icon: const Icon(Icons.open_in_new),
                                 )
                               : job.status == _DownloadJobStatus.failed
@@ -4099,7 +4132,7 @@ class _ServerWebViewScreenState extends State<_ServerWebViewScreen> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              onTap: () => OpenFilex.open(file.path),
+                              onTap: () => _openLocalFileSafely(file.path),
                             );
                           },
                         ),

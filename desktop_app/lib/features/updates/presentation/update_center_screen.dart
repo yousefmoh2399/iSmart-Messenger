@@ -61,7 +61,17 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
   }
 
   Future<void> _loadPackageInfo() async {
-    final info = await PackageInfo.fromPlatform();
+    PackageInfo info;
+    try {
+      info = await PackageInfo.fromPlatform();
+    } catch (_) {
+      info = PackageInfo(
+        appName: 'iSmart Messenger',
+        packageName: 'workplace.chat.desktop',
+        version: '1.1.21',
+        buildNumber: '2',
+      );
+    }
     if (!mounted) return;
     setState(() => _packageInfo = info);
   }

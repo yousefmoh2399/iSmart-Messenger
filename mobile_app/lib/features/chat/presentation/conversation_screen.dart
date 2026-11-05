@@ -1990,14 +1990,36 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
     final outputPath = p.join(tempDir.path, fileName);
 
-    await _audioRecorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        bitRate: 64000,
-        sampleRate: 44100,
-      ),
-      path: outputPath,
-    );
+    try {
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 64000,
+          sampleRate: 44100,
+        ),
+        path: outputPath,
+      );
+    } catch (e) {
+      debugPrint('[_startVoiceRecording] Recorder failed to start: $e');
+      if (mounted) {
+        setState(() {
+          _isRecordingVoice = false;
+          _isVoiceRecordingPaused = false;
+          _isVoiceHoldActive = false;
+          _isVoiceRecordingLocked = false;
+          _recordingDuration = Duration.zero;
+          _recordingStartedAt = null;
+          _voiceCaptureAborted = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('تعذر بدء تسجيل الصوت (الميكروفون قيد الاستخدام أو غير متاح).'),
+          ),
+        );
+      }
+      return;
+    }
 
     if (!mounted) {
       return;

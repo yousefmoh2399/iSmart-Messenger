@@ -1218,7 +1218,36 @@ class _MyFilesScreenState extends ConsumerState<MyFilesScreen> {
         await _sharePendingUpload(upload);
         return;
       case _PendingMenuAction.open:
-        await OpenFilex.open(upload.filePath);
+        try {
+          final file = File(upload.filePath);
+          if (!await file.exists()) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                behavior: SnackBarBehavior.floating,
+                content: Text('الملف غير موجود على مساحة التخزين المحلية.'),
+              ),
+            );
+            return;
+          }
+          final result = await OpenFilex.open(upload.filePath);
+          if (result.type != ResultType.done && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                behavior: SnackBarBehavior.floating,
+                content: Text('تعذر فتح الملف، تأكد من تثبيت تطبيق يدعم هذا الملف على هاتفك.'),
+              ),
+            );
+          }
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text('حدث خطأ أثناء فتح الملف: $e'),
+            ),
+          );
+        }
         return;
       case _PendingMenuAction.moveToFolder:
         await _showMoveFolderPicker(upload.id);
