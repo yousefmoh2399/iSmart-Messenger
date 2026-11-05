@@ -294,41 +294,79 @@ function writeTopPrintersTable(doc, printers) {
   writeRows(doc, "الطابعة", rows, 12);
 }
 
-function styleWorksheet(worksheet) {
-  worksheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 1 }];
-  worksheet.getRow(1).height = 24;
+// ─── Shared style helpers ────────────────────────────────────────────────────
+const PC = {
+  darkBlue:  "FF1E3A8A",
+  midBlue:   "FF2563EB",
+  lightBlue: "FFE0E7FF",
+  rowAlt:    "FFF0F4FF",
+  rowAlt2:   "FFF8FAFC",
+  white:     "FFFFFFFF",
+  labelFont: "FF1E3A8A",
+  valueFont: "FF111827",
+  mutedFont: "FF6B7280",
+  greenDark: "FF065F46",
+  greenMid:  "FF059669",
+  greenRow:  "FFF0FDF4",
+  amber:     "FFFBBF24",
+  amberFont: "FF78350F",
+  redBg:     "FFFEF2F2",
+  redFont:   "FF991B1B",
+  borderCol: "FFD1D5DB",
+};
+
+function pcHeader(cell, bgArgb, fontSize) {
+  cell.font = { name: "Arial", size: fontSize || 11, bold: true, color: { argb: PC.white } };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgArgb } };
+  cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  cell.border = {
+    bottom: { style: "medium", color: { argb: bgArgb } },
+  };
+}
+
+function pcLabel(cell) {
+  cell.font = { name: "Arial", bold: true, size: 10, color: { argb: PC.labelFont } };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.lightBlue } };
+  cell.alignment = { horizontal: "right", vertical: "middle" };
+}
+
+function pcValue(cell) {
+  cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+  cell.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+}
+
+function pcBorder(cell) {
+  cell.border = {
+    top:    { style: "hair", color: { argb: PC.borderCol } },
+    bottom: { style: "hair", color: { argb: PC.borderCol } },
+    left:   { style: "hair", color: { argb: PC.borderCol } },
+    right:  { style: "hair", color: { argb: PC.borderCol } },
+  };
+}
+
+function styleWorksheet(worksheet, headerBg) {
+  const bg = headerBg || PC.darkBlue;
+  worksheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 2 }];
+  worksheet.getRow(1).height = 32;
+  worksheet.getRow(2).height = 10; // spacer
+
   worksheet.getRow(1).eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial" };
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "1F4E78" },
-    };
-    cell.alignment = { horizontal: "center", vertical: "middle" };
-    cell.border = {
-      top: { style: "thin", color: { argb: "D9E2F2" } },
-      bottom: { style: "thin", color: { argb: "D9E2F2" } },
-      left: { style: "thin", color: { argb: "D9E2F2" } },
-      right: { style: "thin", color: { argb: "D9E2F2" } },
-    };
+    pcHeader(cell, bg, 10);
+    pcBorder(cell);
   });
-  worksheet.eachRow((row, rowNumber) => {
-    row.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+
+  worksheet.eachRow((row, rowNum) => {
+    if (rowNum <= 2) return;
+    const isAlt = rowNum % 2 === 0;
+    row.height = 22;
     row.eachCell((cell) => {
-      cell.font = { name: "Arial", size: 11 };
-      cell.border = {
-        top: { style: "thin", color: { argb: "E5E7EB" } },
-        bottom: { style: "thin", color: { argb: "E5E7EB" } },
-        left: { style: "thin", color: { argb: "E5E7EB" } },
-        right: { style: "thin", color: { argb: "E5E7EB" } },
-      };
-      if (rowNumber > 1 && rowNumber % 2 === 0) {
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "F8FAFC" },
-        };
+      cell.font = cell.font || {};
+      cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+      cell.alignment = { horizontal: "right", vertical: "middle", wrapText: true };
+      if (isAlt) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.rowAlt } };
       }
+      pcBorder(cell);
     });
   });
 }
@@ -378,290 +416,664 @@ async function buildExcelReport({
   workbook.created = new Date();
 
   const monthNames = [
-    "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-    "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+    "يناير","فبراير","مارس","أبريل","مايو","يونيو",
+    "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر",
   ];
   const isAllMonths = month !== null && month !== undefined && Number(month) === 0;
   const monthLabel = isAllMonths
     ? `جميع شهور سنة ${year}`
-    : (month && monthNames[Number(month) - 1] ? `${monthNames[Number(month) - 1]} ${year}` : "");
+    : (month && monthNames[Number(month) - 1]
+        ? `${monthNames[Number(month) - 1]} ${year}`
+        : "");
   const hasMonthly = !!monthlyConsumption;
+  const exportDate = new Date();
 
-  const summary = workbook.addWorksheet(fixText("الملخص"));
-  summary.columns = [
-    { header: "البند", key: "metric", width: 32 },
-    { header: "القيمة", key: "value", width: 42 },
-  ];
-  
-  const summaryRows = [
-    { metric: "نوع التقرير", value: type === "branch" ? "فرع" : "عام" },
-    { metric: "الفرع", value: branch?.name || "كل الفروع" },
-    { metric: "عدد الفروع", value: branches.length },
-    { metric: "عدد الطابعات", value: printers.length },
-    { metric: "الطابعات المتصلة", value: printers.filter((item) => item.status === "online").length },
-    { metric: "الطابعات غير المتصلة", value: printers.filter((item) => item.status !== "online").length },
-  ];
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+  function addSheetTitle(sheet, title, subtitle, colCount, bgArgb) {
+    const bg = bgArgb || PC.darkBlue;
+    // Row 1: main title
+    sheet.mergeCells(`A1:${colLetter(colCount)}1`);
+    const tc = sheet.getCell("A1");
+    tc.value = title;
+    tc.font = { name: "Arial", size: 14, bold: true, color: { argb: PC.white } };
+    tc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+    tc.alignment = { horizontal: "center", vertical: "middle" };
+    sheet.getRow(1).height = 40;
 
-  if (hasMonthly) {
-    const totalPages = monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.totalPages || 0), 0);
-    const totalPaper = paperMetrics(totalPages);
-    const partialBranches = monthlyConsumption.consumption.filter((item) => item.hasPartialData || item.hasStaleBaseline).length;
-    summaryRows.push(
-      { metric: isAllMonths ? "تقرير استهلاك الفترة" : "تقرير استهلاك شهر", value: monthLabel },
-      {
-        metric: isAllMonths ? "إجمالي الاستهلاك للفترة (صفحة)" : "إجمالي استهلاك الشهر (صفحة)",
-        value: totalPages,
-      },
-      {
-        metric: "إجمالي استهلاك الرزم (500 ورقة/رزمة)",
-        value: `${totalPaper.exactReams.toFixed(2)} رزمة (${totalPaper.fullReams} رزمة و ${totalPaper.remainingSheets} ورقة)`,
-      },
-      {
-        metric: "عدد العملاء التقديري",
-        value: `${totalPaper.estimatedClients} عميل`,
-      },
-      {
-        metric: "الرزم المطلوبة محاسبيًا",
-        value: totalPaper.requiredReams,
-      },
-      {
-        metric: "فروع تحتاج مراجعة القراءات",
-        value: partialBranches,
-      },
-      {
-        metric: isAllMonths ? "استهلاك أبيض وأسود للفترة" : "استهلاك أبيض وأسود للشهر",
-        value: monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.monoPages || 0), 0),
-      },
-      {
-        metric: isAllMonths ? "استهلاك ملون للفترة" : "استهلاك ملون للشهر",
-        value: monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.colorPages || 0), 0),
-      }
-    );
-  } else {
-    summaryRows.push(
-      {
-        metric: "إجمالي صفحات العمر",
-        value: printers.reduce((sum, item) => sum + Number(item.lifetimeCounters?.totalPages || 0), 0),
-      },
-      {
-        metric: "إجمالي الهالك التقديري",
-        value: waste.reduce((sum, item) => sum + Number(item.estimatedWastePages || 0), 0),
-      }
-    );
+    // Row 2: subtitle
+    sheet.mergeCells(`A2:${colLetter(colCount)}2`);
+    const sc = sheet.getCell("A2");
+    sc.value = subtitle || "";
+    sc.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+    sc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.midBlue } };
+    sc.alignment = { horizontal: "center", vertical: "middle" };
+    sheet.getRow(2).height = 24;
+
+    return 3; // next row index
   }
 
-  summaryRows.push({ metric: "تاريخ الإنشاء", value: formatDate(new Date()) });
-  summary.addRows(summaryRows);
-  styleWorksheet(summary);
-  normalizeWorksheetStrings(summary);
+  function colLetter(n) {
+    let s = "";
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      s = String.fromCharCode(65 + rem) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+
+  function addSectionRow(sheet, label, colCount, nextRow, bgArgb) {
+    sheet.mergeCells(`A${nextRow}:${colLetter(colCount)}${nextRow}`);
+    const c = sheet.getCell(`A${nextRow}`);
+    c.value = label;
+    c.font = { name: "Arial", size: 10, bold: true, color: { argb: bgArgb || PC.darkBlue } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.lightBlue } };
+    c.alignment = { horizontal: "right", vertical: "middle" };
+    sheet.getRow(nextRow).height = 26;
+    return nextRow + 1;
+  }
+
+  function addHeaderRow(sheet, headers, nextRow, bgArgb) {
+    const hRow = sheet.getRow(nextRow);
+    hRow.values = ["", ...headers]; // col A is blank (or index)
+    hRow.height = 28;
+    hRow.eachCell((cell, ci) => {
+      if (ci === 1) return;
+      pcHeader(cell, bgArgb || PC.midBlue, 10);
+      pcBorder(cell);
+    });
+    return nextRow + 1;
+  }
+
+  function statusColor(statusStr) {
+    if (statusStr === "متصلة") return PC.greenMid;
+    if (statusStr === "تحتاج عناية") return PC.amber;
+    return "FFEF4444";
+  }
+
+  function tonerBar(pct) {
+    if (pct === "" || pct === null || pct === undefined) return "-";
+    const n = Math.max(0, Math.min(100, Number(pct)));
+    const filled = Math.round(n / 10);
+    return "█".repeat(filled) + "░".repeat(10 - filled) + `  ${n}%`;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 1 — الملخص التنفيذي
+  // ════════════════════════════════════════════════════════════════════════════
+  const summarySheet = workbook.addWorksheet("الملخص التنفيذي");
+  summarySheet.views = [{ rightToLeft: true }];
+  summarySheet.columns = [{ width: 32 }, { width: 46 }];
+
+  // Title
+  summarySheet.mergeCells("A1:B1");
+  const sTitleC = summarySheet.getCell("A1");
+  sTitleC.value = "🖨️  تقرير إدارة الطابعات — ملخص تنفيذي";
+  sTitleC.font = { name: "Arial", size: 15, bold: true, color: { argb: PC.white } };
+  sTitleC.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
+  sTitleC.alignment = { horizontal: "center", vertical: "middle" };
+  summarySheet.getRow(1).height = 44;
+
+  summarySheet.mergeCells("A2:B2");
+  const sSubC = summarySheet.getCell("A2");
+  sSubC.value = "iSmart Messenger — نظام مراقبة الطابعات الذكية";
+  sSubC.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+  sSubC.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.midBlue } };
+  sSubC.alignment = { horizontal: "center", vertical: "middle" };
+  summarySheet.getRow(2).height = 24;
+
+  summarySheet.addRow([]);
+
+  // Section: نظرة عامة
+  let sRow = 4;
+  summarySheet.mergeCells(`A${sRow}:B${sRow}`);
+  const secOver = summarySheet.getCell(`A${sRow}`);
+  secOver.value = "📊  نظرة عامة على البنية التحتية";
+  secOver.font = { name: "Arial", bold: true, size: 10, color: { argb: PC.labelFont } };
+  secOver.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.lightBlue } };
+  secOver.alignment = { horizontal: "right", vertical: "middle" };
+  summarySheet.getRow(sRow).height = 26;
+  sRow++;
+
+  const onlinePrinters  = printers.filter((p) => p.status === "online").length;
+  const offlinePrinters = printers.filter((p) => p.status !== "online").length;
+
+  const infraRows = [
+    ["نوع التقرير",         type === "branch" ? "تقرير فرع" : "تقرير عام — كل الفروع"],
+    ["الفرع",               branch?.name || "كل الفروع"],
+    ["عدد الفروع المُراقبة",  branches.length],
+    ["إجمالي الطابعات",     printers.length],
+    ["طابعات متصلة الآن 🟢", onlinePrinters],
+    ["طابعات غير متصلة 🔴",  offlinePrinters],
+    ["نسبة الاتصال",        printers.length > 0 ? ((onlinePrinters / printers.length) * 100).toFixed(1) + "%" : "-"],
+  ];
+
+  infraRows.forEach(([lbl, val], i) => {
+    summarySheet.mergeCells(`B${sRow}:B${sRow}`);
+    const row = summarySheet.getRow(sRow);
+    row.height = 24;
+    const lc = row.getCell(1);
+    const vc = row.getCell(2);
+    lc.value = lbl; pcLabel(lc); pcBorder(lc);
+    vc.value = val; pcValue(vc); pcBorder(vc);
+    if (lbl.includes("متصلة الآن")) {
+      vc.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.greenDark } };
+    }
+    if (lbl.includes("غير متصلة") && offlinePrinters > 0) {
+      vc.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.redFont } };
+    }
+    sRow++;
+  });
+
+  summarySheet.addRow([]); sRow++;
+
+  if (hasMonthly) {
+    // Section: استهلاك الورق
+    summarySheet.mergeCells(`A${sRow}:B${sRow}`);
+    const secCons = summarySheet.getCell(`A${sRow}`);
+    secCons.value = `📄  استهلاك الورق — ${monthLabel}`;
+    secCons.font = { name: "Arial", bold: true, size: 10, color: { argb: PC.greenDark } };
+    secCons.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1FAE5" } };
+    secCons.alignment = { horizontal: "right", vertical: "middle" };
+    summarySheet.getRow(sRow).height = 26;
+    sRow++;
+
+    const totalPages  = monthlyConsumption.consumption.reduce((s, b) => s + Number(b.totalPages || 0), 0);
+    const totalMono   = monthlyConsumption.consumption.reduce((s, b) => s + Number(b.monoPages || 0), 0);
+    const totalColor  = monthlyConsumption.consumption.reduce((s, b) => s + Number(b.colorPages || 0), 0);
+    const paper       = paperMetrics(totalPages);
+    const partials    = monthlyConsumption.consumption.filter((b) => b.hasPartialData || b.hasStaleBaseline).length;
+
+    const consRows = [
+      ["الفترة المُقدَّم عنها", monthLabel],
+      ["إجمالي الصفحات المطبوعة", totalPages.toLocaleString("ar-EG")],
+      ["صفحات أبيض وأسود",        totalMono.toLocaleString("ar-EG")],
+      ["صفحات ملونة",             totalColor.toLocaleString("ar-EG")],
+      ["رزم ورق فعلية (500 ورقة)", paper.exactReams.toFixed(2)],
+      ["رزم مطلوبة (محاسبياً)",   paper.requiredReams],
+      ["عدد رزم كاملة + ورق متبقي", `${paper.fullReams} رزمة + ${paper.remainingSheets} ورقة`],
+      ["فروع تحتاج مراجعة بيانات", partials > 0 ? `⚠️  ${partials} فرع` : "✅ لا توجد مشكلات"],
+    ];
+
+    consRows.forEach(([lbl, val]) => {
+      const row = summarySheet.getRow(sRow);
+      row.height = 24;
+      const lc = row.getCell(1);
+      const vc = row.getCell(2);
+      lc.value = lbl; pcLabel(lc); pcBorder(lc);
+      vc.value = val; pcValue(vc); pcBorder(vc);
+      if (String(val).startsWith("⚠️")) {
+        vc.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.amberFont } };
+      }
+      sRow++;
+    });
+  }
+
+  summarySheet.addRow([]); sRow++;
+
+  // Section: معلومات التقرير
+  summarySheet.mergeCells(`A${sRow}:B${sRow}`);
+  const secMeta = summarySheet.getCell(`A${sRow}`);
+  secMeta.value = "📤  معلومات التقرير";
+  secMeta.font = { name: "Arial", bold: true, size: 10, color: { argb: PC.labelFont } };
+  secMeta.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.lightBlue } };
+  secMeta.alignment = { horizontal: "right", vertical: "middle" };
+  summarySheet.getRow(sRow).height = 26;
+  sRow++;
+
+  const metaRows = [
+    ["صدّره", actor?.fullName || actor?.username || "النظام"],
+    ["تاريخ ووقت التصدير", exportDate.toLocaleString("ar-EG", { dateStyle: "full", timeStyle: "short" })],
+  ];
+  metaRows.forEach(([lbl, val]) => {
+    const row = summarySheet.getRow(sRow);
+    row.height = 24;
+    const lc = row.getCell(1);
+    const vc = row.getCell(2);
+    lc.value = lbl; pcLabel(lc); pcBorder(lc);
+    vc.value = val; pcValue(vc); pcBorder(vc);
+    sRow++;
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 2 — الطابعات (Printers List)
+  // ════════════════════════════════════════════════════════════════════════════
+  const printersSheet = workbook.addWorksheet("قائمة الطابعات");
+  printersSheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 3 }];
+
+  const printerCols = [
+    { width: 6 },   // م
+    { width: 22 },  // الفرع
+    { width: 28 },  // اسم الطابعة
+    { width: 18 },  // IP
+    { width: 28 },  // الموديل
+    { width: 20 },  // الرقم التسلسلي
+    { width: 14 },  // الشركة
+    { width: 14 },  // الحالة
+    { width: 18 },  // العداد الحالي
+    { width: 18 },  // عداد العمر
+    { width: 16 },  // أسود %
+    { width: 16 },  // سماوي %
+    { width: 16 },  // أرجواني %
+    { width: 16 },  // أصفر %
+    ...(hasMonthly ? [
+      { width: 20 }, // استهلاك شهري
+      { width: 16 }, // أبيض وأسود شهري
+      { width: 16 }, // ملون شهري
+      { width: 14 }, // رزم فعلية
+      { width: 14 }, // جودة البيانات
+    ] : []),
+  ];
+  printersSheet.columns = printerCols;
+
+  // Title banner
+  printersSheet.mergeCells(`A1:${colLetter(printerCols.length)}1`);
+  const ptTitle = printersSheet.getCell("A1");
+  ptTitle.value = "🖨️  قائمة الطابعات — البيانات التفصيلية";
+  ptTitle.font = { name: "Arial", size: 13, bold: true, color: { argb: PC.white } };
+  ptTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
+  ptTitle.alignment = { horizontal: "center", vertical: "middle" };
+  printersSheet.getRow(1).height = 36;
+
+  printersSheet.mergeCells(`A2:${colLetter(printerCols.length)}2`);
+  const ptSub = printersSheet.getCell("A2");
+  ptSub.value = `إجمالي: ${printers.length} طابعة | متصلة: ${onlinePrinters} | غير متصلة: ${offlinePrinters}${hasMonthly ? " | الفترة: " + monthLabel : ""}`;
+  ptSub.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+  ptSub.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.midBlue } };
+  ptSub.alignment = { horizontal: "center", vertical: "middle" };
+  printersSheet.getRow(2).height = 24;
+
+  // Header row
+  const ptHeaders = [
+    "م", "الفرع", "اسم الطابعة", "عنوان IP", "الموديل",
+    "الرقم التسلسلي", "الشركة", "الحالة",
+    "العداد الحالي", "عداد العمر",
+    "حبر أسود", "سماوي", "أرجواني", "أصفر",
+    ...(hasMonthly ? ["استهلاك شهري", "أبيض وأسود", "ملون", "رزم", "جودة البيانات"] : []),
+  ];
+  const ptHRow = printersSheet.getRow(3);
+  ptHRow.values = ptHeaders;
+  ptHRow.height = 28;
+  ptHRow.eachCell((cell, ci) => {
+    pcHeader(cell, PC.darkBlue, 10);
+    pcBorder(cell);
+  });
 
   const printerUsageMap = {};
   if (hasMonthly && Array.isArray(monthlyConsumption.consumption)) {
     for (const b of monthlyConsumption.consumption) {
-      if (Array.isArray(b.printers)) {
-        for (const p of b.printers) {
-          printerUsageMap[p.printerId] = p;
-        }
+      for (const p of b.printers || []) {
+        printerUsageMap[String(p.printerId)] = p;
       }
     }
   }
 
-  const printersSheet = workbook.addWorksheet(fixText("الطابعات"));
-  printersSheet.columns = [
-    { header: "الفرع", key: "branch", width: 22 },
-    { header: "اسم الطابعة", key: "name", width: 28 },
-    { header: "IP", key: "ip", width: 18 },
-    { header: "الموديل", key: "model", width: 28 },
-    { header: "الرقم التسلسلي", key: "serial", width: 22 },
-    { header: "الشركة", key: "vendor", width: 14 },
-    { header: "الحالة", key: "status", width: 14 },
-    ...(hasMonthly ? [
-      { header: "الاستهلاك الشهري (صفحة)", key: "monthlyTotal", width: 20 },
-      { header: "أبيض وأسود شهري", key: "monthlyMono", width: 18 },
-      { header: "ألوان شهري", key: "monthlyColor", width: 18 },
-      { header: "رزم فعلية", key: "monthlyReams", width: 14 },
-      { header: "رزم مطلوبة", key: "monthlyRequiredReams", width: 14 },
-      { header: "عملاء تقديري", key: "monthlyEstimatedClients", width: 16 },
-      { header: "جودة بيانات الشهر", key: "monthlyDataQuality", width: 22 },
-    ] : []),
-    { header: "العداد الحالي", key: "currentTotal", width: 16 },
-    { header: "عداد العمر", key: "lifetimeTotal", width: 16 },
-    { header: "أسود %", key: "black", width: 10 },
-    { header: "سماوي %", key: "cyan", width: 10 },
-    { header: "أرجواني %", key: "magenta", width: 10 },
-    { header: "أصفر %", key: "yellow", width: 10 },
-  ];
+  printers.forEach((printer, idx) => {
+    const u = printerUsageMap[String(printer._id)] || {};
+    const paper = paperMetrics(u.totalPages || 0);
+    const statusStr = arabicStatus(printer.status);
+    const isOnline  = printer.status === "online";
 
-  printersSheet.addRows(
-    printers.map((printer) => {
-      const u = printerUsageMap[printer._id.toString()] || { totalPages: 0, monoPages: 0, colorPages: 0 };
-      const paper = paperMetrics(u.totalPages);
-      return {
-        branch: printerBranchName(printer),
-        name: printerDisplayName(printer),
-        ip: printer.ipAddress,
-        model: printer.model || "",
-        serial: printer.serialNumber || "",
-        vendor: printer.vendor || "",
-        status: arabicStatus(printer.status),
-        ...(hasMonthly ? {
-          monthlyTotal: u.totalPages,
-          monthlyMono: u.monoPages,
-          monthlyColor: u.colorPages,
-          monthlyReams: Number(paper.exactReams.toFixed(2)),
-          monthlyRequiredReams: paper.requiredReams,
-          monthlyEstimatedClients: paper.estimatedClients,
-          monthlyDataQuality: dataQualityLabel(u),
-        } : {}),
-        currentTotal: printer.counters?.totalPages || 0,
-        lifetimeTotal: printer.lifetimeCounters?.totalPages || 0,
-        black: printer.tonerLevels?.black ?? "",
-        cyan: printer.tonerLevels?.cyan ?? "",
-        magenta: printer.tonerLevels?.magenta ?? "",
-        yellow: printer.tonerLevels?.yellow ?? "",
-      };
-    }),
-  );
-  styleWorksheet(printersSheet);
-  normalizeWorksheetStrings(printersSheet);
+    const row = printersSheet.getRow(4 + idx);
+    row.height = 22;
+    row.values = [
+      idx + 1,
+      printerBranchName(printer),
+      printerDisplayName(printer),
+      printer.ipAddress || "-",
+      printer.model || "-",
+      printer.serialNumber || "-",
+      printer.vendor || "-",
+      statusStr,
+      printer.counters?.totalPages || 0,
+      printer.lifetimeCounters?.totalPages || 0,
+      tonerBar(printer.tonerLevels?.black),
+      tonerBar(printer.tonerLevels?.cyan),
+      tonerBar(printer.tonerLevels?.magenta),
+      tonerBar(printer.tonerLevels?.yellow),
+      ...(hasMonthly ? [
+        u.totalPages || 0,
+        u.monoPages || 0,
+        u.colorPages || 0,
+        Number(paper.exactReams.toFixed(2)),
+        dataQualityLabel(u),
+      ] : []),
+    ];
 
+    row.eachCell((cell, ci) => {
+      cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+      cell.alignment = { horizontal: ci === 1 ? "center" : "right", vertical: "middle", wrapText: true };
+      if (idx % 2 === 0) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.rowAlt } };
+      }
+      pcBorder(cell);
+    });
+
+    // Status cell coloring
+    const statusCell = row.getCell(8);
+    const sColor = isOnline ? PC.greenDark : PC.redFont;
+    statusCell.font = { name: "Arial", size: 10, bold: true, color: { argb: sColor } };
+    statusCell.alignment = { horizontal: "center", vertical: "middle" };
+
+    // Toner bar cells — monospace
+    [11, 12, 13, 14].forEach((ci) => {
+      const c = row.getCell(ci);
+      c.font = { name: "Courier New", size: 9, color: { argb: PC.labelFont } };
+      c.alignment = { horizontal: "left", vertical: "middle" };
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 3 — استهلاك الفروع (if monthly)
+  // ════════════════════════════════════════════════════════════════════════════
   if (hasMonthly) {
-    const branchConsumptionSheet = workbook.addWorksheet(fixText("استهلاك الفروع"));
-    branchConsumptionSheet.columns = [
-      { header: "كود الفرع", key: "branchCode", width: 15 },
-      { header: "اسم الفرع", key: "branchName", width: 25 },
-      { header: "عدد الطابعات", key: "printersCount", width: 15 },
-      { header: "إجمالي الصفحات", key: "totalPages", width: 20 },
-      { header: "استهلاك الرزم (500 ورقة/رزمة)", key: "reams", width: 28 },
-      { header: "الرزم المطلوبة محاسبيًا", key: "requiredReams", width: 22 },
-      { header: "العملاء المفترضين", key: "estimatedClients", width: 20 },
-      { header: "متوسط صفحات/طابعة", key: "avgPagesPerPrinter", width: 18 },
-      { header: "طابعات بقراءات جزئية", key: "partialPrintersCount", width: 22 },
-      { header: "طابعات باستهلاك مرتفع جدًا", key: "suspiciousPrintersCount", width: 26 },
-      { header: "جودة البيانات", key: "dataQuality", width: 24 },
-      { header: "أبيض وأسود", key: "monoPages", width: 18 },
-      { header: "ملون", key: "colorPages", width: 18 },
-    ];
-    branchConsumptionSheet.addRows(
-      monthlyConsumption.consumption.map((b) => {
-        const pages = Number(b.totalPages || 0);
-        const paper = paperMetrics(pages);
-        const printersCount = Number(b.printersCount || 0);
-        return {
-          branchCode: b.branchCode || "",
-          branchName: b.branchName || "",
-          printersCount,
-          totalPages: pages,
-          reams: `${paper.exactReams.toFixed(2)} رزمة (${paper.fullReams} رزمة + ${paper.remainingSheets} ورقة)`,
-          requiredReams: paper.requiredReams,
-          estimatedClients: paper.estimatedClients,
-          avgPagesPerPrinter: printersCount > 0 ? Math.round(pages / printersCount) : 0,
-          partialPrintersCount: b.partialPrintersCount || 0,
-          suspiciousPrintersCount: b.suspiciousPrintersCount || 0,
-          dataQuality: dataQualityLabel(b),
-          monoPages: b.monoPages || 0,
-          colorPages: b.colorPages || 0,
-        };
-      })
-    );
-    styleWorksheet(branchConsumptionSheet);
-    normalizeWorksheetStrings(branchConsumptionSheet);
+    const branchSheet = workbook.addWorksheet("استهلاك الفروع");
+    branchSheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 3 }];
 
-    const printerConsumptionSheet = workbook.addWorksheet(fixText("تفاصيل استهلاك الطابعات"));
-    printerConsumptionSheet.columns = [
-      { header: "كود الفرع", key: "branchCode", width: 15 },
-      { header: "اسم الفرع", key: "branchName", width: 25 },
-      { header: "اسم الطابعة", key: "printerName", width: 30 },
-      { header: "IP", key: "ipAddress", width: 18 },
-      { header: "الموديل", key: "model", width: 28 },
-      { header: "إجمالي الصفحات", key: "totalPages", width: 18 },
-      { header: "أبيض وأسود", key: "monoPages", width: 16 },
-      { header: "ملون", key: "colorPages", width: 16 },
-      { header: "رزم فعلية", key: "reams", width: 14 },
-      { header: "رزم مطلوبة", key: "requiredReams", width: 14 },
-      { header: "عملاء تقديري", key: "estimatedClients", width: 16 },
-      { header: "أول قراءة في الفترة", key: "firstSnapshotAt", width: 22 },
-      { header: "آخر قراءة في الفترة", key: "lastSnapshotAt", width: 22 },
-      { header: "ثقة الهوية", key: "identityConfidence", width: 14 },
-      { header: "ملاحظات النظام", key: "anomalyFlags", width: 28 },
-      { header: "جودة البيانات", key: "dataQuality", width: 24 },
+    const bCols = [
+      { width: 6 },{ width: 16 },{ width: 26 },{ width: 14 },
+      { width: 18 },{ width: 24 },{ width: 20 },{ width: 20 },
+      { width: 18 },{ width: 24 },{ width: 18 },{ width: 18 },
     ];
-    const printerConsumptionRows = [];
+    branchSheet.columns = bCols;
+
+    // Title
+    branchSheet.mergeCells(`A1:${colLetter(bCols.length)}1`);
+    const bTitle = branchSheet.getCell("A1");
+    bTitle.value = `📊  استهلاك الورق بالفروع — ${monthLabel}`;
+    bTitle.font = { name: "Arial", size: 13, bold: true, color: { argb: PC.white } };
+    bTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenDark } };
+    bTitle.alignment = { horizontal: "center", vertical: "middle" };
+    branchSheet.getRow(1).height = 36;
+
+    branchSheet.mergeCells(`A2:${colLetter(bCols.length)}2`);
+    const bSub = branchSheet.getCell("A2");
+    bSub.value = `الفترة: ${monthLabel} | عدد الفروع: ${monthlyConsumption.consumption.length}`;
+    bSub.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+    bSub.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenMid } };
+    bSub.alignment = { horizontal: "center", vertical: "middle" };
+    branchSheet.getRow(2).height = 24;
+
+    // Header
+    const bHeaders = [
+      "م","كود الفرع","اسم الفرع","عدد الطابعات",
+      "إجمالي الصفحات","الرزم الفعلية","رزم مطلوبة",
+      "أبيض وأسود","ملون",
+      "متوسط صفحات/طابعة","طابعات جزئية","جودة البيانات",
+    ];
+    const bHRow = branchSheet.getRow(3);
+    bHRow.values = bHeaders;
+    bHRow.height = 28;
+    bHRow.eachCell((cell) => { pcHeader(cell, PC.greenDark, 10); pcBorder(cell); });
+
+    monthlyConsumption.consumption.forEach((b, idx) => {
+      const pages = Number(b.totalPages || 0);
+      const paper = paperMetrics(pages);
+      const pCount = Number(b.printersCount || 0);
+      const hasIssue = b.hasPartialData || b.hasStaleBaseline;
+
+      const row = branchSheet.getRow(4 + idx);
+      row.height = 22;
+      row.values = [
+        idx + 1,
+        b.branchCode || "-",
+        b.branchName || "-",
+        pCount,
+        pages,
+        Number(paper.exactReams.toFixed(2)),
+        paper.requiredReams,
+        b.monoPages || 0,
+        b.colorPages || 0,
+        pCount > 0 ? Math.round(pages / pCount) : 0,
+        b.partialPrintersCount || 0,
+        dataQualityLabel(b),
+      ];
+
+      row.eachCell((cell, ci) => {
+        cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+        cell.alignment = { horizontal: ci === 1 ? "center" : "right", vertical: "middle" };
+        if (idx % 2 === 0) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenRow } };
+        }
+        pcBorder(cell);
+      });
+
+      if (hasIssue) {
+        const qCell = row.getCell(12);
+        qCell.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.amberFont } };
+        qCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEF3C7" } };
+      }
+    });
+
+    // Totals row
+    const totals = monthlyConsumption.consumption.reduce((acc, b) => {
+      acc.pages += Number(b.totalPages || 0);
+      acc.mono  += Number(b.monoPages || 0);
+      acc.color += Number(b.colorPages || 0);
+      acc.printers += Number(b.printersCount || 0);
+      return acc;
+    }, { pages: 0, mono: 0, color: 0, printers: 0 });
+    const tPaper = paperMetrics(totals.pages);
+    const tRow = branchSheet.getRow(4 + monthlyConsumption.consumption.length);
+    tRow.height = 26;
+    tRow.values = [
+      "", "الإجمالي", "", totals.printers,
+      totals.pages, Number(tPaper.exactReams.toFixed(2)), tPaper.requiredReams,
+      totals.mono, totals.color, "", "", "",
+    ];
+    tRow.eachCell((cell) => {
+      cell.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.greenDark } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1FAE5" } };
+      cell.border = { top: { style: "medium", color: { argb: PC.greenDark } } };
+      cell.alignment = { horizontal: "right", vertical: "middle" };
+      pcBorder(cell);
+    });
+
+    // ── SHEET 4 — تفاصيل استهلاك الطابعات ─────────────────────────────────
+    const pConSheet = workbook.addWorksheet("تفاصيل استهلاك الطابعات");
+    pConSheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 3 }];
+
+    const pcCols = [
+      { width: 6 },{ width: 16 },{ width: 26 },{ width: 28 },
+      { width: 18 },{ width: 26 },{ width: 16 },{ width: 14 },
+      { width: 14 },{ width: 14 },{ width: 22 },{ width: 22 },{ width: 24 },
+    ];
+    pConSheet.columns = pcCols;
+
+    pConSheet.mergeCells(`A1:${colLetter(pcCols.length)}1`);
+    const pcTitle = pConSheet.getCell("A1");
+    pcTitle.value = `📋  تفاصيل استهلاك كل طابعة — ${monthLabel}`;
+    pcTitle.font = { name: "Arial", size: 13, bold: true, color: { argb: PC.white } };
+    pcTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenDark } };
+    pcTitle.alignment = { horizontal: "center", vertical: "middle" };
+    pConSheet.getRow(1).height = 36;
+
+    pConSheet.mergeCells(`A2:${colLetter(pcCols.length)}2`);
+    const pcSub = pConSheet.getCell("A2");
+    pcSub.value = "تقرير تفصيلي بكل طابعة — الاستهلاك والقراءات والملاحظات";
+    pcSub.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+    pcSub.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenMid } };
+    pcSub.alignment = { horizontal: "center", vertical: "middle" };
+    pConSheet.getRow(2).height = 24;
+
+    const pcHeaders = [
+      "م","كود الفرع","اسم الفرع","اسم الطابعة",
+      "عنوان IP","الموديل","إجمالي الصفحات","أبيض وأسود",
+      "ملون","رزم فعلية",
+      "أول قراءة في الفترة","آخر قراءة","جودة البيانات",
+    ];
+    const pcHRow = pConSheet.getRow(3);
+    pcHRow.values = pcHeaders;
+    pcHRow.height = 28;
+    pcHRow.eachCell((cell) => { pcHeader(cell, PC.greenMid, 10); pcBorder(cell); });
+
+    let pcIdx = 1;
     for (const b of monthlyConsumption.consumption) {
       for (const p of b.printers || []) {
         const pages = Number(p.totalPages || 0);
-        const paper = paperMetrics(pages);
-        printerConsumptionRows.push({
-          branchCode: b.branchCode || "",
-          branchName: b.branchName || "",
-          printerName: p.printerName || "",
-          ipAddress: p.ipAddress || "",
-          model: p.model || "",
-          totalPages: pages,
-          monoPages: p.monoPages || 0,
-          colorPages: p.colorPages || 0,
-          reams: Number(paper.exactReams.toFixed(2)),
-          requiredReams: paper.requiredReams,
-          estimatedClients: paper.estimatedClients,
-          firstSnapshotAt: formatDate(p.firstSnapshotAt),
-          lastSnapshotAt: formatDate(p.lastSnapshotAt),
-          identityConfidence: p.identityConfidence || "",
-          anomalyFlags: (p.anomalyFlags || []).join(", "),
-          dataQuality: dataQualityLabel(p),
+        const paper2 = paperMetrics(pages);
+        const hasAnomaly = (p.anomalyFlags || []).length > 0;
+
+        const row = pConSheet.getRow(3 + pcIdx);
+        row.height = 22;
+        row.values = [
+          pcIdx,
+          b.branchCode || "-",
+          b.branchName || "-",
+          p.printerName || "-",
+          p.ipAddress || "-",
+          p.model || "-",
+          pages,
+          p.monoPages || 0,
+          p.colorPages || 0,
+          Number(paper2.exactReams.toFixed(2)),
+          p.firstSnapshotAt ? new Date(p.firstSnapshotAt).toLocaleDateString("ar-EG") : "-",
+          p.lastSnapshotAt  ? new Date(p.lastSnapshotAt).toLocaleDateString("ar-EG")  : "-",
+          dataQualityLabel(p),
+        ];
+
+        row.eachCell((cell, ci) => {
+          cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+          cell.alignment = { horizontal: ci === 1 ? "center" : "right", vertical: "middle" };
+          if (pcIdx % 2 === 0) {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.rowAlt2 } };
+          }
+          pcBorder(cell);
         });
+
+        if (hasAnomaly) {
+          [7, 13].forEach((ci) => {
+            const c = row.getCell(ci);
+            c.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.amberFont } };
+          });
+        }
+        pcIdx++;
       }
     }
-    printerConsumptionSheet.addRows(printerConsumptionRows);
-    styleWorksheet(printerConsumptionSheet);
-    normalizeWorksheetStrings(printerConsumptionSheet);
   }
 
-  const wasteSheet = workbook.addWorksheet(fixText("الهالك"));
-  wasteSheet.columns = [
-    { header: "الفرع", key: "branch", width: 22 },
-    { header: "الطابعة", key: "printer", width: 28 },
-    { header: "صفحات الهالك", key: "waste", width: 16 },
-    { header: "مرات الانحشار", key: "jams", width: 16 },
-    { header: "أخطاء الطابعة", key: "errors", width: 16 },
-    { header: "التاريخ", key: "date", width: 24 },
-  ];
-  wasteSheet.addRows(
-    waste.map((entry) => ({
-      branch: entry.branchId?.name || "",
-      printer: entry.printerId?.printerName || "",
-      waste: entry.estimatedWastePages || 0,
-      jams: entry.paperJams || 0,
-      errors: entry.printerErrors || 0,
-      date: formatDate(entry.calculatedAt),
-    })),
-  );
-  styleWorksheet(wasteSheet);
-  normalizeWorksheetStrings(wasteSheet);
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 5 — الورق الهالك
+  // ════════════════════════════════════════════════════════════════════════════
+  const wasteSheet = workbook.addWorksheet("الورق الهالك والأعطال");
+  wasteSheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 3 }];
 
-  const historySheet = workbook.addWorksheet(fixText("اللقطات"));
-  historySheet.columns = [
-    { header: "الفرع", key: "branch", width: 22 },
-    { header: "الطابعة", key: "printer", width: 28 },
-    { header: "التاريخ", key: "date", width: 24 },
-    { header: "إجمالي الصفحات", key: "total", width: 16 },
-    { header: "عداد العمر", key: "lifetime", width: 16 },
-    { header: "الانحشار", key: "jams", width: 14 },
-    { header: "الحالة", key: "status", width: 14 },
+  const wCols = [
+    { width: 6 },{ width: 22 },{ width: 28 },
+    { width: 16 },{ width: 16 },{ width: 16 },{ width: 24 },
   ];
-  historySheet.addRows(
-    snapshots.map((entry) => ({
-      branch: entry.branchId?.name || "",
-      printer: entry.printerId?.printerName || "",
-      date: formatDate(entry.snapshotAt),
-      total: entry.counters?.totalPages || 0,
-      lifetime: entry.lifetimeCounters?.totalPages || 0,
-      jams: entry.maintenance?.paperJams || 0,
-      status: arabicStatus(entry.status),
-    })),
-  );
-  styleWorksheet(historySheet);
-  normalizeWorksheetStrings(historySheet);
+  wasteSheet.columns = wCols;
 
+  wasteSheet.mergeCells(`A1:${colLetter(wCols.length)}1`);
+  const wTitle = wasteSheet.getCell("A1");
+  wTitle.value = "⚠️  سجل الورق الهالك والأعطال";
+  wTitle.font = { name: "Arial", size: 13, bold: true, color: { argb: PC.white } };
+  wTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB45309" } };
+  wTitle.alignment = { horizontal: "center", vertical: "middle" };
+  wasteSheet.getRow(1).height = 36;
+
+  wasteSheet.mergeCells(`A2:${colLetter(wCols.length)}2`);
+  const wSub = wasteSheet.getCell("A2");
+  wSub.value = `إجمالي سجلات الهالك: ${waste.length} سجل — صفحات مقدّرة ضائعة بسبب الانحشار والأخطاء`;
+  wSub.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+  wSub.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD97706" } };
+  wSub.alignment = { horizontal: "center", vertical: "middle" };
+  wasteSheet.getRow(2).height = 24;
+
+  const wHeaders = ["م","الفرع","الطابعة","صفحات هالك مقدّرة","مرات الانحشار","أخطاء الطابعة","تاريخ التسجيل"];
+  const wHRow = wasteSheet.getRow(3);
+  wHRow.values = wHeaders;
+  wHRow.height = 28;
+  wHRow.eachCell((cell) => { pcHeader(cell, "FFB45309", 10); pcBorder(cell); });
+
+  waste.forEach((entry, idx) => {
+    const row = wasteSheet.getRow(4 + idx);
+    row.height = 22;
+    row.values = [
+      idx + 1,
+      entry.branchId?.name || "-",
+      entry.printerId?.printerName || "-",
+      entry.estimatedWastePages || 0,
+      entry.paperJams || 0,
+      entry.printerErrors || 0,
+      formatDate(entry.calculatedAt),
+    ];
+    row.eachCell((cell, ci) => {
+      cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+      cell.alignment = { horizontal: ci === 1 ? "center" : "right", vertical: "middle" };
+      if (idx % 2 === 0) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEF3C7" } };
+      }
+      pcBorder(cell);
+    });
+    // Highlight high waste
+    if ((entry.estimatedWastePages || 0) > 100) {
+      row.getCell(4).font = { name: "Arial", size: 10, bold: true, color: { argb: PC.redFont } };
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 6 — اللقطات التاريخية
+  // ════════════════════════════════════════════════════════════════════════════
+  const historySheet = workbook.addWorksheet("سجل القراءات التاريخية");
+  historySheet.views = [{ rightToLeft: true, state: "frozen", ySplit: 3 }];
+
+  const hCols = [
+    { width: 6 },{ width: 22 },{ width: 28 },
+    { width: 24 },{ width: 18 },{ width: 18 },{ width: 14 },{ width: 14 },
+  ];
+  historySheet.columns = hCols;
+
+  historySheet.mergeCells(`A1:${colLetter(hCols.length)}1`);
+  const hTitle = historySheet.getCell("A1");
+  hTitle.value = "📅  سجل القراءات التاريخية — اللقطات اليومية";
+  hTitle.font = { name: "Arial", size: 13, bold: true, color: { argb: PC.white } };
+  hTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF374151" } };
+  hTitle.alignment = { horizontal: "center", vertical: "middle" };
+  historySheet.getRow(1).height = 36;
+
+  historySheet.mergeCells(`A2:${colLetter(hCols.length)}2`);
+  const hSub = historySheet.getCell("A2");
+  hSub.value = `إجمالي اللقطات المسجّلة: ${snapshots.length} قراءة`;
+  hSub.font = { name: "Arial", size: 10, italic: true, color: { argb: PC.white } };
+  hSub.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4B5563" } };
+  hSub.alignment = { horizontal: "center", vertical: "middle" };
+  historySheet.getRow(2).height = 24;
+
+  const hHeaders = ["م","الفرع","الطابعة","تاريخ ووقت القراءة","إجمالي الصفحات","عداد العمر","انحشار الورق","الحالة"];
+  const hHRow = historySheet.getRow(3);
+  hHRow.values = hHeaders;
+  hHRow.height = 28;
+  hHRow.eachCell((cell) => { pcHeader(cell, "FF374151", 10); pcBorder(cell); });
+
+  snapshots.forEach((entry, idx) => {
+    const row = historySheet.getRow(4 + idx);
+    row.height = 22;
+    row.values = [
+      idx + 1,
+      entry.branchId?.name || "-",
+      entry.printerId?.printerName || "-",
+      formatDate(entry.snapshotAt),
+      entry.counters?.totalPages || 0,
+      entry.lifetimeCounters?.totalPages || 0,
+      entry.maintenance?.paperJams || 0,
+      arabicStatus(entry.status),
+    ];
+    row.eachCell((cell, ci) => {
+      cell.font = { name: "Arial", size: 10, color: { argb: PC.valueFont } };
+      cell.alignment = { horizontal: ci === 1 ? "center" : "right", vertical: "middle" };
+      if (idx % 2 === 0) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.rowAlt2 } };
+      }
+      pcBorder(cell);
+    });
+    const statusCell = row.getCell(8);
+    const isOn = entry.status === "online";
+    statusCell.font = { name: "Arial", size: 10, bold: true, color: { argb: isOn ? PC.greenDark : PC.redFont } };
+    statusCell.alignment = { horizontal: "center", vertical: "middle" };
+  });
+
+  // ─── Finalize ──────────────────────────────────────────────────────────────
   const buffer = await workbook.xlsx.writeBuffer();
   const suffix = (month && year) ? `-${year}-${month}` : "";
   const fileName = `printer-${type}-report${suffix}-${Date.now()}.xlsx`;
