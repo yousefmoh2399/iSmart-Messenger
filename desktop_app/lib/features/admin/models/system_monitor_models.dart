@@ -553,3 +553,178 @@ class RequestTelemetryData {
     );
   }
 }
+class AdminPollOptionItem {
+  const AdminPollOptionItem({
+    required this.id,
+    required this.text,
+    required this.votesCount,
+    required this.percentage,
+    required this.voterIds,
+  });
+
+  final String id;
+  final String text;
+  final int votesCount;
+  final int percentage;
+  final List<String> voterIds;
+
+  factory AdminPollOptionItem.fromJson(Map<String, dynamic> json) {
+    final vIds = (json['voterIds'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        [];
+    return AdminPollOptionItem(
+      id: json['id']?.toString() ?? '',
+      text: json['text'] as String? ?? '',
+      votesCount: (json['votesCount'] as num?)?.toInt() ?? 0,
+      percentage: (json['percentage'] as num?)?.toInt() ?? 0,
+      voterIds: vIds,
+    );
+  }
+}
+
+class AdminPollCreator {
+  const AdminPollCreator({
+    required this.id,
+    required this.username,
+    required this.fullName,
+    required this.role,
+    required this.jobTitle,
+    required this.branchCode,
+    required this.branchName,
+    this.avatarUrl,
+  });
+
+  final String id;
+  final String username;
+  final String fullName;
+  final String role;
+  final String jobTitle;
+  final String branchCode;
+  final String branchName;
+  final String? avatarUrl;
+
+  factory AdminPollCreator.fromJson(Map<String, dynamic> json) {
+    return AdminPollCreator(
+      id: json['id']?.toString() ?? '',
+      username: json['username'] as String? ?? 'Unknown',
+      fullName: json['fullName'] as String? ?? 'مستخدم غير معروف',
+      role: json['role'] as String? ?? 'user',
+      jobTitle: json['jobTitle'] as String? ?? '-',
+      branchCode: json['branchCode'] as String? ?? '-',
+      branchName: json['branchName'] as String? ?? '-',
+      avatarUrl: json['avatarUrl'] as String?,
+    );
+  }
+}
+
+class AdminPollConversation {
+  const AdminPollConversation({
+    required this.id,
+    required this.title,
+    required this.type,
+  });
+
+  final String id;
+  final String title;
+  final String type;
+
+  factory AdminPollConversation.fromJson(Map<String, dynamic> json) {
+    return AdminPollConversation(
+      id: json['id']?.toString() ?? '',
+      title: json['title'] as String? ?? 'محادثة',
+      type: json['type'] as String? ?? 'group',
+    );
+  }
+}
+
+class AdminPollItem {
+  const AdminPollItem({
+    required this.id,
+    required this.messageType,
+    required this.question,
+    required this.options,
+    required this.totalVotes,
+    required this.uniqueVotersCount,
+    required this.isClosed,
+    required this.isAnonymous,
+    required this.isMultipleChoice,
+    required this.createdAt,
+    this.closedAt,
+    required this.creator,
+    required this.conversation,
+  });
+
+  final String id;
+  final String messageType;
+  final String question;
+  final List<AdminPollOptionItem> options;
+  final int totalVotes;
+  final int uniqueVotersCount;
+  final bool isClosed;
+  final bool isAnonymous;
+  final bool isMultipleChoice;
+  final DateTime createdAt;
+  final DateTime? closedAt;
+  final AdminPollCreator creator;
+  final AdminPollConversation conversation;
+
+  factory AdminPollItem.fromJson(Map<String, dynamic> json) {
+    final opts = (json['options'] as List<dynamic>?)
+            ?.map((e) => AdminPollOptionItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    return AdminPollItem(
+      id: json['id']?.toString() ?? '',
+      messageType: json['messageType'] as String? ?? 'poll',
+      question: json['question'] as String? ?? 'استطلاع رأي',
+      options: opts,
+      totalVotes: (json['totalVotes'] as num?)?.toInt() ?? 0,
+      uniqueVotersCount: (json['uniqueVotersCount'] as num?)?.toInt() ?? 0,
+      isClosed: json['isClosed'] as bool? ?? false,
+      isAnonymous: json['isAnonymous'] as bool? ?? false,
+      isMultipleChoice: json['isMultipleChoice'] as bool? ?? false,
+      createdAt: json['createdAt'] != null
+          ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      closedAt: json['closedAt'] != null
+          ? DateTime.tryParse(json['closedAt'].toString())
+          : null,
+      creator: AdminPollCreator.fromJson(
+          json['creator'] as Map<String, dynamic>? ?? {}),
+      conversation: AdminPollConversation.fromJson(
+          json['conversation'] as Map<String, dynamic>? ?? {}),
+    );
+  }
+}
+
+class AdminPollsData {
+  const AdminPollsData({
+    required this.items,
+    required this.page,
+    required this.limit,
+    required this.total,
+    required this.hasMore,
+  });
+
+  final List<AdminPollItem> items;
+  final int page;
+  final int limit;
+  final int total;
+  final bool hasMore;
+
+  factory AdminPollsData.fromJson(Map<String, dynamic> json) {
+    final rawItems = (json['items'] as List<dynamic>?)
+            ?.map((e) => AdminPollItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    final pag = json['pagination'] as Map<String, dynamic>? ?? {};
+    return AdminPollsData(
+      items: rawItems,
+      page: (pag['page'] as num?)?.toInt() ?? 1,
+      limit: (pag['limit'] as num?)?.toInt() ?? 50,
+      total: (pag['total'] as num?)?.toInt() ?? rawItems.length,
+      hasMore: pag['hasMore'] as bool? ?? false,
+    );
+  }
+}

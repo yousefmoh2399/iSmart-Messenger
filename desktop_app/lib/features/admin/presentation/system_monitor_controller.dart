@@ -12,6 +12,11 @@ class SystemMonitorState {
     this.requestTelemetry,
     this.isLoadingTelemetry = false,
     this.isExportingReport = false,
+    this.pollsData,
+    this.isLoadingPolls = false,
+    this.exportingPollId,
+    this.pollSearchQuery = '',
+    this.pollStatusFilter = 'all',
     this.sessions = const [],
     this.errors = const [],
     this.isLoadingSessions = false,
@@ -37,6 +42,11 @@ class SystemMonitorState {
   final RequestTelemetryData? requestTelemetry;
   final bool isLoadingTelemetry;
   final bool isExportingReport;
+  final AdminPollsData? pollsData;
+  final bool isLoadingPolls;
+  final String? exportingPollId;
+  final String pollSearchQuery;
+  final String pollStatusFilter;
 
   final List<DeviceSession> sessions;
   final List<ClientErrorLog> errors;
@@ -65,6 +75,11 @@ class SystemMonitorState {
     RequestTelemetryData? requestTelemetry,
     bool? isLoadingTelemetry,
     bool? isExportingReport,
+    AdminPollsData? pollsData,
+    bool? isLoadingPolls,
+    String? exportingPollId,
+    String? pollSearchQuery,
+    String? pollStatusFilter,
     List<DeviceSession>? sessions,
     List<ClientErrorLog>? errors,
     bool? isLoadingSessions,
@@ -90,6 +105,13 @@ class SystemMonitorState {
       requestTelemetry: requestTelemetry ?? this.requestTelemetry,
       isLoadingTelemetry: isLoadingTelemetry ?? this.isLoadingTelemetry,
       isExportingReport: isExportingReport ?? this.isExportingReport,
+      pollsData: pollsData ?? this.pollsData,
+      isLoadingPolls: isLoadingPolls ?? this.isLoadingPolls,
+      exportingPollId: exportingPollId != null
+          ? (exportingPollId == '' ? null : exportingPollId)
+          : this.exportingPollId,
+      pollSearchQuery: pollSearchQuery ?? this.pollSearchQuery,
+      pollStatusFilter: pollStatusFilter ?? this.pollStatusFilter,
       sessions: sessions ?? this.sessions,
       errors: errors ?? this.errors,
       isLoadingSessions: isLoadingSessions ?? this.isLoadingSessions,
@@ -130,6 +152,7 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       refreshStats(),
       refreshDeployment(),
       refreshTelemetry(),
+      refreshPolls(),
       refreshSessions(),
       loadErrors(),
     ]);
@@ -174,6 +197,40 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       );
     } catch (_) {
       state = state.copyWith(isLoadingTelemetry: false);
+    }
+  }
+
+Future<void> refreshPolls({String? search, String? status}) async {
+    final s = search ?? state.pollSearchQuery;
+    final st = status ?? state.pollStatusFilter;
+    state = state.copyWith(
+      isLoadingPolls: true,
+      pollSearchQuery: s,
+      pollStatusFilter: st,
+    );
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final data = await repo.getAdminPolls(search: s, status: st);
+      state = state.copyWith(
+        pollsData: data,
+        isLoadingPolls: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingPolls: false);
+    }
+  }
+
+  Future<void> exportPoll(
+    String pollId, {
+    required String format,
+    required String title,
+  }) async {
+    state = state.copyWith(exportingPollId: pollId);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.exportAdminPoll(pollId, format: format, title: title);
+    } finally {
+      state = state.copyWith(exportingPollId: '');
     }
   }
 

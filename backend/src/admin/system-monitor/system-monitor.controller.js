@@ -9,6 +9,9 @@ const {
   getBranchesDeploymentData,
   buildDeploymentExcelReport,
   buildDeploymentPdfReport,
+  getAllSystemPolls,
+  buildPollPdfReport,
+  exportPollToExcel,
 } = require("./system-monitor.service");
 const { getTelemetrySnapshot } = require("../../middleware/request-telemetry.middleware");
 function safeGetLiveSocketMetrics() {
@@ -293,6 +296,42 @@ const exportDeploymentReport = asyncHandler(async (req, res) => {
   }
 });
 
+
+const getAllPolls = asyncHandler(async (req, res) => {
+  const { search, status, page, limit } = req.query;
+  const result = await getAllSystemPolls({
+    search,
+    status,
+    page: parseInt(page, 10) || 1,
+    limit: parseInt(limit, 10) || 50,
+  });
+  res.json({
+    success: true,
+    data: result,
+  });
+});
+
+const exportPollReport = asyncHandler(async (req, res) => {
+  const pollId = req.params.id;
+  const format = (req.query.format || "xlsx").toLowerCase();
+  const actor = req.user;
+
+  if (format === "pdf") {
+    const { buffer, fileName } = await buildPollPdfReport(pollId, actor);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(buffer);
+  } else {
+    const { buffer, filename } = await exportPollToExcel(actor, pollId);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    return res.status(200).send(buffer);
+  }
+});
+
 module.exports = {
   getSystemStats,
   getConnections,
@@ -302,4 +341,6 @@ module.exports = {
   getBranchesDeployment,
   getRequestTelemetry,
   exportDeploymentReport,
+  getAllPolls,
+  exportPollReport,
 };

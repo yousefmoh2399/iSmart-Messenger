@@ -137,4 +137,51 @@ class SystemMonitorRepository {
       mimeType: mime,
     );
   }
+Future<AdminPollsData> getAdminPolls({
+    String search = '',
+    String status = 'all',
+    int page = 1,
+    int limit = 50,
+  }) async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      '/api/admin/system-monitor/polls',
+      queryParameters: {
+        'page': page,
+        'limit': limit,
+        if (search.trim().isNotEmpty) 'search': search.trim(),
+        if (status != 'all') 'status': status,
+      },
+    );
+    final data = response.data?['data'] as Map<String, dynamic>? ?? {};
+    return AdminPollsData.fromJson(data);
+  }
+
+  Future<void> exportAdminPoll(
+    String pollId, {
+    String format = 'xlsx',
+    String title = 'poll',
+  }) async {
+    final response = await _apiClient.dio.get<dynamic>(
+      '/api/admin/system-monitor/polls/$pollId/export',
+      queryParameters: {'format': format},
+      options: Options(responseType: ResponseType.bytes),
+    );
+    final data = response.data;
+    if (data == null) return;
+    final bytes = data is Uint8List
+        ? data
+        : data is List<int>
+            ? Uint8List.fromList(data)
+            : Uint8List.fromList(const <int>[]);
+    final ext = format == 'pdf' ? 'pdf' : 'xlsx';
+    final mime = format == 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    final safeTitle = title.replaceAll(RegExp(r'[\/:*?"<>|\s]+'), '_');
+    await web_bridge.downloadBytes(
+      bytes: bytes,
+      fileName: '${safeTitle}_${DateTime.now().millisecondsSinceEpoch}.$ext',
+      mimeType: mime,
+    );
+  }
 }

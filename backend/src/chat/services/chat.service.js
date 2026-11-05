@@ -3795,10 +3795,11 @@ async function exportPollToExcel(currentUser, messageId) {
     throw new ApiError(404, "الاستطلاع غير موجود أو محذوف.");
   }
   const conversation = await getConversationById(message.conversationId);
-  await assertConversationAccess(currentUser, conversation);
-
   const isAdmin =
     currentUser.role === "admin" || currentUser.role === "superadmin";
+  if (!isAdmin) {
+    await assertConversationAccess(currentUser, conversation);
+  }
   const isManager = currentUser.role === "manager";
   const isPrivileged = isAdmin || isManager;
   const senderIdStr = message.senderId ? String(message.senderId._id || message.senderId) : "";

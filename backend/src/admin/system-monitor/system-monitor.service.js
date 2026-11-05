@@ -6,6 +6,9 @@ const PDFDocument = require("pdfkit");
 const Branch = require("../../chat/models/branch.model");
 const User = require("../../models/user.model");
 const DeviceSession = require("../../models/device-session.model");
+const Message = require("../../chat/models/message.model");
+const Conversation = require("../../chat/models/conversation.model");
+const { exportPollToExcel } = require("../../chat/services/chat.service");
 
 const logo1Path = path.join(__dirname, "../../assets/logo1.png");
 const logo2Path = path.join(__dirname, "../../assets/logo2.png");
@@ -575,8 +578,361 @@ async function buildDeploymentPdfReport(data, actor) {
   return { buffer: Buffer.concat(chunks), fileName };
 }
 
+
+async function getAllSystemPolls({ search = "", status = "all", page = 1, limit = 50 } = {}) {
+  const query = {
+    messageType: { $in: ["poll", "checklist"] },
+    isDeleted: { $ne: true },
+  };
+
+  const skip = (Math.max(1, page) - 1) * limit;
+
+  const rawMessages = await Message.find(query)
+    .populate("senderId", "_id username fullName role avatarUrl jobTitle branchCode branchId")
+    .populate("conversationId", "_id title type members")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const branches = await Branch.find({ deletedAt: null }).select("_id code name").lean();
+  const branchMap = new Map();
+  branches.forEach((b) => {
+    branchMap.set(String(b._id), b.name);
+    if (b.code) branchMap.set(String(b.code).toUpperCase(), b.name);
+  });
+
+  const allPolls = [];
+
+  for (const msg of rawMessages) {
+    const meta = msg.metadata || {};
+    const question = meta.question || msg.content || "استطلاع رأي";
+    const isClosed = meta.isClosed === true;
+
+    if (status === "active" && isClosed) continue;
+    if (status === "closed" && !isClosed) continue;
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      const matchQ = question.toLowerCase().includes(q);
+      const matchCreator =
+        (msg.senderId?.fullName || "").toLowerCase().includes(q) ||
+        (msg.senderId?.username || "").toLowerCase().includes(q);
+      if (!matchQ && !matchCreator) continue;
+    }
+
+    const options = meta.options || [];
+    const votes = meta.votes || {};
+
+    let totalVotes = 0;
+    const voterIdsSet = new Set();
+    const formattedOptions = options.map((opt) => {
+      const vList = votes[String(opt.id)] || [];
+      totalVotes += vList.length;
+      vList.forEach((uid) => voterIdsSet.add(String(uid)));
+      return {
+        id: opt.id,
+        text: opt.text,
+        votesCount: vList.length,
+        voterIds: vList,
+      };
+    });
+
+    formattedOptions.forEach((opt) => {
+      opt.percentage = totalVotes > 0 ? Math.round((opt.votesCount / totalVotes) * 100) : 0;
+    });
+
+    const sender = msg.senderId || {};
+    const bName =
+      (sender.branchId ? branchMap.get(String(sender.branchId)) : null) ||
+      (sender.branchCode ? branchMap.get(String(sender.branchCode).toUpperCase()) : null) ||
+      sender.branchCode ||
+      "-";
+
+    allPolls.push({
+      id: String(msg._id),
+      messageType: msg.messageType,
+      question,
+      options: formattedOptions,
+      totalVotes,
+      uniqueVotersCount: voterIdsSet.size,
+      isClosed,
+      isAnonymous: meta.isAnonymous === true,
+      isMultipleChoice: meta.isMultipleChoice === true,
+      createdAt: msg.createdAt,
+      closedAt: meta.closedAt || null,
+      creator: {
+        id: sender._id ? String(sender._id) : "",
+        username: sender.username || "Unknown",
+        fullName: sender.fullName || "مستخدم غير معروف",
+        role: sender.role || "user",
+        jobTitle: sender.jobTitle || "-",
+        branchCode: sender.branchCode || "-",
+        branchName: bName,
+        avatarUrl: sender.avatarUrl || null,
+      },
+      conversation: {
+        id: msg.conversationId?._id ? String(msg.conversationId._id) : "",
+        title: msg.conversationId?.title || "محادثة",
+        type: msg.conversationId?.type || "group",
+      },
+    });
+  }
+
+  const paginatedItems = allPolls.slice(skip, skip + limit);
+
+  return {
+    items: paginatedItems,
+    pagination: {
+      page,
+      limit,
+      total: allPolls.length,
+      hasMore: skip + paginatedItems.length < allPolls.length,
+    },
+  };
+}
+
+async function buildPollPdfReport(messageId, actor) {
+  const message = await Message.findById(messageId)
+    .populate("senderId", "_id username fullName role jobTitle branchCode branchId")
+    .populate("conversationId", "_id title type")
+    .lean();
+
+  if (!message || message.isDeleted || !["poll", "checklist"].includes(message.messageType)) {
+    throw new Error("الاستطلاع غير موجود أو تم حذفه");
+  }
+
+  const meta = message.metadata || {};
+  const question = meta.question || message.content || "استطلاع رأي";
+  const options = meta.options || [];
+  const votes = meta.votes || {};
+  const isClosed = meta.isClosed === true;
+
+  const allVoterIdsSet = new Set();
+  let totalVotes = 0;
+  for (const opt of options) {
+    const vIds = votes[String(opt.id)] || [];
+    totalVotes += vIds.length;
+    for (const vid of vIds) {
+      if (vid) allVoterIdsSet.add(String(vid));
+    }
+  }
+
+  const voters = await User.find({ _id: { $in: Array.from(allVoterIdsSet) } })
+    .populate("departmentId", "name")
+    .populate("branchId", "name code")
+    .select("fullName username jobTitle role departmentId branchId branchCode")
+    .lean();
+
+  const voterMap = new Map();
+  voters.forEach((v) => voterMap.set(String(v._id), v));
+
+  const doc = new PDFDocument({
+    size: "A4",
+    layout: "landscape",
+    margin: 28,
+    bufferPages: true,
+  });
+
+  configureArabicPdf(doc);
+
+  const chunks = [];
+  doc.on("data", (c) => chunks.push(c));
+  const done = new Promise((resolve) => doc.on("end", resolve));
+
+  const usableWidth = doc.page.width - 56;
+
+  // Header with logos and title
+  const topY = 24;
+  if (fs.existsSync(logo1Path)) {
+    try { doc.image(logo1Path, 28, topY, { width: 50, height: 50 }); } catch (_) {}
+  }
+  if (fs.existsSync(logo2Path)) {
+    try { doc.image(logo2Path, doc.page.width - 78, topY, { width: 50, height: 50 }); } catch (_) {}
+  }
+
+  withArabicFont(doc, true).fontSize(16).fillColor("#1E3A8A");
+  doc.text(processArabicText("تقرير نتائج استطلاع الرأي الرسمي"), 85, topY + 4, {
+    width: usableWidth - 114,
+    align: "center",
+  });
+
+  withArabicFont(doc, false).fontSize(9).fillColor("#64748B");
+  const reportDate = new Date().toISOString().replace("T", " ").slice(0, 19);
+  doc.text(
+    processArabicText(`تاريخ الاستخراج: ${reportDate}   |   المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}`),
+    85,
+    topY + 28,
+    { width: usableWidth - 114, align: "center" }
+  );
+
+  // 4 KPI Summary Cards
+  const kpiY = topY + 56;
+  const kpiW = (usableWidth - 36) / 4;
+  const kpiH = 50;
+
+  const creatorName = message.senderId?.fullName || message.senderId?.username || "غير معروف";
+  const creatorBranch = message.senderId?.branchCode || "-";
+
+  const kpis = [
+    { title: "حالة الاستطلاع", val: isClosed ? "مغلق ومكتمل" : "مفتوح للتصويت", sub: isClosed ? "انتهت فترة التصويت" : "نشط ومتاح حالياً", col: isClosed ? "#EF4444" : "#10B981" },
+    { title: "إجمالي المصوتين", val: `${allVoterIdsSet.size} مصوت`, sub: `${totalVotes} صوت مسجل`, col: "#2563EB" },
+    { title: "منشئ الاستطلاع", val: creatorName, sub: `فرع: ${creatorBranch}`, col: "#8B5CF6" },
+    { title: "عدد الخيارات", val: `${options.length} خيارات`, sub: meta.isMultipleChoice ? "اختيار متعدد" : "اختيار فردي", col: "#F59E0B" },
+  ];
+
+  kpis.forEach((kpi, idx) => {
+    const kX = 28 + (idx * (kpiW + 12));
+    doc.roundedRect(kX, kpiY, kpiW, kpiH, 6).fillColor("#F8FAFC").fill();
+    doc.roundedRect(kX, kpiY, kpiW, kpiH, 6).strokeColor("#CBD5E1").lineWidth(0.8).stroke();
+
+    withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+    doc.text(processArabicText(kpi.title), kX + 8, kpiY + 6, { width: kpiW - 16, align: "right" });
+
+    withArabicFont(doc, true).fontSize(11).fillColor(kpi.col);
+    doc.text(processArabicText(kpi.val), kX + 8, kpiY + 18, { width: kpiW - 16, align: "right", lineBreak: false, ellipsis: true });
+
+    withArabicFont(doc, false).fontSize(7.5).fillColor("#94A3B8");
+    doc.text(processArabicText(kpi.sub), kX + 8, kpiY + 34, { width: kpiW - 16, align: "right", lineBreak: false, ellipsis: true });
+  });
+
+  // Section 1: Question & Options Progress Bars
+  let currentY = kpiY + kpiH + 12;
+
+  doc.roundedRect(28, currentY, usableWidth, 24, 6).fillColor("#EFF6FF").fill();
+  doc.roundedRect(28, currentY, usableWidth, 24, 6).strokeColor("#BFDBFE").lineWidth(0.8).stroke();
+  withArabicFont(doc, true).fontSize(10).fillColor("#1E3A8A");
+  doc.text(processArabicText(`السؤال: ${question}`), 36, currentY + 6, { width: usableWidth - 16, align: "right" });
+
+  currentY += 30;
+
+  const optW = (usableWidth - 24) / Math.min(options.length || 1, 4);
+  const optH = 42;
+
+  options.forEach((opt, idx) => {
+    const vCount = (votes[String(opt.id)] || []).length;
+    const pct = totalVotes > 0 ? Math.round((vCount / totalVotes) * 100) : 0;
+    const oX = 28 + (idx % 4) * (optW + 8);
+    const oY = currentY + Math.floor(idx / 4) * (optH + 6);
+
+    doc.roundedRect(oX, oY, optW, optH, 5).fillColor("#FFFFFF").fill();
+    doc.roundedRect(oX, oY, optW, optH, 5).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+
+    withArabicFont(doc, true).fontSize(9).fillColor("#0F172A");
+    doc.text(processArabicText(opt.text), oX + 6, oY + 5, { width: optW - 12, align: "right", lineBreak: false, ellipsis: true });
+
+    withArabicFont(doc, false).fontSize(8).fillColor("#2563EB");
+    doc.text(processArabicText(`${vCount} صوت (${pct}%)`), oX + 6, oY + 18, { width: optW - 12, align: "right" });
+
+    doc.roundedRect(oX + 6, oY + 30, optW - 12, 5, 2).fillColor("#E2E8F0").fill();
+    if (pct > 0) {
+      const fillW = Math.max(2, (optW - 12) * (pct / 100));
+      doc.roundedRect(oX + 6, oY + 30, fillW, 5, 2).fillColor("#2563EB").fill();
+    }
+  });
+
+  const optRows = Math.ceil(options.length / 4);
+  currentY += (optRows * (optH + 6)) + 10;
+
+  // Section 2: Detailed Voters Table
+  withArabicFont(doc, true).fontSize(10).fillColor("#1E3A8A");
+  doc.text(processArabicText(`سجل المصوتين التفصيلي (${allVoterIdsSet.size} مشارك)`), 28, currentY, { width: usableWidth, align: "right" });
+  currentY += 16;
+
+  const vCols = [
+    { label: "م", w: 30 },
+    { label: "اسم المصوت", w: 180 },
+    { label: "اسم المستخدم", w: 110 },
+    { label: "المسمى والفرع", w: 150 },
+    { label: "الخيار المصوت له", w: 200 },
+    { label: "الدور الوظيفي", w: usableWidth - (30 + 180 + 110 + 150 + 200) },
+  ];
+
+  doc.rect(28, currentY, usableWidth, 20).fillColor("#2563EB").fill();
+  let vHeadX = 28;
+  vCols.forEach((col) => {
+    withArabicFont(doc, true).fontSize(8.5).fillColor("#FFFFFF");
+    doc.text(processArabicText(col.label), vHeadX + 2, currentY + 4, { width: col.w - 4, align: "center" });
+    vHeadX += col.w;
+  });
+  currentY += 20;
+
+  const voterRows = [];
+  let rowIdx = 1;
+  options.forEach((opt) => {
+    const vIds = votes[String(opt.id)] || [];
+    vIds.forEach((vid) => {
+      const u = voterMap.get(String(vid));
+      voterRows.push({
+        num: rowIdx++,
+        fullName: u?.fullName || "مستخدم غير معروف",
+        username: u?.username || "-",
+        branchDept: `${u?.branchCode || "-"} | ${u?.departmentId?.name || u?.jobTitle || "-"}`,
+        choice: opt.text,
+        role: u?.role || "user",
+      });
+    });
+  });
+
+  for (const vr of voterRows) {
+    if (currentY + 18 > doc.page.height - 35) {
+      doc.addPage({ size: "A4", layout: "landscape", margin: 28 });
+      configureArabicPdf(doc);
+      currentY = 28;
+
+      doc.rect(28, currentY, usableWidth, 20).fillColor("#2563EB").fill();
+      let hX = 28;
+      vCols.forEach((col) => {
+        withArabicFont(doc, true).fontSize(8.5).fillColor("#FFFFFF");
+        doc.text(processArabicText(col.label), hX + 2, currentY + 4, { width: col.w - 4, align: "center" });
+        hX += col.w;
+      });
+      currentY += 20;
+    }
+
+    const isEven = vr.num % 2 === 0;
+    doc.rect(28, currentY, usableWidth, 18).fillColor(isEven ? "#F8FAFC" : "#FFFFFF").fill();
+    doc.rect(28, currentY, usableWidth, 18).strokeColor("#E2E8F0").lineWidth(0.5).stroke();
+
+    let rX = 28;
+    const rValues = [
+      String(vr.num),
+      vr.fullName,
+      vr.username,
+      vr.branchDept,
+      vr.choice,
+      vr.role,
+    ];
+
+    rValues.forEach((val, ci) => {
+      withArabicFont(doc, false).fontSize(8).fillColor("#0F172A");
+      doc.text(processArabicText(val), rX + 2, currentY + 4, { width: vCols[ci].w - 4, align: ci === 0 ? "center" : "right", ellipsis: true, lineBreak: false });
+      rX += vCols[ci].w;
+    });
+
+    currentY += 18;
+  }
+
+  const footerY = doc.page.height - 24;
+  withArabicFont(doc, false).fontSize(7.5).fillColor("#64748B");
+  doc.text(
+    processArabicText(`منظومة iSmart Messenger   |   المسؤول: ${actor?.fullName || actor?.username || "Admin"}   |   تاريخ التقرير: ${reportDate}`),
+    28,
+    footerY,
+    { width: usableWidth, align: "center" }
+  );
+
+  doc.end();
+  await done;
+
+  const fileName = `poll-report-${Date.now()}.pdf`;
+  return { buffer: Buffer.concat(chunks), fileName };
+}
+
+
 module.exports = {
   getBranchesDeploymentData,
   buildDeploymentExcelReport,
   buildDeploymentPdfReport,
+  getAllSystemPolls,
+  buildPollPdfReport,
+  exportPollToExcel,
 };

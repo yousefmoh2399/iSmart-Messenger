@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/system_monitor_models.dart';
 import 'system_monitor_controller.dart';
 import 'widgets/branches_deployment_view.dart';
+import 'widgets/admin_polls_view.dart';
 
 class SystemMonitorScreen extends ConsumerStatefulWidget {
   const SystemMonitorScreen({
@@ -20,7 +21,7 @@ class SystemMonitorScreen extends ConsumerStatefulWidget {
 }
 
 class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
-  int _currentTab = 0; // 0 = Deployment & Ops, 1 = Sessions, 2 = Errors
+  int _currentTab = 0; // 0 = Deployment & Ops, 1 = Polls, 2 = Sessions, 3 = Errors
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -89,7 +90,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Top Telemetry Bento KPI Cards (for Sessions & Errors tabs)
-                    if (_currentTab != 0) ...[
+                    if (_currentTab >= 2) ...[
                       _buildTelemetryRow(state, isDark, cs),
                       const SizedBox(height: 20),
                     ],
@@ -105,6 +106,13 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                         cs: cs,
                       )
                     else if (_currentTab == 1)
+                      AdminPollsView(
+                        state: state,
+                        notifier: notifier,
+                        isDark: isDark,
+                        cs: cs,
+                      )
+                    else if (_currentTab == 2)
                       _buildSessionsTab(state, notifier, isDark, cs)
                     else
                       _buildErrorsTab(state, notifier, isDark, cs),
@@ -517,6 +525,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
     final installedBranches =
         state.deploymentData?.summary.installedBranchesCount ?? 0;
     final totalBranches = state.deploymentData?.summary.totalBranches ?? 0;
+    final pollsCount = state.pollsData?.total ?? (state.pollsData?.items.length ?? 0);
 
     return Container(
       padding: const EdgeInsets.all(4),
@@ -541,9 +550,18 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
           ),
           Expanded(
             child: _buildTabButton(
+              title: 'استطلاعات الرأي والتصويت ($pollsCount)',
+              icon: Icons.poll_rounded,
+              index: 1,
+              isDark: isDark,
+              cs: cs,
+            ),
+          ),
+          Expanded(
+            child: _buildTabButton(
               title: 'الأجهزة والجلسات الحية ($liveCount)',
               icon: Icons.devices_rounded,
-              index: 1,
+              index: 2,
               isDark: isDark,
               cs: cs,
             ),
@@ -552,7 +570,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
             child: _buildTabButton(
               title: 'سجل المشاكل والأخطاء ($errorsCount)',
               icon: Icons.bug_report_rounded,
-              index: 2,
+              index: 3,
               isDark: isDark,
               cs: cs,
             ),
@@ -605,16 +623,20 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                       : const Color(0xFF64748B)),
             ),
             const SizedBox(width: 8),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: isSelected
-                    ? (isDark ? Colors.white : const Color(0xFF0F172A))
-                    : (isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B)),
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected
+                      ? (isDark ? Colors.white : const Color(0xFF0F172A))
+                      : (isDark
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFF64748B)),
+                ),
               ),
             ),
           ],
