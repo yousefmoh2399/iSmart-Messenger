@@ -64,10 +64,14 @@ const refresh = asyncHandler(async (req, res) => {
 
 // Revoke refresh session for current device only.
 const logout = asyncHandler(async (req, res) => {
-  await revokeDeviceRefreshSession(
-    req.user.id,
-    req.body?.deviceUid || req.user.deviceUid,
-  );
+  if (req.user?.id) {
+    try {
+      await revokeDeviceRefreshSession(
+        req.user.id,
+        req.body?.deviceUid || req.user.deviceUid,
+      );
+    } catch (_) {}
+  }
   res.status(200).json({ success: true, message: "Logged out." });
 });
 

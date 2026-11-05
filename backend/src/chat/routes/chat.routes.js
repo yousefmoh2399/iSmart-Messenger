@@ -68,14 +68,14 @@ const messageLimiter = rateLimit({
   },
 });
 
-router.use(requireAuth);
-
 router.get(
   "/conversations/:id/avatar",
   [param("id").isMongoId().withMessage("معرّف المحادثة غير صالح.")],
   validateRequest,
   downloadConversationAvatar,
 );
+
+router.use(requireAuth);
 
 router.get("/users", getChatDirectoryUsers);
 router.get("/roles", getChatRoles);
