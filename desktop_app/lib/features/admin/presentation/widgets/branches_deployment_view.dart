@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../models/system_monitor_models.dart';
 import '../system_monitor_controller.dart';
 import 'n8n_workflow_diagram_widget.dart';
+import '../live_operations_topology_screen.dart';
 
 class BranchesDeploymentView extends StatefulWidget {
   const BranchesDeploymentView({
@@ -31,6 +32,23 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _openLiveTopologyScreen(BuildContext context) {
+    HapticFeedback.selectionClick();
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, anim, secAnim) => LiveOperationsTopologyScreen(
+          state: widget.state,
+          notifier: widget.notifier,
+          isDark: widget.isDark,
+          cs: widget.cs,
+        ),
+        transitionsBuilder: (context, anim, secAnim, child) {
+          return FadeTransition(opacity: anim, child: child);
+        },
+      ),
+    );
   }
 
   String _formatTimeAgo(DateTime? dt) {
@@ -82,6 +100,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           telemetry: telemetry,
           stats: stats,
           isDark: isDark,
+          onOpenFullscreen: () => _openLiveTopologyScreen(context),
         ),
         const SizedBox(height: 18),
 

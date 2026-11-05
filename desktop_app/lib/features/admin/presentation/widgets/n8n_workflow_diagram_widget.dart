@@ -9,12 +9,14 @@ class N8nWorkflowDiagramWidget extends StatefulWidget {
     required this.telemetry,
     required this.stats,
     required this.isDark,
+    this.onOpenFullscreen,
   });
 
   final BranchDeploymentSummary? summary;
   final RequestTelemetryData? telemetry;
   final SystemTelemetryStats? stats;
   final bool isDark;
+  final VoidCallback? onOpenFullscreen;
 
   @override
   State<N8nWorkflowDiagramWidget> createState() =>
@@ -154,6 +156,25 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                       ],
                     ),
                   ),
+                  if (widget.onOpenFullscreen != null) ...[
+                    const SizedBox(width: 10),
+                    FilledButton.icon(
+                      onPressed: widget.onOpenFullscreen,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF6366F1),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      icon: const Icon(Icons.open_in_full_rounded, size: 14),
+                      label: const Text(
+                        'خريطة العمليات وشبكة الموظفين الحية (n8n Live Map)',
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
