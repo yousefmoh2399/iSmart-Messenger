@@ -1556,6 +1556,7 @@ async function getDashboard(branchId = null) {
       monthlyUsage,
       tonerAlerts: notifications.filter((item) => item.type === "toner_low").length,
     },
+    printers: printers.map(serializePrinter),
     topPrinters: printers
       .map(serializePrinter)
       .sort((a, b) => (b.lifetimeCounters.totalPages || 0) - (a.lifetimeCounters.totalPages || 0))
