@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,22 +22,9 @@ class SystemMonitorScreen extends ConsumerStatefulWidget {
 class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
   int _currentTab = 0; // 0 = Deployment & Ops, 1 = Sessions, 2 = Errors
   final TextEditingController _searchController = TextEditingController();
-  Timer? _refreshTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (mounted) {
-        ref.read(systemMonitorControllerProvider.notifier).refreshTelemetry();
-        ref.read(systemMonitorControllerProvider.notifier).refreshStats();
-      }
-    });
-  }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -103,9 +88,11 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Top Telemetry Bento KPI Cards
-                    _buildTelemetryRow(state, isDark, cs),
-                    const SizedBox(height: 20),
+                    // Top Telemetry Bento KPI Cards (for Sessions & Errors tabs)
+                    if (_currentTab != 0) ...[
+                      _buildTelemetryRow(state, isDark, cs),
+                      const SizedBox(height: 20),
+                    ],
                     // Segmented Tabs Header
                     _buildTabsHeader(state, isDark, cs),
                     const SizedBox(height: 16),

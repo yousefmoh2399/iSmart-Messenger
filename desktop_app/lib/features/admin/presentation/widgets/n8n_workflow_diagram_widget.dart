@@ -30,7 +30,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2400),
+      duration: const Duration(milliseconds: 2600),
     )..repeat();
   }
 
@@ -51,6 +51,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     final totalBranches = summary?.totalBranches ?? 0;
     final totalDevices = summary?.totalInstalledDevices ?? 0;
     final onlineDevices = summary?.totalOnlineDevices ?? 0;
+    final adoptionPercent = summary?.adoptionPercentage ?? 0;
 
     final rps = telemetry?.rps ?? 0.0;
     final latency = telemetry?.avgLatencyMs ?? (stats != null ? 14 : 0);
@@ -59,28 +60,29 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     final dbStatus = stats?.databaseStatus ?? 'connected';
     final dbHost = stats?.databaseHost ?? 'cluster0.ismart';
     final dbName = stats?.databaseName ?? 'ismart-prod';
+    final cpuCores = stats?.cpuCores ?? 8;
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(18),
+        color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark ? const Color(0xFF21262D) : const Color(0xFFE2E8F0),
-          width: 1.2,
+          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+          width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
-            // Background n8n grid pattern
+            // Background subtle grid
             Positioned.fill(
               child: CustomPaint(
                 painter: _N8nCanvasGridPainter(isDark: isDark),
@@ -88,38 +90,37 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
             ),
             // Header bar
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               child: Row(
                 children: [
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEC4899).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
                       border: Border.all(
-                        color: const Color(0xFFEC4899).withValues(alpha: 0.3),
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.25),
                       ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Color(0xFFEC4899),
-                          ),
+                        const Icon(
+                          Icons.hub_rounded,
+                          size: 14,
+                          color: Color(0xFF818CF8),
                         ),
                         const SizedBox(width: 6),
-                        const Text(
-                          'iSmart Live Workflow Canvas',
+                        Text(
+                          'بنية الربط والتشغيل المباشر (Live Telemetry Architecture)',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFFEC4899),
-                            letterSpacing: 0.3,
+                            color: isDark
+                                ? const Color(0xFFA5B4FC)
+                                : const Color(0xFF4F46E5),
+                            letterSpacing: -0.2,
                           ),
                         ),
                       ],
@@ -131,8 +132,11 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
+                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -140,7 +144,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                         _PulsingDot(color: const Color(0xFF10B981)),
                         const SizedBox(width: 6),
                         Text(
-                          '$rps req/s | نشط ومستقر',
+                          '$rps req/s  •  $latency ms استجابة  •  نشط ومستقر',
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
@@ -155,7 +159,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
             ),
             // Canvas content: Nodes & Flow
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 52, 16, 20),
+              padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final isWide = constraints.maxWidth >= 760;
@@ -167,60 +171,59 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                       children: [
                         _buildNodeCard(
                           isDark: isDark,
-                          title: 'فروع ومحطات العمل',
-                          subtitle: 'Client Nodes',
-                          icon: Icons.store_rounded,
-                          accentColor: const Color(0xFF3B82F6),
+                          title: 'محطات وفروع المنظومة',
+                          subtitle: 'Client Fleet & Workstations',
+                          icon: Icons.corporate_fare_rounded,
+                          accentColor: const Color(0xFF0284C7),
                           badge: '$installedBranches / $totalBranches فرع',
-                          badgeColor: const Color(0xFF3B82F6),
+                          badgeColor: const Color(0xFF0284C7),
                           metrics: [
-                            'الأجهزة: $totalDevices جهاز',
-                            'متصل الآن: $onlineDevices',
+                            'المحطات: $totalDevices جهاز ($onlineDevices متصل)',
+                            'نسبة التغطية: $adoptionPercent%',
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         Center(
                           child: Icon(
                             Icons.arrow_downward_rounded,
-                            color: const Color(0xFF8B5CF6).withValues(alpha: 0.7),
-                            size: 20,
+                            color: const Color(0xFF6366F1).withValues(alpha: 0.6),
+                            size: 18,
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         _buildNodeCard(
                           isDark: isDark,
-                          title: 'خادم المنظومة الأساسي',
-                          subtitle: 'iSmart Core Server',
+                          title: 'خادم المنظومة المركزي',
+                          subtitle: 'iSmart Core Gateway & Cluster',
                           icon: Icons.dns_rounded,
-                          accentColor: const Color(0xFF8B5CF6),
-                          badge: 'v1.1.21',
-                          badgeColor: const Color(0xFF8B5CF6),
+                          accentColor: const Color(0xFF6366F1),
+                          badge: 'v1.1.21 معتمد',
+                          badgeColor: const Color(0xFF6366F1),
                           metrics: [
-                            'المعدل: $rps طلب/ثانية',
-                            'زمن الاستجابة: $latency ms',
-                            'النشط: $activeReqs طلب',
+                            'المعدل: $rps req/s ($latency ms)',
+                            'العمليات الجارية: $activeReqs نشط',
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         Center(
                           child: Icon(
                             Icons.arrow_downward_rounded,
-                            color: const Color(0xFF10B981).withValues(alpha: 0.7),
-                            size: 20,
+                            color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                            size: 18,
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         _buildNodeCard(
                           isDark: isDark,
                           title: 'قاعدة بيانات MongoDB',
-                          subtitle: 'Cluster Database',
+                          subtitle: 'Primary Database Cluster',
                           icon: Icons.storage_rounded,
                           accentColor: const Color(0xFF10B981),
-                          badge: dbStatus == 'connected' ? 'متصل' : dbStatus,
+                          badge: dbStatus == 'connected' ? 'متصل ومستقر' : dbStatus,
                           badgeColor: const Color(0xFF10B981),
                           metrics: [
                             'القاعدة: $dbName',
-                            'المضيف: $dbHost',
+                            'المضيف: $dbHost ($cpuCores Cores)',
                           ],
                         ),
                       ],
@@ -229,7 +232,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
 
                   // Wide desktop view with animated bezier pipes
                   return SizedBox(
-                    height: 154,
+                    height: 148,
                     child: Stack(
                       children: [
                         // Animated Particle Flow Lines
@@ -253,50 +256,49 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                             Expanded(
                               child: _buildNodeCard(
                                 isDark: isDark,
-                                title: 'فروع ومحطات العمل',
-                                subtitle: 'Workstations & Branches',
-                                icon: Icons.store_rounded,
-                                accentColor: const Color(0xFF3B82F6),
+                                title: 'محطات وفروع المنظومة',
+                                subtitle: 'Client Fleet & Workstations',
+                                icon: Icons.corporate_fare_rounded,
+                                accentColor: const Color(0xFF0284C7),
                                 badge: '$installedBranches / $totalBranches فرع',
-                                badgeColor: const Color(0xFF3B82F6),
+                                badgeColor: const Color(0xFF0284C7),
                                 metrics: [
-                                  'الأجهزة: $totalDevices جهاز',
-                                  'متصل الآن: $onlineDevices',
+                                  'المحطات: $totalDevices جهاز ($onlineDevices متصل)',
+                                  'نسبة التغطية: $adoptionPercent% من الفروع',
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 48), // gap for flow wire
+                            const SizedBox(width: 44),
                             // Node 2: Core Server
                             Expanded(
                               child: _buildNodeCard(
                                 isDark: isDark,
                                 title: 'خادم المنظومة المركزي',
-                                subtitle: 'iSmart Core Server',
+                                subtitle: 'iSmart Core Gateway & Cluster',
                                 icon: Icons.dns_rounded,
-                                accentColor: const Color(0xFF8B5CF6),
-                                badge: 'v1.1.21',
-                                badgeColor: const Color(0xFF8B5CF6),
+                                accentColor: const Color(0xFF6366F1),
+                                badge: 'v1.1.21 معتمد',
+                                badgeColor: const Color(0xFF6366F1),
                                 metrics: [
-                                  'المعدل: $rps req/s',
-                                  'الاستجابة: $latency ms',
-                                  'الطلبات النشطة: $activeReqs',
+                                  'المعدل: $rps req/s ($latency ms)',
+                                  'العمليات الجارية: $activeReqs نشط',
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 48), // gap for flow wire
+                            const SizedBox(width: 44),
                             // Node 3: Database
                             Expanded(
                               child: _buildNodeCard(
                                 isDark: isDark,
                                 title: 'قاعدة بيانات MongoDB',
-                                subtitle: 'Cluster Database',
+                                subtitle: 'Primary Database Cluster',
                                 icon: Icons.storage_rounded,
                                 accentColor: const Color(0xFF10B981),
                                 badge: dbStatus == 'connected' ? 'متصل ومستقر' : dbStatus,
                                 badgeColor: const Color(0xFF10B981),
                                 metrics: [
                                   'القاعدة: $dbName',
-                                  'المضيف: $dbHost',
+                                  'المضيف: $dbHost ($cpuCores Cores)',
                                 ],
                               ),
                             ),
@@ -327,17 +329,19 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF161B22) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        color: isDark ? const Color(0xFF111827) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: accentColor.withValues(alpha: isDark ? 0.35 : 0.25),
-          width: 1.3,
+          color: isDark
+              ? accentColor.withValues(alpha: 0.3)
+              : accentColor.withValues(alpha: 0.2),
+          width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: isDark ? 0.12 : 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -352,8 +356,8 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
+                  color: accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(7),
                 ),
                 child: Icon(icon, color: accentColor, size: 16),
               ),
@@ -367,7 +371,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -375,9 +379,9 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                     Text(
                       subtitle,
                       style: TextStyle(
-                        fontSize: 9.5,
+                        fontSize: 9,
                         color: isDark
-                            ? const Color(0xFF8B949E)
+                            ? const Color(0xFF94A3B8)
                             : const Color(0xFF64748B),
                       ),
                     ),
@@ -387,8 +391,8 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: badgeColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
+                  color: badgeColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(5),
                 ),
                 child: Text(
                   badge,
@@ -404,7 +408,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
           const SizedBox(height: 8),
           Divider(
             height: 1,
-            color: isDark ? const Color(0xFF21262D) : const Color(0xFFE2E8F0),
+            color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9),
           ),
           const SizedBox(height: 8),
           // Metric rows
@@ -426,10 +430,10 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                     child: Text(
                       m,
                       style: TextStyle(
-                        fontSize: 10.5,
+                        fontSize: 10,
                         fontWeight: FontWeight.w500,
                         color: isDark
-                            ? const Color(0xFFC9D1D9)
+                            ? const Color(0xFFCBD5E1)
                             : const Color(0xFF334155),
                       ),
                       maxLines: 1,
@@ -463,7 +467,7 @@ class _PulsingDotState extends State<_PulsingDot>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
   }
 
@@ -478,7 +482,7 @@ class _PulsingDotState extends State<_PulsingDot>
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (context, _) {
-        final scale = 0.8 + (_ctrl.value * 0.4);
+        final scale = 0.85 + (_ctrl.value * 0.35);
         final opacity = 0.5 + (_ctrl.value * 0.5);
         return Transform.scale(
           scale: scale,
@@ -490,7 +494,7 @@ class _PulsingDotState extends State<_PulsingDot>
               color: widget.color.withValues(alpha: opacity),
               boxShadow: [
                 BoxShadow(
-                  color: widget.color.withValues(alpha: opacity * 0.6),
+                  color: widget.color.withValues(alpha: opacity * 0.5),
                   blurRadius: 4,
                   spreadRadius: 1,
                 ),
@@ -510,13 +514,13 @@ class _N8nCanvasGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dotPaint = Paint()
-      ..color = (isDark ? Colors.white : Colors.black).withValues(alpha: isDark ? 0.05 : 0.04)
+      ..color = (isDark ? Colors.white : Colors.black).withValues(alpha: isDark ? 0.04 : 0.035)
       ..style = PaintingStyle.fill;
 
-    const double spacing = 18;
+    const double spacing = 16;
     for (double x = 0; x < size.width; x += spacing) {
       for (double y = 0; y < size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 1.0, dotPaint);
+        canvas.drawCircle(Offset(x, y), 0.8, dotPaint);
       }
     }
   }
@@ -537,25 +541,24 @@ class _N8nFlowLinesPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 3 cards divided equally with 2 gaps of 48px
-    final double cardWidth = (size.width - 96) / 3;
+    final double cardWidth = (size.width - 88) / 3;
     final double midY = size.height / 2;
 
     // Line 1: from Node 1 (right edge) to Node 2 (left edge)
     final double p1StartX = cardWidth;
-    final double p1EndX = cardWidth + 48;
+    final double p1EndX = cardWidth + 44;
 
     // Line 2: from Node 2 (right edge) to Node 3 (left edge)
-    final double p2StartX = (cardWidth * 2) + 48;
-    final double p2EndX = (cardWidth * 2) + 96;
+    final double p2StartX = (cardWidth * 2) + 44;
+    final double p2EndX = (cardWidth * 2) + 88;
 
     _drawFlowWire(
       canvas: canvas,
       startX: p1StartX,
       endX: p1EndX,
       y: midY,
-      wireColor: const Color(0xFF3B82F6),
-      particleColor: const Color(0xFF60A5FA),
+      wireColor: const Color(0xFF0284C7),
+      particleColor: const Color(0xFF38BDF8),
       progress: progress,
     );
 
@@ -564,8 +567,8 @@ class _N8nFlowLinesPainter extends CustomPainter {
       startX: p2StartX,
       endX: p2EndX,
       y: midY,
-      wireColor: const Color(0xFF8B5CF6),
-      particleColor: const Color(0xFFA78BFA),
+      wireColor: const Color(0xFF6366F1),
+      particleColor: const Color(0xFF818CF8),
       progress: (progress + 0.5) % 1.0,
     );
   }
@@ -579,10 +582,10 @@ class _N8nFlowLinesPainter extends CustomPainter {
     required Color particleColor,
     required double progress,
   }) {
-    // Base dashed wire
+    // Base pipe
     final basePaint = Paint()
-      ..color = wireColor.withValues(alpha: isDark ? 0.3 : 0.25)
-      ..strokeWidth = 2.5
+      ..color = wireColor.withValues(alpha: isDark ? 0.35 : 0.25)
+      ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
@@ -590,9 +593,9 @@ class _N8nFlowLinesPainter extends CustomPainter {
       ..moveTo(startX, y)
       ..cubicTo(
         startX + ((endX - startX) * 0.4),
-        y - 12,
+        y - 10,
         startX + ((endX - startX) * 0.6),
-        y + 12,
+        y + 10,
         endX,
         y,
       );
@@ -603,26 +606,31 @@ class _N8nFlowLinesPainter extends CustomPainter {
     final portPaint = Paint()
       ..color = wireColor
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(startX, y), 3.5, portPaint);
-    canvas.drawCircle(Offset(endX, y), 3.5, portPaint);
+    canvas.drawCircle(Offset(startX, y), 3.0, portPaint);
+    canvas.drawCircle(Offset(endX, y), 3.0, portPaint);
 
-    // Flowing animated particle orb along path
+    // Flowing animated particles
     final pathMetrics = path.computeMetrics().toList();
     if (pathMetrics.isNotEmpty) {
       final metric = pathMetrics.first;
-      final tangent = metric.getTangentForOffset(metric.length * progress);
-      if (tangent != null) {
-        // Outer halo
-        final haloPaint = Paint()
-          ..color = particleColor.withValues(alpha: 0.35)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
-        canvas.drawCircle(tangent.position, 6, haloPaint);
 
-        // Core bright orb
-        final orbPaint = Paint()
-          ..color = particleColor
-          ..style = PaintingStyle.fill;
-        canvas.drawCircle(tangent.position, 3.2, orbPaint);
+      // Draw 2 particles spaced along the line
+      for (int i = 0; i < 2; i++) {
+        final pOffset = (progress + (i * 0.5)) % 1.0;
+        final tangent = metric.getTangentForOffset(metric.length * pOffset);
+        if (tangent != null) {
+          // Halo
+          final haloPaint = Paint()
+            ..color = particleColor.withValues(alpha: 0.3)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+          canvas.drawCircle(tangent.position, 5, haloPaint);
+
+          // Core
+          final orbPaint = Paint()
+            ..color = particleColor
+            ..style = PaintingStyle.fill;
+          canvas.drawCircle(tangent.position, 2.8, orbPaint);
+        }
       }
     }
   }
