@@ -585,6 +585,16 @@ class ChatRepository {
     );
   }
 
+  Future<ChatMessage> togglePollStatus(String messageId) async {
+    final response = await _apiClient.dio.patch<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/poll/toggle',
+    );
+    return ChatMessage.fromJson(
+      (response.data?['data']?['message'] as Map<String, dynamic>?) ??
+          (response.data?['message'] as Map<String, dynamic>),
+    );
+  }
+
   Future<String> exportPollUrl(String messageId, {String? token}) async {
     final url = '/api/chat/messages/$messageId/poll/export';
     return '${_apiClient.dio.options.baseUrl}$url?token=${token ?? ''}';

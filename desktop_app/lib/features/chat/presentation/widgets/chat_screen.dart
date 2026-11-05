@@ -2371,6 +2371,44 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _togglePoll(String messageId, bool isCurrentlyClosed) async {
+    final actionName =
+        isCurrentlyClosed ? 'إعادة فتح التصويت' : 'إغلاق التصويت';
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('جاري $actionName... ⏳'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+      await ref
+          .read(
+            conversationMessagesControllerProvider(_conversationId).notifier,
+          )
+          .togglePollStatus(messageId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isCurrentlyClosed
+                  ? 'تمت إعادة فتح التصويت بنجاح 🔓'
+                  : 'تم إغلاق التصويت بنجاح 🔒',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('فشل $actionName: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _votePoll(String messageId, List<String> optionIds) async {
     try {
       await ref
@@ -4690,6 +4728,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                     widget.currentUser?.role == 'manager';
                                 final canExportPoll =
                                     isMine || isPrivilegedPollExporter;
+                                final isPrivilegedPollAdmin =
+                                    widget.currentUser?.role == 'admin' ||
+                                    widget.currentUser?.role == 'superadmin';
+                                final canTogglePoll =
+                                    isMine || isPrivilegedPollAdmin;
 
                                 final messageLocalDate =
                                     message.createdAt.toLocal();
@@ -4927,6 +4970,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                                       onExportPoll: () =>
                                           _exportPoll(message.id),
                                       canExportPoll: canExportPoll,
+                                      canTogglePoll: canTogglePoll,
+                                      onTogglePoll: () => _togglePoll(
+                                        message.id,
+                                        message.isPollClosed,
+                                      ),
                                       onSaveAttachment:
                                           message.hasAttachment &&
                                               message.attachmentDownloadAllowed

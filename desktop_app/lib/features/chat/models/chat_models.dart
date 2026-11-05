@@ -869,6 +869,14 @@ class ChatMessage {
   bool get isStickerMessage =>
       metadata?['sticker'] == true || metadata?['isSticker'] == true;
   bool get isPollMessage => messageType == 'poll' || messageType == 'checklist';
+  bool get isPollClosed {
+    if (!isPollMessage) return false;
+    final poll = metadata?['poll'];
+    if (poll is Map<String, dynamic>) {
+      return poll['isClosed'] == true;
+    }
+    return metadata?['isClosed'] == true;
+  }
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';
   bool get hasAttachment => fileUrl != null && fileUrl!.isNotEmpty;

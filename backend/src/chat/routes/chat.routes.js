@@ -46,6 +46,7 @@ const {
   requestAttachmentRestore,
   restoreAttachment,
   votePoll,
+  togglePoll,
   exportPoll,
   postChatTransfer,
   downloadChatTransfer,
@@ -345,6 +346,14 @@ router.patch(
   [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
   validateRequest,
   markSingleMessageSeen,
+);
+
+router.patch(
+  "/messages/:id/poll/toggle",
+  requireAuth,
+  [param("id").isMongoId().withMessage("معرّف الرسالة غير صالح.")],
+  validateRequest,
+  togglePoll,
 );
 
 router.post(

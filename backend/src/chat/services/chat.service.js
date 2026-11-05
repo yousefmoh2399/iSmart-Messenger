@@ -3714,6 +3714,71 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   return serializeMessage(populated, populated.senderId);
 }
 
+async function togglePollMessage(currentUser, messageId) {
+  const message = await Message.findById(messageId).populate("senderId");
+  if (
+    !message ||
+    message.isDeleted ||
+    !["poll", "checklist"].includes(message.messageType)
+  ) {
+    throw new ApiError(404, "الاستطلاع غير موجود أو محذوف.");
+  }
+  const conversation = await getConversationById(message.conversationId);
+  const isAdmin =
+    currentUser.role === "admin" || currentUser.role === "superadmin";
+  const senderIdStr = message.senderId ? String(message.senderId._id || message.senderId) : "";
+  const currentUserIdStr = String(currentUser._id || currentUser.id || "");
+  const isCreator = Boolean(senderIdStr && senderIdStr === currentUserIdStr);
+
+  if (!isAdmin && !isCreator) {
+    throw new ApiError(
+      403,
+      "غير مصرح لك بإغلاق هذا الاستطلاع، فقط منشئ الاستطلاع أو مسؤول النظام يمكنه ذلك."
+    );
+  }
+
+  const rawMeta = message.metadata || {};
+  const meta =
+    rawMeta.poll && typeof rawMeta.poll === "object"
+      ? rawMeta.poll
+      : rawMeta;
+  const nextIsClosed = !meta.isClosed;
+  meta.isClosed = nextIsClosed;
+  meta.closedAt = nextIsClosed ? new Date() : null;
+  meta.closedBy = nextIsClosed ? currentUserIdStr : null;
+
+  if (rawMeta.poll && typeof rawMeta.poll === "object") {
+    message.metadata.poll = meta;
+  } else {
+    message.metadata = meta;
+  }
+  message.markModified("metadata");
+  await message.save();
+
+  const populated = await Message.findById(message._id)
+    .populate(
+      "senderId",
+      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+    )
+    .exec();
+
+  let audienceUserIds;
+  if (conversation.type === "broadcast") {
+    const publisherIds = extractIdArray(conversation.broadcastPublisherIds);
+    audienceUserIds = Array.from(
+      new Set([...extractIdArray(conversation.members), ...publisherIds]),
+    );
+  } else {
+    audienceUserIds = extractIdArray(conversation.members);
+  }
+
+  return {
+    audienceUserIds,
+    message: serializeMessage(populated, populated.senderId),
+    isClosed: nextIsClosed,
+  };
+}
+
 async function votePollMessage(currentUser, messageId, optionIds) {
   const message = await Message.findById(messageId);
   if (
@@ -4488,6 +4553,7 @@ module.exports = {
   removeConversationAvatar,
   getConversationAvatarFilePath,
   votePollMessage,
+  togglePollMessage,
   exportPollToExcel,
   serializeUserLite,
   serializeConversation,

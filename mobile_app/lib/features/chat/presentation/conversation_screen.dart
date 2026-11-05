@@ -6392,6 +6392,30 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       ?.id ??
                                                                                   '',
                                                                               isMine: isMine,
+                                                                              canToggle: isMine ||
+                                                                                  (ref
+                                                                                          .watch(
+                                                                                            authControllerProvider,
+                                                                                          )
+                                                                                          .valueOrNull
+                                                                                          ?.role ==
+                                                                                      'admin') ||
+                                                                                  (ref
+                                                                                          .watch(
+                                                                                            authControllerProvider,
+                                                                                          )
+                                                                                          .valueOrNull
+                                                                                          ?.role ==
+                                                                                      'superadmin'),
+                                                                              onToggle: () => ref
+                                                                                  .read(
+                                                                                    conversationMessagesControllerProvider(
+                                                                                      widget.conversation.id,
+                                                                                    ).notifier,
+                                                                                  )
+                                                                                  .togglePoll(
+                                                                                    message.id,
+                                                                                  ),
                                                                               onVote:
                                                                                   (
                                                                                     optionIds,

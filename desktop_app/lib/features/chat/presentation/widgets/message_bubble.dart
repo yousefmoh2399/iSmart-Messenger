@@ -50,6 +50,8 @@ class MessageBubble extends StatefulWidget {
     this.onVotePoll,
     this.onExportPoll,
     this.canExportPoll = false,
+    this.onTogglePoll,
+    this.canTogglePoll = false,
     this.avatarUrl,
     this.replyPreview,
     this.replyPreviewSender,
@@ -95,6 +97,8 @@ class MessageBubble extends StatefulWidget {
   final Future<void> Function(List<String>)? onVotePoll;
   final VoidCallback? onExportPoll;
   final bool canExportPoll;
+  final VoidCallback? onTogglePoll;
+  final bool canTogglePoll;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final VoidCallback? onPin;
@@ -679,8 +683,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     currentUserId: widget.currentUserId,
                                     isMine: widget.isMine,
                                     canExport: widget.canExportPoll,
+                                    canToggle: widget.canTogglePoll,
                                     onVote: widget.onVotePoll ?? (_) async {},
                                     onExport: widget.onExportPoll ?? () {},
+                                    onToggle: widget.onTogglePoll != null
+                                        ? () async => widget.onTogglePoll!()
+                                        : null,
                                   ),
                                 ),
                               if (widget.message.isGifMessage &&

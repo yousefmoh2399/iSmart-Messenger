@@ -2823,6 +2823,23 @@ class ConversationMessagesController
     }
   }
 
+  Future<void> togglePoll(String messageId) async {
+    try {
+      final updatedMessage = await ref
+          .read(chatRepositoryProvider)
+          .togglePollStatus(messageId);
+      final st = state.valueOrNull;
+      if (st != null) {
+        _setStateAndCache(
+          st.copyWith(messages: _upsertMessage(st.messages, updatedMessage)),
+        );
+      }
+    } catch (error, stack) {
+      state = AsyncError(error, stack);
+      rethrow;
+    }
+  }
+
   Future<void> exportPoll(String messageId) async {
     try {
       if (kIsWeb) {

@@ -358,7 +358,8 @@ const createPoll = asyncHandler(async (req, res) => {
 
 const togglePollStatusController = asyncHandler(async (req, res) => {
   const pollId = req.params.id;
-  const result = await togglePollStatus(pollId, req.user);
+  const io = req.app.get("io");
+  const result = await togglePollStatus(pollId, req.user, io);
   res.json({
     success: true,
     data: result,

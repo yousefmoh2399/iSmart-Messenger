@@ -1262,7 +1262,7 @@ async function getAllSystemPolls({ search = "", status = "all", page = 1, limit 
   };
 }
 
-async function togglePollStatus(pollId, actor) {
+async function togglePollStatus(pollId, actor, io = null) {
   const message = await Message.findById(pollId);
   if (!message || message.isDeleted) {
     throw new Error("الاستطلاع غير موجود");
@@ -1272,6 +1272,7 @@ async function togglePollStatus(pollId, actor) {
   const nextIsClosed = !meta.isClosed;
   meta.isClosed = nextIsClosed;
   meta.closedAt = nextIsClosed ? new Date() : null;
+  meta.closedBy = nextIsClosed ? String(actor.id || actor._id) : null;
 
   if (rawMeta.poll && typeof rawMeta.poll === "object") {
     message.metadata.poll = meta;
@@ -1280,6 +1281,20 @@ async function togglePollStatus(pollId, actor) {
   }
   message.markModified("metadata");
   await message.save();
+
+  if (io) {
+    try {
+      const { emitMessageUpdated } = require("../../chat/controllers/chat.controller");
+      const { serializeMessage } = require("../../chat/services/chat.service");
+      const populated = await Message.findById(message._id)
+        .populate("senderId", "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt")
+        .exec();
+      if (populated) {
+        await emitMessageUpdated(io, serializeMessage(populated, populated.senderId));
+      }
+    } catch (_) {}
+  }
+
   return { id: String(message._id), isClosed: nextIsClosed, closedAt: meta.closedAt };
 }
 

@@ -1229,6 +1229,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
+  Future<ChatMessage> togglePollStatus(String messageId) async {
+    return _guardAuth(
+      () => _repository().togglePollStatus(messageId),
+    );
+  }
+
   String exportPollUrl(String messageId) {
     return _repository().exportPollUrl(messageId);
   }
@@ -2459,6 +2465,19 @@ class ConversationMessagesController
         latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
       );
     }
+  }
+
+  Future<ChatMessage> togglePollStatus(String messageId) async {
+    final updated = await _guardAuth(
+      () => _repository().togglePollStatus(messageId),
+    );
+    final latest = state.valueOrNull;
+    if (latest != null) {
+      _setStateAndCache(
+        latest.copyWith(messages: _upsertMessage(latest.messages, updated)),
+      );
+    }
+    return updated;
   }
 
   Future<ChatSearchResult> searchMessages(String query, {String? cursor}) {

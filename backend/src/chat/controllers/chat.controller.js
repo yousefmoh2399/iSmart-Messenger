@@ -51,6 +51,7 @@ const {
   restoreAttachmentFromSender,
   getMessageReadReceipts,
   votePollMessage,
+  togglePollMessage,
   exportPollToExcel,
   assertConversationAccess,
 } = require("../services/chat.service");
@@ -1059,6 +1060,21 @@ const getSystemErrors = asyncHandler(async (req, res) => {
   });
 });
 
+const togglePoll = asyncHandler(async (req, res) => {
+  const result = await togglePollMessage(req.user, req.params.id);
+
+  const io = req.app.get("io");
+  if (io) {
+    await emitMessageUpdated(io, result.message);
+  }
+
+  sendChatResponse(res, {
+    message: result.isClosed ? "تم إغلاق التصويت." : "تمت إعادة فتح التصويت.",
+    data: { message: result.message, isClosed: result.isClosed },
+    legacy: { message: result.message, isClosed: result.isClosed },
+  });
+});
+
 const votePoll = asyncHandler(async (req, res) => {
   const result = await votePollMessage(
     req.user,
@@ -1098,8 +1114,8 @@ const getMessageReadReceiptsHandler = asyncHandler(async (req, res) => {
   sendChatResponse(res, { data: result });
 });
 
-module.exports = {
-  votePoll,
+module.exports = {,,
+  togglePoll,
   exportPoll,
   getChatDirectoryUsers,
   getChatRoles,

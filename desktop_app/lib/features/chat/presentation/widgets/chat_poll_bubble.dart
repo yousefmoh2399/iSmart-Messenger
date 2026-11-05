@@ -7,6 +7,8 @@ class ChatPollBubble extends StatefulWidget {
   final Future<void> Function(List<String>) onVote;
   final VoidCallback onExport;
   final bool canExport;
+  final bool canToggle;
+  final Future<void> Function()? onToggle;
 
   const ChatPollBubble({
     super.key,
@@ -16,6 +18,8 @@ class ChatPollBubble extends StatefulWidget {
     required this.onVote,
     required this.onExport,
     this.canExport = false,
+    this.canToggle = false,
+    this.onToggle,
   });
 
   @override
@@ -27,6 +31,7 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
   late Map<String, dynamic> pollData;
   Set<String> _selectedOptionIds = <String>{};
   bool _hasPendingVote = false;
+  bool _isToggling = false;
 
   @override
   void initState() {
@@ -550,31 +555,87 @@ class _ChatPollBubbleState extends State<ChatPollBubble>
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                if ((widget.isMine || widget.canExport) && totalVotes > 0 && !isChecklist)
-                  TextButton.icon(
-                    onPressed: widget.onExport,
-                    icon: Icon(
-                      Icons.file_download_outlined,
-                      size: 15,
-                      color: primaryAccent,
-                    ),
-                    label: Text(
-                      'تصدير النتائج',
-                      style: TextStyle(
-                        color: primaryAccent,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.canToggle && widget.onToggle != null && !isChecklist)
+                      TextButton.icon(
+                        onPressed: _isToggling
+                            ? null
+                            : () async {
+                                setState(() => _isToggling = true);
+                                try {
+                                  await widget.onToggle!();
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isToggling = false);
+                                  }
+                                }
+                              },
+                        icon: _isToggling
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(
+                                isClosed
+                                    ? Icons.lock_open_rounded
+                                    : Icons.lock_outline_rounded,
+                                size: 14,
+                                color: isClosed
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFFEA580C),
+                              ),
+                        label: Text(
+                          isClosed ? 'إعادة فتح التصويت' : 'إغلاق التصويت',
+                          style: TextStyle(
+                            color: isClosed
+                                ? const Color(0xFF10B981)
+                                : const Color(0xFFEA580C),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
-                    ),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
+                    if ((widget.isMine || widget.canExport) && totalVotes > 0 && !isChecklist) ...[
+                      if (widget.canToggle && widget.onToggle != null)
+                        const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: widget.onExport,
+                        icon: Icon(
+                          Icons.file_download_outlined,
+                          size: 15,
+                          color: primaryAccent,
+                        ),
+                        label: Text(
+                          'تصدير النتائج',
+                          style: TextStyle(
+                            color: primaryAccent,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
+                    ],
+                  ],
+                ),
               ],
             ),
           ],
