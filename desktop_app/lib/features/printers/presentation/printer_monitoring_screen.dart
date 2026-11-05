@@ -1053,13 +1053,17 @@ class _PrinterContent extends StatelessWidget {
                       onTestPrint: onTestPrint,
                       accent: colors.primary,
                     )
-                  : Row(
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SizedBox(
+                        width: outerConstraints.maxWidth > 700 ? outerConstraints.maxWidth : 700,
+                        child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
                           curve: Curves.easeInOutCubic,
-                          width: isSidebarCollapsed ? 80 : 280,
+                          width: isSidebarCollapsed ? 56 : 280,
                           child: _BranchPanel(
                             isCollapsed: isSidebarCollapsed,
                             onToggle: onToggleSidebar,
@@ -1101,6 +1105,8 @@ class _PrinterContent extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ),
+                      ),
                     ),
             ),
               ],

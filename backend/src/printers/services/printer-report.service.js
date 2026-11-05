@@ -382,13 +382,18 @@ function normalizeWorksheetStrings(worksheet) {
 }
 
 async function createReportRecord({ type, format, branchId, actor, fileName }) {
-  await PrinterReport.create({
-    type,
-    format,
-    branchId: branchId || null,
-    generatedBy: actor?.id || null,
-    fileName,
-  });
+  try {
+    await PrinterReport.create({
+      type,
+      format,
+      branchId: branchId || null,
+      generatedBy: actor?._id || actor?.id || null,
+      fileName,
+    });
+  } catch (err) {
+    // Non-fatal: log but don't block file download
+    console.warn("[printer-report] createReportRecord failed (non-fatal):", err.message);
+  }
 }
 
 function printerDisplayName(printer) {
