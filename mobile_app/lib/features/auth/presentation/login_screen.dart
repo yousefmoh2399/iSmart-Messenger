@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/button_loading_indicator.dart';
 
@@ -79,11 +80,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   String _friendlyLoginError(Object error) {
+    if (error is ApiException) {
+      return error.message;
+    }
+
     final raw = error.toString();
     final text = raw.toLowerCase();
     if (text.contains('invalid') &&
         (text.contains('password') || text.contains('credentials'))) {
-      return 'اسم المستخدم أو كلمة المرور غير صحيحة.';
+      return 'كلمة المرور غير صحيحة.';
+    }
+    if (text.contains('invalid') && text.contains('username')) {
+      return 'اسم المستخدم غير مسجل.';
     }
     if (text.contains('disabled') ||
         text.contains('blocked') ||
@@ -102,7 +110,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         text.contains('attempt')) {
       return 'تم تجاوز عدد محاولات تسجيل الدخول. حاول مرة أخرى بعد قليل.';
     }
-    if (text.contains('500') || text.contains('server')) {
+    if (text.contains('500') || text.contains('server error') || text.contains('internal server')) {
       return 'الخادم يواجه مشكلة مؤقتة. حاول مرة أخرى بعد قليل.';
     }
     if (text.contains('socket') ||

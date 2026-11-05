@@ -294,8 +294,6 @@ class ApiClient {
 
       final payload = error.response?.data;
       final statusCode = error.response?.statusCode;
-      final requestPath = error.requestOptions.path.toLowerCase();
-      final isLoginRequest = requestPath.contains('/api/auth/login');
 
       String? serverMessage;
       if (payload is Map<String, dynamic>) {
@@ -316,12 +314,8 @@ class ApiClient {
       }
 
       if (statusCode == 401) {
-        final lower = serverMessage?.toLowerCase() ?? '';
-        if (isLoginRequest || lower.contains('invalid username or password')) {
-          return const ApiException(
-            'اسم المستخدم أو كلمة المرور غير صحيحة.',
-            statusCode: 401,
-          );
+        if (serverMessage != null && serverMessage.isNotEmpty) {
+          return ApiException(serverMessage, statusCode: 401);
         }
         return const ApiException(
           'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',

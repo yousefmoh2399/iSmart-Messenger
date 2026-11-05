@@ -172,16 +172,21 @@ async function loginUser({
   const user = await User.findOne({ username: normalizedUsername }).exec();
 
   if (!user) {
-    throw new ApiError(401, "Invalid username or password.");
+    throw new ApiError(401, "Invalid username.");
   }
 
   if (user.isActive === false) {
     throw new ApiError(403, "This account is inactive.");
   }
 
-  const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+  const safePassword = String(password != null ? password : "");
+  if (!user.passwordHash || typeof user.passwordHash !== "string") {
+    throw new ApiError(401, "Invalid password.");
+  }
+
+  const isValidPassword = await bcrypt.compare(safePassword, user.passwordHash);
   if (!isValidPassword) {
-    throw new ApiError(401, "Invalid username or password.");
+    throw new ApiError(401, "Invalid password.");
   }
 
   const normalizedDeviceUid = normalizeDeviceUid(deviceUid) || "unknown";

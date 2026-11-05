@@ -33,8 +33,17 @@ function translateApiErrorMessage(message, statusCode) {
     return "تم تجاوز عدد المحاولات المسموح. حاول مرة أخرى بعد قليل.";
   }
   if (statusCode === 401) {
+    if (lower.includes("invalid password") || lower.includes("كلمة المرور غير صحيحة")) {
+      return "كلمة المرور غير صحيحة.";
+    }
+    if (lower.includes("invalid username") || lower.includes("اسم المستخدم غير مسجل") || lower.includes("اسم المستخدم غير صحيح")) {
+      return "اسم المستخدم غير مسجل.";
+    }
     if (lower.includes("invalid username or password")) {
       return "اسم المستخدم أو كلمة المرور غير صحيحة.";
+    }
+    if (/[\u0600-\u06FF]/.test(raw)) {
+      return raw;
     }
     return "انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.";
   }
