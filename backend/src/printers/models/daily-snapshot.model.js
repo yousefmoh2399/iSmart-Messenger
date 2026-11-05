@@ -4,7 +4,7 @@ const dailySnapshotSchema = new mongoose.Schema(
   {
     printerId: { type: mongoose.Schema.Types.ObjectId, ref: "Printer", required: true, index: true },
     branchId: { type: mongoose.Schema.Types.ObjectId, ref: "PrinterBranch", required: true, index: true },
-    snapshotAt: { type: Date, required: true, default: Date.now, index: true },
+    snapshotAt: { type: Date, required: true, default: Date.now },
     counters: { type: Object, default: {} },
     lifetimeCounters: { type: Object, default: {} },
     tonerLevels: { type: Object, default: {} },

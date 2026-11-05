@@ -4,7 +4,7 @@ const wasteStatisticSchema = new mongoose.Schema(
   {
     printerId: { type: mongoose.Schema.Types.ObjectId, ref: "Printer", required: true, index: true },
     branchId: { type: mongoose.Schema.Types.ObjectId, ref: "PrinterBranch", required: true, index: true },
-    calculatedAt: { type: Date, default: Date.now, index: true },
+    calculatedAt: { type: Date, default: Date.now },
     paperJams: { type: Number, default: 0 },
     failedJobs: { type: Number, default: 0 },
     interruptedJobs: { type: Number, default: 0 },

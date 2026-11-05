@@ -850,11 +850,21 @@ class _PrinterContent extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: LayoutBuilder(
         builder: (context, outerConstraints) {
-          final isMobileLayout = outerConstraints.maxWidth < 700;
+          final isMobileLayout = outerConstraints.maxWidth < 768;
           final hPad = isMobileLayout ? 12.0 : 20.0;
-          return Padding(
+          final minContentHeight = isMobileLayout ? 540.0 : 580.0;
+          final estimatedHeaderStats = (data.isOffline ? 60.0 : 0.0) +
+              (isMobileLayout ? 360.0 : 250.0);
+          final availableHeight = outerConstraints.maxHeight - estimatedHeaderStats;
+          final contentHeight =
+              availableHeight > minContentHeight ? availableHeight : minContentHeight;
+
+          return SingleChildScrollView(
+            scrollDirection: Axis.vertical,
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: EdgeInsets.fromLTRB(hPad, 8, hPad, isMobileLayout ? 12 : 20),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
             if (data.isOffline)
               Container(
@@ -1029,7 +1039,8 @@ class _PrinterContent extends StatelessWidget {
             const SizedBox(height: 16),
             _StatsGrid(totals: totals),
             const SizedBox(height: 16),
-            Expanded(
+            SizedBox(
+              height: contentHeight,
               child: isMobileLayout
                   ? _MobileLayout(
                       branches: branches,
@@ -1053,12 +1064,8 @@ class _PrinterContent extends StatelessWidget {
                       onTestPrint: onTestPrint,
                       accent: colors.primary,
                     )
-                  : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: outerConstraints.maxWidth > 700 ? outerConstraints.maxWidth : 700,
-                        child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 250),
@@ -1105,8 +1112,6 @@ class _PrinterContent extends StatelessWidget {
                           ),
                         ),
                       ],
-                    ),
-                      ),
                     ),
             ),
               ],
@@ -1465,28 +1470,35 @@ class _PrinterDetailsScreenState extends ConsumerState<PrinterDetailsScreen> {
     }
   }
 
-  Future<void> _exportReport() async {
+  Future<void> _exportReport({String format = 'pdf'}) async {
     if (_isExporting) return;
     setState(() => _isExporting = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
       await ref
           .read(printerRepositoryProvider)
-          .exportPrinterReport(_printer.id);
+          .exportPrinterReport(_printer.id, format: format);
       if (!mounted) return;
+      final isPdf = format == 'pdf';
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            backgroundColor: const Color(0xFF007AFF),
+            backgroundColor: isPdf ? const Color(0xFF007AFF) : const Color(0xFF10B981),
             content: Row(
               children: [
-                const Icon(Icons.picture_as_pdf_rounded, color: Colors.white, size: 20),
+                Icon(
+                  isPdf ? Icons.picture_as_pdf_rounded : Icons.table_view_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
                 const SizedBox(width: 10),
                 Text(
-                  _fixText('تم تصدير تقرير الطابعة بصيغة PDF بنجاح.'),
+                  _fixText(isPdf
+                      ? 'تم تصدير تقرير الطابعة بصيغة PDF بنجاح.'
+                      : 'تم تصدير تقرير الطابعة بصيغة Excel بنجاح.'),
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ],
@@ -1808,9 +1820,26 @@ class _PrinterDetailsScreenState extends ConsumerState<PrinterDetailsScreen> {
               ),
               const SizedBox(width: 8),
 
+              // Excel Export Button
+              FilledButton.icon(
+                onPressed: _isExporting ? null : () => _exportReport(format: 'xlsx'),
+                icon: const Icon(Icons.table_view_rounded, size: 17),
+                label: const Text('تقرير Excel'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+
               // PDF Export Button (Apple primary blue)
               FilledButton.icon(
-                onPressed: _isExporting ? null : _exportReport,
+                onPressed: _isExporting ? null : () => _exportReport(format: 'pdf'),
                 icon: _isExporting
                     ? const SizedBox(
                         width: 16,
@@ -1825,7 +1854,7 @@ class _PrinterDetailsScreenState extends ConsumerState<PrinterDetailsScreen> {
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF007AFF),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),

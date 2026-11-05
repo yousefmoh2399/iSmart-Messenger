@@ -197,9 +197,14 @@ class PrinterRepository {
     );
   }
 
-  Future<void> exportPrinterReport(String printerId, {int? month, int? year}) {
+  Future<void> exportPrinterReport(
+    String printerId, {
+    String format = 'pdf',
+    int? month,
+    int? year,
+  }) {
     return exportReport(
-      format: 'xlsx',
+      format: format,
       type: 'printer',
       printerId: printerId,
       fromMonth: month,

@@ -1937,6 +1937,25 @@ async function exportReport(actor, { type = "global", format = "pdf", branchId =
       });
     }
 
+    if (format === "xlsx") {
+      return buildExcelReport({
+        type: "printer",
+        branch: printer.branchId,
+        branches: printer.branchId ? [printer.branchId] : [],
+        printers: [printer],
+        snapshots,
+        waste: [],
+        actor,
+        month: parsedMonth,
+        year: parsedYear,
+        fromMonth: parsedFromMonth,
+        fromYear: parsedFromYear,
+        toMonth: parsedToMonth,
+        toYear: parsedToYear,
+        monthlyConsumption,
+      });
+    }
+
     return buildPrinterPdfReport({
       printer,
       snapshots,
