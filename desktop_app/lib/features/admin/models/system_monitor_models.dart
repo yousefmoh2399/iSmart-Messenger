@@ -255,6 +255,10 @@ class BranchDeploymentSummary {
     required this.adoptionPercentage,
     required this.totalInstalledDevices,
     required this.totalOnlineDevices,
+    this.latestVersionDevicesCount = 0,
+    this.outdatedDevicesCount = 0,
+    this.criticalOutdatedDevicesCount = 0,
+    this.outdatedBranchesCount = 0,
     required this.currentAppVersion,
     required this.versionBreakdown,
     required this.platformBreakdown,
@@ -267,6 +271,10 @@ class BranchDeploymentSummary {
   final int adoptionPercentage;
   final int totalInstalledDevices;
   final int totalOnlineDevices;
+  final int latestVersionDevicesCount;
+  final int outdatedDevicesCount;
+  final int criticalOutdatedDevicesCount;
+  final int outdatedBranchesCount;
   final String currentAppVersion;
   final Map<String, int> versionBreakdown;
   final Map<String, int> platformBreakdown;
@@ -293,6 +301,10 @@ class BranchDeploymentSummary {
       adoptionPercentage: (json['adoptionPercentage'] as num?)?.toInt() ?? 0,
       totalInstalledDevices: (json['totalInstalledDevices'] as num?)?.toInt() ?? 0,
       totalOnlineDevices: (json['totalOnlineDevices'] as num?)?.toInt() ?? 0,
+      latestVersionDevicesCount: (json['latestVersionDevicesCount'] as num?)?.toInt() ?? 0,
+      outdatedDevicesCount: (json['outdatedDevicesCount'] as num?)?.toInt() ?? 0,
+      criticalOutdatedDevicesCount: (json['criticalOutdatedDevicesCount'] as num?)?.toInt() ?? 0,
+      outdatedBranchesCount: (json['outdatedBranchesCount'] as num?)?.toInt() ?? 0,
       currentAppVersion: json['currentAppVersion'] as String? ?? '1.1.21',
       versionBreakdown: vMap,
       platformBreakdown: pMap,
@@ -348,6 +360,10 @@ class BranchDeviceItem {
     required this.ipAddress,
     required this.clientType,
     required this.appVersion,
+    this.isOutdated = false,
+    this.versionStatus = 'latest',
+    this.versionStatusLabel = 'محدث',
+    this.workstationType = 'محطة عمل',
     required this.isOnline,
     this.lastSeenAt,
     required this.username,
@@ -360,6 +376,10 @@ class BranchDeviceItem {
   final String ipAddress;
   final String clientType;
   final String appVersion;
+  final bool isOutdated;
+  final String versionStatus;
+  final String versionStatusLabel;
+  final String workstationType;
   final bool isOnline;
   final DateTime? lastSeenAt;
   final String username;
@@ -367,13 +387,20 @@ class BranchDeviceItem {
 
   factory BranchDeviceItem.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>? ?? {};
+    final v = json['appVersion'] as String? ?? '1.1.21';
+    final isOut = json['isOutdated'] as bool? ?? (v != '1.1.21');
+
     return BranchDeviceItem(
       hostname: json['hostname'] as String? ?? 'Unknown Device',
       os: json['os'] as String? ?? 'Windows',
       osVersion: json['osVersion'] as String? ?? '',
       ipAddress: json['ipAddress'] as String? ?? '-',
       clientType: json['clientType'] as String? ?? 'desktop',
-      appVersion: json['appVersion'] as String? ?? '1.1.21',
+      appVersion: v,
+      isOutdated: isOut,
+      versionStatus: json['versionStatus'] as String? ?? (isOut ? 'previous' : 'latest'),
+      versionStatusLabel: json['versionStatusLabel'] as String? ?? (isOut ? 'نسخة قديمة ⚠️' : 'محدث (v1.1.21)'),
+      workstationType: json['workstationType'] as String? ?? 'محطة عمل',
       isOnline: json['isOnline'] as bool? ?? false,
       lastSeenAt: json['lastSeenAt'] != null
           ? DateTime.tryParse(json['lastSeenAt'].toString())
@@ -390,6 +417,10 @@ class BranchDeploymentItem {
     required this.branchName,
     required this.branchCode,
     required this.isInstalled,
+    this.hasOutdatedDevices = false,
+    this.outdatedDevicesCount = 0,
+    this.latestDevicesCount = 0,
+    this.versionStatusLabel = '',
     required this.totalRegisteredUsers,
     required this.installedUsersCount,
     required this.onlineUsersCount,
@@ -405,6 +436,10 @@ class BranchDeploymentItem {
   final String branchName;
   final String branchCode;
   final bool isInstalled;
+  final bool hasOutdatedDevices;
+  final int outdatedDevicesCount;
+  final int latestDevicesCount;
+  final String versionStatusLabel;
   final int totalRegisteredUsers;
   final int installedUsersCount;
   final int onlineUsersCount;
@@ -434,6 +469,10 @@ class BranchDeploymentItem {
       branchName: json['branchName'] as String? ?? '',
       branchCode: json['branchCode'] as String? ?? '',
       isInstalled: json['isInstalled'] as bool? ?? false,
+      hasOutdatedDevices: json['hasOutdatedDevices'] as bool? ?? false,
+      outdatedDevicesCount: (json['outdatedDevicesCount'] as num?)?.toInt() ?? 0,
+      latestDevicesCount: (json['latestDevicesCount'] as num?)?.toInt() ?? 0,
+      versionStatusLabel: json['versionStatusLabel'] as String? ?? '',
       totalRegisteredUsers: (json['totalRegisteredUsers'] as num?)?.toInt() ?? 0,
       installedUsersCount: (json['installedUsersCount'] as num?)?.toInt() ?? 0,
       onlineUsersCount: (json['onlineUsersCount'] as num?)?.toInt() ?? 0,
