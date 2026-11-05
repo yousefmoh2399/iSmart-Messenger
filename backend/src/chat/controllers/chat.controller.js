@@ -1114,7 +1114,7 @@ const getMessageReadReceiptsHandler = asyncHandler(async (req, res) => {
   sendChatResponse(res, { data: result });
 });
 
-module.exports = {,,
+module.exports = {
   togglePoll,
   exportPoll,
   getChatDirectoryUsers,
