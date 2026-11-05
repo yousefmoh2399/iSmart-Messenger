@@ -251,6 +251,7 @@ class ApiClient {
   bool _isPublicAuthPath(String requestPath) {
     return requestPath.contains('/api/auth/login') ||
         requestPath.contains('/api/auth/register') ||
+        requestPath.contains('/api/auth/logout') ||
         requestPath.contains('/api/auth/forgot-password') ||
         requestPath.contains('/api/auth/reset-password') ||
         requestPath.contains('/api/auth/refresh') ||
@@ -298,7 +299,18 @@ class ApiClient {
 
       String? serverMessage;
       if (payload is Map<String, dynamic>) {
-        serverMessage =
+        if (payload['details'] is List) {
+          final detailsList = (payload['details'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map((d) => (d['message'] ?? d['msg'])?.toString().trim())
+              .whereType<String>()
+              .where((m) => m.isNotEmpty)
+              .toList();
+          if (detailsList.isNotEmpty) {
+            serverMessage = detailsList.join('\n');
+          }
+        }
+        serverMessage ??=
             (payload['message'] as String?)?.trim() ??
             (payload['error'] as String?)?.trim();
       }

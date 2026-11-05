@@ -142,17 +142,26 @@ const getMyProfile = asyncHandler(async (req, res) => {
 });
 
 const updateMyProfile = asyncHandler(async (req, res) => {
-  const user = await updateProfile(req.user, req.body);
+  const result = await updateProfile(req.user, {
+    ...req.body,
+    deviceUid: req.body?.deviceUid || req.user.deviceUid,
+  });
+  const user = result.user || result;
   const io = req.app.get("io");
   if (io) {
     io.emit("user_profile_updated", { user });
     if (req.body?.password) {
+      const currentDeviceUid = req.body?.deviceUid || req.user.deviceUid || null;
       io.to(`user:${req.user.id}`).emit("force_logout", {
         reason: "password_changed",
+        excludeDeviceUid: currentDeviceUid,
       });
     }
   }
-  sendChatResponse(res, { data: { user }, legacy: { user } });
+  sendChatResponse(res, {
+    data: result.token ? result : { user },
+    legacy: result.token ? result : { user },
+  });
 });
 
 const uploadMyAvatar = asyncHandler(async (req, res) => {

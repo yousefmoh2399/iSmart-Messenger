@@ -399,6 +399,10 @@ final authSessionManagerProvider = Provider<AuthSessionManager>((ref) {
         ref.invalidate(ticketsControllerProvider);
         ref.invalidate(closedTicketsControllerProvider);
         ref.invalidate(printerControllerProvider);
+
+        try {
+          ref.read(authControllerProvider.notifier).logout();
+        } catch (_) {}
       });
     },
   );

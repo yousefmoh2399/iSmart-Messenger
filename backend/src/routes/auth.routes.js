@@ -11,7 +11,7 @@ const {
   revokeOtherSessions,
 } = require("../controllers/auth.controller");
 const validateRequest = require("../middleware/validate.middleware");
-const { requireAuth } = require("../middleware/auth.middleware");
+const { requireAuth, optionalAuth } = require("../middleware/auth.middleware");
 const { createRateLimitStore } = require("../config/rate-limit-store");
 
 const router = express.Router();
@@ -101,7 +101,7 @@ router.delete("/sessions/:deviceUid", requireAuth, revokeSession);
 
 router.post(
   "/logout",
-  requireAuth,
+  optionalAuth,
   [body("deviceUid").optional().isString().trim()],
   validateRequest,
   logout,

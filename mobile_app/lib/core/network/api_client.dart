@@ -32,6 +32,7 @@ class ApiClient {
           final requestPath = options.path.toLowerCase();
           final isPublic =
               requestPath.contains('/api/auth/login') ||
+              requestPath.contains('/api/auth/logout') ||
               requestPath.contains('/api/auth/refresh') ||
               requestPath.contains('/api/app-settings') ||
               requestPath.contains('/health');
@@ -237,6 +238,19 @@ class ApiClient {
       final requestPath = error.requestOptions.path.toLowerCase();
       final isLoginRequest = requestPath.contains('/api/auth/login');
 
+      if (payload is Map<String, dynamic>) {
+        if (payload['details'] is List) {
+          final detailsList = (payload['details'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map((d) => (d['message'] ?? d['msg'])?.toString().trim())
+              .whereType<String>()
+              .where((m) => m.isNotEmpty)
+              .toList();
+          if (detailsList.isNotEmpty) {
+            return ApiException(detailsList.join('\n'), statusCode: statusCode);
+          }
+        }
+      }
       if (payload is Map<String, dynamic> && payload['message'] is String) {
         final rawMessage = (payload['message'] as String).trim();
         final lowerMessage = rawMessage.toLowerCase();

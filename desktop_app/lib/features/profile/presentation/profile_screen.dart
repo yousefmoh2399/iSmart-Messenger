@@ -708,6 +708,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   style: const TextStyle(fontSize: 14),
+                  validator: (value) {
+                    final trimmed = value?.trim() ?? '';
+                    if (trimmed.isNotEmpty && trimmed.length < 6) {
+                      return 'كلمة المرور يجب ألا تقل عن 6 أحرف';
+                    }
+                    return null;
+                  },
                   decoration: InputDecoration(
                     labelText: 'كلمة مرور جديدة',
                     hintText: 'اتركها فارغة إذا كنت لا تريد تغييرها',

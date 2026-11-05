@@ -365,6 +365,11 @@ class AuthRepository {
     String? password,
   }) async {
     final token = await getToken();
+    String? deviceUid;
+    try {
+      deviceUid = await _loadOrCreateDeviceUid();
+    } catch (_) {}
+
     final response = await _apiClient.dio.put<Map<String, dynamic>>(
       '/api/users/me',
       data: {
@@ -372,12 +377,24 @@ class AuthRepository {
         if (jobTitle != null) 'jobTitle': jobTitle,
         if (password != null && password.trim().isNotEmpty)
           'password': password,
+        if (deviceUid != null && deviceUid.isNotEmpty)
+          'deviceUid': deviceUid,
       },
       options: Options(headers: {'Authorization': 'Bearer $token'}),
     );
+    final userRaw = response.data?['user'] ?? response.data;
     final user = AppUser.fromJson(
-      response.data?['user'] as Map<String, dynamic>,
+      userRaw as Map<String, dynamic>,
     );
+    final newToken = response.data?['token'] as String?;
+    final newRefreshToken = response.data?['refreshToken'] as String?;
+    if (newToken != null && newRefreshToken != null) {
+      await _sessionManager.updateTokens(
+        accessToken: newToken,
+        refreshToken: newRefreshToken,
+        userId: user.id,
+      );
+    }
     await _saveCachedUser(user);
     return user;
   }

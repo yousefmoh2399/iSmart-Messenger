@@ -136,18 +136,19 @@ function buildToken(user, deviceUid = null) {
 
 const defaultRefreshExpiresIn = process.env.JWT_REFRESH_EXPIRES_IN || "3650d";
 
-function buildRefreshToken(user, refreshNonce) {
-  return jwt.sign(
-    {
-      sub: user._id.toString(),
-      type: "refresh",
-      rn: refreshNonce,
-    },
-    jwtSecret,
-    {
-      expiresIn: defaultRefreshExpiresIn,
-    },
-  );
+function buildRefreshToken(user, refreshNonce, deviceUid = null) {
+  const normalizedDid = normalizeDeviceUid(deviceUid);
+  const payload = {
+    sub: user._id.toString(),
+    type: "refresh",
+    rn: refreshNonce,
+  };
+  if (normalizedDid && normalizedDid !== "unknown") {
+    payload.did = normalizedDid;
+  }
+  return jwt.sign(payload, jwtSecret, {
+    expiresIn: defaultRefreshExpiresIn,
+  });
 }
 
 async function buildUserResponse(user) {
@@ -734,6 +735,8 @@ async function revokeOtherUserDeviceSessions(
 }
 
 module.exports = {
+  buildToken,
+  buildRefreshToken,
   loginUser,
   refreshAccessToken,
   buildUserResponse,

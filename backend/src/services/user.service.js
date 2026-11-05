@@ -751,11 +751,33 @@ async function updateProfile(actor, payload) {
     };
   }
 
+  let newSessionTokens = null;
   if (payload.password) {
     user.passwordHash = await bcrypt.hash(payload.password, 10);
     user.refreshTokenNonce = crypto.randomBytes(16).toString("hex");
-    user.refreshSessions = [];
     incrementTokenVersion(user);
+
+    const deviceUid = payload.deviceUid || actor?.deviceUid || null;
+    if (deviceUid) {
+      const { buildToken, buildRefreshToken } = require("./auth.service");
+      const refreshNonce = crypto.randomBytes(16).toString("hex");
+      const now = new Date();
+      user.refreshSessions = [
+        {
+          deviceUid,
+          nonce: refreshNonce,
+          deviceName: payload.deviceName || "Current Device",
+          platform: payload.platform || "desktop",
+          createdAt: now,
+          lastUsedAt: now,
+        },
+      ];
+      const token = buildToken(user, deviceUid);
+      const refreshToken = buildRefreshToken(user, refreshNonce, deviceUid);
+      newSessionTokens = { token, refreshToken };
+    } else {
+      user.refreshSessions = [];
+    }
   }
 
   await user.save();
@@ -769,7 +791,16 @@ async function updateProfile(actor, payload) {
       chatPreferences: user.chatPreferences || null,
     },
   });
-  return serializeUser(user, await getEffectivePermissionsForUser(user));
+  const serialized = serializeUser(user, await getEffectivePermissionsForUser(user));
+  if (newSessionTokens) {
+    return {
+      user: serialized,
+      token: newSessionTokens.token,
+      refreshToken: newSessionTokens.refreshToken,
+      passwordChanged: true,
+    };
+  }
+  return serialized;
 }
 
 async function updateUserAvatar(actor, file) {
