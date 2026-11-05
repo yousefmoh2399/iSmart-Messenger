@@ -848,10 +848,14 @@ class _PrinterContent extends StatelessWidget {
               );
     return Directionality(
       textDirection: TextDirection.rtl,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-        child: Column(
-          children: [
+      child: LayoutBuilder(
+        builder: (context, outerConstraints) {
+          final isMobileLayout = outerConstraints.maxWidth < 700;
+          final hPad = isMobileLayout ? 12.0 : 20.0;
+          return Padding(
+            padding: EdgeInsets.fromLTRB(hPad, 8, hPad, isMobileLayout ? 12 : 20),
+            child: Column(
+              children: [
             if (data.isOffline)
               Container(
                 margin: const EdgeInsets.only(bottom: 16),
@@ -1026,59 +1030,230 @@ class _PrinterContent extends StatelessWidget {
             _StatsGrid(totals: totals),
             const SizedBox(height: 16),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeInOutCubic,
-                    width: isSidebarCollapsed ? 80 : 320,
-                    child: _BranchPanel(
-                      isCollapsed: isSidebarCollapsed,
-                      onToggle: onToggleSidebar,
+              child: isMobileLayout
+                  ? _MobileLayout(
                       branches: branches,
                       totalBranchesCount: totalBranchesCount,
-                      searchController: branchSearchController,
+                      branchSearchController: branchSearchController,
                       selectedBranchId: selectedBranchId,
                       scanningBranchId: scanningBranchId,
-                      onSelected: onBranchSelected,
-                      onDiscover: onDiscover,
-                      onEditBranch: onEditBranch,
-                      onDeleteBranch: onDeleteBranch,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _PrinterTable(
-                      printers: visiblePrinters,
                       selectedPrinterId: selectedPrinterId,
-                      onSelected: onPrinterSelected,
-                      onSyncPrinter: onSyncPrinter,
-                      onDeletePrinter: onDeletePrinter,
-                      onTestPrint: onTestPrint,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeInOutCubic,
-                    width: isRightSidebarCollapsed ? 80 : 300,
-                    child: _SidePanel(
-                      isCollapsed: isRightSidebarCollapsed,
-                      onToggle: onToggleRightSidebar,
                       selectedBranch: selectedBranch,
                       selectedPrinter: selectedPrinter,
-                      notifications: visibleNotifications,
-                      logs: visibleLogs,
+                      visiblePrinters: visiblePrinters,
+                      visibleNotifications: visibleNotifications,
+                      visibleLogs: visibleLogs,
+                      onBranchSelected: onBranchSelected,
+                      onPrinterSelected: onPrinterSelected,
+                      onDiscover: onDiscover,
+                      onSyncPrinter: onSyncPrinter,
+                      onDeletePrinter: onDeletePrinter,
+                      onEditBranch: onEditBranch,
+                      onDeleteBranch: onDeleteBranch,
+                      onTestPrint: onTestPrint,
                       accent: colors.primary,
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOutCubic,
+                          width: isSidebarCollapsed ? 80 : 280,
+                          child: _BranchPanel(
+                            isCollapsed: isSidebarCollapsed,
+                            onToggle: onToggleSidebar,
+                            branches: branches,
+                            totalBranchesCount: totalBranchesCount,
+                            searchController: branchSearchController,
+                            selectedBranchId: selectedBranchId,
+                            scanningBranchId: scanningBranchId,
+                            onSelected: onBranchSelected,
+                            onDiscover: onDiscover,
+                            onEditBranch: onEditBranch,
+                            onDeleteBranch: onDeleteBranch,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _PrinterTable(
+                            printers: visiblePrinters,
+                            selectedPrinterId: selectedPrinterId,
+                            onSelected: onPrinterSelected,
+                            onSyncPrinter: onSyncPrinter,
+                            onDeletePrinter: onDeletePrinter,
+                            onTestPrint: onTestPrint,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOutCubic,
+                          width: isRightSidebarCollapsed ? 56 : 280,
+                          child: _SidePanel(
+                            isCollapsed: isRightSidebarCollapsed,
+                            onToggle: onToggleRightSidebar,
+                            selectedBranch: selectedBranch,
+                            selectedPrinter: selectedPrinter,
+                            notifications: visibleNotifications,
+                            logs: visibleLogs,
+                            accent: colors.primary,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
             ),
-          ],
-        ),
+              ],
+            ),
+          );
+        },
       ),
+    );
+  }
+}
+
+// ─── Mobile Layout with Tabs ──────────────────────────────────────────────────
+class _MobileLayout extends StatefulWidget {
+  const _MobileLayout({
+    required this.branches,
+    required this.totalBranchesCount,
+    required this.branchSearchController,
+    required this.selectedBranchId,
+    required this.scanningBranchId,
+    required this.selectedPrinterId,
+    required this.selectedBranch,
+    required this.selectedPrinter,
+    required this.visiblePrinters,
+    required this.visibleNotifications,
+    required this.visibleLogs,
+    required this.onBranchSelected,
+    required this.onPrinterSelected,
+    required this.onDiscover,
+    required this.onSyncPrinter,
+    required this.onDeletePrinter,
+    required this.onEditBranch,
+    required this.onDeleteBranch,
+    this.onTestPrint,
+    required this.accent,
+  });
+
+  final List<PrinterBranchItem> branches;
+  final int totalBranchesCount;
+  final TextEditingController branchSearchController;
+  final String? selectedBranchId;
+  final String? scanningBranchId;
+  final String? selectedPrinterId;
+  final PrinterBranchItem? selectedBranch;
+  final PrinterItem? selectedPrinter;
+  final List<PrinterItem> visiblePrinters;
+  final List<Map<String, dynamic>> visibleNotifications;
+  final List<Map<String, dynamic>> visibleLogs;
+  final ValueChanged<String?> onBranchSelected;
+  final ValueChanged<PrinterItem> onPrinterSelected;
+  final ValueChanged<String>? onDiscover;
+  final ValueChanged<String>? onSyncPrinter;
+  final ValueChanged<String>? onDeletePrinter;
+  final ValueChanged<PrinterBranchItem>? onEditBranch;
+  final ValueChanged<String>? onDeleteBranch;
+  final ValueChanged<PrinterItem>? onTestPrint;
+  final Color accent;
+
+  @override
+  State<_MobileLayout> createState() => _MobileLayoutState();
+}
+
+class _MobileLayoutState extends State<_MobileLayout>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: theme.brightness == Brightness.dark
+                ? const Color(0xFF1C1C1E)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.06),
+            ),
+          ),
+          child: TabBar(
+            controller: _tabController,
+            labelColor: widget.accent,
+            unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+            indicatorColor: widget.accent,
+            indicatorSize: TabBarIndicatorSize.label,
+            dividerColor: Colors.transparent,
+            tabs: const [
+              Tab(icon: Icon(Icons.location_city_rounded, size: 20), text: 'الفروع'),
+              Tab(icon: Icon(Icons.print_rounded, size: 20), text: 'الطابعات'),
+              Tab(icon: Icon(Icons.notifications_rounded, size: 20), text: 'السجل'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // Tab 1: Branches
+              _BranchPanel(
+                isCollapsed: false,
+                onToggle: () {},
+                branches: widget.branches,
+                totalBranchesCount: widget.totalBranchesCount,
+                searchController: widget.branchSearchController,
+                selectedBranchId: widget.selectedBranchId,
+                scanningBranchId: widget.scanningBranchId,
+                onSelected: (id) {
+                  widget.onBranchSelected(id);
+                  _tabController.animateTo(1);
+                },
+                onDiscover: widget.onDiscover,
+                onEditBranch: widget.onEditBranch,
+                onDeleteBranch: widget.onDeleteBranch,
+              ),
+              // Tab 2: Printers
+              _PrinterTable(
+                printers: widget.visiblePrinters,
+                selectedPrinterId: widget.selectedPrinterId,
+                onSelected: widget.onPrinterSelected,
+                onSyncPrinter: widget.onSyncPrinter,
+                onDeletePrinter: widget.onDeletePrinter,
+                onTestPrint: widget.onTestPrint,
+              ),
+              // Tab 3: Logs & Notifications
+              _SidePanel(
+                isCollapsed: false,
+                onToggle: () {},
+                selectedBranch: widget.selectedBranch,
+                selectedPrinter: widget.selectedPrinter,
+                notifications: widget.visibleNotifications,
+                logs: widget.visibleLogs,
+                accent: widget.accent,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3559,14 +3734,15 @@ class _StatsGrid extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth < 900 ? 2 : 4;
+        final crossAxisCount = constraints.maxWidth < 600 ? 1 : (constraints.maxWidth < 900 ? 2 : 4);
+        final aspectRatio = crossAxisCount == 4 ? 2.35 : (crossAxisCount == 2 ? 2.0 : 3.5);
         return GridView.count(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: crossAxisCount,
-          crossAxisSpacing: 14,
-          mainAxisSpacing: 14,
-          childAspectRatio: crossAxisCount == 4 ? 2.35 : 2.1,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: aspectRatio,
           children: [
             _buildStatCard(
               context: context,

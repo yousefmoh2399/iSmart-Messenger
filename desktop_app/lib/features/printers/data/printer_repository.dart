@@ -199,7 +199,7 @@ class PrinterRepository {
 
   Future<void> exportPrinterReport(String printerId, {int? month, int? year}) {
     return exportReport(
-      format: 'pdf',
+      format: 'xlsx',
       type: 'printer',
       printerId: printerId,
       fromMonth: month,
