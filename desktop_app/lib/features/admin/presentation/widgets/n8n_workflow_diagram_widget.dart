@@ -63,6 +63,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     final dbHost = stats?.databaseHost ?? 'cluster0.ismart';
     final dbName = stats?.databaseName ?? 'ismart-prod';
     final cpuCores = stats?.cpuCores ?? 8;
+    final targetVer = summary?.targetAppVersion ?? summary?.currentAppVersion ?? '1.1.22';
 
     return Container(
       decoration: BoxDecoration(
@@ -218,7 +219,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                           subtitle: 'iSmart Core Gateway & Cluster',
                           icon: Icons.dns_rounded,
                           accentColor: const Color(0xFF6366F1),
-                          badge: 'v1.1.21 معتمد',
+                          badge: 'v$targetVer معتمد',
                           badgeColor: const Color(0xFF6366F1),
                           metrics: [
                             'المعدل: $rps req/s ($latency ms)',
@@ -298,7 +299,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                                 subtitle: 'iSmart Core Gateway & Cluster',
                                 icon: Icons.dns_rounded,
                                 accentColor: const Color(0xFF6366F1),
-                                badge: 'v1.1.21 معتمد',
+                                badge: 'v$targetVer معتمد',
                                 badgeColor: const Color(0xFF6366F1),
                                 metrics: [
                                   'المعدل: $rps req/s ($latency ms)',
