@@ -167,6 +167,7 @@ class AuthController extends Notifier<AuthState> {
       return;
     }
     _isLoggingOut = true;
+    state = const AuthState(status: AuthStatus.unauthenticated);
     final chatSocket = ref.read(chatSocketServiceProvider);
     final authRepository = ref.read(authRepositoryProvider);
     final activeConversation = ref.read(activeConversationIdProvider.notifier);

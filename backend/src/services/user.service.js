@@ -757,27 +757,26 @@ async function updateProfile(actor, payload) {
     user.refreshTokenNonce = crypto.randomBytes(16).toString("hex");
     incrementTokenVersion(user);
 
-    const deviceUid = payload.deviceUid || actor?.deviceUid || null;
-    if (deviceUid) {
-      const { buildToken, buildRefreshToken } = require("./auth.service");
-      const refreshNonce = crypto.randomBytes(16).toString("hex");
-      const now = new Date();
-      user.refreshSessions = [
-        {
-          deviceUid,
-          nonce: refreshNonce,
-          deviceName: payload.deviceName || "Current Device",
-          platform: payload.platform || "desktop",
-          createdAt: now,
-          lastUsedAt: now,
-        },
-      ];
-      const token = buildToken(user, deviceUid);
-      const refreshToken = buildRefreshToken(user, refreshNonce, deviceUid);
-      newSessionTokens = { token, refreshToken };
-    } else {
-      user.refreshSessions = [];
-    }
+    const deviceUid =
+      payload.deviceUid ||
+      actor?.deviceUid ||
+      ("device-" + crypto.randomBytes(6).toString("hex"));
+    const { buildToken, buildRefreshToken } = require("./auth.service");
+    const refreshNonce = crypto.randomBytes(16).toString("hex");
+    const now = new Date();
+    user.refreshSessions = [
+      {
+        deviceUid,
+        nonce: refreshNonce,
+        deviceName: payload.deviceName || "Current Device",
+        platform: payload.platform || "desktop",
+        createdAt: now,
+        lastUsedAt: now,
+      },
+    ];
+    const token = buildToken(user, deviceUid);
+    const refreshToken = buildRefreshToken(user, refreshNonce, deviceUid);
+    newSessionTokens = { token, refreshToken };
   }
 
   await user.save();
@@ -936,11 +935,10 @@ async function logoutUserAll(actor, userId, io = null) {
   incrementTokenVersion(user);
   await user.save();
 
-  if (io) {
-    io.to(`user:${userId}`).emit("force_logout", {
-      reason: "admin_force_logout",
-    });
-  }
+  const { forceLogoutUserDevices } = require("../chat/sockets/chat.socket");
+  forceLogoutUserDevices(io, userId, {
+    reason: "admin_force_logout",
+  });
 
   await logAuditEvent({
     actorId: actor.id,

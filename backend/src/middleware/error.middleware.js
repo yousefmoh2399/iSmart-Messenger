@@ -81,8 +81,9 @@ function errorHandler(error, req, res, next) {
   if (
     error?.message === "Request aborted" ||
     error?.code === "ECONNABORTED" ||
-    req.aborted ||
-    req.destroyed
+    res.headersSent ||
+    res.destroyed ||
+    (res.socket && res.socket.destroyed)
   ) {
     logger.warn("request.aborted_by_client", {
       path: req.originalUrl,
@@ -162,6 +163,48 @@ function errorHandler(error, req, res, next) {
       error: translatedMessage,
       message: translatedMessage,
       details: error.details,
+    });
+    return;
+  }
+
+  if (error?.name === "CastError") {
+    const field = error.path || "id";
+    const msg = `معرّف غير صالح للقيمة '${field}'.`;
+    res.status(400).json({
+      success: false,
+      data: null,
+      error: msg,
+      message: msg,
+    });
+    return;
+  }
+
+  if (error?.name === "ValidationError") {
+    const details = Object.values(error.errors || {}).map((e) => ({
+      field: e.path,
+      message: e.message,
+    }));
+    const msg = details[0]?.message || "فشل التحقق من صحة البيانات.";
+    res.status(400).json({
+      success: false,
+      data: null,
+      error: msg,
+      message: msg,
+      details,
+    });
+    return;
+  }
+
+  if (error?.code === 11000) {
+    const keys = Object.keys(error.keyValue || {});
+    const msg = keys.length
+      ? `القيمة المدخلة في حقل '${keys.join(", ")}' مستخدمة بالفعل.`
+      : "هذه البيانات موجودة بالفعل.";
+    res.status(409).json({
+      success: false,
+      data: null,
+      error: msg,
+      message: msg,
     });
     return;
   }
