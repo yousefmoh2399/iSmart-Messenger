@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io' as io_dart;
+import 'package:flutter/foundation.dart';
 
 import 'package:socket_io_client/socket_io_client.dart' as io;
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 
 import '../../../../shared/services/print_job_processor.dart';
 
@@ -61,20 +63,34 @@ class ChatSocketService implements PrintStatusEmitter {
 
     final completer = Completer<void>();
     Map<String, dynamic> deviceInfo = {};
-    if (!const bool.fromEnvironment('dart.library.html')) {
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        try {
+          final eInfo = await web_bridge.getElectronDeviceInfo();
+          deviceInfo = {
+            'os': eInfo['osName'] ?? 'windows',
+            'osVersion': eInfo['osVersion']?.toString() ?? '',
+            'hostname': eInfo['hostName']?.toString() ?? '',
+            'platform': 'win32',
+            'arch': eInfo['architecture']?.toString() ?? 'x64',
+            'appVersion': eInfo['appVersion']?.toString() ?? '1.1.21',
+          };
+        } catch (_) {
+          deviceInfo = {'os': 'windows', 'appVersion': '1.1.21'};
+        }
+      } else {
+        deviceInfo = {'os': 'web', 'appVersion': '1.1.21'};
+      }
+    } else {
       try {
         deviceInfo = {
           'os': io_dart.Platform.operatingSystem,
           'osVersion': io_dart.Platform.operatingSystemVersion,
           'hostname': io_dart.Platform.localHostname,
+          'platform': io_dart.Platform.operatingSystem,
           'appVersion': '1.1.21',
         };
       } catch (_) {}
-    } else {
-      deviceInfo = {
-        'os': 'web',
-        'appVersion': '1.1.21',
-      };
     }
 
     final socket =

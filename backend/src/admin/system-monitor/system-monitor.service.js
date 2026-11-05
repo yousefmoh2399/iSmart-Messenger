@@ -6,6 +6,7 @@ const PDFDocument = require("pdfkit");
 const Branch = require("../../chat/models/branch.model");
 const User = require("../../models/user.model");
 const DeviceSession = require("../../models/device-session.model");
+const UpdateDevice = require("../updates/device.model");
 const Message = require("../../chat/models/message.model");
 const Conversation = require("../../chat/models/conversation.model");
 const { exportPollToExcel } = require("../../chat/services/chat.service");
@@ -56,138 +57,50 @@ function formatDate(value) {
   return date.toISOString().replace("T", " ").slice(0, 19);
 }
 
-async function seedRealisticDeviceSessions() {
-  const count = await DeviceSession.countDocuments();
-  if (count > 0) return 0;
-
-  const users = await User.find({ isActive: true })
-    .select('_id username fullName role jobTitle branchId branchCode')
-    .lean();
-  const branches = await Branch.find({ deletedAt: null }).lean();
-
-  if (!users.length || !branches.length) return 0;
-
-  const usersByBranch = new Map();
-  for (const u of users) {
-    const code = (u.branchCode || '100').toUpperCase();
-    if (!usersByBranch.has(code)) usersByBranch.set(code, []);
-    usersByBranch.get(code).push(u);
-  }
-
-  const sessionsToInsert = [];
-  for (let bIdx = 0; bIdx < branches.length; bIdx++) {
-    const branch = branches[bIdx];
-    const code = (branch.code || '').toUpperCase();
-    const bUsers = usersByBranch.get(code) || [];
-    const branchNum = parseInt(code, 10) || (bIdx + 1);
-
-    // Pick 2 to 4 users per branch
-    const usersToSeed = bUsers.slice(0, 4);
-
-    for (let uIdx = 0; uIdx < usersToSeed.length; uIdx++) {
-      const u = usersToSeed[uIdx];
-      const uName = (u.username || '').toLowerCase();
-
-      let hostPrefix = 'PC';
-      let os = 'Windows 10 Pro';
-      let osVersion = '10.0.19045';
-      let arch = 'x64';
-
-      if (uName.startsWith('cash')) {
-        hostPrefix = 'POS-CASH';
-        if (bIdx % 3 === 0) {
-          os = 'Windows 7 Professional SP1';
-          osVersion = '6.1.7601';
-          arch = 'ia32';
-        }
-      } else if (uName.startsWith('man')) {
-        hostPrefix = 'LAPTOP-MGR';
-        os = 'Windows 11 Pro';
-        osVersion = '10.0.22631';
-      } else if (uName.startsWith('acc')) {
-        hostPrefix = 'PC-ACC';
-      } else if (uName.startsWith('cs')) {
-        hostPrefix = 'PC-CS';
-      } else if (uName.startsWith('law')) {
-        hostPrefix = 'PC-LAW';
-      }
-
-      const hostname = `${hostPrefix}-${code}`;
-      const ipAddress = `192.168.${branchNum % 250}.${10 + uIdx * 2}`;
-
-      // Real version distribution:
-      // ~72% on 1.1.21 (latest)
-      // ~18% on 1.1.20 (previous release)
-      // ~10% on 1.0.9 (critical outdated)
-      let appVersion = '1.1.21';
-      if (bIdx === 3 || bIdx === 7 || bIdx === 15) {
-        appVersion = uIdx === 0 ? '1.0.9' : '1.1.20';
-      } else if (bIdx % 4 === 0 && uIdx === 1) {
-        appVersion = '1.1.20';
-      } else if (bIdx % 6 === 0 && uIdx === 2) {
-        appVersion = '1.0.9';
-      }
-
-      const isOnline = (bIdx + uIdx) % 3 !== 0;
-      const startedDaysAgo = (bIdx * 3 + uIdx * 5) % 60 + 2;
-      const startedAt = new Date(Date.now() - startedDaysAgo * 86400 * 1000);
-      const lastSeenMinutesAgo = isOnline ? (uIdx * 3) : (uIdx * 120 + 30);
-      const lastSeenAt = new Date(Date.now() - lastSeenMinutesAgo * 60 * 1000);
-
-      sessionsToInsert.push({
-        userId: u._id,
-        socketId: isOnline ? `sock_live_${code}_${uIdx}_${Date.now()}` : null,
-        ipAddress,
-        clientType: 'desktop',
-        deviceInfo: {
-          hostname,
-          os,
-          osVersion,
-          platform: 'win32',
-          arch,
-          appVersion,
-        },
-        isOnline,
-        startedAt,
-        lastSeenAt,
-      });
-    }
-  }
-
-  if (sessionsToInsert.length > 0) {
-    await DeviceSession.insertMany(sessionsToInsert);
-  }
-  return sessionsToInsert.length;
+// Purge any legacy mock seeded sessions once at startup / execution
+let hasPurgedLegacyMocks = false;
+async function purgeLegacyMockSessions() {
+  if (hasPurgedLegacyMocks) return;
+  try {
+    await DeviceSession.deleteMany({
+      $or: [
+        { "deviceInfo.hostname": /^(PC|LAPTOP|POS)-(ACC|MGR|CS|LAW|\d+)/i },
+        { "deviceInfo.hostname": /^(PC|LAPTOP|POS)/i },
+        { socketId: /^sock_live_/i },
+      ],
+    });
+    hasPurgedLegacyMocks = true;
+  } catch (_) {}
 }
 
 async function getBranchesDeploymentData() {
-  const sessionCount = await DeviceSession.countDocuments();
-  if (sessionCount === 0) {
-    try {
-      await seedRealisticDeviceSessions();
-    } catch (e) {
-      console.error("[SystemMonitor] Failed to seed device sessions:", e);
-    }
-  }
+  await purgeLegacyMockSessions();
 
-  const [branches, users, sessions] = await Promise.all([
+  const [branches, users, updateDevices, rawSessions] = await Promise.all([
     Branch.find({ deletedAt: null }).sort({ code: 1, name: 1 }).lean(),
     User.find({ isActive: true })
       .select("_id username fullName role jobTitle branchId branchCode lastActiveAt isOnline")
       .lean(),
-    DeviceSession.find({})
+    UpdateDevice.find({}).sort({ lastSeenAt: -1, updatedAt: -1 }).lean(),
+    DeviceSession.find({
+      "deviceInfo.hostname": { $not: /^(PC|LAPTOP|POS)-/i },
+    })
       .populate("userId", "_id username fullName role branchId branchCode isOnline jobTitle")
       .sort({ lastSeenAt: -1 })
       .lean(),
   ]);
 
-  // Group users by branch
+  // Group users by branchId and branchCode
   const usersByBranchId = new Map();
   const usersByBranchCode = new Map();
   const allUsersMap = new Map();
+  const allUsersByUsername = new Map();
 
   for (const u of users) {
     allUsersMap.set(String(u._id), u);
+    if (u.username) {
+      allUsersByUsername.set(u.username.toLowerCase(), u);
+    }
     if (u.branchId) {
       const bId = String(u.branchId);
       if (!usersByBranchId.has(bId)) usersByBranchId.set(bId, []);
@@ -200,25 +113,32 @@ async function getBranchesDeploymentData() {
     }
   }
 
-  // Group sessions by user
-  const sessionsByUser = new Map();
-  const versionCounts = {};
-  const platformCounts = {};
+  // Group UpdateDevices by branchCode and by userId
+  const devicesByBranchCode = new Map();
+  const devicesByUserId = new Map();
 
-  for (const s of sessions) {
+  for (const dev of updateDevices) {
+    if (dev.branchCode) {
+      const bCode = String(dev.branchCode).toUpperCase();
+      if (!devicesByBranchCode.has(bCode)) devicesByBranchCode.set(bCode, []);
+      devicesByBranchCode.get(bCode).push(dev);
+    }
+    if (dev.lastKnownUserId) {
+      const uId = String(dev.lastKnownUserId);
+      if (!devicesByUserId.has(uId)) devicesByUserId.set(uId, []);
+      devicesByUserId.get(uId).push(dev);
+    }
+  }
+
+  // Group non-mock sessions by user
+  const sessionsByUser = new Map();
+  for (const s of rawSessions) {
     const uId = s.userId?._id ? String(s.userId._id) : (s.userId ? String(s.userId) : null);
     if (!uId) continue;
     if (!sessionsByUser.has(uId)) sessionsByUser.set(uId, []);
     sessionsByUser.get(uId).push(s);
-
-    const version = s.deviceInfo?.appVersion || (s.clientType === "desktop" ? CURRENT_APP_VERSION : s.clientType || "unknown");
-    versionCounts[version] = (versionCounts[version] || 0) + 1;
-
-    const osName = s.deviceInfo?.os || s.clientType || "unknown";
-    platformCounts[osName] = (platformCounts[osName] || 0) + 1;
   }
 
-  // Build branch deployment items
   const branchItems = [];
   let totalInstalledBranches = 0;
   let totalDevices = 0;
@@ -228,93 +148,163 @@ async function getBranchesDeploymentData() {
   let totalCriticalOutdated = 0;
   let outdatedBranchesCount = 0;
 
+  const versionCounts = {};
+  const platformCounts = {};
+
   for (const b of branches) {
     const bId = String(b._id);
     const bCode = (b.code || "").toUpperCase();
-
-    // Get all users associated with this branch
     const branchUsers = usersByBranchId.get(bId) || usersByBranchCode.get(bCode) || [];
 
-    const installedUsers = [];
     const devicesMap = new Map();
     const branchVersions = new Set();
     let branchLastSeen = null;
     let onlineUsersCount = 0;
 
     for (const u of branchUsers) {
-      const uId = String(u._id);
       if (u.isOnline) onlineUsersCount++;
-
-      const uSessions = sessionsByUser.get(uId) || [];
-      if (uSessions.length > 0) {
-        for (const s of uSessions) {
-          const version = s.deviceInfo?.appVersion || CURRENT_APP_VERSION;
-          branchVersions.add(version);
-
-          if (!branchLastSeen || new Date(s.lastSeenAt) > new Date(branchLastSeen)) {
-            branchLastSeen = s.lastSeenAt;
-          }
-
-          // Strictly unique device key per physical machine and user
-          const hostName = (s.deviceInfo?.hostname || `PC-${u.username.toUpperCase()}`).trim();
-          const devKey = `${uId}_${hostName}`;
-
-          const isOutdated = version !== CURRENT_APP_VERSION;
-          const isCritical = version === "1.0.9" || version < "1.1.20";
-          const versionStatus = !isOutdated ? "latest" : (isCritical ? "critical" : "previous");
-          const versionStatusLabel = !isOutdated
-            ? `محدث (v${CURRENT_APP_VERSION})`
-            : (isCritical ? `نسخة قديمة حرجة (v${version}) 🚨` : `نسخة سابقة (v${version}) ⚠️`);
-
-          const uNameLower = (u.username || '').toLowerCase();
-          const workstationType = uNameLower.startsWith('cash')
-            ? 'نقطة بيع كاشير'
-            : (uNameLower.startsWith('man') ? 'حاسب إدارة فرع' : (uNameLower.startsWith('acc') ? 'حاسب الحسابات' : 'محطة عمل'));
-
-          // Keep latest session for this device
-          if (!devicesMap.has(devKey) || new Date(s.lastSeenAt) > new Date(devicesMap.get(devKey).lastSeenAt)) {
-            devicesMap.set(devKey, {
-              hostname: hostName,
-              os: s.deviceInfo?.os || "Windows",
-              osVersion: s.deviceInfo?.osVersion || "",
-              ipAddress: s.ipAddress || "-",
-              clientType: s.clientType || "desktop",
-              appVersion: version,
-              isOutdated,
-              versionStatus,
-              versionStatusLabel,
-              workstationType,
-              isOnline: !!s.isOnline,
-              startedAt: s.startedAt || s.createdAt || new Date(),
-              lastSeenAt: s.lastSeenAt,
-              user: {
-                id: u._id,
-                username: u.username,
-                fullName: u.fullName,
-                role: u.role,
-                jobTitle: u.jobTitle || "-",
-              },
-            });
-          }
+      if (u.lastActiveAt) {
+        if (!branchLastSeen || new Date(u.lastActiveAt) > new Date(branchLastSeen)) {
+          branchLastSeen = u.lastActiveAt;
         }
+      }
+    }
 
-        installedUsers.push({
-          userId: u._id,
+    // 1. Process physical devices registered in UpdateDevice for this branch
+    const bUpdateDevices = devicesByBranchCode.get(bCode) || [];
+    for (const dev of bUpdateDevices) {
+      const devKey = (dev.hostName || dev.deviceUid || dev.deviceName || String(dev._id)).trim().toLowerCase();
+      const appVersion = String(dev.appVersion || "unknown").trim();
+      branchVersions.add(appVersion);
+
+      const devLastSeen = dev.lastSeenAt || dev.lastHeartbeatAt || dev.updatedAt;
+      if (!branchLastSeen || (devLastSeen && new Date(devLastSeen) > new Date(branchLastSeen))) {
+        branchLastSeen = devLastSeen;
+      }
+
+      const isOutdated = appVersion !== CURRENT_APP_VERSION;
+      const isCritical = isOutdated && (appVersion === "1.0.9" || appVersion < "1.1.20" || appVersion.startsWith("1.0.") || appVersion.startsWith("1.1."));
+      const versionStatus = !isOutdated ? "latest" : (isCritical ? "critical" : "previous");
+      const versionStatusLabel = !isOutdated
+        ? `محدث (v${CURRENT_APP_VERSION})`
+        : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`);
+
+      const hostName = (dev.hostName || dev.deviceName || "Desktop-PC").trim();
+      const uNameLower = (dev.lastKnownUsername || "").toLowerCase();
+      const workstationType = uNameLower.startsWith("cash")
+        ? "نقطة بيع كاشير"
+        : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : (uNameLower.startsWith("cs") ? "خدمة العملاء" : "محطة عمل")));
+
+      // Live online status verification
+      const isOnline = dev.connectionStatus === "online" ||
+        (devLastSeen && (Date.now() - new Date(devLastSeen).getTime()) < 5 * 60 * 1000);
+
+      // Resolve user details
+      let userObj = {
+        id: dev.lastKnownUserId,
+        username: dev.lastKnownUsername || "-",
+        fullName: dev.lastKnownFullName || "-",
+        role: "-",
+        jobTitle: "-",
+      };
+      if (dev.lastKnownUserId && allUsersMap.has(String(dev.lastKnownUserId))) {
+        const u = allUsersMap.get(String(dev.lastKnownUserId));
+        userObj = {
+          id: u._id,
           username: u.username,
           fullName: u.fullName,
           role: u.role,
           jobTitle: u.jobTitle || "-",
-          isOnline: !!u.isOnline,
-          lastActiveAt: u.lastActiveAt,
-          sessionsCount: uSessions.length,
+        };
+      } else if (uNameLower && allUsersByUsername.has(uNameLower)) {
+        const u = allUsersByUsername.get(uNameLower);
+        userObj = {
+          id: u._id,
+          username: u.username,
+          fullName: u.fullName,
+          role: u.role,
+          jobTitle: u.jobTitle || "-",
+        };
+      }
+
+      // Keep latest session if duplicates for the same host
+      if (!devicesMap.has(devKey) || (devLastSeen && new Date(devLastSeen) > new Date(devicesMap.get(devKey).lastSeenAt))) {
+        devicesMap.set(devKey, {
+          hostname: hostName,
+          os: dev.osName || "Windows",
+          osVersion: dev.osVersion || "",
+          ipAddress: dev.localIp || "-",
+          clientType: dev.platform?.includes("mobile") ? "mobile" : "desktop",
+          appVersion,
+          isOutdated,
+          versionStatus,
+          versionStatusLabel,
+          workstationType,
+          isOnline: !!isOnline,
+          startedAt: dev.createdAt || new Date(),
+          lastSeenAt: devLastSeen,
+          user: userObj,
         });
       }
     }
 
-    const isInstalled = devicesMap.size > 0 || installedUsers.length > 0;
-    if (isInstalled) totalInstalledBranches++;
+    // 2. Also process any real active socket sessions for branch users not in UpdateDevice
+    for (const u of branchUsers) {
+      const uId = String(u._id);
+      const uSessions = sessionsByUser.get(uId) || [];
+      for (const s of uSessions) {
+        const hostName = (s.deviceInfo?.hostname || s.clientType || "Device").trim();
+        const devKey = hostName.toLowerCase();
+        if (devicesMap.has(devKey)) continue; // Already covered by UpdateDevice
+
+        const appVersion = s.deviceInfo?.appVersion || (s.clientType === "desktop" ? CURRENT_APP_VERSION : "unknown");
+        branchVersions.add(appVersion);
+
+        if (!branchLastSeen || (s.lastSeenAt && new Date(s.lastSeenAt) > new Date(branchLastSeen))) {
+          branchLastSeen = s.lastSeenAt;
+        }
+
+        const isOutdated = appVersion !== CURRENT_APP_VERSION;
+        const isCritical = isOutdated && (appVersion === "1.0.9" || appVersion < "1.1.20");
+        const versionStatus = !isOutdated ? "latest" : (isCritical ? "critical" : "previous");
+        const versionStatusLabel = !isOutdated
+          ? `محدث (v${CURRENT_APP_VERSION})`
+          : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`);
+
+        const uNameLower = (u.username || "").toLowerCase();
+        const workstationType = uNameLower.startsWith("cash")
+          ? "نقطة بيع كاشير"
+          : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : "محطة عمل"));
+
+        devicesMap.set(devKey, {
+          hostname: hostName,
+          os: s.deviceInfo?.os || "Windows",
+          osVersion: s.deviceInfo?.osVersion || "",
+          ipAddress: s.ipAddress || "-",
+          clientType: s.clientType || "desktop",
+          appVersion,
+          isOutdated,
+          versionStatus,
+          versionStatusLabel,
+          workstationType,
+          isOnline: !!s.isOnline,
+          startedAt: s.startedAt || s.createdAt || new Date(),
+          lastSeenAt: s.lastSeenAt,
+          user: {
+            id: u._id,
+            username: u.username,
+            fullName: u.fullName,
+            role: u.role,
+            jobTitle: u.jobTitle || "-",
+          },
+        });
+      }
+    }
 
     const branchDevices = Array.from(devicesMap.values());
+    const isInstalled = branchDevices.length > 0;
+    if (isInstalled) totalInstalledBranches++;
+
     const branchOnlineDevs = branchDevices.filter((d) => d.isOnline).length;
     const branchOutdatedDevs = branchDevices.filter((d) => d.isOutdated).length;
     const branchLatestDevs = branchDevices.filter((d) => !d.isOutdated).length;
@@ -324,8 +314,10 @@ async function getBranchesDeploymentData() {
     totalOutdatedDevices += branchOutdatedDevs;
     totalLatestDevices += branchLatestDevs;
 
-    branchDevices.forEach(d => {
+    branchDevices.forEach((d) => {
       if (d.versionStatus === "critical") totalCriticalOutdated++;
+      versionCounts[d.appVersion] = (versionCounts[d.appVersion] || 0) + 1;
+      platformCounts[d.os] = (platformCounts[d.os] || 0) + 1;
     });
 
     const hasOutdatedDevices = branchOutdatedDevs > 0;
@@ -342,21 +334,32 @@ async function getBranchesDeploymentData() {
       outdatedDevicesCount: branchOutdatedDevs,
       latestDevicesCount: branchLatestDevs,
       totalRegisteredUsers: branchUsers.length,
-      installedUsersCount: installedUsers.length,
+      installedUsersCount: branchDevices.length,
       onlineUsersCount,
       devicesCount: branchDevices.length,
       onlineDevicesCount: branchOnlineDevs,
       appVersions: sortedVersions,
-      versionStatusLabel: !hasOutdatedDevices
-        ? "محدثة بالكامل ✅"
-        : `يوجد إصدارات قديمة ⚠️ (${branchOutdatedDevs} جهاز)`,
+      versionStatusLabel: !isInstalled
+        ? "لم يتم التثبيت بعد"
+        : (!hasOutdatedDevices
+            ? "محدثة بالكامل ✅"
+            : `يوجد إصدارات قديمة ⚠️ (${branchOutdatedDevs} جهاز)`),
       lastActivityAt: branchLastSeen,
       devices: branchDevices,
-      installedUsers,
+      installedUsers: branchUsers.map((u) => ({
+        userId: u._id,
+        username: u.username,
+        fullName: u.fullName,
+        role: u.role,
+        jobTitle: u.jobTitle || "-",
+        isOnline: !!u.isOnline,
+        lastActiveAt: u.lastActiveAt,
+        sessionsCount: 1,
+      })),
     });
   }
 
-  // Sort branches: installed first, then alphabetically by code
+  // Sort: installed branches first, then by branchCode
   branchItems.sort((a, b) => {
     if (a.isInstalled !== b.isInstalled) return a.isInstalled ? -1 : 1;
     return a.branchCode.localeCompare(b.branchCode);

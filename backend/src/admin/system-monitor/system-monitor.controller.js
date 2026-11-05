@@ -152,6 +152,51 @@ const getConnections = asyncHandler(async (req, res) => {
     query.userId = { $in: userIds };
   }
 
+  // Purge any legacy mock seeded sessions
+  await DeviceSession.deleteMany({
+    $or: [
+      { "deviceInfo.hostname": /^(PC|LAPTOP|POS)-(ACC|MGR|CS|LAW|\d+)/i },
+      { "deviceInfo.hostname": /^(PC|LAPTOP|POS)/i },
+      { socketId: /^sock_live_/i },
+    ],
+  }).catch(() => {});
+
+  // Sync registered physical devices from UpdateDevice into DeviceSession
+  try {
+    const UpdateDevice = require("../updates/device.model");
+    const regDevices = await UpdateDevice.find({}).lean();
+    for (const dev of regDevices) {
+      if (dev.lastKnownUserId) {
+        await DeviceSession.findOneAndUpdate(
+          {
+            userId: dev.lastKnownUserId,
+            "deviceInfo.hostname": dev.hostName || dev.deviceName,
+          },
+          {
+            $set: {
+              ipAddress: dev.localIp || "-",
+              clientType: dev.platform?.includes("mobile") ? "mobile" : "desktop",
+              isOnline: dev.connectionStatus === "online",
+              lastSeenAt: dev.lastSeenAt || dev.lastHeartbeatAt || dev.updatedAt,
+              deviceInfo: {
+                hostname: dev.hostName || dev.deviceName,
+                os: dev.osName || "Windows",
+                osVersion: dev.osVersion || "",
+                platform: dev.platform || "win32",
+                arch: dev.architecture || "x64",
+                appVersion: dev.appVersion || "unknown",
+              },
+            },
+            $setOnInsert: {
+              startedAt: dev.createdAt || new Date(),
+            },
+          },
+          { upsert: true }
+        );
+      }
+    }
+  } catch (_) {}
+
   const rawSessions = await DeviceSession.find(query)
     .populate("userId", "username fullName role avatarUrl isOnline jobTitleBranch department")
     .sort({ lastSeenAt: -1, startedAt: -1 })

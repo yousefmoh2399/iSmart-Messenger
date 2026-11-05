@@ -62,7 +62,15 @@ class ChatSocketService {
           .enableReconnection()
           .setReconnectionDelay(1200)
           .setReconnectionDelayMax(4000)
-          .setAuth({'token': token, 'clientType': clientType})
+          .setAuth({
+            'token': token,
+            'clientType': clientType,
+            'deviceInfo': {
+              'platform': 'android',
+              'os': 'Android',
+              'appVersion': '1.2.7',
+            },
+          })
           .setExtraHeaders({
             'Authorization': 'Bearer $token',
             'x-client-type': clientType,

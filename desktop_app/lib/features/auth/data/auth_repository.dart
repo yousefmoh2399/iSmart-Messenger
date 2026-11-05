@@ -503,7 +503,7 @@ class AuthRepository {
         'deviceUid': deviceUid,
         'platform': 'windows',
         'deviceName': 'كمبيوتر المكتب Windows',
-        'appVersion': '1.2.4',
+        'appVersion': '1.1.21',
       };
       final deviceName = meta['deviceName'] ?? 'Desktop Windows';
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
@@ -516,7 +516,7 @@ class AuthRepository {
             if (deviceName.isNotEmpty)
               'x-device-name': Uri.encodeComponent(deviceName),
             'x-device-platform': 'windows',
-            'x-app-version': '1.2.4',
+            'x-app-version': '1.1.21',
           },
         ),
       );

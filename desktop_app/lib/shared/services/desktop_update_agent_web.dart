@@ -211,7 +211,7 @@ class DesktopUpdateAgent {
     try {
       final isElectron = web_bridge.isElectron();
       final electronInfo = isElectron ? await web_bridge.getElectronDeviceInfo() : const <String, dynamic>{};
-      final appVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
+      final appVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
       _deviceUid ??= await _loadOrCreateDeviceUid();
 
       String? primaryIp = electronInfo['localIp']?.toString();
@@ -290,7 +290,7 @@ class DesktopUpdateAgent {
 
     try {
       final electronInfo = await web_bridge.getElectronDeviceInfo();
-      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
+      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
       final currentState = await _stateStore.load();
 
       if (_areVersionsEqual(currentVersion, task.release.version)) {
@@ -507,7 +507,7 @@ class DesktopUpdateAgent {
     _isTaskRunning = true;
     try {
       final electronInfo = await web_bridge.getElectronDeviceInfo();
-      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
+      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
 
       hasUpdateAvailableNotifier.value = true;
       downloadProgressNotifier.value = 0.0;
@@ -654,7 +654,7 @@ class DesktopUpdateAgent {
     }
 
     final electronInfo = await web_bridge.getElectronDeviceInfo();
-    final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.2';
+    final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
 
     if (taskState.status == 'awaiting_healthcheck') {
       if (_areVersionsEqual(currentVersion, targetVersion)) {
