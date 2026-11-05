@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/system_monitor_models.dart';
 import 'system_monitor_controller.dart';
+import 'widgets/branches_deployment_view.dart';
 
 class SystemMonitorScreen extends ConsumerStatefulWidget {
   const SystemMonitorScreen({
@@ -19,11 +22,24 @@ class SystemMonitorScreen extends ConsumerStatefulWidget {
 }
 
 class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
-  int _currentTab = 0; // 0 = Sessions, 1 = Errors
+  int _currentTab = 0; // 0 = Deployment & Ops, 1 = Sessions, 2 = Errors
   final TextEditingController _searchController = TextEditingController();
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (mounted) {
+        ref.read(systemMonitorControllerProvider.notifier).refreshTelemetry();
+        ref.read(systemMonitorControllerProvider.notifier).refreshStats();
+      }
+    });
+  }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -95,6 +111,13 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                     const SizedBox(height: 16),
                     // Active Tab Content
                     if (_currentTab == 0)
+                      BranchesDeploymentView(
+                        state: state,
+                        notifier: notifier,
+                        isDark: isDark,
+                        cs: cs,
+                      )
+                    else if (_currentTab == 1)
                       _buildSessionsTab(state, notifier, isDark, cs)
                     else
                       _buildErrorsTab(state, notifier, isDark, cs),
@@ -504,6 +527,9 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
   ) {
     final liveCount = state.stats?.liveSocketsCount ?? 0;
     final errorsCount = state.errorsTotal;
+    final installedBranches =
+        state.deploymentData?.summary.installedBranchesCount ?? 0;
+    final totalBranches = state.deploymentData?.summary.totalBranches ?? 0;
 
     return Container(
       padding: const EdgeInsets.all(4),
@@ -517,9 +543,20 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
         children: [
           Expanded(
             child: _buildTabButton(
-              title: 'الأجهزة والجلسات الحية ($liveCount متصل)',
-              icon: Icons.devices_rounded,
+              title: totalBranches > 0
+                  ? 'انتشار الفروع والعمليات ($installedBranches/$totalBranches)'
+                  : 'انتشار الفروع والعمليات',
+              icon: Icons.hub_rounded,
               index: 0,
+              isDark: isDark,
+              cs: cs,
+            ),
+          ),
+          Expanded(
+            child: _buildTabButton(
+              title: 'الأجهزة والجلسات الحية ($liveCount)',
+              icon: Icons.devices_rounded,
+              index: 1,
               isDark: isDark,
               cs: cs,
             ),
@@ -528,7 +565,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
             child: _buildTabButton(
               title: 'سجل المشاكل والأخطاء ($errorsCount)',
               icon: Icons.bug_report_rounded,
-              index: 1,
+              index: 2,
               isDark: isDark,
               cs: cs,
             ),

@@ -21,6 +21,7 @@ const {
 } = require("./config/env");
 const { getDatabaseStatus } = require("./config/database");
 const { getRedisStatus } = require("./config/redis");
+const { requestTelemetryMiddleware } = require("./middleware/request-telemetry.middleware");
 const authRoutes = require("./routes/auth.routes");
 const documentRoutes = require("./routes/document.routes");
 const userRoutes = require("./routes/user.routes");
@@ -86,6 +87,7 @@ app.use(
 );
 app.use(compression());
 app.use(helmet());
+app.use(requestTelemetryMiddleware);
 app.use(
   morgan(":method :safe-url :status :response-time ms - :res[content-length]", {
     skip: (req) =>

@@ -7,6 +7,11 @@ class SystemMonitorState {
   const SystemMonitorState({
     this.stats,
     this.isLoadingStats = false,
+    this.deploymentData,
+    this.isLoadingDeployment = false,
+    this.requestTelemetry,
+    this.isLoadingTelemetry = false,
+    this.isExportingReport = false,
     this.sessions = const [],
     this.errors = const [],
     this.isLoadingSessions = false,
@@ -27,6 +32,12 @@ class SystemMonitorState {
 
   final SystemTelemetryStats? stats;
   final bool isLoadingStats;
+  final BranchesDeploymentData? deploymentData;
+  final bool isLoadingDeployment;
+  final RequestTelemetryData? requestTelemetry;
+  final bool isLoadingTelemetry;
+  final bool isExportingReport;
+
   final List<DeviceSession> sessions;
   final List<ClientErrorLog> errors;
   final bool isLoadingSessions;
@@ -49,6 +60,11 @@ class SystemMonitorState {
   SystemMonitorState copyWith({
     SystemTelemetryStats? stats,
     bool? isLoadingStats,
+    BranchesDeploymentData? deploymentData,
+    bool? isLoadingDeployment,
+    RequestTelemetryData? requestTelemetry,
+    bool? isLoadingTelemetry,
+    bool? isExportingReport,
     List<DeviceSession>? sessions,
     List<ClientErrorLog>? errors,
     bool? isLoadingSessions,
@@ -69,6 +85,11 @@ class SystemMonitorState {
     return SystemMonitorState(
       stats: stats ?? this.stats,
       isLoadingStats: isLoadingStats ?? this.isLoadingStats,
+      deploymentData: deploymentData ?? this.deploymentData,
+      isLoadingDeployment: isLoadingDeployment ?? this.isLoadingDeployment,
+      requestTelemetry: requestTelemetry ?? this.requestTelemetry,
+      isLoadingTelemetry: isLoadingTelemetry ?? this.isLoadingTelemetry,
+      isExportingReport: isExportingReport ?? this.isExportingReport,
       sessions: sessions ?? this.sessions,
       errors: errors ?? this.errors,
       isLoadingSessions: isLoadingSessions ?? this.isLoadingSessions,
@@ -107,6 +128,8 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
   Future<void> refreshAll() async {
     await Future.wait([
       refreshStats(),
+      refreshDeployment(),
+      refreshTelemetry(),
       refreshSessions(),
       loadErrors(),
     ]);
@@ -123,6 +146,44 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       );
     } catch (_) {
       state = state.copyWith(isLoadingStats: false);
+    }
+  }
+
+  Future<void> refreshDeployment() async {
+    state = state.copyWith(isLoadingDeployment: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final data = await repo.getBranchesDeployment();
+      state = state.copyWith(
+        deploymentData: data,
+        isLoadingDeployment: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingDeployment: false);
+    }
+  }
+
+  Future<void> refreshTelemetry() async {
+    state = state.copyWith(isLoadingTelemetry: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final data = await repo.getRequestTelemetry();
+      state = state.copyWith(
+        requestTelemetry: data,
+        isLoadingTelemetry: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingTelemetry: false);
+    }
+  }
+
+  Future<void> exportReport(String format) async {
+    state = state.copyWith(isExportingReport: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.exportDeploymentReport(format: format);
+    } finally {
+      state = state.copyWith(isExportingReport: false);
     }
   }
 

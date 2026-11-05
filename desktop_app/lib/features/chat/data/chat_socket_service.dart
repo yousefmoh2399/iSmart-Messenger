@@ -67,8 +67,14 @@ class ChatSocketService implements PrintStatusEmitter {
           'os': io_dart.Platform.operatingSystem,
           'osVersion': io_dart.Platform.operatingSystemVersion,
           'hostname': io_dart.Platform.localHostname,
+          'appVersion': '1.1.21',
         };
       } catch (_) {}
+    } else {
+      deviceInfo = {
+        'os': 'web',
+        'appVersion': '1.1.21',
+      };
     }
 
     final socket =

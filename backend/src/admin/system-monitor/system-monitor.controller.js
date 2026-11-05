@@ -5,6 +5,12 @@ const asyncHandler = require("../../utils/async-handler");
 const DeviceSession = require("../../models/device-session.model");
 const ClientError = require("../../models/client-error.model");
 const User = require("../../models/user.model");
+const {
+  getBranchesDeploymentData,
+  buildDeploymentExcelReport,
+  buildDeploymentPdfReport,
+} = require("./system-monitor.service");
+const { getTelemetrySnapshot } = require("../../middleware/request-telemetry.middleware");
 function safeGetLiveSocketMetrics() {
   try {
     const chatSocket = require("../../chat/sockets/chat.socket");
@@ -250,10 +256,50 @@ const deleteAllErrors = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "All errors deleted" });
 });
 
+const getBranchesDeployment = asyncHandler(async (req, res) => {
+  const data = await getBranchesDeploymentData();
+  res.json({
+    success: true,
+    data,
+  });
+});
+
+const getRequestTelemetry = asyncHandler(async (req, res) => {
+  const telemetry = getTelemetrySnapshot();
+  res.json({
+    success: true,
+    data: telemetry,
+  });
+});
+
+const exportDeploymentReport = asyncHandler(async (req, res) => {
+  const format = (req.query.format || "xlsx").toLowerCase();
+  const data = await getBranchesDeploymentData();
+  const actor = req.user;
+
+  if (format === "pdf") {
+    const { buffer, fileName } = await buildDeploymentPdfReport(data, actor);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(buffer);
+  } else {
+    const { buffer, fileName } = await buildDeploymentExcelReport(data, actor);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(buffer);
+  }
+});
+
 module.exports = {
   getSystemStats,
   getConnections,
   getErrors,
   markErrorResolved,
   deleteAllErrors,
+  getBranchesDeployment,
+  getRequestTelemetry,
+  exportDeploymentReport,
 };

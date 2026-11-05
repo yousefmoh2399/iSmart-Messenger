@@ -246,3 +246,310 @@ class PaginatedResponse<T> {
   final int total;
   final bool hasMore;
 }
+
+class BranchDeploymentSummary {
+  const BranchDeploymentSummary({
+    required this.totalBranches,
+    required this.installedBranchesCount,
+    required this.notInstalledBranchesCount,
+    required this.adoptionPercentage,
+    required this.totalInstalledDevices,
+    required this.totalOnlineDevices,
+    required this.currentAppVersion,
+    required this.versionBreakdown,
+    required this.platformBreakdown,
+    required this.calculatedAt,
+  });
+
+  final int totalBranches;
+  final int installedBranchesCount;
+  final int notInstalledBranchesCount;
+  final int adoptionPercentage;
+  final int totalInstalledDevices;
+  final int totalOnlineDevices;
+  final String currentAppVersion;
+  final Map<String, int> versionBreakdown;
+  final Map<String, int> platformBreakdown;
+  final DateTime calculatedAt;
+
+  factory BranchDeploymentSummary.fromJson(Map<String, dynamic> json) {
+    final vMap = <String, int>{};
+    if (json['versionBreakdown'] is Map) {
+      (json['versionBreakdown'] as Map).forEach((k, v) {
+        vMap[k.toString()] = (v as num).toInt();
+      });
+    }
+    final pMap = <String, int>{};
+    if (json['platformBreakdown'] is Map) {
+      (json['platformBreakdown'] as Map).forEach((k, v) {
+        pMap[k.toString()] = (v as num).toInt();
+      });
+    }
+
+    return BranchDeploymentSummary(
+      totalBranches: (json['totalBranches'] as num?)?.toInt() ?? 0,
+      installedBranchesCount: (json['installedBranchesCount'] as num?)?.toInt() ?? 0,
+      notInstalledBranchesCount: (json['notInstalledBranchesCount'] as num?)?.toInt() ?? 0,
+      adoptionPercentage: (json['adoptionPercentage'] as num?)?.toInt() ?? 0,
+      totalInstalledDevices: (json['totalInstalledDevices'] as num?)?.toInt() ?? 0,
+      totalOnlineDevices: (json['totalOnlineDevices'] as num?)?.toInt() ?? 0,
+      currentAppVersion: json['currentAppVersion'] as String? ?? '1.1.21',
+      versionBreakdown: vMap,
+      platformBreakdown: pMap,
+      calculatedAt: json['calculatedAt'] != null
+          ? DateTime.parse(json['calculatedAt'].toString())
+          : DateTime.now(),
+    );
+  }
+}
+
+class InstalledUserItem {
+  const InstalledUserItem({
+    required this.userId,
+    required this.username,
+    required this.fullName,
+    required this.role,
+    required this.jobTitle,
+    required this.isOnline,
+    this.lastActiveAt,
+    required this.sessionsCount,
+  });
+
+  final String userId;
+  final String username;
+  final String fullName;
+  final String role;
+  final String jobTitle;
+  final bool isOnline;
+  final DateTime? lastActiveAt;
+  final int sessionsCount;
+
+  factory InstalledUserItem.fromJson(Map<String, dynamic> json) {
+    return InstalledUserItem(
+      userId: json['userId']?.toString() ?? '',
+      username: json['username'] as String? ?? '',
+      fullName: json['fullName'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+      jobTitle: json['jobTitle'] as String? ?? '-',
+      isOnline: json['isOnline'] as bool? ?? false,
+      lastActiveAt: json['lastActiveAt'] != null
+          ? DateTime.tryParse(json['lastActiveAt'].toString())
+          : null,
+      sessionsCount: (json['sessionsCount'] as num?)?.toInt() ?? 1,
+    );
+  }
+}
+
+class BranchDeviceItem {
+  const BranchDeviceItem({
+    required this.hostname,
+    required this.os,
+    required this.osVersion,
+    required this.ipAddress,
+    required this.clientType,
+    required this.appVersion,
+    required this.isOnline,
+    this.lastSeenAt,
+    required this.username,
+    required this.fullName,
+  });
+
+  final String hostname;
+  final String os;
+  final String osVersion;
+  final String ipAddress;
+  final String clientType;
+  final String appVersion;
+  final bool isOnline;
+  final DateTime? lastSeenAt;
+  final String username;
+  final String fullName;
+
+  factory BranchDeviceItem.fromJson(Map<String, dynamic> json) {
+    final user = json['user'] as Map<String, dynamic>? ?? {};
+    return BranchDeviceItem(
+      hostname: json['hostname'] as String? ?? 'Unknown Device',
+      os: json['os'] as String? ?? 'Windows',
+      osVersion: json['osVersion'] as String? ?? '',
+      ipAddress: json['ipAddress'] as String? ?? '-',
+      clientType: json['clientType'] as String? ?? 'desktop',
+      appVersion: json['appVersion'] as String? ?? '1.1.21',
+      isOnline: json['isOnline'] as bool? ?? false,
+      lastSeenAt: json['lastSeenAt'] != null
+          ? DateTime.tryParse(json['lastSeenAt'].toString())
+          : null,
+      username: user['username'] as String? ?? '',
+      fullName: user['fullName'] as String? ?? '',
+    );
+  }
+}
+
+class BranchDeploymentItem {
+  const BranchDeploymentItem({
+    required this.branchId,
+    required this.branchName,
+    required this.branchCode,
+    required this.isInstalled,
+    required this.totalRegisteredUsers,
+    required this.installedUsersCount,
+    required this.onlineUsersCount,
+    required this.devicesCount,
+    required this.onlineDevicesCount,
+    required this.appVersions,
+    this.lastActivityAt,
+    required this.devices,
+    required this.installedUsers,
+  });
+
+  final String branchId;
+  final String branchName;
+  final String branchCode;
+  final bool isInstalled;
+  final int totalRegisteredUsers;
+  final int installedUsersCount;
+  final int onlineUsersCount;
+  final int devicesCount;
+  final int onlineDevicesCount;
+  final List<String> appVersions;
+  final DateTime? lastActivityAt;
+  final List<BranchDeviceItem> devices;
+  final List<InstalledUserItem> installedUsers;
+
+  factory BranchDeploymentItem.fromJson(Map<String, dynamic> json) {
+    final devsList = (json['devices'] as List<dynamic>?)
+            ?.map((e) => BranchDeviceItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    final usersList = (json['installedUsers'] as List<dynamic>?)
+            ?.map((e) => InstalledUserItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    final versionsList = (json['appVersions'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        [];
+
+    return BranchDeploymentItem(
+      branchId: json['branchId']?.toString() ?? '',
+      branchName: json['branchName'] as String? ?? '',
+      branchCode: json['branchCode'] as String? ?? '',
+      isInstalled: json['isInstalled'] as bool? ?? false,
+      totalRegisteredUsers: (json['totalRegisteredUsers'] as num?)?.toInt() ?? 0,
+      installedUsersCount: (json['installedUsersCount'] as num?)?.toInt() ?? 0,
+      onlineUsersCount: (json['onlineUsersCount'] as num?)?.toInt() ?? 0,
+      devicesCount: (json['devicesCount'] as num?)?.toInt() ?? 0,
+      onlineDevicesCount: (json['onlineDevicesCount'] as num?)?.toInt() ?? 0,
+      appVersions: versionsList,
+      lastActivityAt: json['lastActivityAt'] != null
+          ? DateTime.tryParse(json['lastActivityAt'].toString())
+          : null,
+      devices: devsList,
+      installedUsers: usersList,
+    );
+  }
+}
+
+class BranchesDeploymentData {
+  const BranchesDeploymentData({
+    required this.summary,
+    required this.branches,
+  });
+
+  final BranchDeploymentSummary summary;
+  final List<BranchDeploymentItem> branches;
+
+  factory BranchesDeploymentData.fromJson(Map<String, dynamic> json) {
+    final s = BranchDeploymentSummary.fromJson(
+        json['summary'] as Map<String, dynamic>? ?? {});
+    final bList = (json['branches'] as List<dynamic>?)
+            ?.map((e) => BranchDeploymentItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+    return BranchesDeploymentData(
+      summary: s,
+      branches: bList,
+    );
+  }
+}
+
+class LiveRequestItem {
+  const LiveRequestItem({
+    required this.id,
+    required this.timestamp,
+    required this.method,
+    required this.path,
+    required this.statusCode,
+    required this.durationMs,
+    required this.clientIp,
+    this.username,
+    this.fullName,
+  });
+
+  final String id;
+  final DateTime timestamp;
+  final String method;
+  final String path;
+  final int statusCode;
+  final int durationMs;
+  final String clientIp;
+  final String? username;
+  final String? fullName;
+
+  factory LiveRequestItem.fromJson(Map<String, dynamic> json) {
+    final user = json['user'] as Map<String, dynamic>?;
+    return LiveRequestItem(
+      id: json['id'] as String? ?? '',
+      timestamp: json['timestamp'] != null
+          ? DateTime.tryParse(json['timestamp'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      method: json['method'] as String? ?? 'GET',
+      path: json['path'] as String? ?? '/',
+      statusCode: (json['statusCode'] as num?)?.toInt() ?? 200,
+      durationMs: (json['durationMs'] as num?)?.toInt() ?? 0,
+      clientIp: json['clientIp'] as String? ?? '-',
+      username: user?['username'] as String?,
+      fullName: user?['fullName'] as String?,
+    );
+  }
+}
+
+class RequestTelemetryData {
+  const RequestTelemetryData({
+    required this.totalRequests,
+    required this.activeRequests,
+    required this.rps,
+    required this.avgLatencyMs,
+    required this.statusCounts,
+    required this.recentRequests,
+  });
+
+  final int totalRequests;
+  final int activeRequests;
+  final double rps;
+  final int avgLatencyMs;
+  final Map<String, int> statusCounts;
+  final List<LiveRequestItem> recentRequests;
+
+  factory RequestTelemetryData.fromJson(Map<String, dynamic> json) {
+    final sc = <String, int>{};
+    if (json['statusCounts'] is Map) {
+      (json['statusCounts'] as Map).forEach((k, v) {
+        sc[k.toString()] = (v as num).toInt();
+      });
+    }
+
+    final reqs = (json['recentRequests'] as List<dynamic>?)
+            ?.map((e) => LiveRequestItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [];
+
+    return RequestTelemetryData(
+      totalRequests: (json['totalRequests'] as num?)?.toInt() ?? 0,
+      activeRequests: (json['activeRequests'] as num?)?.toInt() ?? 0,
+      rps: (json['rps'] as num?)?.toDouble() ?? 0.0,
+      avgLatencyMs: (json['avgLatencyMs'] as num?)?.toInt() ?? 0,
+      statusCounts: sc,
+      recentRequests: reqs,
+    );
+  }
+}

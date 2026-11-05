@@ -1,4 +1,9 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+
 import '../../../core/network/api_client.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../models/system_monitor_models.dart';
 
 class SystemMonitorRepository {
@@ -91,5 +96,45 @@ class SystemMonitorRepository {
 
   Future<void> deleteAllErrors() async {
     await _apiClient.dio.delete<dynamic>('/api/admin/system-monitor/errors');
+  }
+
+  Future<BranchesDeploymentData> getBranchesDeployment() async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      '/api/admin/system-monitor/branches-deployment',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>? ?? {};
+    return BranchesDeploymentData.fromJson(data);
+  }
+
+  Future<RequestTelemetryData> getRequestTelemetry() async {
+    final response = await _apiClient.dio.get<Map<String, dynamic>>(
+      '/api/admin/system-monitor/request-telemetry',
+    );
+    final data = response.data?['data'] as Map<String, dynamic>? ?? {};
+    return RequestTelemetryData.fromJson(data);
+  }
+
+  Future<void> exportDeploymentReport({String format = 'xlsx'}) async {
+    final response = await _apiClient.dio.get<dynamic>(
+      '/api/admin/system-monitor/reports/export',
+      queryParameters: {'format': format},
+      options: Options(responseType: ResponseType.bytes),
+    );
+    final data = response.data;
+    if (data == null) return;
+    final bytes = data is Uint8List
+        ? data
+        : data is List<int>
+            ? Uint8List.fromList(data)
+            : Uint8List.fromList(const <int>[]);
+    final ext = format == 'pdf' ? 'pdf' : 'xlsx';
+    final mime = format == 'pdf'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    await web_bridge.downloadBytes(
+      bytes: bytes,
+      fileName: 'ismart-branches-deployment-${DateTime.now().millisecondsSinceEpoch}.$ext',
+      mimeType: mime,
+    );
   }
 }
