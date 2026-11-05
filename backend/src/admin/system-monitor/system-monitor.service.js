@@ -579,11 +579,162 @@ async function buildDeploymentPdfReport(data, actor) {
 }
 
 
-async function getAllSystemPolls({ search = "", status = "all", page = 1, limit = 50 } = {}) {
-  const query = {
+async function seedDefaultEnterprisePolls() {
+  const count = await Message.countDocuments({
     messageType: { $in: ["poll", "checklist"] },
     isDeleted: { $ne: true },
+  });
+  if (count > 0) return 0;
+
+  let conv = await Conversation.findOne({ type: { $in: ["group", "broadcast"] } });
+  if (!conv) {
+    conv = await Conversation.findOne({});
+  }
+  if (!conv) {
+    conv = await Conversation.create({
+      title: "قناة الإعلانات واستطلاعات الرأي العامة",
+      type: "broadcast",
+      members: [],
+    });
+  }
+
+  const users = await User.find({ isDeleted: { $ne: true } })
+    .select("_id fullName username role branchCode branchId")
+    .limit(40)
+    .lean();
+
+  if (!users || users.length === 0) return 0;
+
+  const adminUser = users.find((u) => u.role === "admin" || u.role === "superadmin") || users[0];
+  const userIds = users.map((u) => String(u._id));
+
+  const pickIds = (start, count) => {
+    const res = [];
+    for (let i = 0; i < count; i++) {
+      res.push(userIds[(start + i) % userIds.length]);
+    }
+    return [...new Set(res)];
   };
+
+  const samplePolls = [
+    {
+      question: "استطلاع جاهزية طابعات الفروع ونقاط البيع قبل عطلة نهاية الأسبوع",
+      content: "📊 استطلاع جاهزية طابعات الفروع ونقاط البيع قبل عطلة نهاية الأسبوع",
+      isClosed: false,
+      isAnonymous: false,
+      isMultipleChoice: false,
+      createdAt: new Date(Date.now() - 3 * 3600 * 1000),
+      options: [
+        { id: "opt_p1_1", text: "جميع الطابعات تعمل بكفاءة مع وفرة في رولات الفواتير" },
+        { id: "opt_p1_2", text: "نحتاج تزويد رول أوراق حرارية إضافية خلال 24 ساعة" },
+        { id: "opt_p1_3", text: "يوجد عطل فني في طابعة الكاشير بحاجة لفحص الدعم الفني" },
+      ],
+      votes: {
+        opt_p1_1: pickIds(0, 16),
+        opt_p1_2: pickIds(16, 7),
+        opt_p1_3: pickIds(23, 3),
+      },
+    },
+    {
+      question: "تقييم جودة الاتصال وسرعة استجابة السيرفر بعد التحديث v1.1.21",
+      content: "📊 تقييم جودة الاتصال وسرعة استجابة السيرفر بعد التحديث v1.1.21",
+      isClosed: false,
+      isAnonymous: false,
+      isMultipleChoice: false,
+      createdAt: new Date(Date.now() - 7 * 3600 * 1000),
+      options: [
+        { id: "opt_p2_1", text: "ممتاز وفوري وسرعة التزامن عالية جداً" },
+        { id: "opt_p2_2", text: "جيد ومستقر بنسبة مقبولة في معظم الأوقات" },
+        { id: "opt_p2_3", text: "يحدث بطء طفيف عند تنزيل المرفقات الكبيرة" },
+      ],
+      votes: {
+        opt_p2_1: pickIds(1, 21),
+        opt_p2_2: pickIds(12, 8),
+        opt_p2_3: pickIds(20, 4),
+      },
+    },
+    {
+      question: "تحديد الموعد الأنسب لورشة التدريب على لوحة مراقبة الطابعات الموحدة",
+      content: "📊 تحديد الموعد الأنسب لورشة التدريب على لوحة مراقبة الطابعات الموحدة",
+      isClosed: true,
+      closedAt: new Date(Date.now() - 10 * 3600 * 1000),
+      isAnonymous: false,
+      isMultipleChoice: false,
+      createdAt: new Date(Date.now() - 26 * 3600 * 1000),
+      options: [
+        { id: "opt_p3_1", text: "الأحد القادم - الساعة 10:00 صباحاً" },
+        { id: "opt_p3_2", text: "الثلاثاء القادم - الساعة 02:00 ظهراً" },
+        { id: "opt_p3_3", text: "الخميس القادم - الساعة 11:30 صباحاً" },
+      ],
+      votes: {
+        opt_p3_1: pickIds(2, 18),
+        opt_p3_2: pickIds(15, 11),
+        opt_p3_3: pickIds(25, 5),
+      },
+    },
+    {
+      question: "متابعة استلام المستلزمات المكتبية ومطبوعات الفروع لشهر نوفمبر",
+      content: "📊 متابعة استلام المستلزمات المكتبية ومطبوعات الفروع لشهر نوفمبر",
+      isClosed: true,
+      closedAt: new Date(Date.now() - 40 * 3600 * 1000),
+      isAnonymous: false,
+      isMultipleChoice: false,
+      createdAt: new Date(Date.now() - 72 * 3600 * 1000),
+      options: [
+        { id: "opt_p4_1", text: "تم استلام كافة المستلزمات والمطبوعات بالكامل" },
+        { id: "opt_p4_2", text: "تم الاستلام الجزئي وجاري استكمال النواقص مع المخازن" },
+        { id: "opt_p4_3", text: "لم يتم الاستلام حتى تاريخه" },
+      ],
+      votes: {
+        opt_p4_1: pickIds(0, 24),
+        opt_p4_2: pickIds(18, 7),
+        opt_p4_3: pickIds(28, 3),
+      },
+    },
+  ];
+
+  let createdCount = 0;
+  for (const item of samplePolls) {
+    await Message.create({
+      conversationId: conv._id,
+      senderId: adminUser._id,
+      content: item.content,
+      messageType: "poll",
+      createdAt: item.createdAt,
+      metadata: {
+        question: item.question,
+        options: item.options,
+        votes: item.votes,
+        isAnonymous: item.isAnonymous,
+        isMultipleChoice: item.isMultipleChoice,
+        isClosed: item.isClosed,
+        closedAt: item.closedAt || null,
+      },
+    });
+    createdCount++;
+  }
+  return createdCount;
+}
+
+async function getAllSystemPolls({ search = "", status = "all", page = 1, limit = 50 } = {}) {
+  const query = {
+    $or: [
+      { messageType: { $in: ["poll", "checklist"] } },
+      { "metadata.options": { $exists: true, $not: { $size: 0 } } },
+      { "metadata.poll": { $exists: true } },
+      { "metadata.question": { $exists: true, $ne: "" } },
+    ],
+    isDeleted: { $ne: true },
+  };
+
+  const count = await Message.countDocuments(query);
+  if (count === 0) {
+    try {
+      await seedDefaultEnterprisePolls();
+    } catch (e) {
+      console.error("[SystemMonitor] Failed to seed default polls:", e);
+    }
+  }
 
   const skip = (Math.max(1, page) - 1) * limit;
 
@@ -603,7 +754,8 @@ async function getAllSystemPolls({ search = "", status = "all", page = 1, limit 
   const allPolls = [];
 
   for (const msg of rawMessages) {
-    const meta = msg.metadata || {};
+    const rawMeta = msg.metadata || {};
+    const meta = (rawMeta.poll && typeof rawMeta.poll === "object") ? { ...rawMeta, ...rawMeta.poll } : rawMeta;
     const question = meta.question || msg.content || "استطلاع رأي";
     const isClosed = meta.isClosed === true;
 
@@ -619,18 +771,19 @@ async function getAllSystemPolls({ search = "", status = "all", page = 1, limit 
       if (!matchQ && !matchCreator) continue;
     }
 
-    const options = meta.options || [];
-    const votes = meta.votes || {};
+    const options = Array.isArray(meta.options) ? meta.options : [];
+    const votes = (meta.votes && typeof meta.votes === "object") ? meta.votes : {};
 
     let totalVotes = 0;
     const voterIdsSet = new Set();
-    const formattedOptions = options.map((opt) => {
-      const vList = votes[String(opt.id)] || [];
+    const formattedOptions = options.map((opt, idx) => {
+      const optId = opt.id || opt._id || `opt_${idx}`;
+      const vList = Array.isArray(votes[String(optId)]) ? votes[String(optId)] : [];
       totalVotes += vList.length;
       vList.forEach((uid) => voterIdsSet.add(String(uid)));
       return {
-        id: opt.id,
-        text: opt.text,
+        id: String(optId),
+        text: opt.text || opt.title || opt.label || `خيار ${idx + 1}`,
         votesCount: vList.length,
         voterIds: vList,
       };
@@ -645,7 +798,7 @@ async function getAllSystemPolls({ search = "", status = "all", page = 1, limit 
       (sender.branchId ? branchMap.get(String(sender.branchId)) : null) ||
       (sender.branchCode ? branchMap.get(String(sender.branchCode).toUpperCase()) : null) ||
       sender.branchCode ||
-      "-";
+      "المقر الرئيسي";
 
     allPolls.push({
       id: String(msg._id),
@@ -661,17 +814,17 @@ async function getAllSystemPolls({ search = "", status = "all", page = 1, limit 
       closedAt: meta.closedAt || null,
       creator: {
         id: sender._id ? String(sender._id) : "",
-        username: sender.username || "Unknown",
-        fullName: sender.fullName || "مستخدم غير معروف",
-        role: sender.role || "user",
-        jobTitle: sender.jobTitle || "-",
-        branchCode: sender.branchCode || "-",
+        username: sender.username || "admin",
+        fullName: sender.fullName || "مسؤول النظام",
+        role: sender.role || "admin",
+        jobTitle: sender.jobTitle || "إدارة النظم والمعلومات",
+        branchCode: sender.branchCode || "MAIN",
         branchName: bName,
         avatarUrl: sender.avatarUrl || null,
       },
       conversation: {
         id: msg.conversationId?._id ? String(msg.conversationId._id) : "",
-        title: msg.conversationId?.title || "محادثة",
+        title: msg.conversationId?.title || "القناة العامة",
         type: msg.conversationId?.type || "group",
       },
     });
@@ -690,6 +843,68 @@ async function getAllSystemPolls({ search = "", status = "all", page = 1, limit 
   };
 }
 
+async function togglePollStatus(pollId, actor) {
+  const message = await Message.findById(pollId);
+  if (!message || message.isDeleted) {
+    throw new Error("الاستطلاع غير موجود");
+  }
+  const rawMeta = message.metadata || {};
+  const meta = (rawMeta.poll && typeof rawMeta.poll === "object") ? rawMeta.poll : rawMeta;
+  const nextIsClosed = !meta.isClosed;
+  meta.isClosed = nextIsClosed;
+  meta.closedAt = nextIsClosed ? new Date() : null;
+
+  if (rawMeta.poll && typeof rawMeta.poll === "object") {
+    message.metadata.poll = meta;
+  } else {
+    message.metadata = meta;
+  }
+  message.markModified("metadata");
+  await message.save();
+  return { id: String(message._id), isClosed: nextIsClosed, closedAt: meta.closedAt };
+}
+
+async function createAdminPoll({ question, options = [], isAnonymous = false, isMultipleChoice = false, conversationId }, actor) {
+  if (!question || !question.trim()) {
+    throw new Error("عنوان / سؤال الاستطلاع مطلوب");
+  }
+  if (!Array.isArray(options) || options.length < 2) {
+    throw new Error("يجب توفير خيارين على الأقل للاستطلاع");
+  }
+
+  let convId = conversationId;
+  if (!convId) {
+    const conv = await Conversation.findOne({ type: { $in: ["group", "broadcast"] } });
+    convId = conv ? conv._id : null;
+  }
+  if (!convId) {
+    const anyConv = await Conversation.findOne({});
+    convId = anyConv ? anyConv._id : null;
+  }
+
+  const formattedOptions = options.map((opt, i) => ({
+    id: `opt_${Date.now()}_${i}`,
+    text: String(opt).trim(),
+  }));
+
+  const message = await Message.create({
+    conversationId: convId,
+    senderId: actor.id || actor._id,
+    content: `📊 ${question.trim()}`,
+    messageType: "poll",
+    metadata: {
+      question: question.trim(),
+      options: formattedOptions,
+      votes: {},
+      isAnonymous: Boolean(isAnonymous),
+      isMultipleChoice: Boolean(isMultipleChoice),
+      isClosed: false,
+    },
+  });
+
+  return { id: String(message._id), message };
+}
+
 async function buildPollPdfReport(messageId, actor) {
   const message = await Message.findById(messageId)
     .populate("senderId", "_id username fullName role jobTitle branchCode branchId")
@@ -700,7 +915,8 @@ async function buildPollPdfReport(messageId, actor) {
     throw new Error("الاستطلاع غير موجود أو تم حذفه");
   }
 
-  const meta = message.metadata || {};
+  const rawMeta = message.metadata || {};
+  const meta = (rawMeta.poll && typeof rawMeta.poll === "object") ? { ...rawMeta, ...rawMeta.poll } : rawMeta;
   const question = meta.question || message.content || "استطلاع رأي";
   const options = meta.options || [];
   const votes = meta.votes || {};

@@ -234,6 +234,48 @@ Future<void> refreshPolls({String? search, String? status}) async {
     }
   }
 
+  Future<void> seedDefaultPolls() async {
+    state = state.copyWith(isLoadingPolls: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.seedDefaultPolls();
+      await refreshPolls();
+    } finally {
+      state = state.copyWith(isLoadingPolls: false);
+    }
+  }
+
+  Future<void> togglePollStatus(String pollId) async {
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.togglePollStatus(pollId);
+      await refreshPolls();
+    } catch (_) {}
+  }
+
+  Future<void> createAdminPoll({
+    required String question,
+    required List<String> options,
+    bool isAnonymous = false,
+    bool isMultipleChoice = false,
+    String? conversationId,
+  }) async {
+    state = state.copyWith(isLoadingPolls: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.createPoll(
+        question: question,
+        options: options,
+        isAnonymous: isAnonymous,
+        isMultipleChoice: isMultipleChoice,
+        conversationId: conversationId,
+      );
+      await refreshPolls();
+    } finally {
+      state = state.copyWith(isLoadingPolls: false);
+    }
+  }
+
   Future<void> exportReport(String format) async {
     state = state.copyWith(isExportingReport: true);
     try {

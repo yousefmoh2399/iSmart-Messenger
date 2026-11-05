@@ -12,6 +12,9 @@ const {
   getAllSystemPolls,
   buildPollPdfReport,
   exportPollToExcel,
+  seedDefaultEnterprisePolls,
+  togglePollStatus,
+  createAdminPoll,
 } = require("./system-monitor.service");
 const { getTelemetrySnapshot } = require("../../middleware/request-telemetry.middleware");
 function safeGetLiveSocketMetrics() {
@@ -332,6 +335,36 @@ const exportPollReport = asyncHandler(async (req, res) => {
   }
 });
 
+const seedPolls = asyncHandler(async (req, res) => {
+  const created = await seedDefaultEnterprisePolls();
+  res.json({
+    success: true,
+    message: created > 0 ? "تم توليد استطلاعات الرأي النموذجية بنجاح" : "استطلاعات الرأي موجودة بالفعل",
+    created,
+  });
+});
+
+const createPoll = asyncHandler(async (req, res) => {
+  const { question, options, isAnonymous, isMultipleChoice, conversationId } = req.body;
+  const result = await createAdminPoll(
+    { question, options, isAnonymous, isMultipleChoice, conversationId },
+    req.user
+  );
+  res.status(201).json({
+    success: true,
+    data: result,
+  });
+});
+
+const togglePollStatusController = asyncHandler(async (req, res) => {
+  const pollId = req.params.id;
+  const result = await togglePollStatus(pollId, req.user);
+  res.json({
+    success: true,
+    data: result,
+  });
+});
+
 module.exports = {
   getSystemStats,
   getConnections,
@@ -343,4 +376,7 @@ module.exports = {
   exportDeploymentReport,
   getAllPolls,
   exportPollReport,
+  seedPolls,
+  createPoll,
+  togglePollStatusController,
 };

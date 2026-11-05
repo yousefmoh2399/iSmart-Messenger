@@ -3810,7 +3810,8 @@ async function exportPollToExcel(currentUser, messageId) {
     throw new ApiError(403, "ليس لديك صلاحية لتصدير نتائج هذا الاستطلاع.");
   }
 
-  const metadata = message.metadata || {};
+  const rawMeta = message.metadata || {};
+  const metadata = (rawMeta.poll && typeof rawMeta.poll === "object") ? { ...rawMeta, ...rawMeta.poll } : rawMeta;
   const question = metadata.question || "استطلاع رأي";
   const options = metadata.options || [];
   const votes = metadata.votes || {};

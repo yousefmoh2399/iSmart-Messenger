@@ -741,6 +741,25 @@ class _AdminPollsViewState extends State<AdminPollsView> {
                   style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                 ),
               ),
+              const Spacer(),
+
+              // Toggle Close/Reopen Poll Button
+              TextButton.icon(
+                onPressed: () => notifier.togglePollStatus(poll.id),
+                icon: Icon(
+                  isClosed ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
+                  size: 15,
+                  color: isClosed ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                ),
+                label: Text(
+                  isClosed ? 'إعادة فتح' : 'إغلاق التصويت',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isClosed ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                  ),
+                ),
+              ),
             ],
           ),
         ],
@@ -774,6 +793,18 @@ class _AdminPollsViewState extends State<AdminPollsView> {
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: () => widget.notifier.seedDefaultPolls(),
+            icon: const Icon(Icons.auto_awesome, size: 16),
+            label: const Text('توليد استطلاعات نموذجية للاختبار'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ],

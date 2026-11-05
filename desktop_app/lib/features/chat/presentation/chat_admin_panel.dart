@@ -17,6 +17,8 @@ import '../../../shared/widgets/shimmer_skeleton.dart';
 import '../../admin/presentation/backup_screen.dart';
 import '../../admin/presentation/update_management_screen.dart';
 import '../../admin/presentation/server_settings_screen.dart';
+import '../../admin/presentation/system_monitor_controller.dart';
+import '../../admin/presentation/widgets/admin_polls_view.dart';
 import '../../reports/presentation/report_templates_screen.dart';
 import '../../users/data/user_management_repository.dart';
 import '../models/chat_models.dart';
@@ -167,6 +169,7 @@ class _ChatAdminPanelState extends ConsumerState<ChatAdminPanel>
       if (_can('canManageBranches')) 'branches',
       if (_can('canCreateRooms') || _can('canSendBroadcast')) 'rooms',
       if (_can('canManageRoles')) 'roles',
+      if (_can('canManageAnnouncements') || widget.currentUser.isAdmin) 'polls',
       if (_can('canViewDepartmentLogs')) 'audit',
       if (_can('canManageSystem')) 'errors',
       if (_can('canManageSystem')) 'server',
@@ -269,6 +272,17 @@ class _ChatAdminPanelState extends ConsumerState<ChatAdminPanel>
           ),
           mobileTab: const Tab(text: 'الصلاحيات'),
           child: _RolesAdminTab(roles: widget.roles),
+        ),
+      if (_visibleTabKeys.contains('polls'))
+        _AdminPanelTabData(
+          label: 'استطلاعات الرأي',
+          destination: const NavigationRailDestination(
+            icon: Icon(Icons.poll_outlined),
+            selectedIcon: Icon(Icons.poll_rounded),
+            label: Text('استطلاعات الرأي'),
+          ),
+          mobileTab: const Tab(text: 'استطلاعات الرأي'),
+          child: _AdminPollsTab(currentUser: widget.currentUser),
         ),
       if (_visibleTabKeys.contains('audit'))
         _AdminPanelTabData(
@@ -9790,4 +9804,327 @@ class _BatchJobItemDraft {
   int count;
   bool isEnabled;
   final bool isCustom;
+}
+
+
+// ---------------- Polls Tab ----------------
+
+class _AdminPollsTab extends ConsumerStatefulWidget {
+  const _AdminPollsTab({required this.currentUser});
+  final AppUser currentUser;
+
+  @override
+  ConsumerState<_AdminPollsTab> createState() => _AdminPollsTabState();
+}
+
+class _AdminPollsTabState extends ConsumerState<_AdminPollsTab> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(systemMonitorControllerProvider.notifier).refreshPolls();
+    });
+  }
+
+  Future<void> _openCreatePollDialog() async {
+    final questionCtrl = TextEditingController();
+    final optionCtrls = [
+      TextEditingController(),
+      TextEditingController(),
+    ];
+    bool isAnonymous = false;
+    bool isMultipleChoice = false;
+
+    final shouldCreate = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          return AlertDialog(
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.poll_rounded, color: Color(0xFF6366F1), size: 20),
+                ),
+                const SizedBox(width: 10),
+                const Text('إنشاء استطلاع رأي جديد', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              ],
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: questionCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'سؤال الاستطلاع / الموضوع *',
+                        hintText: 'مثال: استطلاع جاهزية طابعات الفروع',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.help_outline_rounded),
+                      ),
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'خيارات التصويت (2 كحد أدنى):',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    for (int i = 0; i < optionCtrls.length; i++) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: optionCtrls[i],
+                                decoration: InputDecoration(
+                                  labelText: 'خيار رقم ${i + 1}',
+                                  border: const OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                            if (optionCtrls.length > 2) ...[
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
+                                onPressed: () {
+                                  setDialogState(() {
+                                    optionCtrls.removeAt(i);
+                                  });
+                                },
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (optionCtrls.length < 8)
+                      TextButton.icon(
+                        onPressed: () {
+                          setDialogState(() {
+                            optionCtrls.add(TextEditingController());
+                          });
+                        },
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('إضافة خيار إضافي'),
+                      ),
+                    const Divider(height: 24),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('تصويت مجهول الهوية', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      subtitle: const Text('إخفاء أسماء الموظفين المصوتين في النتائج', style: TextStyle(fontSize: 11)),
+                      value: isAnonymous,
+                      onChanged: (val) => setDialogState(() => isAnonymous = val),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('السماح باختيارات متعددة', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      subtitle: const Text('يمكن للموظف اختيار أكثر من خيار واحد', style: TextStyle(fontSize: 11)),
+                      value: isMultipleChoice,
+                      onChanged: (val) => setDialogState(() => isMultipleChoice = val),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6366F1)),
+                onPressed: () {
+                  final q = questionCtrl.text.trim();
+                  final validOptions = optionCtrls.map((c) => c.text.trim()).where((t) => t.isNotEmpty).toList();
+                  if (q.isEmpty || validOptions.length < 2) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('برجاء كتابة السؤال وتوفير خيارين على الأقل')),
+                    );
+                    return;
+                  }
+                  Navigator.of(dialogCtx).pop(true);
+                },
+                icon: const Icon(Icons.send_rounded, size: 16),
+                label: const Text('نشر الاستطلاع'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (shouldCreate == true) {
+      final q = questionCtrl.text.trim();
+      final validOptions = optionCtrls.map((c) => c.text.trim()).where((t) => t.isNotEmpty).toList();
+      try {
+        await ref.read(systemMonitorControllerProvider.notifier).createAdminPoll(
+          question: q,
+          options: validOptions,
+          isAnonymous: isAnonymous,
+          isMultipleChoice: isMultipleChoice,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم إنشاء ونشر استطلاع الرأي بنجاح')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('حدث خطأ أثناء إنشاء الاستطلاع: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final cs = theme.colorScheme;
+    final monitorState = ref.watch(systemMonitorControllerProvider);
+    final notifier = ref.read(systemMonitorControllerProvider.notifier);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header Bar
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF111827) : Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.02),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.poll_rounded, color: Color(0xFF6366F1), size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'استطلاعات الرأي والتصويت الحي',
+                            style: TextStyle(
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.circle, color: Color(0xFF10B981), size: 6),
+                                SizedBox(width: 4),
+                                Text(
+                                  'تحديث فوري',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF10B981),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'متابعة شاملة لجميع استطلاعات الرأي بالفروع، وتتبع نسب المشاركة، وإمكانية التصدير المباشر لملفات Excel و PDF الرسمية.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: _openCreatePollDialog,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text(
+                    'استطلاع جديد',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: () => notifier.refreshPolls(),
+                  icon: monitorState.isLoadingPolls
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded, size: 18),
+                  tooltip: 'تحديث البيانات',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // AdminPollsView for KPIs, Filters, Cards, and Exports
+          AdminPollsView(
+            state: monitorState,
+            notifier: notifier,
+            isDark: isDark,
+            cs: cs,
+          ),
+        ],
+      ),
+    );
+  }
 }

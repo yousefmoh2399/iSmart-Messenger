@@ -184,4 +184,33 @@ Future<AdminPollsData> getAdminPolls({
       mimeType: mime,
     );
   }
+
+  Future<void> seedDefaultPolls() async {
+    await _apiClient.dio.post<dynamic>('/api/admin/system-monitor/polls/seed');
+  }
+
+  Future<void> togglePollStatus(String pollId) async {
+    await _apiClient.dio.patch<dynamic>(
+      '/api/admin/system-monitor/polls/$pollId/toggle-status',
+    );
+  }
+
+  Future<void> createPoll({
+    required String question,
+    required List<String> options,
+    bool isAnonymous = false,
+    bool isMultipleChoice = false,
+    String? conversationId,
+  }) async {
+    await _apiClient.dio.post<dynamic>(
+      '/api/admin/system-monitor/polls',
+      data: {
+        'question': question,
+        'options': options,
+        'isAnonymous': isAnonymous,
+        'isMultipleChoice': isMultipleChoice,
+        if (conversationId != null) 'conversationId': conversationId,
+      },
+    );
+  }
 }
