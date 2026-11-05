@@ -11,6 +11,9 @@ class AppErrorLogService {
 
   dynamic chatSocketService;
 
+  DateTime? _lastLoggedAt;
+  String? _lastLoggedKey;
+
   final UserPreferencesStore _preferencesStore = UserPreferencesStore();
   Future<void> _lastWrite = Future<void>.value();
 
@@ -38,6 +41,11 @@ class AppErrorLogService {
   }
 
   Future<void> recordDioException(DioException error, {String source = 'api'}) {
+    // Skip cancelled requests and missing auth token cancellations - they are intentional client aborts, not errors
+    if (error.type == DioExceptionType.cancel ||
+        error.error.toString().contains('Missing or invalid authentication token')) {
+      return Future.value();
+    }
     final request = error.requestOptions;
     return record(
       error,
@@ -61,6 +69,17 @@ class AppErrorLogService {
     required String source,
     required Map<String, Object?> context,
   }) async {
+    final now = DateTime.now();
+    final dedupeKey = '$source:${context['method'] ?? ''}:${context['path'] ?? ''}:${error.toString()}';
+    if (_lastLoggedKey == dedupeKey &&
+        _lastLoggedAt != null &&
+        now.difference(_lastLoggedAt!) < const Duration(seconds: 5)) {
+      // Throttle identical error spam within 5 seconds
+      return;
+    }
+    _lastLoggedKey = dedupeKey;
+    _lastLoggedAt = now;
+
     try {
       final preferences = await _preferencesStore.load();
       final entry = _formatEntry(

@@ -192,7 +192,8 @@ class ApiClient {
                   ? _sessionManager.mapRefreshFailure(refreshError)
                   : mapError(refreshError);
               final readable = _readableDioError(error, mapped);
-              if (requestOptions.extra['skipErrorLog'] != true) {
+              final isTempNetworkError = refreshError is RefreshNetworkException;
+              if (requestOptions.extra['skipErrorLog'] != true && !isTempNetworkError) {
                 unawaited(
                   AppErrorLogService.instance.recordDioException(
                     readable,
@@ -206,7 +207,9 @@ class ApiClient {
           }
 
           final readable = _readableDioError(error, mapError(error));
-          if (requestOptions.extra['skipErrorLog'] != true) {
+          final isCancelled = error.type == DioExceptionType.cancel ||
+              error.error is MissingAuthTokenException;
+          if (requestOptions.extra['skipErrorLog'] != true && !isCancelled) {
             unawaited(AppErrorLogService.instance.recordDioException(readable));
           }
           handler.reject(readable);
