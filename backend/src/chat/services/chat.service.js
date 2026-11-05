@@ -3725,12 +3725,20 @@ async function togglePollMessage(currentUser, messageId) {
   }
   const conversation = await getConversationById(message.conversationId);
   const isAdmin =
-    currentUser.role === "admin" || currentUser.role === "superadmin";
+    currentUser.role === "admin" ||
+    currentUser.role === "superadmin" ||
+    Boolean(currentUser.permissions?.canManagePolls) ||
+    Boolean(currentUser.permissions?.canViewSystemMonitor);
   const senderIdStr = message.senderId ? String(message.senderId._id || message.senderId) : "";
   const currentUserIdStr = String(currentUser._id || currentUser.id || "");
   const isCreator = Boolean(senderIdStr && senderIdStr === currentUserIdStr);
 
-  if (!isAdmin && !isCreator) {
+  const member = conversation?.members?.find(
+    (m) => String(m.user?._id || m.user) === currentUserIdStr
+  );
+  const isConvAdmin = member && (member.role === "admin" || member.role === "creator");
+
+  if (!isAdmin && !isCreator && !isConvAdmin) {
     throw new ApiError(
       403,
       "غير مصرح لك بإغلاق هذا الاستطلاع، فقط منشئ الاستطلاع أو مسؤول النظام يمكنه ذلك."
@@ -3748,8 +3756,11 @@ async function togglePollMessage(currentUser, messageId) {
   meta.closedBy = nextIsClosed ? currentUserIdStr : null;
 
   if (rawMeta.poll && typeof rawMeta.poll === "object") {
-    message.metadata.poll = meta;
+    rawMeta.poll = meta;
+    rawMeta.isClosed = nextIsClosed;
+    message.metadata = rawMeta;
   } else {
+    meta.isClosed = nextIsClosed;
     message.metadata = meta;
   }
   message.markModified("metadata");
@@ -3792,7 +3803,10 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   await assertConversationAccess(currentUser, conversation);
 
   let metadata = message.metadata || {};
-  if (metadata.isClosed) {
+  const isNestedPoll = Boolean(metadata.poll && typeof metadata.poll === "object");
+  const pollTarget = isNestedPoll ? metadata.poll : metadata;
+
+  if (pollTarget.isClosed || metadata.isClosed) {
     throw new ApiError(400, "التصويت مغلق في هذا الاستطلاع.");
   }
   if (!metadata.options || !Array.isArray(metadata.options)) {

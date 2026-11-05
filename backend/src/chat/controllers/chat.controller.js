@@ -1115,6 +1115,7 @@ const getMessageReadReceiptsHandler = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  emitMessageUpdated,
   votePoll,
   togglePoll,
   exportPoll,

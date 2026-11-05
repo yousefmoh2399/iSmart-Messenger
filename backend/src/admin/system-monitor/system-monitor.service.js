@@ -118,8 +118,12 @@ async function getBranchesDeploymentData() {
   const devicesByUserId = new Map();
 
   for (const dev of updateDevices) {
-    if (dev.branchCode) {
-      const bCode = String(dev.branchCode).toUpperCase();
+    let bCode = dev.branchCode ? String(dev.branchCode).toUpperCase() : null;
+    if (!bCode && dev.lastKnownUserId && allUsersMap.has(String(dev.lastKnownUserId))) {
+      const u = allUsersMap.get(String(dev.lastKnownUserId));
+      bCode = (u.branchCode || "").toUpperCase();
+    }
+    if (bCode) {
       if (!devicesByBranchCode.has(bCode)) devicesByBranchCode.set(bCode, []);
       devicesByBranchCode.get(bCode).push(dev);
     }
@@ -173,7 +177,11 @@ async function getBranchesDeploymentData() {
     // 1. Process physical devices registered in UpdateDevice for this branch
     const bUpdateDevices = devicesByBranchCode.get(bCode) || [];
     for (const dev of bUpdateDevices) {
-      const devKey = (dev.hostName || dev.deviceUid || dev.deviceName || String(dev._id)).trim().toLowerCase();
+      const devKey = dev.deviceUid
+        ? String(dev.deviceUid).trim().toLowerCase()
+        : ((dev.hostName || dev.deviceName)
+            ? String(dev.hostName || dev.deviceName).trim().toLowerCase()
+            : String(dev._id));
       const appVersion = String(dev.appVersion || "unknown").trim();
       branchVersions.add(appVersion);
 
@@ -189,11 +197,13 @@ async function getBranchesDeploymentData() {
         ? `محدث (v${CURRENT_APP_VERSION})`
         : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`);
 
-      const hostName = (dev.hostName || dev.deviceName || "Desktop-PC").trim();
+      const hostName = (dev.hostName || dev.deviceName || (dev.platform?.includes("mobile") ? "Mobile Device" : "Desktop-PC")).trim();
       const uNameLower = (dev.lastKnownUsername || "").toLowerCase();
-      const workstationType = uNameLower.startsWith("cash")
-        ? "نقطة بيع كاشير"
-        : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : (uNameLower.startsWith("cs") ? "خدمة العملاء" : "محطة عمل")));
+      const workstationType = dev.platform?.includes("mobile")
+        ? "جهاز ذكي (موبايل)"
+        : (uNameLower.startsWith("cash")
+          ? "نقطة بيع كاشير"
+          : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : (uNameLower.startsWith("cs") ? "خدمة العملاء" : "محطة عمل"))));
 
       // Live online status verification
       const isOnline = dev.connectionStatus === "online" ||
@@ -231,7 +241,7 @@ async function getBranchesDeploymentData() {
       if (!devicesMap.has(devKey) || (devLastSeen && new Date(devLastSeen) > new Date(devicesMap.get(devKey).lastSeenAt))) {
         devicesMap.set(devKey, {
           hostname: hostName,
-          os: dev.osName || "Windows",
+          os: dev.osName || (dev.platform?.includes("mobile") ? "Android/iOS" : "Windows"),
           osVersion: dev.osVersion || "",
           ipAddress: dev.localIp || "-",
           clientType: dev.platform?.includes("mobile") ? "mobile" : "desktop",
@@ -253,35 +263,56 @@ async function getBranchesDeploymentData() {
       const uId = String(u._id);
       const uSessions = sessionsByUser.get(uId) || [];
       for (const s of uSessions) {
-        const hostName = (s.deviceInfo?.hostname || s.clientType || "Device").trim();
-        const devKey = hostName.toLowerCase();
+        const rawHost = (s.deviceInfo?.hostname || "").trim();
+        const clientType = s.clientType || (s.deviceInfo?.platform?.includes("mobile") ? "mobile" : "desktop");
+        const hostName = rawHost || (clientType === "mobile" ? `Mobile-${u.username}` : `PC-${u.username}`);
+        const devKey = s.deviceInfo?.deviceUid
+          ? String(s.deviceInfo.deviceUid).trim().toLowerCase()
+          : (rawHost ? `${rawHost.toLowerCase()}_${uId}` : `session_${s._id}`);
         if (devicesMap.has(devKey)) continue; // Already covered by UpdateDevice
 
-        const appVersion = s.deviceInfo?.appVersion || (s.clientType === "desktop" ? CURRENT_APP_VERSION : "unknown");
-        branchVersions.add(appVersion);
+        let appVersion = String(s.deviceInfo?.appVersion || "").trim();
+        if (!appVersion || appVersion === "unknown") {
+          const userDevs = devicesByUserId.get(uId) || [];
+          if (userDevs.length > 0 && userDevs[0].appVersion) {
+            appVersion = String(userDevs[0].appVersion).trim();
+          }
+        }
+        if (!appVersion) {
+          appVersion = "غير محدد";
+        }
+
+        if (appVersion !== "غير محدد") {
+          branchVersions.add(appVersion);
+        }
 
         if (!branchLastSeen || (s.lastSeenAt && new Date(s.lastSeenAt) > new Date(branchLastSeen))) {
           branchLastSeen = s.lastSeenAt;
         }
 
-        const isOutdated = appVersion !== CURRENT_APP_VERSION;
-        const isCritical = isOutdated && (appVersion === "1.0.9" || appVersion < "1.1.20");
-        const versionStatus = !isOutdated ? "latest" : (isCritical ? "critical" : "previous");
-        const versionStatusLabel = !isOutdated
-          ? `محدث (v${CURRENT_APP_VERSION})`
-          : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`);
+        const isKnownVersion = appVersion !== "غير محدد";
+        const isOutdated = isKnownVersion && appVersion !== CURRENT_APP_VERSION;
+        const isCritical = isOutdated && (appVersion === "1.0.9" || appVersion < "1.1.20" || appVersion.startsWith("1.0.") || appVersion.startsWith("1.1."));
+        const versionStatus = !isKnownVersion ? "pending" : (!isOutdated ? "latest" : (isCritical ? "critical" : "previous"));
+        const versionStatusLabel = !isKnownVersion
+          ? "إصدار غير محدد"
+          : (!isOutdated
+            ? `محدث (v${CURRENT_APP_VERSION})`
+            : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`));
 
         const uNameLower = (u.username || "").toLowerCase();
-        const workstationType = uNameLower.startsWith("cash")
-          ? "نقطة بيع كاشير"
-          : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : "محطة عمل"));
+        const workstationType = clientType === "mobile"
+          ? "جهاز ذكي (موبايل)"
+          : (uNameLower.startsWith("cash")
+            ? "نقطة بيع كاشير"
+            : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : "محطة عمل")));
 
         devicesMap.set(devKey, {
           hostname: hostName,
-          os: s.deviceInfo?.os || "Windows",
+          os: s.deviceInfo?.os || (clientType === "mobile" ? "Android/iOS" : "Windows"),
           osVersion: s.deviceInfo?.osVersion || "",
           ipAddress: s.ipAddress || "-",
-          clientType: s.clientType || "desktop",
+          clientType,
           appVersion,
           isOutdated,
           versionStatus,
@@ -337,6 +368,8 @@ async function getBranchesDeploymentData() {
       installedUsersCount: branchDevices.length,
       onlineUsersCount,
       devicesCount: branchDevices.length,
+      totalDevices: branchDevices.length,
+      latestVersionDevicesCount: branchLatestDevs,
       onlineDevicesCount: branchOnlineDevs,
       appVersions: sortedVersions,
       versionStatusLabel: !isInstalled
@@ -390,6 +423,9 @@ async function getBranchesDeploymentData() {
 }
 
 async function buildDeploymentExcelReport(data, actor) {
+  if (!data) {
+    data = await getBranchesDeploymentData();
+  }
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "iSmart Messenger Enterprise Monitor";
   workbook.created = new Date();
@@ -723,6 +759,9 @@ async function buildDeploymentExcelReport(data, actor) {
 }
 
 async function buildDeploymentPdfReport(data, actor) {
+  if (!data) {
+    data = await getBranchesDeploymentData();
+  }
   const doc = new PDFDocument({ margin: 28, size: "A4", layout: "landscape" });
   configureArabicPdf(doc);
   const chunks = [];
@@ -1278,8 +1317,11 @@ async function togglePollStatus(pollId, actor, io = null) {
   meta.closedBy = nextIsClosed ? String(actor.id || actor._id) : null;
 
   if (rawMeta.poll && typeof rawMeta.poll === "object") {
-    message.metadata.poll = meta;
+    rawMeta.poll = meta;
+    rawMeta.isClosed = nextIsClosed;
+    message.metadata = rawMeta;
   } else {
+    meta.isClosed = nextIsClosed;
     message.metadata = meta;
   }
   message.markModified("metadata");
@@ -1588,4 +1630,7 @@ module.exports = {
   getAllSystemPolls,
   buildPollPdfReport,
   exportPollToExcel,
+  seedDefaultEnterprisePolls,
+  togglePollStatus,
+  createAdminPoll,
 };

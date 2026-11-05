@@ -273,15 +273,18 @@ class _LiveOperationsTopologyScreenState
       final List<_TopologyNode> branchEmployees = [];
 
       // 1. Real Physical Devices from UpdateDevice / DeviceSession
+      final Set<String> representedUsers = {};
       if (b.devices.isNotEmpty) {
         for (int di = 0; di < b.devices.length; di++) {
           final dev = b.devices[di];
+          if (dev.username.isNotEmpty) representedUsers.add(dev.username.toLowerCase());
+          if (dev.fullName.isNotEmpty) representedUsers.add(dev.fullName.toLowerCase());
           final empId = 'dev_${b.branchCode}_$di';
           branchEmployees.add(
             _TopologyNode(
               id: empId,
               type: _TopologyNodeType.employee,
-              name: dev.fullName.isNotEmpty ? dev.fullName : dev.username,
+              name: dev.fullName.isNotEmpty ? dev.fullName : (dev.username.isNotEmpty ? dev.username : dev.hostname),
               subtitle: dev.hostname,
               branchName: b.branchName,
               branchCode: b.branchCode,
@@ -303,29 +306,39 @@ class _LiveOperationsTopologyScreenState
             ),
           );
         }
-      } else if (b.installedUsers.isNotEmpty) {
-        // 2. Real installed users in this branch from MongoDB
+      }
+
+      // 2. Real branch users without explicit device registrations
+      if (b.installedUsers.isNotEmpty) {
+        int nonDevIndex = 0;
         for (int ui = 0; ui < b.installedUsers.length; ui++) {
           final usr = b.installedUsers[ui];
+          final uName = usr.username.toLowerCase();
+          final fName = usr.fullName.toLowerCase();
+          if (representedUsers.contains(uName) || representedUsers.contains(fName)) {
+            continue; // Already displayed with their active device above
+          }
           final empId = 'usr_${b.branchCode}_$ui';
           branchEmployees.add(
             _TopologyNode(
               id: empId,
               type: _TopologyNodeType.employee,
               name: usr.fullName.isNotEmpty ? usr.fullName : usr.username,
-              subtitle: usr.jobTitle,
+              subtitle: usr.jobTitle.isNotEmpty ? usr.jobTitle : 'موظف بالفرع',
               branchName: b.branchName,
               branchCode: b.branchCode,
-              color: _roleColor(ui),
-              icon: Icons.person_rounded,
+              color: _roleColor(b.devices.length + nonDevIndex++),
+              icon: Icons.person_outline_rounded,
               isOnline: usr.isOnline,
               ipAddress: '-',
-              os: 'تطبيق iSmart',
-              jobTitle: usr.jobTitle,
+              os: 'غير مسجل على جهاز',
+              jobTitle: usr.jobTitle.isNotEmpty ? usr.jobTitle : 'موظف بالفرع',
               role: usr.role,
-              appVersion: '1.1.21',
+              appVersion: 'غير محدد',
               isOutdated: false,
-              versionStatusLabel: 'محدث',
+              versionStatusLabel: 'لم يسجل جهازاً',
+              workstationType: 'مستخدم فرع',
+              hostname: 'محطة غير معينة',
               position: Offset.zero,
               size: const Size(220, 68),
               connectedNodeIds: [branchHubId],
@@ -1264,7 +1277,7 @@ class _LiveOperationsTopologyScreenState
                                 borderRadius: BorderRadius.circular(3),
                               ),
                               child: Text(
-                                '${node.appVersion ?? "1.1.14"} 🚨 قديم',
+                                '${node.appVersion ?? "قديم"} 🚨 قديم',
                                 style: const TextStyle(
                                   fontSize: 8.5,
                                   fontWeight: FontWeight.w900,
@@ -1272,7 +1285,7 @@ class _LiveOperationsTopologyScreenState
                                 ),
                               ),
                             )
-                          else
+                          else if (node.appVersion != null && node.appVersion!.isNotEmpty && node.appVersion != 'غير محدد')
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                               decoration: BoxDecoration(
@@ -1280,11 +1293,27 @@ class _LiveOperationsTopologyScreenState
                                 borderRadius: BorderRadius.circular(3),
                               ),
                               child: Text(
-                                'v${node.appVersion ?? "1.1.21"}',
+                                'v${node.appVersion}',
                                 style: const TextStyle(
                                   fontSize: 8.5,
                                   fontWeight: FontWeight.w700,
                                   color: Color(0xFF10B981),
+                                ),
+                              ),
+                            )
+                          else
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: (isDark ? Colors.white12 : Colors.black12),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: const Text(
+                                'غير مسجل',
+                                style: TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey,
                                 ),
                               ),
                             ),
@@ -1916,10 +1945,15 @@ class _LiveOperationsTopologyScreenState
                                         '🚨 قديم',
                                         style: TextStyle(fontSize: 9, color: Color(0xFFEF4444), fontWeight: FontWeight.w800),
                                       )
-                                    else
+                                    else if (emp.appVersion != null && emp.appVersion!.isNotEmpty && emp.appVersion != 'غير محدد')
                                       Text(
-                                        'v${emp.appVersion ?? "1.1.21"}',
+                                        'v${emp.appVersion}',
                                         style: const TextStyle(fontSize: 9, color: Colors.grey),
+                                      )
+                                    else
+                                      const Text(
+                                        'غير مسجل',
+                                        style: TextStyle(fontSize: 9, color: Colors.grey),
                                       ),
                                   ],
                                 ),
@@ -2201,7 +2235,7 @@ class _LiveOperationsTopologyScreenState
           _inspectorRow('عنوان IP:', node.ipAddress ?? '-'),
           _inspectorRow('اسم الجهاز / Host:', node.hostname ?? '-'),
           _inspectorRow('نظام التشغيل:', node.os ?? '-'),
-          _inspectorRow('إصدار التطبيق:', node.appVersion ?? '1.1.21'),
+          _inspectorRow('إصدار التطبيق:', (node.appVersion != null && node.appVersion!.isNotEmpty && node.appVersion != 'غير محدد') ? 'v${node.appVersion}' : 'غير مسجل على جهاز'),
           if (node.isOutdated)
             Container(
               margin: const EdgeInsets.symmetric(vertical: 4),
