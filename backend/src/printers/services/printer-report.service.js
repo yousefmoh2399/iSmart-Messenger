@@ -85,45 +85,44 @@ function arabicStatus(status) {
   }
 }
 
+const logo1Path = path.join(__dirname, "../../assets/logo1.png");
+const logo2Path = path.join(__dirname, "../../assets/logo2.png");
+
+function processArabicText(text) {
+  if (text == null) return "";
+  const input = fixText(text);
+  if (!/[؀-ۿ]/.test(input)) return input;
+
+  const swapped = input
+    .replace(/\(/g, "\x01")
+    .replace(/\)/g, "(")
+    .replace(/\x01/g, ")");
+
+  return swapped.split(" ").reverse().join("  ");
+}
+
 function configureArabicPdf(doc) {
-  let regularPath = path.join(
-    __dirname,
-    "../../assets/fonts/Amiri-Regular.ttf",
-  );
-  let boldPath = path.join(
-    __dirname,
-    "../../assets/fonts/Amiri-Bold.ttf",
-  );
+  const candidatesRegular = [
+    path.join(__dirname, "../../assets/fonts/Arial.ttf"),
+    path.join(__dirname, "../../assets/fonts/Amiri-Regular.ttf"),
+    path.join(__dirname, "../../assets/fonts/NotoSansArabic-Regular.ttf"),
+  ];
+  const candidatesBold = [
+    path.join(__dirname, "../../assets/fonts/Arial-Bold.ttf"),
+    path.join(__dirname, "../../assets/fonts/Amiri-Bold.ttf"),
+    path.join(__dirname, "../../assets/fonts/NotoSansArabic-Bold.ttf"),
+  ];
 
-  if (!fs.existsSync(regularPath)) {
-    regularPath = path.join(
-      __dirname,
-      "../../assets/fonts/NotoSansArabic-Regular.ttf",
-    );
-    boldPath = path.join(
-      __dirname,
-      "../../assets/fonts/NotoSansArabic-Bold.ttf",
-    );
-  }
+  const regularPath = candidatesRegular.find((p) => fs.existsSync(p));
+  const boldPath = candidatesBold.find((p) => fs.existsSync(p));
 
-  if (!fs.existsSync(regularPath)) {
-    regularPath = path.join(
-      __dirname,
-      "../../../../desktop_app/assets/fonts/NotoSansArabic-Regular.ttf",
-    );
-    boldPath = path.join(
-      __dirname,
-      "../../../../desktop_app/assets/fonts/NotoSansArabic-Bold.ttf",
-    );
-  }
-
-  if (fs.existsSync(regularPath)) {
+  if (regularPath) {
     doc.registerFont("Arabic", regularPath);
   }
-  if (fs.existsSync(boldPath)) {
+  if (boldPath) {
     doc.registerFont("ArabicBold", boldPath);
   }
-  doc.font(fs.existsSync(regularPath) ? "Arabic" : "Helvetica");
+  doc.font(regularPath ? "Arabic" : "Helvetica");
 }
 
 function withArabicFont(doc, bold = false) {
@@ -751,6 +750,9 @@ async function buildExcelReport({
       if (idx % 2 === 0) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.rowAlt } };
       }
+      if ([9, 10, 15, 16, 17].includes(ci) && typeof cell.value === "number") {
+        cell.numFmt = "#,##0";
+      }
       pcBorder(cell);
     });
 
@@ -1095,19 +1097,26 @@ async function buildExcelReport({
 async function buildPdfReport({
   type,
   branch,
-  branches,
-  printers,
-  waste,
+  branches = [],
+  printers = [],
+  waste = [],
   actor,
   month,
   year,
+  fromMonth,
+  fromYear,
+  toMonth,
+  toYear,
   monthlyConsumption,
 }) {
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  const doc = new PDFDocument({ margin: 30, size: "A4", layout: "landscape" });
   configureArabicPdf(doc);
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
   const done = new Promise((resolve) => doc.on("end", resolve));
+
+  const usableWidth = doc.page.width - 60; // 841.89 - 60 = 781.89 pt
+  const reportDate = formatDate(new Date());
 
   const monthNames = [
     "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
@@ -1116,120 +1125,165 @@ async function buildPdfReport({
   const isAllMonths = month !== null && month !== undefined && Number(month) === 0;
   const monthName = isAllMonths ? "جميع الشهور" : (month && monthNames[Number(month) - 1] ? monthNames[Number(month) - 1] : "");
   const title = month && year
-    ? (isAllMonths ? `تقرير استهلاك الطابعات لجميع شهور سنة ${year}` : `تقرير استهلاك الطابعات لشهر ${monthName} ${year}`)
-    : "تقرير مراقبة الطابعات";
+    ? (isAllMonths ? `تقرير استهلاك ومتابعة الطابعات لجميع شهور سنة ${year}` : `تقرير استهلاك ومتابعة الطابعات لشهر ${monthName} ${year}`)
+    : "تقرير متابعة وحالة الطابعات";
 
-  withArabicFont(doc, true).fontSize(22).fillColor("#0F172A");
-  pdfText(doc, title, { align: "right" });
-  withArabicFont(doc, false).fontSize(10).fillColor("#475569");
-  pdfText(doc, formatBidiLine("نوع التقرير", type === "branch" ? "فرع" : "عام"), { align: "right" });
-  pdfText(doc, formatBidiLine("الفرع", branch?.name || "كل الفروع"), { align: "right" });
-  pdfText(doc, formatBidiLine("تاريخ التقرير", formatDate(new Date())), { align: "right" });
+  function drawPageHeader() {
+    try {
+      if (fs.existsSync(logo1Path)) doc.image(logo1Path, 30, 20, { width: 50 });
+      if (fs.existsSync(logo2Path)) doc.image(logo2Path, doc.page.width - 80, 20, { width: 50 });
+    } catch (_) {}
 
-  writeSectionTitle(doc, "الملخص التنفيذي");
-  const summaryLines = [
-    { label: "عدد الفروع", value: branches.length },
-    { label: "عدد الطابعات", value: printers.length },
-    { label: "الطابعات المتصلة", value: printers.filter((item) => item.status === "online").length },
-    { label: "الطابعات غير المتصلة", value: printers.filter((item) => item.status !== "online").length },
+    withArabicFont(doc, true).fontSize(11).fillColor("#1E3A8A");
+    doc.text(processArabicText("مشروع تنمية المنشآت الصغيرة والحرفية - جمعية رجال الأعمال بالدقهلية"), 85, 22, { width: usableWidth - 110, align: "center" });
+
+    // Banner
+    doc.roundedRect(30, 42, usableWidth, 38, 5).fill("#1E3A8A");
+    withArabicFont(doc, true).fontSize(13).fillColor("#FFFFFF");
+    doc.text(processArabicText(title), 30, 48, { width: usableWidth, align: "center" });
+    withArabicFont(doc, false).fontSize(8.5).fillColor("#DBEAFE");
+    const sub = `الفرع: ${branch?.name || "كافة الفروع"}   |   إجمالي الطابعات: ${printers.length}   |   تاريخ الإصدار: ${reportDate}`;
+    doc.text(processArabicText(sub), 30, 64, { width: usableWidth, align: "center" });
+  }
+
+  drawPageHeader();
+
+  // Summary KPI Cards (y: 86)
+  const kpiY = 86;
+  const totalP = printers.length;
+  const onlineP = printers.filter((p) => p.status === "online").length;
+  const offlineP = totalP - onlineP;
+
+  let totalPagesMonth = 0;
+  if (monthlyConsumption && Array.isArray(monthlyConsumption.consumption)) {
+    totalPagesMonth = monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.totalPages || 0), 0);
+  }
+  const paper = paperMetrics(totalPagesMonth);
+
+  const kpis = [
+    { label: "إجمالي الطابعات", val: `${totalP} طابعة`, col: "#1E3A8A" },
+    { label: "الطابعات المتصلة", val: `${onlineP} متصلة`, col: "#15803D" },
+    { label: "الطابعات غير المتصلة", val: `${offlineP} غير متصلة`, col: offlineP > 0 ? "#B91C1C" : "#64748B" },
+    { label: "استهلاك الشهر", val: `${totalPagesMonth.toLocaleString("en-US")} صفحة`, col: "#0369A1" },
+    { label: "الرزم المطلوبة", val: `${paper.requiredReams} رزمة`, col: "#D97706" },
   ];
 
-  if (monthlyConsumption) {
-    const mTotal = monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.totalPages || 0), 0);
-    const mMono = monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.monoPages || 0), 0);
-    const mColor = monthlyConsumption.consumption.reduce((sum, item) => sum + Number(item.colorPages || 0), 0);
-    const mPaper = paperMetrics(mTotal);
-    const mPartialBranches = monthlyConsumption.consumption.filter((item) => item.hasPartialData || item.hasStaleBaseline).length;
-    summaryLines.push(
-      { label: isAllMonths ? `إجمالي الاستهلاك للفترة` : `إجمالي استهلاك شهر ${monthName}`, value: `${mTotal} صفحة` },
-      { label: "إجمالي استهلاك الرزم (500 ورقة/رزمة)", value: `${mPaper.exactReams.toFixed(2)} رزمة (${mPaper.fullReams} رزمة و ${mPaper.remainingSheets} ورقة)` },
-      { label: "الرزم المطلوبة محاسبيًا", value: mPaper.requiredReams },
-      { label: "عدد العملاء التقديري", value: `${mPaper.estimatedClients} عميل` },
-      { label: "فروع تحتاج مراجعة القراءات", value: mPartialBranches },
-      { label: isAllMonths ? "استهلاك أبيض وأسود للفترة" : "استهلاك أبيض وأسود للشهر", value: `${mMono} صفحة` },
-      { label: isAllMonths ? "استهلاك ملون للفترة" : "استهلاك ملون للشهر", value: `${mColor} صفحة` }
-    );
-  } else {
-    summaryLines.push(
-      {
-        label: "إجمالي صفحات العمر",
-        value: printers.reduce((sum, item) => sum + Number(item.lifetimeCounters?.totalPages || 0), 0),
-      },
-      {
-        label: "إجمالي الهالك التقديري",
-        value: waste.reduce((sum, item) => sum + Number(item.estimatedWastePages || 0), 0),
-      }
-    );
+  const cardW = (usableWidth - (kpis.length - 1) * 8) / kpis.length;
+  for (let i = 0; i < kpis.length; i++) {
+    const k = kpis[i];
+    const x = 30 + i * (cardW + 8);
+    doc.roundedRect(x, kpiY, cardW, 36, 4).fill("#F8FAFC");
+    doc.roundedRect(x, kpiY, cardW, 36, 4).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+    withArabicFont(doc, false).fontSize(7.5).fillColor("#64748B");
+    doc.text(processArabicText(k.label), x + 2, kpiY + 4, { width: cardW - 4, align: "center" });
+    withArabicFont(doc, true).fontSize(9.5).fillColor(k.col);
+    doc.text(processArabicText(k.val), x + 2, kpiY + 18, { width: cardW - 4, align: "center" });
   }
 
-  writeInfoLines(doc, summaryLines);
+  // Printers Table (y: 130)
+  const columns = [
+    { label: "م", w: 30 },
+    { label: "الفرع", w: 100 },
+    { label: "اسم الطابعة", w: 120 },
+    { label: "الموديل", w: 105 },
+    { label: "عنوان IP", w: 90 },
+    { label: "الحالة", w: 65 },
+    { label: "العداد الكلي", w: 85 },
+    { label: "استهلاك الشهر", w: 85 },
+    { label: "الحبر الأسود", w: 101 },
+  ];
 
+  let currentY = 130;
+  const rowH = 18;
+  const headerH = 22;
+
+  function drawTableHeader(y) {
+    let x = 30;
+    for (const c of columns) {
+      doc.rect(x, y, c.w, headerH).fill("#1E3A8A").strokeColor("#1E40AF").stroke();
+      withArabicFont(doc, true).fontSize(8.5).fillColor("#FFFFFF");
+      doc.text(processArabicText(c.label), x + 2, y + 6, { width: c.w - 4, align: "center" });
+      x += c.w;
+    }
+  }
+
+  drawTableHeader(currentY);
+  currentY += headerH;
+
+  // Map monthly consumption per printer
+  const pUsageMap = {};
   if (monthlyConsumption && Array.isArray(monthlyConsumption.consumption)) {
-    writeSectionTitle(doc, isAllMonths ? "استهلاك الفروع خلال الفترة" : "استهلاك الفروع خلال الشهر");
-    const branchRows = monthlyConsumption.consumption.map((b, index) => {
-      const pages = Number(b.totalPages || 0);
-      const paper = paperMetrics(pages);
-      return {
-        "#": index + 1,
-        "كود الفرع": b.branchCode || "",
-        "الفرع": b.branchName || "",
-        "عدد الأجهزة": b.printersCount || 0,
-        "الصفحات": pages,
-        "استهلاك الرزم": `${paper.exactReams.toFixed(2)} رزمة`,
-        "رزم مطلوبة": paper.requiredReams,
-        "العملاء المقدر": paper.estimatedClients,
-        "جودة البيانات": dataQualityLabel(b),
-        "أبيض وأسود": b.monoPages || 0,
-        "ألوان": b.colorPages || 0,
-      };
-    });
-    writeRows(doc, "الفرع", branchRows, 50);
-
-    writeSectionTitle(doc, "استهلاك الطابعات خلال الشهر");
-    const printerRows = [];
-    let prIndex = 1;
     for (const b of monthlyConsumption.consumption) {
-      if (Array.isArray(b.printers)) {
-        for (const p of b.printers) {
-          const pages = Number(p.totalPages || 0);
-          const paper = paperMetrics(pages);
-          printerRows.push({
-            "#": prIndex++,
-            "الفرع": b.branchName,
-            "الطابعة": p.printerName,
-            "الموديل": p.model || "-",
-            "أبيض وأسود": p.monoPages || 0,
-            "ألوان": p.colorPages || 0,
-            "الاستهلاك": pages,
-            "رزم": paper.exactReams.toFixed(2),
-            "رزم مطلوبة": paper.requiredReams,
-            "عملاء تقديري": paper.estimatedClients,
-            "جودة البيانات": dataQualityLabel(p),
-          });
-        }
+      for (const p of b.printers || []) {
+        pUsageMap[String(p.printerId)] = p;
       }
     }
-    writeRows(doc, "الطابعة", printerRows, 150);
-  } else {
-    writeTopPrintersTable(doc, printers);
-    writeRows(
-      doc,
-      "ملخص الهالك",
-      waste.slice(0, 25).map((entry) => ({
-        الفرع: entry.branchId?.name || "",
-        الطابعة: entry.printerId?.printerName || "",
-        "الهالك التقديري": entry.estimatedWastePages || 0,
-        "مرات الانحشار": entry.paperJams || 0,
-        التاريخ: formatDate(entry.calculatedAt),
-      })),
-      25,
-    );
   }
+
+  for (let idx = 0; idx < printers.length; idx++) {
+    if (currentY + rowH > doc.page.height - 40) {
+      doc.addPage({ margin: 30, size: "A4", layout: "landscape" });
+      drawPageHeader();
+      currentY = 90;
+      drawTableHeader(currentY);
+      currentY += headerH;
+    }
+
+    const pr = printers[idx];
+    const u = pUsageMap[String(pr._id)] || {};
+    const isEven = idx % 2 === 0;
+    const rowBg = isEven ? "#F8FAFC" : "#FFFFFF";
+
+    const prLifetime = Number(pr.lifetimeCounters?.totalPages || pr.counters?.totalPages || 0);
+    const prMonth = Number(u.totalPages || 0);
+    const prToner = pr.tonerLevels?.black != null ? `${pr.tonerLevels.black}%` : "-";
+    const isOnline = pr.status === "online";
+
+    const rowData = [
+      String(idx + 1),
+      printerBranchName(pr) || "-",
+      printerDisplayName(pr),
+      pr.model || "-",
+      pr.ipAddress || "-",
+      arabicStatus(pr.status),
+      prLifetime.toLocaleString("en-US"),
+      prMonth > 0 ? prMonth.toLocaleString("en-US") : "-",
+      prToner,
+    ];
+
+    let rX = 30;
+    for (let c = 0; c < columns.length; c++) {
+      const col = columns[c];
+      doc.rect(rX, currentY, col.w, rowH).fill(rowBg).strokeColor("#E2E8F0").stroke();
+
+      if (c === 5) {
+        withArabicFont(doc, true).fontSize(8).fillColor(isOnline ? "#15803D" : "#B91C1C");
+      } else {
+        withArabicFont(doc, false).fontSize(8).fillColor("#0F172A");
+      }
+
+      doc.text(processArabicText(rowData[c]), rX + 2, currentY + 4, {
+        width: col.w - 4,
+        align: "center",
+        ellipsis: true,
+        lineBreak: false,
+      });
+      rX += col.w;
+    }
+    currentY += rowH;
+  }
+
+  // Footer on page bottom
+  const footerY = doc.page.height - 26;
+  withArabicFont(doc, false).fontSize(7.5).fillColor("#64748B");
+  const footerText = `منظومة iSmart Messenger لإدارة ومتابعة الطابعات   |   المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}   |   تاريخ التقرير: ${reportDate}`;
+  doc.text(processArabicText(footerText), 30, footerY, { width: usableWidth, align: "center" });
 
   doc.end();
   await done;
+
   const suffix = (month && year) ? `-${year}-${month}` : "";
-  const fileName = `printer-${type}-report${suffix}-${Date.now()}.pdf`;
+  const fileName = `printers-${type}-report${suffix}-${Date.now()}.pdf`;
   await createReportRecord({
     type,
     format: "pdf",
@@ -1242,7 +1296,7 @@ async function buildPdfReport({
 
 async function buildPrinterPdfReport({
   printer,
-  snapshots,
+  snapshots = [],
   actor,
   month,
   year,
@@ -1252,198 +1306,298 @@ async function buildPrinterPdfReport({
   toYear,
   monthlyConsumption,
 }) {
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  const doc = new PDFDocument({ margin: 30, size: "A4" });
   configureArabicPdf(doc);
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
   const done = new Promise((resolve) => doc.on("end", resolve));
 
+  const usableWidth = doc.page.width - 60; // 595.28 - 60 = 535.28 pt
   const name = printerDisplayName(printer);
-  const maintenance = printer.maintenance || {};
+  const branchName = printerBranchName(printer);
   const toner = printer.tonerLevels || {};
-  const extended = printer.extendedDetails || {};
-  const product = extended.product || {};
-  const usage = extended.usage || {};
-  const supplies = Array.isArray(extended.supplies) ? extended.supplies : [];
-  const events = Array.isArray(extended.events) ? extended.events : [];
-  const jobs = Array.isArray(extended.jobs) ? extended.jobs : [];
-  const media = Array.isArray(usage.media) ? usage.media : [];
+  const counters = printer.counters || {};
+  const lifetime = printer.lifetimeCounters || {};
+  const isOnline = printer.status === "online";
+  const reportDate = formatDate(new Date());
 
-  withArabicFont(doc, true).fontSize(22).fillColor("#0F172A");
-  let mainTitle = "تقرير تفصيلي للطابعة";
-  const effectiveMonth = month ?? fromMonth;
-  const effectiveYear = year ?? fromYear;
-  if (effectiveMonth && effectiveYear) {
-    const monthNames = [
-      "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-      "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
-    ];
-    const isAllMonths = Number(effectiveMonth) === 0;
-    const isRange = fromMonth && toMonth && (fromMonth !== toMonth || fromYear !== toYear);
-    if (isRange) {
-      const fromName = monthNames[Number(fromMonth) - 1] || fromMonth;
-      const toName = monthNames[Number(toMonth) - 1] || toMonth;
-      mainTitle = `تقرير الطابعة للفترة من شهر ${fromName} ${fromYear} إلى ${toName} ${toYear}`;
-    } else {
-      const monthName = isAllMonths ? "جميع الشهور" : (monthNames[Number(effectiveMonth) - 1] || effectiveMonth);
-      mainTitle = isAllMonths ? `تقرير الطابعة لجميع شهور سنة ${effectiveYear}` : `تقرير الطابعة لشهر ${monthName} ${effectiveYear}`;
-    }
-  }
-  pdfText(doc, mainTitle, { align: "right" });
+  // Top header with logos
+  try {
+    if (fs.existsSync(logo1Path)) doc.image(logo1Path, 30, 24, { width: 55 });
+    if (fs.existsSync(logo2Path)) doc.image(logo2Path, doc.page.width - 85, 24, { width: 55 });
+  } catch (_) {}
 
-  withArabicFont(doc, false).fontSize(10).fillColor("#475569");
-  pdfText(doc, formatBidiLine("اسم الطابعة", name), { align: "right" });
-  pdfText(doc, formatBidiLine("الفرع", printerBranchName(printer)), { align: "right" });
-  pdfText(doc, formatBidiLine("عنوان IP", printer.ipAddress), { align: "right" });
-  pdfText(doc, formatBidiLine("الحالة الحالية", arabicStatus(printer.status)), { align: "right" });
-  pdfText(doc, formatBidiLine("تاريخ التقرير", formatDate(new Date())), { align: "right" });
+  withArabicFont(doc, true).fontSize(11).fillColor("#1E3A8A");
+  doc.text(processArabicText("مشروع تنمية المنشآت الصغيرة والحرفية"), 90, 26, { width: usableWidth - 120, align: "center" });
+  withArabicFont(doc, true).fontSize(9.5).fillColor("#475569");
+  doc.text(processArabicText("جمعية رجال الأعمال والمستثمرين بالدقهلية"), 90, 41, { width: usableWidth - 120, align: "center" });
+  withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+  doc.text(processArabicText("رقم الإشهار: 777 لسنة 1995 - رقم الترخيص: 1031"), 90, 55, { width: usableWidth - 120, align: "center" });
 
-  writeSectionTitle(doc, "المعلومات الأساسية");
-  writeInfoLines(doc, [
-    { label: "اسم الطابعة", value: name },
-    { label: "الموديل", value: printer.model || product.productName || "-" },
-    { label: "الرقم التسلسلي", value: printer.serialNumber || product.serialNumber || "-" },
-    { label: "الشركة", value: printer.vendor || "-" },
-    { label: "الفرع", value: printerBranchName(printer) },
-    { label: "آخر مزامنة", value: formatDate(printer.lastSyncAt) },
-    { label: "العداد الحالي", value: printer.counters?.totalPages || 0 },
-    { label: "عداد العمر", value: printer.lifetimeCounters?.totalPages || 0 },
-  ]);
+  doc.strokeColor("#CBD5E1").lineWidth(0.8).moveTo(30, 72).lineTo(doc.page.width - 30, 72).stroke();
 
-  writeSectionTitle(doc, "عدادات الاستخدام");
-  writeInfoLines(doc, [
-    { label: "إجمالي الصفحات", value: printer.lifetimeCounters?.totalPages || 0 },
-    { label: "الصفحات الأحادية", value: printer.lifetimeCounters?.monoPages || 0 },
-    { label: "الصفحات الملونة", value: printer.lifetimeCounters?.colorPages || 0 },
-    { label: "صفحات الوجهين", value: printer.lifetimeCounters?.duplexPages || 0 },
-    { label: "صفحات النسخ", value: printer.lifetimeCounters?.copyPages || 0 },
-    { label: "صفحات المسح الضوئي", value: printer.lifetimeCounters?.scanPages || 0 },
-    { label: "إجمالي الصفحات المطبوعة", value: usage.totalPrintedPages || "-" },
-    { label: "صفحات PCL6", value: usage.pcl6Pages || "-" },
-    { label: "صفحات PCL5", value: usage.pcl5Pages || "-" },
-    { label: "صفحات PostScript", value: usage.postScriptPages || "-" },
-    { label: "مكافئ A4", value: usage.a4EquivalentPages || "-" },
-  ]);
+  // Banner Title
+  const bannerY = 80;
+  const bannerHeight = 44;
+  doc.roundedRect(30, bannerY, usableWidth, bannerHeight, 6).fill("#1E3A8A");
+  withArabicFont(doc, true).fontSize(13).fillColor("#FFFFFF");
+  doc.text(processArabicText("تقرير الفحص الفني والمواصفات التشغيلية للطابعة"), 30, bannerY + 8, { width: usableWidth, align: "center" });
+  withArabicFont(doc, false).fontSize(8.5).fillColor("#DBEAFE");
+  const subTitleText = `الفرع: ${branchName || "الرئيسي"}   |   الطابعة: ${name}   |   عنوان IP: ${printer.ipAddress || "-"}   |   التاريخ: ${reportDate}`;
+  doc.text(processArabicText(subTitleText), 30, bannerY + 26, { width: usableWidth, align: "center" });
 
+  // 4 KPI Summary Cards (y: 134)
+  const kpiY = 134;
+  const cardW = (usableWidth - 24) / 4; // ~127.8 pt
+  const cardH = 46;
+
+  // Card 1: Status
+  doc.roundedRect(30, kpiY, cardW, cardH, 6).fill(isOnline ? "#F0FDF4" : "#FEF2F2");
+  doc.roundedRect(30, kpiY, cardW, cardH, 6).strokeColor(isOnline ? "#86EFAC" : "#FECACA").lineWidth(0.8).stroke();
+  withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+  doc.text(processArabicText("الحالة الآن"), 34, kpiY + 6, { width: cardW - 8, align: "center" });
+  withArabicFont(doc, true).fontSize(10).fillColor(isOnline ? "#15803D" : "#B91C1C");
+  doc.text(processArabicText(isOnline ? "متصلة بنشاط" : "غير متصلة"), 34, kpiY + 22, { width: cardW - 8, align: "center" });
+
+  // Card 2: Total Counter
+  const totalPages = Number(lifetime.totalPages || counters.totalPages || 0);
+  doc.roundedRect(30 + cardW + 8, kpiY, cardW, cardH, 6).fill("#F8FAFC");
+  doc.roundedRect(30 + cardW + 8, kpiY, cardW, cardH, 6).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+  withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+  doc.text(processArabicText("إجمالي العداد"), 30 + cardW + 12, kpiY + 6, { width: cardW - 8, align: "center" });
+  withArabicFont(doc, true).fontSize(11).fillColor("#1E3A8A");
+  doc.text(processArabicText(`${totalPages.toLocaleString("en-US")} صفحة`), 30 + cardW + 12, kpiY + 22, { width: cardW - 8, align: "center" });
+
+  // Card 3: Monthly Pages
+  let mPages = 0;
   if (monthlyConsumption && Array.isArray(monthlyConsumption.consumption)) {
-    let printerConsumption = null;
     for (const b of monthlyConsumption.consumption) {
-      const p = b.printers?.find((item) => item.printerId === printer._id.toString());
-      if (p) {
-        printerConsumption = p;
-        break;
+      const p = (b.printers || []).find((x) => x.printerId === String(printer._id));
+      if (p) { mPages = Number(p.totalPages || 0); break; }
+    }
+  }
+  const reams = (mPages / 500).toFixed(1);
+  doc.roundedRect(30 + (cardW + 8) * 2, kpiY, cardW, cardH, 6).fill("#F8FAFC");
+  doc.roundedRect(30 + (cardW + 8) * 2, kpiY, cardW, cardH, 6).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+  withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+  doc.text(processArabicText("استهلاك الشهر"), 30 + (cardW + 8) * 2 + 4, kpiY + 6, { width: cardW - 8, align: "center" });
+  withArabicFont(doc, true).fontSize(10).fillColor("#0369A1");
+  doc.text(processArabicText(`${mPages.toLocaleString("en-US")} (${reams} رزمة)`), 30 + (cardW + 8) * 2 + 4, kpiY + 22, { width: cardW - 8, align: "center" });
+
+  // Card 4: Black Toner
+  const blackToner = toner.black != null ? Number(toner.black) : 0;
+  doc.roundedRect(30 + (cardW + 8) * 3, kpiY, cardW, cardH, 6).fill("#F8FAFC");
+  doc.roundedRect(30 + (cardW + 8) * 3, kpiY, cardW, cardH, 6).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+  withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+  doc.text(processArabicText("الحبر الأساسي"), 30 + (cardW + 8) * 3 + 4, kpiY + 6, { width: cardW - 8, align: "center" });
+  withArabicFont(doc, true).fontSize(11).fillColor(blackToner > 20 ? "#1E293B" : "#B91C1C");
+  doc.text(processArabicText(`${blackToner}%`), 30 + (cardW + 8) * 3 + 4, kpiY + 22, { width: cardW - 8, align: "center" });
+
+  // Section 1: Specs Table (y: 190)
+  let curY = 190;
+  doc.roundedRect(30, curY, usableWidth, 22, 4).fill("#2563EB");
+  withArabicFont(doc, true).fontSize(9.5).fillColor("#FFFFFF");
+  doc.text(processArabicText("البيانات الفنية والشبكية للطابعة"), 30, curY + 5, { width: usableWidth, align: "center" });
+  curY += 26;
+
+  const specs = [
+    { label: "اسم الطابعة", val: name, label2: "عنوان IP", val2: printer.ipAddress || "-" },
+    { label: "الموديل", val: printer.model || "-", label2: "الفرع", val2: branchName || "-" },
+    { label: "الرقم التسلسلي", val: printer.serialNumber || "-", label2: "الشركة المصنعة", val2: printer.vendor || "-" },
+    { label: "آخر مزامنة", val: formatDate(printer.lastSyncAt), label2: "حالة الطابعة", val2: arabicStatus(printer.status) },
+  ];
+
+  const colW1 = 75, colW2 = 192, colW3 = 75, colW4 = 193; // total 535
+  for (let i = 0; i < specs.length; i++) {
+    const s = specs[i];
+    const isEven = i % 2 === 0;
+    const rowBg = isEven ? "#F8FAFC" : "#FFFFFF";
+    const rowH = 18;
+
+    // Col 1 (label)
+    doc.rect(30, curY, colW1, rowH).fill("#F1F5F9").strokeColor("#E2E8F0").stroke();
+    withArabicFont(doc, true).fontSize(8).fillColor("#475569");
+    doc.text(processArabicText(s.label), 32, curY + 4, { width: colW1 - 4, align: "center" });
+
+    // Col 2 (val)
+    doc.rect(30 + colW1, curY, colW2, rowH).fill(rowBg).strokeColor("#E2E8F0").stroke();
+    withArabicFont(doc, false).fontSize(8).fillColor("#0F172A");
+    doc.text(processArabicText(s.val), 30 + colW1 + 4, curY + 4, { width: colW2 - 8, align: "center", ellipsis: true, lineBreak: false });
+
+    // Col 3 (label2)
+    doc.rect(30 + colW1 + colW2, curY, colW3, rowH).fill("#F1F5F9").strokeColor("#E2E8F0").stroke();
+    withArabicFont(doc, true).fontSize(8).fillColor("#475569");
+    doc.text(processArabicText(s.label2), 30 + colW1 + colW2 + 2, curY + 4, { width: colW3 - 4, align: "center" });
+
+    // Col 4 (val2)
+    doc.rect(30 + colW1 + colW2 + colW3, curY, colW4, rowH).fill(rowBg).strokeColor("#E2E8F0").stroke();
+    withArabicFont(doc, false).fontSize(8).fillColor("#0F172A");
+    doc.text(processArabicText(s.val2), 30 + colW1 + colW2 + colW3 + 4, curY + 4, { width: colW4 - 8, align: "center", ellipsis: true, lineBreak: false });
+
+    curY += rowH;
+  }
+
+  curY += 8;
+
+  // Section 2: Toner Levels with Graphical Progress Bars
+  doc.roundedRect(30, curY, usableWidth, 22, 4).fill("#2563EB");
+  withArabicFont(doc, true).fontSize(9.5).fillColor("#FFFFFF");
+  doc.text(processArabicText("مستويات خراطيش الحبر والمستهلكات"), 30, curY + 5, { width: usableWidth, align: "center" });
+  curY += 26;
+
+  const tonerItems = [
+    { label: "أسود (K)", pct: toner.black, color: "#1E293B" },
+    { label: "سماوي (C)", pct: toner.cyan, color: "#0284C7" },
+    { label: "أرجواني (M)", pct: toner.magenta, color: "#DB2777" },
+    { label: "أصفر (Y)", pct: toner.yellow, color: "#CA8A04" },
+  ];
+
+  const tCardW = (usableWidth - 18) / 4; // ~129 pt
+  for (let i = 0; i < tonerItems.length; i++) {
+    const t = tonerItems[i];
+    const x = 30 + i * (tCardW + 6);
+    const pct = t.pct != null ? Math.max(0, Math.min(100, Number(t.pct))) : null;
+
+    doc.roundedRect(x, curY, tCardW, 40, 4).fill("#F8FAFC");
+    doc.roundedRect(x, curY, tCardW, 40, 4).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+
+    withArabicFont(doc, true).fontSize(8).fillColor("#475569");
+    doc.text(processArabicText(t.label), x + 4, curY + 5, { width: tCardW - 8, align: "center" });
+
+    if (pct != null) {
+      const barX = x + 10;
+      const barY = curY + 18;
+      const barW = tCardW - 20;
+      const barH = 7;
+      doc.roundedRect(barX, barY, barW, barH, 3).fill("#E2E8F0");
+      if (pct > 0) {
+        doc.roundedRect(barX, barY, (barW * pct) / 100, barH, 3).fill(t.color);
       }
+      withArabicFont(doc, true).fontSize(7.5).fillColor(t.color);
+      doc.text(`${pct}%`, x + 4, curY + 28, { width: tCardW - 8, align: "center" });
+    } else {
+      withArabicFont(doc, false).fontSize(8).fillColor("#94A3B8");
+      doc.text(processArabicText("غير متوفر"), x + 4, curY + 22, { width: tCardW - 8, align: "center" });
     }
-    if (printerConsumption) {
-      const monthNames = [
-        "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-        "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+  }
+
+  curY += 46;
+
+  // Section 3: Detailed Counters (4 boxes)
+  doc.roundedRect(30, curY, usableWidth, 22, 4).fill("#2563EB");
+  withArabicFont(doc, true).fontSize(9.5).fillColor("#FFFFFF");
+  doc.text(processArabicText("تفاصيل عدادات الطباعة"), 30, curY + 5, { width: usableWidth, align: "center" });
+  curY += 26;
+
+  const counterItems = [
+    { label: "أبيض وأسود", val: Number(lifetime.monoPages || counters.monoPages || 0).toLocaleString("en-US") },
+    { label: "ملون", val: Number(lifetime.colorPages || counters.colorPages || 0).toLocaleString("en-US") },
+    { label: "طباعة وجهين", val: Number(lifetime.duplexPages || counters.duplexPages || 0).toLocaleString("en-US") },
+    { label: "نسخ ومسح ضوئي", val: Number((lifetime.scanPages || counters.scanPages || 0) + (lifetime.copyPages || counters.copyPages || 0)).toLocaleString("en-US") },
+  ];
+
+  const cBoxW = (usableWidth - 18) / 4;
+  for (let i = 0; i < counterItems.length; i++) {
+    const ci = counterItems[i];
+    const x = 30 + i * (cBoxW + 6);
+    doc.roundedRect(x, curY, cBoxW, 36, 4).fill("#F8FAFC");
+    doc.roundedRect(x, curY, cBoxW, 36, 4).strokeColor("#E2E8F0").lineWidth(0.8).stroke();
+    withArabicFont(doc, false).fontSize(8).fillColor("#64748B");
+    doc.text(processArabicText(ci.label), x + 4, curY + 5, { width: cBoxW - 8, align: "center" });
+    withArabicFont(doc, true).fontSize(9.5).fillColor("#0F172A");
+    doc.text(processArabicText(ci.val), x + 4, curY + 18, { width: cBoxW - 8, align: "center" });
+  }
+
+  curY += 42;
+
+  // Section 4: History Table (Snapshots)
+  doc.roundedRect(30, curY, usableWidth, 22, 4).fill("#2563EB");
+  withArabicFont(doc, true).fontSize(9.5).fillColor("#FFFFFF");
+  doc.text(processArabicText("سجل آخر القراءات التاريخية"), 30, curY + 5, { width: usableWidth, align: "center" });
+  curY += 25;
+
+  const histCols = [
+    { label: "م", w: 30 },
+    { label: "التاريخ والوقت", w: 125 },
+    { label: "الحالة", w: 75 },
+    { label: "العداد الكلي", w: 105 },
+    { label: "انحشار الورق", w: 90 },
+    { label: "مستوى الحبر", w: 110 },
+  ];
+
+  // Draw Header
+  let hX = 30;
+  for (const c of histCols) {
+    doc.rect(hX, curY, c.w, 18).fill("#1E3A8A").strokeColor("#1E40AF").stroke();
+    withArabicFont(doc, true).fontSize(8).fillColor("#FFFFFF");
+    doc.text(processArabicText(c.label), hX + 2, curY + 4, { width: c.w - 4, align: "center" });
+    hX += c.w;
+  }
+  curY += 18;
+
+  const recentSnapshots = (snapshots || []).slice(0, 16);
+  if (recentSnapshots.length === 0) {
+    doc.rect(30, curY, usableWidth, 20).fill("#F8FAFC").strokeColor("#E2E8F0").stroke();
+    withArabicFont(doc, false).fontSize(8.5).fillColor("#94A3B8");
+    doc.text(processArabicText("لا توجد قراءات تاريخية مسجلة لهذه الطابعة حتى الآن"), 30, curY + 5, { width: usableWidth, align: "center" });
+    curY += 20;
+  } else {
+    for (let i = 0; i < recentSnapshots.length; i++) {
+      const snap = recentSnapshots[i];
+      const isEven = i % 2 === 0;
+      const rowBg = isEven ? "#F8FAFC" : "#FFFFFF";
+      const rowH = 16;
+
+      const sTotal = Number(snap.counters?.totalPages || snap.lifetimeCounters?.totalPages || 0);
+      const sJams = Number(snap.maintenance?.paperJams || 0);
+      const sToner = snap.tonerLevels?.black != null ? `${snap.tonerLevels.black}%` : "-";
+      const sDate = formatDate(snap.snapshotAt);
+      const sStatus = arabicStatus(snap.status);
+
+      const rowVals = [
+        String(i + 1),
+        sDate,
+        sStatus,
+        sTotal.toLocaleString("en-US"),
+        String(sJams),
+        sToner,
       ];
-      const isAllMonths = Number(month) === 0;
-      const monthName = isAllMonths ? "جميع الشهور" : (monthNames[Number(month) - 1] || month);
-      writeSectionTitle(doc, isAllMonths ? `الاستهلاك للفترة - سنة ${year}` : `الاستهلاك الشهري - شهر ${monthName} ${year}`);
-      writeInfoLines(doc, [
-        { label: isAllMonths ? "استهلاك أبيض وأسود للفترة" : "استهلاك أبيض وأسود خلال الشهر", value: printerConsumption.monoPages || 0 },
-        { label: isAllMonths ? "استهلاك ملون للفترة" : "استهلاك ملون خلال الشهر", value: printerConsumption.colorPages || 0 },
-        { label: isAllMonths ? "إجمالي الاستهلاك للفترة" : "إجمالي الاستهلاك خلال الشهر", value: printerConsumption.totalPages || 0 },
-      ]);
+
+      let rX = 30;
+      for (let c = 0; c < histCols.length; c++) {
+        const col = histCols[c];
+        doc.rect(rX, curY, col.w, rowH).fill(rowBg).strokeColor("#E2E8F0").stroke();
+
+        if (c === 2) {
+          withArabicFont(doc, true).fontSize(7.5).fillColor(snap.status === "online" ? "#15803D" : "#B91C1C");
+        } else {
+          withArabicFont(doc, false).fontSize(7.5).fillColor("#0F172A");
+        }
+
+        doc.text(processArabicText(rowVals[c]), rX + 2, curY + 3, {
+          width: col.w - 4,
+          align: "center",
+          ellipsis: true,
+          lineBreak: false,
+        });
+        rX += col.w;
+      }
+      curY += rowH;
     }
   }
 
-  writeSectionTitle(doc, "الحالة والمستهلكات");
-  writeInfoLines(doc, [
-    { label: "أسود", value: toner.black == null ? "-" : `${toner.black}%` },
-    { label: "سماوي", value: toner.cyan == null ? "-" : `${toner.cyan}%` },
-    { label: "أرجواني", value: toner.magenta == null ? "-" : `${toner.magenta}%` },
-    { label: "أصفر", value: toner.yellow == null ? "-" : `${toner.yellow}%` },
-    { label: "مرات الانحشار", value: maintenance.paperJams || 0 },
-  ]);
-  writeBullets(doc, maintenance.errorMessages || [], 15);
-  writeBullets(doc, maintenance.warnings || [], 15);
-
-  if (Object.keys(product).length > 0) {
-    writeSectionTitle(doc, "معلومات الجهاز الموسعة");
-    writeInfoLines(
-      doc,
-      Object.entries(product).map(([key, value]) => ({
-        label: humanizeKey(key),
-        value,
-      })),
-    );
-  }
-
-  writeRows(
-    doc,
-    "تفاصيل الخراطيش والمستهلكات",
-    supplies.map((item) => ({
-      اللون: item.color || item.family || "-",
-      الحالة: item.status || "-",
-      "الرقم التسلسلي": item.serialNumber || "-",
-      "رقم الجزء": item.partNumber || "-",
-      النوع: item.type || "-",
-      "تاريخ التركيب": item.firstInstallDate || "-",
-      "آخر استخدام": item.lastUseDate || "-",
-      "صفحات مطبوعة": item.pagesPrinted || "-",
-      "صفحات متبقية": item.remainingPages || "-",
-    })),
-    30,
-  );
-
-  writeRows(
-    doc,
-    "استخدام الورق حسب المقاس",
-    media.map((item) => ({
-      المقاس: item.mediaSize || "-",
-      الوحدات: item.units || item.duplexSheets || "-",
-      "إجمالي الصفحات": item.totalPages || item.totalImpressions || "-",
-    })),
-    40,
-  );
-
-  writeRows(
-    doc,
-    "سجل الأحداث",
-    events.map((item) => ({
-      الكود: item.code || "-",
-      النوع: item.type || "-",
-      التاريخ: item.dateTime || "-",
-      التكرار: item.count || "-",
-      العداد: item.cycles || "-",
-      الوصف: item.description || "-",
-    })),
-    60,
-  );
-
-  writeRows(
-    doc,
-    "سجل الوظائف",
-    jobs.map((item) => ({
-      الاسم: item.name || "-",
-      المستخدم: item.user || "-",
-      الحالة: item.status || "-",
-      التاريخ: item.dateTime || "-",
-      التفاصيل: item.details || "-",
-    })),
-    40,
-  );
-
-  writeRows(
-    doc,
-    "آخر القراءات التاريخية",
-    snapshots.slice(-30).reverse().map((snapshot) => ({
-      التاريخ: formatDate(snapshot.snapshotAt),
-      الحالة: arabicStatus(snapshot.status),
-      "العداد الحالي": snapshot.counters?.totalPages || 0,
-      "عداد العمر": snapshot.lifetimeCounters?.totalPages || 0,
-      "الانحشار": snapshot.maintenance?.paperJams || 0,
-    })),
-    30,
-  );
+  // Footer on page bottom
+  const footerY = doc.page.height - 32;
+  doc.strokeColor("#E2E8F0").lineWidth(0.8).moveTo(30, footerY - 5).lineTo(doc.page.width - 30, footerY - 5).stroke();
+  withArabicFont(doc, false).fontSize(7.5).fillColor("#64748B");
+  const footerText = `منظومة iSmart Messenger لإدارة ومتابعة الطابعات   |   المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}   |   تاريخ وتوقيت التقرير: ${reportDate}`;
+  doc.text(processArabicText(footerText), 30, footerY, { width: usableWidth, align: "center" });
 
   doc.end();
   await done;
+
   const suffix = (month && year) ? `-${year}-${month}` : "";
-  const fileName = `printer-detail-${printer.ipAddress}${suffix}-${Date.now()}.pdf`;
+  const fileName = `printer-detail-${printer.ipAddress || printer._id}${suffix}-${Date.now()}.pdf`;
   await createReportRecord({
     type: "printer",
     format: "pdf",
