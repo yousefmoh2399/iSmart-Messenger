@@ -98,9 +98,13 @@ class SystemMonitorRepository {
     await _apiClient.dio.delete<dynamic>('/api/admin/system-monitor/errors');
   }
 
-  Future<BranchesDeploymentData> getBranchesDeployment() async {
+  Future<BranchesDeploymentData> getBranchesDeployment({String? targetVersion}) async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/admin/system-monitor/branches-deployment',
+      queryParameters: {
+        if (targetVersion != null && targetVersion.trim().isNotEmpty)
+          'targetVersion': targetVersion.trim(),
+      },
     );
     final data = response.data?['data'] as Map<String, dynamic>? ?? {};
     return BranchesDeploymentData.fromJson(data);
@@ -114,10 +118,14 @@ class SystemMonitorRepository {
     return RequestTelemetryData.fromJson(data);
   }
 
-  Future<void> exportDeploymentReport({String format = 'xlsx'}) async {
+  Future<void> exportDeploymentReport({String format = 'xlsx', String? targetVersion}) async {
     final response = await _apiClient.dio.get<dynamic>(
       '/api/admin/system-monitor/reports/export',
-      queryParameters: {'format': format},
+      queryParameters: {
+        'format': format,
+        if (targetVersion != null && targetVersion.trim().isNotEmpty)
+          'targetVersion': targetVersion.trim(),
+      },
       options: Options(responseType: ResponseType.bytes),
     );
     final data = response.data;

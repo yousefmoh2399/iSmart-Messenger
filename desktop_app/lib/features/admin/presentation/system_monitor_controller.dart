@@ -172,11 +172,11 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
     }
   }
 
-  Future<void> refreshDeployment() async {
+  Future<void> refreshDeployment({String? targetVersion}) async {
     state = state.copyWith(isLoadingDeployment: true);
     try {
       final repo = ref.read(systemMonitorRepositoryProvider);
-      final data = await repo.getBranchesDeployment();
+      final data = await repo.getBranchesDeployment(targetVersion: targetVersion);
       state = state.copyWith(
         deploymentData: data,
         isLoadingDeployment: false,
@@ -276,11 +276,11 @@ Future<void> refreshPolls({String? search, String? status}) async {
     }
   }
 
-  Future<void> exportReport(String format) async {
+  Future<void> exportReport(String format, {String? targetVersion}) async {
     state = state.copyWith(isExportingReport: true);
     try {
       final repo = ref.read(systemMonitorRepositoryProvider);
-      await repo.exportDeploymentReport(format: format);
+      await repo.exportDeploymentReport(format: format, targetVersion: targetVersion);
     } finally {
       state = state.copyWith(isExportingReport: false);
     }

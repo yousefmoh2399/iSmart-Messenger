@@ -1,3 +1,29 @@
+import 'dart:math' as math;
+
+int compareAppVersions(String? v1, String? v2) {
+  if (v1 == null || v1.isEmpty || v1 == 'غير محدد' || v1 == 'unknown') {
+    return (v2 == null || v2.isEmpty) ? 0 : -1;
+  }
+  if (v2 == null || v2.isEmpty || v2 == 'غير محدد' || v2 == 'unknown') return 1;
+  final clean1 = v1.replaceAll(RegExp(r'[^0-9.]'), '');
+  final clean2 = v2.replaceAll(RegExp(r'[^0-9.]'), '');
+  if (clean1.isEmpty && clean2.isEmpty) return 0;
+  if (clean1.isEmpty) return -1;
+  if (clean2.isEmpty) return 1;
+
+  final p1 = clean1.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+  final p2 = clean2.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+  final maxLen = math.max(p1.length, p2.length);
+
+  for (int i = 0; i < maxLen; i++) {
+    final a = i < p1.length ? p1[i] : 0;
+    final b = i < p2.length ? p2[i] : 0;
+    if (a < b) return -1;
+    if (a > b) return 1;
+  }
+  return 0;
+}
+
 class DeviceSession {
   const DeviceSession({
     required this.id,
@@ -260,6 +286,7 @@ class BranchDeploymentSummary {
     this.criticalOutdatedDevicesCount = 0,
     this.outdatedBranchesCount = 0,
     required this.currentAppVersion,
+    this.targetAppVersion,
     required this.versionBreakdown,
     required this.platformBreakdown,
     required this.calculatedAt,
@@ -276,6 +303,7 @@ class BranchDeploymentSummary {
   final int criticalOutdatedDevicesCount;
   final int outdatedBranchesCount;
   final String currentAppVersion;
+  final String? targetAppVersion;
   final Map<String, int> versionBreakdown;
   final Map<String, int> platformBreakdown;
   final DateTime calculatedAt;
@@ -306,6 +334,7 @@ class BranchDeploymentSummary {
       criticalOutdatedDevicesCount: (json['criticalOutdatedDevicesCount'] as num?)?.toInt() ?? 0,
       outdatedBranchesCount: (json['outdatedBranchesCount'] as num?)?.toInt() ?? 0,
       currentAppVersion: json['currentAppVersion'] as String? ?? '1.1.21',
+      targetAppVersion: json['targetAppVersion'] as String? ?? json['currentAppVersion'] as String? ?? '1.1.21',
       versionBreakdown: vMap,
       platformBreakdown: pMap,
       calculatedAt: json['calculatedAt'] != null

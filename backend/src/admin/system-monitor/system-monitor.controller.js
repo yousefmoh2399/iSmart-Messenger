@@ -308,7 +308,8 @@ const deleteAllErrors = asyncHandler(async (req, res) => {
 });
 
 const getBranchesDeployment = asyncHandler(async (req, res) => {
-  const data = await getBranchesDeploymentData();
+  const targetVersion = req.query.targetVersion;
+  const data = await getBranchesDeploymentData(targetVersion);
   res.json({
     success: true,
     data,
@@ -325,7 +326,8 @@ const getRequestTelemetry = asyncHandler(async (req, res) => {
 
 const exportDeploymentReport = asyncHandler(async (req, res) => {
   const format = (req.query.format || "xlsx").toLowerCase();
-  const data = await getBranchesDeploymentData();
+  const targetVersion = req.query.targetVersion;
+  const data = await getBranchesDeploymentData(targetVersion);
   const actor = req.user;
 
   if (format === "pdf") {

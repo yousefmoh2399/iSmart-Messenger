@@ -16,6 +16,22 @@ const logo2Path = path.join(__dirname, "../../assets/logo2.png");
 
 const CURRENT_APP_VERSION = "1.1.21";
 
+function compareAppVersions(v1, v2) {
+  if (!v1 || !v2) return 0;
+  const clean1 = String(v1).replace(/[^0-9.]/g, "");
+  const clean2 = String(v2).replace(/[^0-9.]/g, "");
+  const p1 = clean1.split(".").map((n) => parseInt(n, 10) || 0);
+  const p2 = clean2.split(".").map((n) => parseInt(n, 10) || 0);
+  const maxLen = Math.max(p1.length, p2.length);
+  for (let i = 0; i < maxLen; i++) {
+    const a = p1[i] || 0;
+    const b = p2[i] || 0;
+    if (a < b) return -1;
+    if (a > b) return 1;
+  }
+  return 0;
+}
+
 function processArabicText(text) {
   if (text == null) return "";
   const input = String(text);
@@ -73,8 +89,22 @@ async function purgeLegacyMockSessions() {
   } catch (_) {}
 }
 
-async function getBranchesDeploymentData() {
+async function getBranchesDeploymentData(requestedTargetVersion = null) {
   await purgeLegacyMockSessions();
+
+  let effectiveTargetVersion = requestedTargetVersion ? String(requestedTargetVersion).trim() : null;
+  if (!effectiveTargetVersion) {
+    try {
+      const Release = require("../updates/release.model");
+      const latestRel = await Release.findOne({ isPublished: true }).sort({ createdAt: -1 }).lean();
+      if (latestRel && latestRel.version) {
+        effectiveTargetVersion = String(latestRel.version).trim();
+      }
+    } catch (_) {}
+  }
+  if (!effectiveTargetVersion) {
+    effectiveTargetVersion = CURRENT_APP_VERSION;
+  }
 
   const [branches, users, updateDevices, rawSessions] = await Promise.all([
     Branch.find({ deletedAt: null }).sort({ code: 1, name: 1 }).lean(),
@@ -190,12 +220,25 @@ async function getBranchesDeploymentData() {
         branchLastSeen = devLastSeen;
       }
 
-      const isOutdated = appVersion !== CURRENT_APP_VERSION;
-      const isCritical = isOutdated && (appVersion === "1.0.9" || appVersion < "1.1.20" || appVersion.startsWith("1.0.") || appVersion.startsWith("1.1."));
-      const versionStatus = !isOutdated ? "latest" : (isCritical ? "critical" : "previous");
-      const versionStatusLabel = !isOutdated
-        ? `محدث (v${CURRENT_APP_VERSION})`
-        : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`);
+      const cmp = compareAppVersions(appVersion, effectiveTargetVersion);
+      const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
+      const isOutdated = isKnown && cmp < 0;
+      const isExactMatch = isKnown && cmp === 0;
+      const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.0"));
+      const versionStatus = !isKnown
+        ? "pending"
+        : (isOutdated
+          ? (isCritical ? "critical" : "previous")
+          : "latest");
+      const versionStatusLabel = !isKnown
+        ? "إصدار غير محدد"
+        : (isExactMatch
+          ? `مطابق للمعتمد (v${effectiveTargetVersion}) ✅`
+          : (isOutdated
+            ? (isCritical
+              ? `نسخة قديمة حرجة (v${appVersion}) 🚨`
+              : `نسخة سابقة (v${appVersion}) ⚠️`)
+            : `إصدار أحدث (v${appVersion}) 🚀`));
 
       const hostName = (dev.hostName || dev.deviceName || (dev.platform?.includes("mobile") ? "Mobile Device" : "Desktop-PC")).trim();
       const uNameLower = (dev.lastKnownUsername || "").toLowerCase();
@@ -290,15 +333,25 @@ async function getBranchesDeploymentData() {
           branchLastSeen = s.lastSeenAt;
         }
 
-        const isKnownVersion = appVersion !== "غير محدد";
-        const isOutdated = isKnownVersion && appVersion !== CURRENT_APP_VERSION;
-        const isCritical = isOutdated && (appVersion === "1.0.9" || appVersion < "1.1.20" || appVersion.startsWith("1.0.") || appVersion.startsWith("1.1."));
-        const versionStatus = !isKnownVersion ? "pending" : (!isOutdated ? "latest" : (isCritical ? "critical" : "previous"));
-        const versionStatusLabel = !isKnownVersion
+        const cmp = compareAppVersions(appVersion, effectiveTargetVersion);
+        const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
+        const isOutdated = isKnown && cmp < 0;
+        const isExactMatch = isKnown && cmp === 0;
+        const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.0"));
+        const versionStatus = !isKnown
+          ? "pending"
+          : (isOutdated
+            ? (isCritical ? "critical" : "previous")
+            : "latest");
+        const versionStatusLabel = !isKnown
           ? "إصدار غير محدد"
-          : (!isOutdated
-            ? `محدث (v${CURRENT_APP_VERSION})`
-            : (isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`));
+          : (isExactMatch
+            ? `مطابق للمعتمد (v${effectiveTargetVersion}) ✅`
+            : (isOutdated
+              ? (isCritical
+                ? `نسخة قديمة حرجة (v${appVersion}) 🚨`
+                : `نسخة سابقة (v${appVersion}) ⚠️`)
+              : `إصدار أحدث (v${appVersion}) 🚀`));
 
         const uNameLower = (u.username || "").toLowerCase();
         const workstationType = clientType === "mobile"
@@ -413,7 +466,8 @@ async function getBranchesDeploymentData() {
       outdatedDevicesCount: totalOutdatedDevices,
       criticalOutdatedDevicesCount: totalCriticalOutdated,
       outdatedBranchesCount,
-      currentAppVersion: CURRENT_APP_VERSION,
+      currentAppVersion: effectiveTargetVersion,
+      targetAppVersion: effectiveTargetVersion,
       versionBreakdown: versionCounts,
       platformBreakdown: platformCounts,
       calculatedAt: new Date().toISOString(),
@@ -422,9 +476,9 @@ async function getBranchesDeploymentData() {
   };
 }
 
-async function buildDeploymentExcelReport(data, actor) {
+async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = null) {
   if (!data) {
-    data = await getBranchesDeploymentData();
+    data = await getBranchesDeploymentData(requestedTargetVersion);
   }
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "iSmart Messenger Enterprise Monitor";
@@ -758,9 +812,9 @@ async function buildDeploymentExcelReport(data, actor) {
   return { buffer: Buffer.from(buffer), fileName };
 }
 
-async function buildDeploymentPdfReport(data, actor) {
+async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = null) {
   if (!data) {
-    data = await getBranchesDeploymentData();
+    data = await getBranchesDeploymentData(requestedTargetVersion);
   }
   const doc = new PDFDocument({ margin: 28, size: "A4", layout: "landscape" });
   configureArabicPdf(doc);

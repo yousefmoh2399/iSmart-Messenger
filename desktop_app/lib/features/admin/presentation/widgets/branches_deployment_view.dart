@@ -26,12 +26,52 @@ class BranchesDeploymentView extends StatefulWidget {
 
 class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
   final TextEditingController _searchCtrl = TextEditingController();
-  String _filterType = 'all'; // 'all', 'installed', 'not_installed'
+  final TextEditingController _targetVersionCtrl = TextEditingController();
+  String _filterType = 'all'; // 'all', 'exact', 'older', 'not_installed'
+  String _appliedTargetVersion = '1.1.21';
+  bool _initializedTarget = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialVer = widget.state.deploymentData?.summary.targetAppVersion ??
+        widget.state.deploymentData?.summary.currentAppVersion;
+    if (initialVer != null && initialVer.isNotEmpty) {
+      _targetVersionCtrl.text = initialVer;
+      _appliedTargetVersion = initialVer;
+      _initializedTarget = true;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant BranchesDeploymentView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_initializedTarget) {
+      final initialVer = widget.state.deploymentData?.summary.targetAppVersion ??
+          widget.state.deploymentData?.summary.currentAppVersion;
+      if (initialVer != null && initialVer.isNotEmpty) {
+        _targetVersionCtrl.text = initialVer;
+        _appliedTargetVersion = initialVer;
+        _initializedTarget = true;
+      }
+    }
+  }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _targetVersionCtrl.dispose();
     super.dispose();
+  }
+
+  void _applyTargetVersion([String? newVersion]) {
+    final ver = (newVersion ?? _targetVersionCtrl.text).trim();
+    if (ver.isEmpty) return;
+    _targetVersionCtrl.text = ver;
+    setState(() {
+      _appliedTargetVersion = ver;
+    });
+    widget.notifier.refreshDeployment(targetVersion: ver);
   }
 
   void _openLiveTopologyScreen(BuildContext context) {
@@ -77,14 +117,55 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     final allBranches = deployment?.branches ?? [];
     final query = _searchCtrl.text.trim().toLowerCase();
 
-    final installedCount = allBranches.where((b) => b.isInstalled).length;
+    final targetVer = _appliedTargetVersion;
+
+    final detectedVersions = (summary?.versionBreakdown.keys ?? [])
+        .where((v) => v != 'unknown' && v != 'غير محدد' && v.trim().isNotEmpty)
+        .toList();
+    if (!detectedVersions.contains('1.1.21')) {
+      detectedVersions.add('1.1.21');
+    }
+    detectedVersions.sort((a, b) => compareAppVersions(b, a));
+
+    final totalExactDevs = allBranches.fold<int>(
+      0,
+      (sum, b) =>
+          sum +
+          b.devices
+              .where((d) => compareAppVersions(d.appVersion, targetVer) == 0)
+              .length,
+    );
+    final totalOlderDevs = allBranches.fold<int>(
+      0,
+      (sum, b) =>
+          sum +
+          b.devices
+              .where((d) => compareAppVersions(d.appVersion, targetVer) < 0)
+              .length,
+    );
+
+    final exactBranchesCount = allBranches
+        .where((b) => b.devices.any(
+            (d) => compareAppVersions(d.appVersion, targetVer) == 0))
+        .length;
+    final olderBranchesCount = allBranches
+        .where((b) => b.devices.any(
+            (d) => compareAppVersions(d.appVersion, targetVer) < 0))
+        .length;
     final pendingCount = allBranches.where((b) => !b.isInstalled).length;
-    final outdatedCount = allBranches.where((b) => b.hasOutdatedDevices).length;
 
     final filteredBranches = allBranches.where((b) {
-      if (_filterType == 'installed' && !b.isInstalled) return false;
-      if (_filterType == 'not_installed' && b.isInstalled) return false;
-      if (_filterType == 'outdated' && !b.hasOutdatedDevices) return false;
+      if (_filterType == 'exact') {
+        final hasExact = b.devices.any(
+            (d) => compareAppVersions(d.appVersion, targetVer) == 0);
+        if (!hasExact) return false;
+      } else if (_filterType == 'older') {
+        final hasOlder = b.devices.any(
+            (d) => compareAppVersions(d.appVersion, targetVer) < 0);
+        if (!hasOlder) return false;
+      } else if (_filterType == 'not_installed') {
+        if (b.isInstalled) return false;
+      }
       if (query.isNotEmpty) {
         final matchesName = b.branchName.toLowerCase().contains(query);
         final matchesCode = b.branchCode.toLowerCase().contains(query);
@@ -107,23 +188,36 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
         const SizedBox(height: 18),
 
         // 2. Executive Bento KPI Cards
-        _buildBentoKpiRow(summary, telemetry, isDark, cs),
+        _buildBentoKpiRow(summary, telemetry, isDark, cs, targetVer),
         const SizedBox(height: 18),
 
-        // 3. Action and Filter Bar
+        // 3. Target Version Inspector Bar
+        _buildTargetVersionInspectorBar(
+          isDark: isDark,
+          cs: cs,
+          isLoading: state.isLoadingDeployment,
+          detectedVersions: detectedVersions,
+          targetVersion: targetVer,
+        ),
+        const SizedBox(height: 14),
+
+        // 4. Action and Filter Bar
         _buildActionFilterBar(
           state: state,
           notifier: notifier,
           allCount: allBranches.length,
-          installedCount: installedCount,
+          exactBranchesCount: exactBranchesCount,
+          exactDevsCount: totalExactDevs,
+          olderBranchesCount: olderBranchesCount,
+          olderDevsCount: totalOlderDevs,
           pendingCount: pendingCount,
-          outdatedCount: outdatedCount,
+          targetVersion: targetVer,
           isDark: isDark,
           cs: cs,
         ),
         const SizedBox(height: 14),
 
-        // 4. Fleet Data Table / Cards
+        // 5. Fleet Data Table / Cards
         if (state.isLoadingDeployment && allBranches.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 40),
@@ -132,13 +226,254 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
         else if (filteredBranches.isEmpty)
           _buildEmptyBranchesCard(isDark)
         else
-          _buildFleetView(filteredBranches, isDark, cs),
+          _buildFleetView(filteredBranches, isDark, cs, targetVer),
 
         const SizedBox(height: 22),
 
-        // 5. Live Server Requests Stream (Cloudflare-style Log Stream)
+        // 6. Live Server Requests Stream (Cloudflare-style Log Stream)
         _buildLiveRequestsStreamCard(telemetry, isDark, cs),
       ],
+    );
+  }
+
+  Widget _buildTargetVersionInspectorBar({
+    required bool isDark,
+    required ColorScheme cs,
+    required bool isLoading,
+    required List<String> detectedVersions,
+    required String targetVersion,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF111827) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          width: 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 920;
+
+          final inputAndApplyWidget = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 130,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFF38BDF8).withValues(alpha: 0.5),
+                    width: 1.2,
+                  ),
+                ),
+                child: TextField(
+                  controller: _targetVersionCtrl,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF38BDF8),
+                  ),
+                  decoration: const InputDecoration(
+                    hintText: '1.1.21',
+                    hintStyle: TextStyle(fontSize: 12, color: Colors.grey),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _applyTargetVersion(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: isLoading ? null : () => _applyTargetVersion(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  elevation: 0,
+                ),
+                icon: isLoading
+                    ? const SizedBox(
+                        width: 13,
+                        height: 13,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.check_circle_rounded, size: 15),
+                label: const Text(
+                  'تطبيق ومطابقة',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          );
+
+          final titleWidget = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.rule_folder_rounded,
+                  color: Color(0xFF38BDF8),
+                  size: 17,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'الإصدار المرجعي المعتمد للفحص:',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF38BDF8).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'v$targetVersion',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0284C7),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    'أدخل نسخة البرنامج للمقارنة الفورية وفرز الأجهزة المطابقة أو الأقدم',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+
+          final chipsWidget = detectedVersions.isNotEmpty
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'نسخ مكتشفة بالشبكة:',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 5,
+                      children: detectedVersions.map((v) {
+                        final isCurrent = v == targetVersion;
+                        return InkWell(
+                          onTap: () => _applyTargetVersion(v),
+                          borderRadius: BorderRadius.circular(5),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                            decoration: BoxDecoration(
+                              color: isCurrent
+                                  ? const Color(0xFF0284C7).withValues(alpha: 0.2)
+                                  : (isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9)),
+                              borderRadius: BorderRadius.circular(5),
+                              border: Border.all(
+                                color: isCurrent
+                                    ? const Color(0xFF0284C7)
+                                    : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                              ),
+                            ),
+                            child: Text(
+                              'v$v',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontFamily: 'monospace',
+                                fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
+                                color: isCurrent
+                                    ? const Color(0xFF38BDF8)
+                                    : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                )
+              : const SizedBox.shrink();
+
+          if (isCompact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                titleWidget,
+                const SizedBox(height: 10),
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    inputAndApplyWidget,
+                    chipsWidget,
+                  ],
+                ),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              titleWidget,
+              const SizedBox(width: 16),
+              inputAndApplyWidget,
+              const Spacer(),
+              chipsWidget,
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -147,6 +482,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     RequestTelemetryData? telemetry,
     bool isDark,
     ColorScheme cs,
+    String targetVer,
   ) {
     final adoptionPercent = summary?.adoptionPercentage ?? 0;
     final installedBranches = summary?.installedBranchesCount ?? 0;
@@ -221,12 +557,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
             accentColor: outdatedDevs > 0
                 ? const Color(0xFFF59E0B)
                 : const Color(0xFF10B981),
-            title: 'إصدارات التطبيق بالفروع',
-            value: '$latestDevs محدث',
+            title: 'مطابقة الإصدار المعتمد',
+            value: '$latestDevs مطابق',
             subtitle: outdatedDevs > 0
-                ? '$outdatedDevs جهاز بنسخ قديمة بحاجة لتحديث'
-                : 'كافة الأجهزة محدثة على v$appVer',
-            badge: outdatedDevs > 0 ? '$outdatedDevs قديم ⚠️' : 'سليم 100% ✅',
+                ? '$outdatedDevs جهاز بنسخ أقدم من v$targetVer'
+                : 'كافة الأجهزة مطابقة على v$targetVer',
+            badge: outdatedDevs > 0 ? '$outdatedDevs قديم ⚠️' : 'مطابق 100% ✅',
             badgeColor: outdatedDevs > 0
                 ? const Color(0xFFF59E0B)
                 : const Color(0xFF10B981),
@@ -379,9 +715,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     required SystemMonitorState state,
     required SystemMonitorController notifier,
     required int allCount,
-    required int installedCount,
+    required int exactBranchesCount,
+    required int exactDevsCount,
+    required int olderBranchesCount,
+    required int olderDevsCount,
     required int pendingCount,
-    required int outdatedCount,
+    required String targetVersion,
     required bool isDark,
     required ColorScheme cs,
   }) {
@@ -459,17 +798,18 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
             children: [
               _buildFilterChoice('all', 'جميع الفروع ($allCount)'),
               const SizedBox(width: 6),
-              _buildFilterChoice('installed', 'المثبتة ($installedCount)'),
+              _buildFilterChoice(
+                'exact',
+                'نفس الإصدار v$targetVersion ($exactBranchesCount فرع / $exactDevsCount محطة)',
+              ),
+              const SizedBox(width: 6),
+              _buildFilterChoice(
+                'older',
+                'إصدارات أقدم ($olderBranchesCount فرع / $olderDevsCount محطة)',
+                isWarning: olderDevsCount > 0,
+              ),
               const SizedBox(width: 6),
               _buildFilterChoice('not_installed', 'بانتظار التثبيت ($pendingCount)'),
-              if (outdatedCount > 0) ...[
-                const SizedBox(width: 6),
-                _buildFilterChoice(
-                  'outdated',
-                  'نسخ قديمة ($outdatedCount)',
-                  isWarning: true,
-                ),
-              ],
             ],
           );
 
@@ -480,7 +820,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               OutlinedButton.icon(
                 onPressed: isExporting
                     ? null
-                    : () => notifier.exportReport('xlsx'),
+                    : () => notifier.exportReport('xlsx', targetVersion: targetVersion),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF10B981),
                   side: BorderSide(
@@ -512,7 +852,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               OutlinedButton.icon(
                 onPressed: isExporting
                     ? null
-                    : () => notifier.exportReport('pdf'),
+                    : () => notifier.exportReport('pdf', targetVersion: targetVersion),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFFEF4444),
                   side: BorderSide(
@@ -643,13 +983,14 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     List<BranchDeploymentItem> branches,
     bool isDark,
     ColorScheme cs,
+    String targetVersion,
   ) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 840;
 
         if (isWide) {
-          return _buildEnterpriseFleetTable(branches, isDark, cs);
+          return _buildEnterpriseFleetTable(branches, isDark, cs, targetVersion);
         }
 
         // Compact list for smaller screens
@@ -657,7 +998,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           children: branches
               .map((b) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildBranchCard(b, isDark, cs),
+                    child: _buildBranchCard(b, isDark, cs, targetVersion),
                   ))
               .toList(),
         );
@@ -669,6 +1010,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     List<BranchDeploymentItem> branches,
     bool isDark,
     ColorScheme cs,
+    String targetVersion,
   ) {
     return Container(
       decoration: BoxDecoration(
@@ -799,6 +1141,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               itemBuilder: (context, index) {
                 final b = branches[index];
                 final isInstalled = b.isInstalled;
+                final branchExactDevs = b.devices
+                    .where((d) => compareAppVersions(d.appVersion, targetVersion) == 0)
+                    .length;
+                final branchOlderDevs = b.devices
+                    .where((d) => compareAppVersions(d.appVersion, targetVersion) < 0)
+                    .length;
 
                 return Padding(
                   padding:
@@ -977,7 +1325,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                                         : const Color(0xFF94A3B8),
                                   ),
                                 )
-                              : b.hasOutdatedDevices
+                              : branchOlderDevs > 0
                                   ? Container(
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 7, vertical: 3),
@@ -1001,7 +1349,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                                           const SizedBox(width: 4),
                                           Flexible(
                                             child: Text(
-                                              'v${b.appVersions.join(", ")} (${b.outdatedDevicesCount} قديم)',
+                                              'v${b.appVersions.join(", ")} ($branchOlderDevs جهاز أقدم ⚠️)',
                                               style: const TextStyle(
                                                 fontSize: 10,
                                                 fontFamily: 'monospace',
@@ -1015,39 +1363,64 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                                         ],
                                       ),
                                     )
-                                  : Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 7, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF10B981)
-                                            .withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(
-                                          color: const Color(0xFF10B981)
-                                              .withValues(alpha: 0.25),
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.verified_rounded,
-                                            size: 13,
-                                            color: Color(0xFF10B981),
+                                  : branchExactDevs > 0
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 7, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF10B981)
+                                                .withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: const Color(0xFF10B981)
+                                                  .withValues(alpha: 0.25),
+                                            ),
                                           ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'v${b.appVersions.isNotEmpty ? b.appVersions.first : "1.1.21"} (محدث)',
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.verified_rounded,
+                                                size: 13,
+                                                color: Color(0xFF10B981),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'v$targetVersion (مطابق 100% ✅)',
+                                                style: const TextStyle(
+                                                  fontSize: 10,
+                                                  fontFamily: 'monospace',
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFF10B981),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        )
+                                      : Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 7, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF6366F1)
+                                                .withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: const Color(0xFF6366F1)
+                                                  .withValues(alpha: 0.25),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            b.appVersions.isNotEmpty
+                                                ? 'v${b.appVersions.join(", ")}'
+                                                : 'إصدار غير محدد',
                                             style: const TextStyle(
                                               fontSize: 10,
                                               fontFamily: 'monospace',
                                               fontWeight: FontWeight.w700,
-                                              color: Color(0xFF10B981),
+                                              color: Color(0xFF6366F1),
                                             ),
                                           ),
-                                        ],
-                                      ),
-                                    ),
+                                        ),
                         ),
                       ),
 
@@ -1071,7 +1444,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                         child: OutlinedButton(
                           onPressed: b.devices.isEmpty && b.installedUsers.isEmpty
                               ? null
-                              : () => _showBranchDevicesModal(context, b, isDark),
+                              : () => _showBranchDevicesModal(context, b, isDark, targetVersion),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 4),
@@ -1109,7 +1482,14 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     BranchDeploymentItem branch,
     bool isDark,
     ColorScheme cs,
+    String targetVersion,
   ) {
+    final branchExactDevs = branch.devices
+        .where((d) => compareAppVersions(d.appVersion, targetVersion) == 0)
+        .length;
+    final branchOlderDevs = branch.devices
+        .where((d) => compareAppVersions(d.appVersion, targetVersion) < 0)
+        .length;
     final isInstalled = branch.isInstalled;
     final statusColor =
         isInstalled ? const Color(0xFF10B981) : const Color(0xFF94A3B8);
@@ -1228,14 +1608,16 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                   isDark: isDark,
                   label: 'إصدار البرنامج',
                   value: branch.appVersions.isNotEmpty
-                      ? 'v${branch.appVersions.first}'
-                      : (isInstalled ? 'v1.1.21' : '-'),
-                  sub: branch.hasOutdatedDevices
-                      ? '⚠️ ${branch.outdatedDevicesCount} جهاز قديم'
-                      : (isInstalled ? '✅ محدث بالكامل' : '-'),
-                  color: branch.hasOutdatedDevices
+                      ? 'v${branch.appVersions.join(", ")}'
+                      : (isInstalled ? 'إصدار غير محدد' : '-'),
+                  sub: branchOlderDevs > 0
+                      ? '⚠️ $branchOlderDevs جهاز أقدم من v$targetVersion'
+                      : (branchExactDevs > 0
+                          ? '✅ مطابق لـ v$targetVersion'
+                          : (isInstalled ? 'محدد' : '-')),
+                  color: branchOlderDevs > 0
                       ? const Color(0xFFF59E0B)
-                      : (isInstalled
+                      : (branchExactDevs > 0
                           ? const Color(0xFF10B981)
                           : const Color(0xFF8B5CF6)),
                 ),
@@ -1246,7 +1628,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           OutlinedButton(
             onPressed: branch.devices.isEmpty && branch.installedUsers.isEmpty
                 ? null
-                : () => _showBranchDevicesModal(context, branch, isDark),
+                : () => _showBranchDevicesModal(context, branch, isDark, targetVersion),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 6),
               minimumSize: const Size(0, 32),
@@ -1606,7 +1988,11 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     BuildContext context,
     BranchDeploymentItem branch,
     bool isDark,
+    String targetVersion,
   ) {
+    final branchOlderDevs = branch.devices
+        .where((d) => compareAppVersions(d.appVersion, targetVersion) < 0)
+        .length;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1683,7 +2069,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                       controller: scrollController,
                       padding: const EdgeInsets.all(16),
                       children: [
-                        if (branch.hasOutdatedDevices)
+                        if (branchOlderDevs > 0)
                           Container(
                             margin: const EdgeInsets.only(bottom: 12),
                             padding: const EdgeInsets.symmetric(
@@ -1707,7 +2093,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'تنبيه إصدارات: يوجد ${branch.outdatedDevicesCount} جهاز بنسخة قديمة في هذا الفرع يتطلب التحديث إلى v1.1.21 لضمان استقرار المنظومة والربط.',
+                                    'تنبيه إصدارات: يوجد $branchOlderDevs جهاز بنسخة أقدم من الإصدار المطلوب (v$targetVersion) في هذا الفرع يتطلب التحديث لضمان استقرار المنظومة والربط.',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
@@ -1731,7 +2117,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                           ),
                           const SizedBox(height: 8),
                           ...branch.devices.map(
-                            (d) => _buildDeviceItemRow(d, isDark),
+                            (d) => _buildDeviceItemRow(d, isDark, targetVersion),
                           ),
                           const SizedBox(height: 16),
                         ],
@@ -1763,27 +2149,51 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
-  Widget _buildDeviceItemRow(BranchDeviceItem d, bool isDark) {
+  Widget _buildDeviceItemRow(
+    BranchDeviceItem d,
+    bool isDark,
+    String targetVersion,
+  ) {
+    final cmp = compareAppVersions(d.appVersion, targetVersion);
+    final isExact = cmp == 0;
+    final isOlder = cmp < 0;
+    final isNewer = cmp > 0;
+
     Color versionBg;
     Color versionBorder;
     Color versionText;
     IconData versionIcon;
+    String statusLabel;
 
-    if (d.versionStatus == 'critical') {
-      versionBg = const Color(0xFFEF4444).withValues(alpha: 0.12);
-      versionBorder = const Color(0xFFEF4444).withValues(alpha: 0.4);
-      versionText = const Color(0xFFEF4444);
-      versionIcon = Icons.error_outline_rounded;
-    } else if (d.versionStatus == 'previous') {
-      versionBg = const Color(0xFFF59E0B).withValues(alpha: 0.12);
-      versionBorder = const Color(0xFFF59E0B).withValues(alpha: 0.4);
-      versionText = const Color(0xFFF59E0B);
-      versionIcon = Icons.warning_amber_rounded;
-    } else {
+    if (isExact) {
       versionBg = const Color(0xFF10B981).withValues(alpha: 0.1);
-      versionBorder = const Color(0xFF10B981).withValues(alpha: 0.3);
+      versionBorder = const Color(0xFF10B981).withValues(alpha: 0.35);
       versionText = const Color(0xFF10B981);
       versionIcon = Icons.check_circle_outline_rounded;
+      statusLabel = 'مطابق للمعتمد ✅';
+    } else if (isOlder) {
+      final isCritical = d.versionStatus == 'critical' || cmp < -1;
+      versionBg = isCritical
+          ? const Color(0xFFEF4444).withValues(alpha: 0.12)
+          : const Color(0xFFF59E0B).withValues(alpha: 0.12);
+      versionBorder = isCritical
+          ? const Color(0xFFEF4444).withValues(alpha: 0.4)
+          : const Color(0xFFF59E0B).withValues(alpha: 0.4);
+      versionText = isCritical ? const Color(0xFFEF4444) : const Color(0xFFF59E0B);
+      versionIcon = isCritical ? Icons.error_outline_rounded : Icons.warning_amber_rounded;
+      statusLabel = 'أقدم من المطلوب (المطلوب: v$targetVersion) ⚠️';
+    } else if (isNewer) {
+      versionBg = const Color(0xFF8B5CF6).withValues(alpha: 0.12);
+      versionBorder = const Color(0xFF8B5CF6).withValues(alpha: 0.35);
+      versionText = const Color(0xFF8B5CF6);
+      versionIcon = Icons.rocket_launch_rounded;
+      statusLabel = 'أحدث من المطلوب (v$targetVersion) 🚀';
+    } else {
+      versionBg = const Color(0xFF64748B).withValues(alpha: 0.1);
+      versionBorder = const Color(0xFF64748B).withValues(alpha: 0.3);
+      versionText = const Color(0xFF64748B);
+      versionIcon = Icons.help_outline_rounded;
+      statusLabel = 'إصدار غير محدد';
     }
 
     return Container(
@@ -1871,7 +2281,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                           Icon(versionIcon, size: 11, color: versionText),
                           const SizedBox(width: 3),
                           Text(
-                            'v${d.appVersion} (${d.versionStatusLabel})',
+                            'v${d.appVersion} ($statusLabel)',
                             style: TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.w700,
