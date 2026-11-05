@@ -274,9 +274,17 @@ class AuthController extends Notifier<AuthState> {
     );
   }
 
-  Future<void> uploadAvatar(String filePath) async {
+  Future<void> uploadAvatar(
+    String filePath, {
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
     final repository = ref.read(authRepositoryProvider);
-    final user = await repository.uploadAvatar(filePath);
+    final user = await repository.uploadAvatar(
+      filePath,
+      fileBytes: fileBytes,
+      fileName: fileName,
+    );
     final session = await repository.getSession();
     state = AuthState(
       status: AuthStatus.authenticated,

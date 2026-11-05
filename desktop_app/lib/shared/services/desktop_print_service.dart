@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import '../../../core/utils/app_path_utils.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/network/media_url_resolver.dart';
@@ -282,7 +282,7 @@ class DesktopPrintService implements PrintExecutor {
     _log(
       '_resolvePrintableFile called: fileName=$fileName, downloadUrl=${_redactUrl(downloadUrl)}, inline=${inlineFileBase64 != null}',
     );
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
     final safeName = _sanitizeFileName(
       fileName,
       mimeType,

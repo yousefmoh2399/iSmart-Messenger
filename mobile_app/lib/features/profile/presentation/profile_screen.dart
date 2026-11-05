@@ -50,11 +50,26 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.image,
         allowMultiple: false,
+        withData: true,
       );
-      final filePath = result?.files.single.path;
-      if (filePath == null || filePath.isEmpty) return;
+      final picked = result?.files.single;
+      if (picked == null) return;
 
-      await ref.read(authControllerProvider.notifier).uploadAvatar(filePath);
+      if (picked.bytes != null && picked.bytes!.isNotEmpty) {
+        await ref.read(authControllerProvider.notifier).uploadAvatar(
+          picked.path ?? '',
+          fileBytes: picked.bytes,
+          fileName: picked.name,
+        );
+      } else if (picked.path != null && picked.path!.isNotEmpty) {
+        await ref.read(authControllerProvider.notifier).uploadAvatar(
+          picked.path!,
+          fileName: picked.name,
+        );
+      } else {
+        return;
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تحديث الصورة الشخصية بنجاح')),

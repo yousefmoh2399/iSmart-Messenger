@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/utils/app_path_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 
@@ -114,7 +114,7 @@ class StorageCleanerService {
 
     if (!kIsWeb) {
       try {
-        final tempDir = await getTemporaryDirectory();
+        final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
         if (tempDir.existsSync()) {
           await for (final entity in tempDir.list(recursive: true, followLinks: false)) {
             if (entity is File) {
@@ -201,7 +201,7 @@ class StorageCleanerService {
           PaintingBinding.instance.imageCache.clearLiveImages();
         }
 
-        final tempDir = await getTemporaryDirectory();
+        final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
         if (!tempDir.existsSync()) return;
 
         await for (final entity in tempDir.list(recursive: true, followLinks: false)) {

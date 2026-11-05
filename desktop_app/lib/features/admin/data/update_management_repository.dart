@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/utils/app_path_utils.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_repository.dart';
@@ -467,7 +467,7 @@ class UpdateManagementRepository {
   }
 
   Future<Directory> _defaultArtifactDirectory() async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
     return Directory(path.join(tempDir.path, 'update-artifacts'));
   }
 

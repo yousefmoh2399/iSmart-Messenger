@@ -671,15 +671,24 @@ class AuthRepository {
     return user;
   }
 
-  Future<AppUser> uploadAvatar(String filePath) async {
+  Future<AppUser> uploadAvatar(
+    String filePath, {
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
     final token = await getToken();
+    final resolvedFileName = fileName?.trim().isNotEmpty == true
+        ? fileName!.trim()
+        : (filePath.isNotEmpty ? p.basename(filePath) : 'avatar.png');
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/users/me/avatar',
       data: FormData.fromMap({
-        'avatar': await MultipartFile.fromFile(
-          filePath,
-          filename: p.basename(filePath),
-        ),
+        'avatar': fileBytes != null
+            ? MultipartFile.fromBytes(fileBytes, filename: resolvedFileName)
+            : await MultipartFile.fromFile(
+                filePath,
+                filename: resolvedFileName,
+              ),
       }),
       options: Options(
         headers: {'Authorization': 'Bearer $token'},

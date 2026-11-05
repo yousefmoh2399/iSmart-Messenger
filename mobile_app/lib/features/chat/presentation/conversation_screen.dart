@@ -17,6 +17,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
+import '../../../../core/utils/app_path_utils.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:swipe_to/swipe_to.dart';
@@ -1985,7 +1986,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       return;
     }
 
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
     final fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
     final outputPath = p.join(tempDir.path, fileName);
 

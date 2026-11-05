@@ -6,7 +6,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/utils/app_path_utils.dart';
 
 
 class AttachmentSendDraft {
@@ -331,7 +331,7 @@ class _WhatsAppMediaEditorDialogState
     }
 
     final outBytes = byteData.buffer.asUint8List();
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
     final outputPath = p.join(
       tempDir.path,
       'ismart_desktop_media_${DateTime.now().microsecondsSinceEpoch}.png',

@@ -8,8 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../../../core/settings/user_preferences.dart';
 import '../../../core/utils/formatters.dart';
@@ -178,21 +176,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
       setState(() => _uploadingAvatar = true);
 
-      final tempDir = await getTemporaryDirectory();
-      final tempFilePath = p.join(
-        tempDir.path,
-        'avatar_cropped_${DateTime.now().millisecondsSinceEpoch}.png',
+      final safeFileName = picked.name.isNotEmpty
+          ? picked.name
+          : 'avatar_cropped_${DateTime.now().millisecondsSinceEpoch}.png';
+
+      await ref.read(authControllerProvider.notifier).uploadAvatar(
+        picked.path ?? '',
+        fileBytes: croppedBytes,
+        fileName: safeFileName,
       );
-      final tempFile = File(tempFilePath);
-      await tempFile.writeAsBytes(croppedBytes, flush: true);
-
-      await ref.read(authControllerProvider.notifier).uploadAvatar(tempFile.path);
-
-      try {
-        if (await tempFile.exists()) {
-          await tempFile.delete();
-        }
-      } catch (_) {}
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import '../../../../core/utils/app_path_utils.dart';
 
 class _IsolateBlurJob {
   const _IsolateBlurJob({
@@ -875,7 +875,7 @@ class _WhatsAppMediaEditorDialogState
       }
 
       final outBytes = finalByteData.buffer.asUint8List();
-      final tempDir = await getTemporaryDirectory();
+      final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
       final outputPath = p.join(
         tempDir.path,
         'ismart_markup_${DateTime.now().microsecondsSinceEpoch}.png',
