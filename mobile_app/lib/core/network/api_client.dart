@@ -115,12 +115,20 @@ class ApiClient {
           final isRefreshRequest = requestOptions.path.contains(
             '/api/auth/refresh',
           );
+          final isLogoutRequest =
+              requestOptions.path.contains('/api/auth/logout') ||
+              requestOptions.extra['requestSource'] == 'auth.logout';
+          final isLoginRequest = requestOptions.path.contains(
+            '/api/auth/login',
+          );
 
           // Handle 401 errors by attempting token refresh once per request.
           if (error.response?.statusCode == 401 &&
               _authRepository != null &&
               !alreadyRetried &&
-              !isRefreshRequest) {
+              !isRefreshRequest &&
+              !isLogoutRequest &&
+              !isLoginRequest) {
             try {
               final refreshed = await _refreshAccessToken();
               final token = await _authRepository.getToken();

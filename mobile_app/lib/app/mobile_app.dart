@@ -748,6 +748,37 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     _socketEventsSubscription = ref.read(chatSocketServiceProvider).events.listen((
       event,
     ) {
+      if (event.type == 'force_logout') {
+        unawaited(() async {
+          try {
+            final targetUid =
+                event.payload['targetDeviceUid']?.toString().trim();
+            final excludeUid =
+                event.payload['excludeDeviceUid']?.toString().trim();
+            if ((targetUid != null && targetUid.isNotEmpty) ||
+                (excludeUid != null && excludeUid.isNotEmpty)) {
+              final myUid =
+                  await ref.read(authRepositoryProvider).getDeviceUid();
+              if (excludeUid != null &&
+                  excludeUid.isNotEmpty &&
+                  myUid == excludeUid) {
+                return;
+              }
+              if (targetUid != null &&
+                  targetUid.isNotEmpty &&
+                  myUid != targetUid) {
+                return;
+              }
+            }
+            await ref.read(authControllerProvider.notifier).logout();
+          } catch (_) {}
+        }());
+        return;
+      }
+      if (event.type == 'session_expired') {
+        unawaited(ref.read(authControllerProvider.notifier).logout());
+        return;
+      }
       if (event.type == 'file_receive_requested') {
         unawaited(_handleIncomingFileRequest(event.payload));
         return;

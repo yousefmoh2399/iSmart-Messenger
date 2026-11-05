@@ -444,16 +444,9 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
       ref.read(activeConversationIdProvider.notifier).state = null;
       ref.read(sessionInvalidationRevisionProvider.notifier).state++;
       
-      if (ref.exists(chatOverviewControllerProvider)) ref.read(chatOverviewControllerProvider.notifier).resetState();
-      if (ref.exists(usersControllerProvider)) ref.read(usersControllerProvider.notifier).resetState();
-      if (ref.exists(remoteDocumentsControllerProvider)) ref.read(remoteDocumentsControllerProvider.notifier).resetState();
-      if (ref.exists(adminDocumentsControllerProvider)) ref.read(adminDocumentsControllerProvider.notifier).resetState();
-      if (ref.exists(announcementsControllerProvider)) ref.read(announcementsControllerProvider.notifier).resetState();
-      if (ref.exists(adminAnnouncementsControllerProvider)) ref.read(adminAnnouncementsControllerProvider.notifier).resetState();
-      if (ref.exists(ticketsControllerProvider)) ref.read(ticketsControllerProvider.notifier).resetState();
-      if (ref.exists(mobilePrinterControllerProvider)) ref.read(mobilePrinterControllerProvider.notifier).resetState();
-      if (ref.exists(pendingUploadsControllerProvider)) ref.read(pendingUploadsControllerProvider.notifier).resetState();
-      if (ref.exists(scanSessionControllerProvider)) ref.read(scanSessionControllerProvider.notifier).resetState();
+      try {
+        ref.read(authControllerProvider.notifier).logout();
+      } catch (_) {}
 
       ref.invalidate(chatOverviewControllerProvider);
       ref.invalidate(chatRealtimeControllerProvider);
