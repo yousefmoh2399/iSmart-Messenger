@@ -198,13 +198,21 @@ const getConnections = asyncHandler(async (req, res) => {
   } catch (_) {}
 
   const rawSessions = await DeviceSession.find(query)
-    .populate("userId", "username fullName role avatarUrl isOnline jobTitleBranch department")
+    .populate({
+      path: "userId",
+      select: "username fullName role avatarUrl isOnline jobTitle branchCode departmentId departmentIds",
+      populate: { path: "departmentId", select: "name code" },
+    })
     .sort({ lastSeenAt: -1, startedAt: -1 })
     .lean();
 
   // Reconcile each session against real-time live socket metrics
   const reconciledSessions = [];
   for (const s of rawSessions) {
+    if (s.userId && typeof s.userId === "object") {
+      s.userId.department = s.userId.departmentId?.name || (typeof s.userId.department === "string" ? s.userId.department : null);
+      s.userId.jobTitleBranch = [s.userId.jobTitle, s.userId.branchCode].filter(Boolean).join(" - ") || null;
+    }
     const isLive = s.socketId
       ? liveMetrics.isSocketConnected(s.socketId)
       : s.userId

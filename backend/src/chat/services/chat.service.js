@@ -1135,9 +1135,6 @@ async function listConversationsForUser(currentUser) {
   for (const conversation of conversations) {
     try {
       await assertConversationAccess(currentUser, conversation);
-      if (isDepartmentDefaultConversation(conversation)) {
-        continue;
-      }
       const memberState = await getConversationState(
         currentUser.id,
         conversation._id,
