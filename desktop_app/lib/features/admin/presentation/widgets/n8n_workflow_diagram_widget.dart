@@ -32,7 +32,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2600),
+      duration: const Duration(milliseconds: 2400),
     )..repeat();
   }
 
@@ -67,15 +67,15 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
+        color: isDark ? const Color(0xFF10131A) : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.03),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -85,7 +85,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
-            // Background subtle grid
+            // Background subtle dot grid
             Positioned.fill(
               child: CustomPaint(
                 painter: _N8nCanvasGridPainter(isDark: isDark),
@@ -100,29 +100,27 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                      color: const Color(0xFFFF6D5A).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(
-                        color: const Color(0xFF6366F1).withValues(alpha: 0.25),
+                        color: const Color(0xFFFF6D5A).withValues(alpha: 0.25),
                       ),
                     ),
-                    child: Row(
+                    child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.hub_rounded,
                           size: 14,
-                          color: Color(0xFF818CF8),
+                          color: Color(0xFFFF6D5A),
                         ),
-                        const SizedBox(width: 6),
+                        SizedBox(width: 6),
                         Text(
                           'بنية الربط والتشغيل المباشر (Live Telemetry Architecture)',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: isDark
-                                ? const Color(0xFFA5B4FC)
-                                : const Color(0xFF4F46E5),
+                            color: Color(0xFFFF6D5A),
                             letterSpacing: -0.2,
                           ),
                         ),
@@ -144,7 +142,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _PulsingDot(color: const Color(0xFF10B981)),
+                        const _PulsingDot(color: Color(0xFF10B981)),
                         const SizedBox(width: 6),
                         Text(
                           '$rps req/s  •  $latency ms استجابة  •  نشط ومستقر',
@@ -162,7 +160,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                     FilledButton.icon(
                       onPressed: widget.onOpenFullscreen,
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF6366F1),
+                        backgroundColor: const Color(0xFFFF6D5A), // n8n Coral
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                         shape: RoundedRectangleBorder(
@@ -171,7 +169,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                       ),
                       icon: const Icon(Icons.open_in_full_rounded, size: 14),
                       label: const Text(
-                        'خريطة العمليات وشبكة الموظفين الحية (n8n Live Map)',
+                        'خريطة العمليات وشبكة الأجهزة الحية (n8n Live Map)',
                         style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                       ),
                     ),
@@ -181,7 +179,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
             ),
             // Canvas content: Nodes & Flow
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
+              padding: const EdgeInsets.fromLTRB(16, 50, 16, 16),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final isWide = constraints.maxWidth >= 760;
@@ -195,35 +193,37 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                           isDark: isDark,
                           title: 'محطات وفروع المنظومة',
                           subtitle: 'Client Fleet & Workstations',
-                          icon: Icons.corporate_fare_rounded,
-                          accentColor: const Color(0xFF0284C7),
-                          badge: '$installedBranches / $totalBranches فرع',
-                          badgeColor: const Color(0xFF0284C7),
+                          category: 'TRIGGER / POS',
+                          icon: Icons.devices_rounded,
+                          accentColor: const Color(0xFFFF6D5A),
+                          badge: '$onlineDevices / $totalDevices متصل',
+                          badgeColor: const Color(0xFF10B981),
                           metrics: [
                             'المحطات: $totalDevices جهاز ($onlineDevices متصل)',
-                            'نسبة التغطية: $adoptionPercent%',
+                            'نسبة التغطية: $adoptionPercent% من الفروع ($installedBranches / $totalBranches)',
                           ],
                         ),
                         const SizedBox(height: 10),
                         Center(
                           child: Icon(
                             Icons.arrow_downward_rounded,
-                            color: const Color(0xFF6366F1).withValues(alpha: 0.6),
+                            color: const Color(0xFF06B6D4).withValues(alpha: 0.6),
                             size: 18,
                           ),
                         ),
                         const SizedBox(height: 10),
                         _buildNodeCard(
                           isDark: isDark,
-                          title: 'خادم المنظومة المركزي',
+                          title: 'خادم المنظومة المركزي وبوابة الاتصال',
                           subtitle: 'iSmart Core Gateway & Cluster',
-                          icon: Icons.dns_rounded,
-                          accentColor: const Color(0xFF6366F1),
+                          category: 'GATEWAY / ROUTER',
+                          icon: Icons.router_rounded,
+                          accentColor: const Color(0xFF06B6D4),
                           badge: 'v$targetVer معتمد',
-                          badgeColor: const Color(0xFF6366F1),
+                          badgeColor: const Color(0xFF06B6D4),
                           metrics: [
-                            'المعدل: $rps req/s ($latency ms)',
-                            'العمليات الجارية: $activeReqs نشط',
+                            'المعدل: $rps req/s ($latency ms استجابة)',
+                            'العمليات الجارية: $activeReqs طلب نشط',
                           ],
                         ),
                         const SizedBox(height: 10),
@@ -237,8 +237,9 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                         const SizedBox(height: 10),
                         _buildNodeCard(
                           isDark: isDark,
-                          title: 'قاعدة بيانات MongoDB',
+                          title: 'قاعدة بيانات MongoDB والتخزين',
                           subtitle: 'Primary Database Cluster',
+                          category: 'DATABASE',
                           icon: Icons.storage_rounded,
                           accentColor: const Color(0xFF10B981),
                           badge: dbStatus == 'connected' ? 'متصل ومستقر' : dbStatus,
@@ -254,8 +255,9 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
 
                   // Wide desktop view with animated bezier pipes
                   return SizedBox(
-                    height: 148,
+                    height: 154,
                     child: Stack(
+                      clipBehavior: Clip.none,
                       children: [
                         // Animated Particle Flow Lines
                         Positioned.fill(
@@ -280,40 +282,47 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                                 isDark: isDark,
                                 title: 'محطات وفروع المنظومة',
                                 subtitle: 'Client Fleet & Workstations',
-                                icon: Icons.corporate_fare_rounded,
-                                accentColor: const Color(0xFF0284C7),
-                                badge: '$installedBranches / $totalBranches فرع',
-                                badgeColor: const Color(0xFF0284C7),
+                                category: 'TRIGGER / POS',
+                                icon: Icons.devices_rounded,
+                                accentColor: const Color(0xFFFF6D5A),
+                                badge: '$onlineDevices / $totalDevices متصل',
+                                badgeColor: const Color(0xFF10B981),
                                 metrics: [
                                   'المحطات: $totalDevices جهاز ($onlineDevices متصل)',
-                                  'نسبة التغطية: $adoptionPercent% من الفروع',
+                                  'نسبة التغطية: $adoptionPercent% من الفروع ($installedBranches / $totalBranches)',
                                 ],
+                                hasLeftPort: false,
+                                hasRightPort: true,
                               ),
                             ),
-                            const SizedBox(width: 44),
+                            const SizedBox(width: 46),
                             // Node 2: Core Server
                             Expanded(
                               child: _buildNodeCard(
                                 isDark: isDark,
-                                title: 'خادم المنظومة المركزي',
+                                title: 'خادم المنظومة المركزي وبوابة الاتصال',
                                 subtitle: 'iSmart Core Gateway & Cluster',
-                                icon: Icons.dns_rounded,
-                                accentColor: const Color(0xFF6366F1),
+                                category: 'GATEWAY / ROUTER',
+                                icon: Icons.router_rounded,
+                                accentColor: const Color(0xFF06B6D4),
                                 badge: 'v$targetVer معتمد',
-                                badgeColor: const Color(0xFF6366F1),
+                                badgeColor: const Color(0xFF06B6D4),
                                 metrics: [
-                                  'المعدل: $rps req/s ($latency ms)',
-                                  'العمليات الجارية: $activeReqs نشط',
+                                  'المعدل: $rps req/s ($latency ms استجابة)',
+                                  'العمليات الجارية: $activeReqs طلب نشط',
                                 ],
+                                hasLeftPort: true,
+                                hasRightPort: true,
                               ),
                             ),
-                            const SizedBox(width: 44),
+                            const SizedBox(width: 46),
                             // Node 3: Database
                             Expanded(
                               child: _buildNodeCard(
                                 isDark: isDark,
-                                title: 'قاعدة بيانات MongoDB',
+                                title: 'قاعدة بيانات MongoDB والتخزين',
                                 subtitle: 'Primary Database Cluster',
+                                category: 'DATABASE',
                                 icon: Icons.storage_rounded,
                                 accentColor: const Color(0xFF10B981),
                                 badge: dbStatus == 'connected' ? 'متصل ومستقر' : dbStatus,
@@ -322,6 +331,8 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                                   'القاعدة: $dbName',
                                   'المضيف: $dbHost ($cpuCores Cores)',
                                 ],
+                                hasLeftPort: true,
+                                hasRightPort: false,
                               ),
                             ),
                           ],
@@ -342,128 +353,192 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
     required bool isDark,
     required String title,
     required String subtitle,
+    required String category,
     required IconData icon,
     required Color accentColor,
     required String badge,
     required Color badgeColor,
     required List<String> metrics,
+    bool hasLeftPort = false,
+    bool hasRightPort = false,
   }) {
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        color: isDark ? const Color(0xFF141722) : Colors.white,
+        borderRadius: BorderRadius.circular(13),
         border: Border.all(
-          color: isDark
-              ? accentColor.withValues(alpha: 0.3)
-              : accentColor.withValues(alpha: 0.2),
-          width: 1.0,
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+          width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          // Top node header
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
+          // Left port handle
+          if (hasLeftPort)
+            Positioned(
+              left: -5,
+              top: 50,
+              child: Container(
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(7),
+                  color: isDark ? const Color(0xFF10131A) : Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: accentColor, width: 2),
                 ),
-                child: Icon(icon, color: accentColor, size: 16),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+
+          // Right port handle
+          if (hasRightPort)
+            Positioned(
+              right: -5,
+              top: 50,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF10131A) : Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: accentColor, width: 2),
+                ),
+              ),
+            ),
+
+          // Content
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Top node header
+                Row(
                   children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: accentColor.withValues(alpha: 0.35)),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      child: Icon(icon, color: accentColor, size: 17),
                     ),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: accentColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  category,
+                                  style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w800,
+                                    color: accentColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              color: isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        badge,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: badgeColor,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: badgeColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(5),
+                const SizedBox(height: 8),
+                Divider(
+                  height: 1,
+                  color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9),
                 ),
-                child: Text(
-                  badge,
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w700,
-                    color: badgeColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Divider(
-            height: 1,
-            color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9),
-          ),
-          const SizedBox(height: 8),
-          // Metric rows
-          ...metrics.map(
-            (m) => Padding(
-              padding: const EdgeInsets.only(bottom: 3),
-              child: Row(
-                children: [
-                  Container(
-                    width: 4,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: accentColor,
+                const SizedBox(height: 8),
+                // Metric rows
+                ...metrics.map(
+                  (m) => Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: accentColor,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            m,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: isDark
+                                  ? const Color(0xFFCBD5E1)
+                                  : const Color(0xFF334155),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      m,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        color: isDark
-                            ? const Color(0xFFCBD5E1)
-                            : const Color(0xFF334155),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -536,13 +611,13 @@ class _N8nCanvasGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dotPaint = Paint()
-      ..color = (isDark ? Colors.white : Colors.black).withValues(alpha: isDark ? 0.04 : 0.035)
+      ..color = (isDark ? const Color(0xFF222938) : const Color(0xFFCBD5E1)).withValues(alpha: isDark ? 0.7 : 0.6)
       ..style = PaintingStyle.fill;
 
-    const double spacing = 16;
-    for (double x = 0; x < size.width; x += spacing) {
-      for (double y = 0; y < size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 0.8, dotPaint);
+    const double spacing = 18;
+    for (double x = 8; x < size.width; x += spacing) {
+      for (double y = 8; y < size.height; y += spacing) {
+        canvas.drawCircle(Offset(x, y), 1.0, dotPaint);
       }
     }
   }
@@ -563,24 +638,25 @@ class _N8nFlowLinesPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double cardWidth = (size.width - 88) / 3;
-    final double midY = size.height / 2;
+    final double cardWidth = (size.width - 92) / 3;
+    const double midY = 60; // aligned with ports
 
     // Line 1: from Node 1 (right edge) to Node 2 (left edge)
     final double p1StartX = cardWidth;
-    final double p1EndX = cardWidth + 44;
+    final double p1EndX = cardWidth + 46;
 
     // Line 2: from Node 2 (right edge) to Node 3 (left edge)
-    final double p2StartX = (cardWidth * 2) + 44;
-    final double p2EndX = (cardWidth * 2) + 88;
+    final double p2StartX = (cardWidth * 2) + 46;
+    final double p2EndX = (cardWidth * 2) + 92;
 
     _drawFlowWire(
       canvas: canvas,
       startX: p1StartX,
       endX: p1EndX,
       y: midY,
-      wireColor: const Color(0xFF0284C7),
-      particleColor: const Color(0xFF38BDF8),
+      wireColor: const Color(0xFFFF6D5A),
+      particleColor: const Color(0xFFFF8B7A),
+      label: '💬 رسالة كاشير',
       progress: progress,
     );
 
@@ -589,8 +665,9 @@ class _N8nFlowLinesPainter extends CustomPainter {
       startX: p2StartX,
       endX: p2EndX,
       y: midY,
-      wireColor: const Color(0xFF6366F1),
-      particleColor: const Color(0xFF818CF8),
+      wireColor: const Color(0xFF06B6D4),
+      particleColor: const Color(0xFF38BDF8),
+      label: '💾 حفظ MongoDB',
       progress: (progress + 0.5) % 1.0,
     );
   }
@@ -602,6 +679,7 @@ class _N8nFlowLinesPainter extends CustomPainter {
     required double y,
     required Color wireColor,
     required Color particleColor,
+    required String label,
     required double progress,
   }) {
     // Base pipe
@@ -615,9 +693,9 @@ class _N8nFlowLinesPainter extends CustomPainter {
       ..moveTo(startX, y)
       ..cubicTo(
         startX + ((endX - startX) * 0.4),
-        y - 10,
+        y - 12,
         startX + ((endX - startX) * 0.6),
-        y + 10,
+        y + 12,
         endX,
         y,
       );
@@ -628,31 +706,32 @@ class _N8nFlowLinesPainter extends CustomPainter {
     final portPaint = Paint()
       ..color = wireColor
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(startX, y), 3.0, portPaint);
-    canvas.drawCircle(Offset(endX, y), 3.0, portPaint);
+    canvas.drawCircle(Offset(startX, y), 3.5, portPaint);
+    canvas.drawCircle(Offset(endX, y), 3.5, portPaint);
 
-    // Flowing animated particles
+    // Flowing animated particles with trail
     final pathMetrics = path.computeMetrics().toList();
     if (pathMetrics.isNotEmpty) {
       final metric = pathMetrics.first;
+      final tangent = metric.getTangentForOffset(metric.length * progress);
+      if (tangent != null) {
+        // Halo
+        final haloPaint = Paint()
+          ..color = particleColor.withValues(alpha: 0.35)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+        canvas.drawCircle(tangent.position, 6, haloPaint);
 
-      // Draw 2 particles spaced along the line
-      for (int i = 0; i < 2; i++) {
-        final pOffset = (progress + (i * 0.5)) % 1.0;
-        final tangent = metric.getTangentForOffset(metric.length * pOffset);
-        if (tangent != null) {
-          // Halo
-          final haloPaint = Paint()
-            ..color = particleColor.withValues(alpha: 0.3)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-          canvas.drawCircle(tangent.position, 5, haloPaint);
+        // Core
+        final orbPaint = Paint()
+          ..color = particleColor
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(tangent.position, 3.2, orbPaint);
 
-          // Core
-          final orbPaint = Paint()
-            ..color = particleColor
-            ..style = PaintingStyle.fill;
-          canvas.drawCircle(tangent.position, 2.8, orbPaint);
-        }
+        // White center
+        final centerPaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(tangent.position, 1.8, centerPaint);
       }
     }
   }
