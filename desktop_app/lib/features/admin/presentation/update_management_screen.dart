@@ -9,6 +9,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../shared/providers/providers.dart';
 import '../models/update_management_models.dart';
 import '../../chat/models/chat_models.dart';
+import 'update_distribution_topology_screen.dart';
 
 class UpdateManagementScreen extends ConsumerStatefulWidget {
   const UpdateManagementScreen({super.key});
@@ -500,22 +501,60 @@ class _UpdateManagementScreenState
           label: const Text('تحديث البيانات'),
         );
 
+        final topologyBtn = FilledButton.icon(
+          onPressed: () {
+            final targetVer = _selectedReleaseId != null
+                ? _releases.firstWhere((r) => r.id == _selectedReleaseId, orElse: () => _releases.first).version
+                : (_releases.isNotEmpty ? _releases.first.version : '1.1.22');
+            Navigator.of(context).push(
+              PageRouteBuilder(
+                pageBuilder: (context, anim, secAnim) => UpdateDistributionTopologyScreen(
+                  releases: _releases,
+                  devices: _devices,
+                  branches: _availableBranches,
+                  targetVersion: targetVer,
+                  onReload: _reload,
+                  isEmbedded: false,
+                ),
+                transitionsBuilder: (context, anim, secAnim, child) =>
+                    FadeTransition(opacity: anim, child: child),
+              ),
+            );
+          },
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF10B981),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+          icon: const Icon(Icons.hub_rounded, size: 17),
+          label: const Text(
+            'شبكة سحب التحديثات (n8n Live Map)',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+          ),
+        );
+
         return isCompact
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   titleSection,
                   const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: actionBtn,
+                  Row(
+                    children: [
+                      Expanded(child: topologyBtn),
+                      const SizedBox(width: 8),
+                      actionBtn,
+                    ],
                   ),
                 ],
               )
             : Row(
                 children: [
                   Expanded(child: titleSection),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
+                  topologyBtn,
+                  const SizedBox(width: 10),
                   actionBtn,
                 ],
               );
@@ -656,6 +695,7 @@ class _UpdateManagementScreenState
       {'id': 'releases', 'label': 'الإصدارات والرفع', 'icon': Iconsax.box},
       {'id': 'jobs', 'label': 'مهام التوزيع (Rollout)', 'icon': Iconsax.send_2},
       {'id': 'devices', 'label': 'أجهزة المنظومة (Fleet)', 'icon': Iconsax.monitor},
+      {'id': 'topology', 'label': 'شبكة سحب التحديثات (n8n Map)', 'icon': Icons.hub_rounded},
     ];
 
     return Container(
@@ -719,8 +759,34 @@ class _UpdateManagementScreenState
     return switch (_selectedSection) {
       'jobs' => _buildJobsSection(wide, isDark),
       'devices' => _buildDevicesSection(wide, isDark),
+      'topology' => _buildTopologySection(wide, isDark),
       _ => _buildReleasesSection(wide, isDark),
     };
+  }
+
+  Widget _buildTopologySection(bool wide, bool isDark) {
+    final targetVer = _selectedReleaseId != null
+        ? _releases.firstWhere((r) => r.id == _selectedReleaseId, orElse: () => _releases.first).version
+        : (_releases.isNotEmpty ? _releases.first.version : '1.1.22');
+
+    return Container(
+      height: 720,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: UpdateDistributionTopologyScreen(
+        releases: _releases,
+        devices: _devices,
+        branches: _availableBranches,
+        targetVersion: targetVer,
+        onReload: _reload,
+        isEmbedded: true,
+      ),
+    );
   }
 
   // --- TAB 1: RELEASES & UPLOAD ---
