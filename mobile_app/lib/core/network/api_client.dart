@@ -32,6 +32,7 @@ class ApiClient {
           final requestPath = options.path.toLowerCase();
           final isPublic =
               requestPath.contains('/api/auth/login') ||
+              requestPath.contains('/api/auth/logout') ||
               requestPath.contains('/api/auth/refresh') ||
               requestPath.contains('/api/app-settings') ||
               requestPath.contains('/health');
@@ -114,12 +115,20 @@ class ApiClient {
           final isRefreshRequest = requestOptions.path.contains(
             '/api/auth/refresh',
           );
+          final isLogoutRequest =
+              requestOptions.path.contains('/api/auth/logout') ||
+              requestOptions.extra['requestSource'] == 'auth.logout';
+          final isLoginRequest = requestOptions.path.contains(
+            '/api/auth/login',
+          );
 
           // Handle 401 errors by attempting token refresh once per request.
           if (error.response?.statusCode == 401 &&
               _authRepository != null &&
               !alreadyRetried &&
-              !isRefreshRequest) {
+              !isRefreshRequest &&
+              !isLogoutRequest &&
+              !isLoginRequest) {
             try {
               final refreshed = await _refreshAccessToken();
               final token = await _authRepository.getToken();
@@ -237,18 +246,32 @@ class ApiClient {
       final requestPath = error.requestOptions.path.toLowerCase();
       final isLoginRequest = requestPath.contains('/api/auth/login');
 
+      if (payload is Map<String, dynamic>) {
+        if (payload['details'] is List) {
+          final detailsList = (payload['details'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map((d) => (d['message'] ?? d['msg'])?.toString().trim())
+              .whereType<String>()
+              .where((m) => m.isNotEmpty)
+              .toList();
+          if (detailsList.isNotEmpty) {
+            return ApiException(detailsList.join('\n'), statusCode: statusCode);
+          }
+        }
+      }
       if (payload is Map<String, dynamic> && payload['message'] is String) {
         final rawMessage = (payload['message'] as String).trim();
-        final lowerMessage = rawMessage.toLowerCase();
-        if (statusCode == 401 &&
-            (isLoginRequest ||
-                lowerMessage.contains('invalid username or password'))) {
-          return const ApiException(
-            'اسم المستخدم أو كلمة المرور غير صحيحة.',
-            statusCode: 401,
-          );
-        }
         if (statusCode == 401) {
+          if (rawMessage.isNotEmpty) {
+            return ApiException(
+              _translateServerMessage(
+                rawMessage,
+                statusCode: statusCode,
+                requestPath: requestPath,
+              ),
+              statusCode: 401,
+            );
+          }
           return const ApiException(
             'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',
             statusCode: 401,

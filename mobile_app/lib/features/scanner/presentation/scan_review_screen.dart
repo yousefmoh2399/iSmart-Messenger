@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,459 +7,604 @@ import 'package:uuid/uuid.dart';
 import '../../../shared/models/image_filter_type.dart';
 import '../../../shared/models/scan_page.dart';
 import '../../../shared/providers/providers.dart';
-import '../data/image_processing_service.dart';
+import '../data/native_scanner_bridge.dart';
+import 'widgets/quad_crop_editor.dart';
 
-enum _ScanQualityMode { auto, pro, fast }
-
+/// Screen for interactive review, manual quadrilateral cropping, filter selection, and rotation.
+///
+/// Execution pipeline:
+/// - Preview: Fast native warp (maxSide 1600 with in-memory quarterTurns) -> filter.
+/// - Rotation: Adjusts quarterTurns and re-generates preview without intermediate rotate files.
+/// - Final save: Full-resolution warp(quarterTurns) -> filter (exactly 2 encodes, 0 separate rotateLeft passes).
 class ScanReviewScreen extends ConsumerStatefulWidget {
   const ScanReviewScreen({
     super.key,
     required this.rawImagePath,
     required this.sessionId,
+    this.pageId,
+    this.initialCorners = const [],
+    this.initialFilter = 'enhance',
+    this.initialQuarterRotations = 0,
+    this.imageWidth = 0,
+    this.imageHeight = 0,
   });
 
   final String rawImagePath;
   final String sessionId;
+  final String? pageId;
+  final List<double> initialCorners; // 8 normalized coordinates
+  final String initialFilter;
+  final int initialQuarterRotations;
+  final int imageWidth;
+  final int imageHeight;
 
   @override
   ConsumerState<ScanReviewScreen> createState() => _ScanReviewScreenState();
 }
 
-class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen>
-    with SingleTickerProviderStateMixin {
-  ImageFilterType _filter = ImageFilterType.document;
-  int _quarterTurns = 0;
-  _ScanQualityMode _qualityMode = _ScanQualityMode.fast;
-  Uint8List? _previewBytes;
-  Uint8List? _sourceBytes;
-  bool _busy = false;
-  String? _statusMessage;
-  int _requestId = 0;
-  late final AnimationController _scanLineController;
-  final Map<String, Uint8List> _previewCache = {};
+class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
+  late List<double> _corners;
+  bool _isEditingCrop = false;
+  late String _selectedFilter;
+  late int _quarterRotations;
+
+  bool _isBusy = false;
+  String? _statusText;
+
+  String? _warpedPreviewPath;
+  String? _currentPreviewPath;
+  final Map<String, String> _filterCache = {};
+
+  final Set<String> _tempFiles = {};
+  int _previewToken = 0;
+
+  final GlobalKey<State<QuadCropEditor>> _cropEditorKey = GlobalKey();
+
+  static const List<({String key, String label, IconData icon})> _filters = [
+    (key: 'enhance', label: 'توضيح', icon: Icons.auto_fix_high_rounded),
+    (key: 'original', label: 'أصلي', icon: Icons.image_rounded),
+    (key: 'lighten', label: 'تفتيح', icon: Icons.wb_sunny_rounded),
+    (key: 'gray', label: 'رمادي', icon: Icons.filter_b_and_w_rounded),
+    (key: 'eco', label: 'اقتصادي', icon: Icons.format_color_reset_rounded),
+    (key: 'no_handwriting', label: 'بدون كتابة يد', icon: Icons.cleaning_services_rounded),
+  ];
 
   @override
   void initState() {
     super.initState();
-    _scanLineController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat();
-    _loadInitialPreview();
+    _selectedFilter = widget.initialFilter;
+    _quarterRotations = widget.initialQuarterRotations % 4;
+
+    if (widget.initialCorners.length == 8) {
+      _corners = List<double>.from(widget.initialCorners);
+      _isEditingCrop = false;
+    } else {
+      _corners = [0.05, 0.05, 0.95, 0.05, 0.95, 0.95, 0.05, 0.95];
+      _isEditingCrop = true;
+    }
+
+    _preparePreview();
   }
 
   @override
   void dispose() {
-    _previewCache.clear();
-    _scanLineController.dispose();
+    _cleanupTempFiles();
     super.dispose();
   }
 
-  Future<void> _loadInitialPreview() async {
-    final sourceBytes = await File(widget.rawImagePath).readAsBytes();
-    if (!mounted) return;
-
-    setState(() {
-      _sourceBytes = sourceBytes;
-      _previewBytes = sourceBytes;
-      _statusMessage = null;
-      _busy = false;
-    });
-
-    _rebuildPreview();
+  void _cleanupTempFiles() {
+    for (final path in _tempFiles) {
+      try {
+        final f = File(path);
+        if (f.existsSync()) {
+          f.deleteSync();
+        }
+      } catch (e) {
+        debugPrint('[ScanReviewScreen] Error deleting temp file $path: $e');
+      }
+    }
+    _tempFiles.clear();
   }
 
-  Future<void> _rebuildPreview() async {
-    final requestId = ++_requestId;
-    final cacheKey = '${_filter.index}-$_quarterTurns-${_qualityMode.name}';
+  Future<void> _preparePreview() async {
+    final token = ++_previewToken;
+    setState(() {
+      _isBusy = true;
+      _statusText = 'جار تصحيح المنظور...';
+    });
 
-    if (_previewCache.containsKey(cacheKey)) {
+    try {
+      final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
+      final tag = DateTime.now().millisecondsSinceEpoch;
+      final warpedPath = '${draftsDir.path}/preview_warp_$tag.jpg';
+      _tempFiles.add(warpedPath);
+
+      // Fast native warp at max 1600px for instant preview with rotation in-memory
+      await NativeScannerBridge.warp(
+        path: widget.rawImagePath,
+        corners: _corners,
+        outPath: warpedPath,
+        maxSide: 1600,
+        quarterTurns: _quarterRotations,
+      ).timeout(const Duration(seconds: 20));
+
+      if (token != _previewToken || !mounted) return;
+
+      _warpedPreviewPath = warpedPath;
+      _filterCache.clear();
+
+      await _applyFilter(_selectedFilter, parentToken: token);
+    } catch (e) {
+      if (token != _previewToken || !mounted) return;
       setState(() {
-        _previewBytes = _previewCache[cacheKey];
-        _busy = false;
-        _statusMessage = null;
+        _isBusy = false;
+        _statusText = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ أثناء تجهيز المعاينة: $e')),
+      );
+    }
+  }
+
+  Future<void> _applyFilter(String filterKey, {int? parentToken}) async {
+    final warped = _warpedPreviewPath;
+    if (warped == null) return;
+
+    if (_filterCache.containsKey(filterKey)) {
+      setState(() {
+        _selectedFilter = filterKey;
+        _currentPreviewPath = _filterCache[filterKey];
+        _isBusy = false;
+        _statusText = null;
       });
       return;
     }
 
+    final token = parentToken ?? ++_previewToken;
     setState(() {
-      _busy = true;
-      _statusMessage = switch (_filter) {
-        ImageFilterType.document =>
-          'جار اكتشاف الحواف، تصحيح المنظور، وتنظيف الورقة...',
-        ImageFilterType.color =>
-          'جار تحسين الإضاءة والخلفية مع الحفاظ على الألوان...',
-        ImageFilterType.grayscale =>
-          'جار إبراز النص وتنظيف الصفحة في الوضع الرمادي...',
-        ImageFilterType.blackWhite =>
-          'جار تحويل الصفحة إلى أبيض وأسود واضح للطباعة...',
-      };
+      _isBusy = true;
+      _statusText = 'جار تطبيق الفلتر...';
+      _selectedFilter = filterKey;
     });
 
     try {
-      final sourceBytes = _sourceBytes ??= await File(
-        widget.rawImagePath,
-      ).readAsBytes();
+      final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
+      final tag = DateTime.now().millisecondsSinceEpoch;
+      final filteredPath = '${draftsDir.path}/preview_${filterKey}_$tag.jpg';
+      _tempFiles.add(filteredPath);
 
-      final imageProcessingService = ref.read(imageProcessingServiceProvider);
-      Uint8List bytes;
-      final previewPreferredQuality = switch (_qualityMode) {
-        _ScanQualityMode.auto => ScanProcessingQuality.balanced,
-        _ScanQualityMode.pro => ScanProcessingQuality.enhanced,
-        _ScanQualityMode.fast => ScanProcessingQuality.preview,
-      };
-      final previewTimeout = switch (_qualityMode) {
-        _ScanQualityMode.auto => const Duration(seconds: 9),
-        _ScanQualityMode.pro => const Duration(seconds: 18),
-        _ScanQualityMode.fast => const Duration(seconds: 5),
-      };
-      try {
-        bytes = await imageProcessingService
-            .transformBytes(
-              bytes: sourceBytes,
-              filter: _filter,
-              quarterTurns: _quarterTurns,
-              quality: previewPreferredQuality,
-            )
-            .timeout(previewTimeout);
-      } on TimeoutException {
-        if (!mounted || requestId != _requestId) return;
-        if (_qualityMode == _ScanQualityMode.pro) {
-          rethrow;
-        }
-        setState(() {
-          _statusMessage =
-              'الجهاز احتاج وقتًا أطول؛ تم التحويل تلقائيًا إلى وضع سريع متوازن للحفاظ على جودة احترافية.';
-        });
-        bytes = await imageProcessingService
-            .transformBytes(
-              bytes: sourceBytes,
-              filter: _filter,
-              quarterTurns: _quarterTurns,
-              quality: ScanProcessingQuality.preview,
-            )
-            .timeout(const Duration(seconds: 8));
-      }
-      if (!mounted || requestId != _requestId) return;
+      await NativeScannerBridge.applyFilter(
+        path: warped,
+        filter: filterKey,
+        outPath: filteredPath,
+        maxSide: 1600,
+      ).timeout(const Duration(seconds: 20));
+
+      if (token != _previewToken || !mounted) return;
+
+      _filterCache[filterKey] = filteredPath;
       setState(() {
-        // Before adding to cache, limit to max 4 entries (one per filter type)
-        if (_previewCache.length >= 4) {
-          _previewCache.remove(_previewCache.keys.first);
-        }
-        _previewCache[cacheKey] = bytes;
-        _previewBytes = bytes;
-        _busy = false;
-        _statusMessage = null;
+        _currentPreviewPath = filteredPath;
+        _isBusy = false;
+        _statusText = null;
       });
-    } catch (error) {
-      if (!mounted || requestId != _requestId) return;
+    } catch (e) {
+      if (token != _previewToken || !mounted) return;
       setState(() {
-        _previewBytes = _sourceBytes;
-        _busy = false;
-        _statusMessage = error is TimeoutException
-            ? 'المعالجة استغرقت وقتًا طويلًا على هذا الجهاز. تم عرض النسخة الأصلية مؤقتًا.'
-            : 'تعذر تطبيق التحسين الآن على الهاتف. تم عرض النسخة الأصلية ويمكنك المحاولة مرة أخرى.';
+        _isBusy = false;
+        _statusText = null;
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ أثناء تطبيق الفلتر: $e')),
+      );
     }
   }
 
-  Future<void> _confirm() async {
-    final previewBytes = _previewBytes;
-    if (previewBytes == null) return;
-    if (mounted) {
-      setState(() {
-        _busy = true;
-        _statusMessage = 'جار تجهيز النسخة النهائية بجودة سكانر احترافية...';
-      });
-    }
+  Future<void> _rotateLeft() async {
+    if (_isBusy) return;
+    _quarterRotations = (_quarterRotations + 1) % 4;
+    await _preparePreview();
+  }
 
+  Future<void> _confirmAndSave() async {
+    setState(() {
+      _isBusy = true;
+      _statusText = 'جار حفظ المستند بجودة كاملة...';
+    });
+
+    final intermediateFiles = <String>[];
     try {
-      final pageId = const Uuid().v4();
-      final imagePath = await ref
-          .read(localDocumentStoreProvider)
-          .savePageBytes(
-            sessionId: widget.sessionId,
-            pageId: pageId,
-            bytes: previewBytes,
-          );
+      final pageId = widget.pageId ?? const Uuid().v4();
+      final draftsDir = await ref.read(localDocumentStoreProvider).getDraftsDirectory();
+      final fullWarpPath = '${draftsDir.path}/full_warp_$pageId.jpg';
+      final fullFilteredPath = '${draftsDir.path}/full_filtered_$pageId.jpg';
+      intermediateFiles.addAll([fullWarpPath, fullFilteredPath]);
+
+      // 1. Hardware-accelerated warp (+ in-memory rotation before single encode)
+      // Capped at 2048px (200 DPI A4) so PdfBuilderService hits its 0ms fast path directly!
+      await NativeScannerBridge.warp(
+        path: widget.rawImagePath,
+        corners: _corners,
+        outPath: fullWarpPath,
+        maxSide: 2048,
+        quarterTurns: _quarterRotations,
+      ).timeout(const Duration(seconds: 20));
+
+      // 2. Native OpenCV filter directly on the rotated warped document
+      await NativeScannerBridge.applyFilter(
+        path: fullWarpPath,
+        filter: _selectedFilter,
+        outPath: fullFilteredPath,
+        maxSide: 2048,
+      ).timeout(const Duration(seconds: 20));
+
+      // 3. Save directly into session files without memory overhead
+      final savedPath = await ref.read(localDocumentStoreProvider).savePageFile(
+        sessionId: widget.sessionId,
+        pageId: pageId,
+        sourcePath: fullFilteredPath,
+      );
+
+      // 5. Preserve raw capture inside session directory for non-destructive re-warps
+      String preservedRawPath = widget.rawImagePath;
+      if (!preservedRawPath.contains(widget.sessionId)) {
+        preservedRawPath = await ref.read(localDocumentStoreProvider).importRawScanFile(
+          sessionId: widget.sessionId,
+          sourcePath: widget.rawImagePath,
+        );
+      }
+
+      // Clean up intermediate full-res files immediately
+      for (final p in intermediateFiles) {
+        try {
+          final f = File(p);
+          if (f.existsSync()) f.deleteSync();
+        } catch (_) {}
+      }
 
       if (!mounted) return;
-      Navigator.pop(
-        context,
-        ScanPage(id: pageId, imagePath: imagePath, createdAt: DateTime.now()),
+      Navigator.of(context).pop(
+        ScanPage(
+          id: pageId,
+          imagePath: savedPath,
+          createdAt: DateTime.now(),
+          originalPath: preservedRawPath,
+          corners: _corners,
+          filter: ImageFilterType.fromKey(_selectedFilter),
+          quarterTurns: _quarterRotations,
+        ),
       );
-    } catch (error) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
-        _busy = false;
-        _statusMessage = 'حدث خطأ أثناء الحفظ. حاول مرة أخرى.';
+        _isBusy = false;
+        _statusText = null;
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ أثناء حفظ الصفحة: $e')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('مراجعة الصفحة')),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final previewHeight = (constraints.maxHeight * 0.48).clamp(
-              280.0,
-              520.0,
-            );
-            return SingleChildScrollView(
-              padding: EdgeInsets.only(bottom: 16 + bottomInset),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: SizedBox(
-                        height: previewHeight,
-                        child: Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Center(
-                                child: _previewBytes == null
-                                    ? const Text('جار تحميل الصفحة...')
-                                    : Image.memory(
-                                        _previewBytes!,
-                                        fit: BoxFit.contain,
-                                        cacheWidth: 1400,
-                                      ),
-                              ),
-                              if (_busy)
-                                _ScannerLoadingOverlay(
-                                  controller: _scanLineController,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_statusMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFFBEB),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Text(
-                            _statusMessage!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Color(0xFF92400E)),
-                          ),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            for (final filter in ImageFilterType.values)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: ChoiceChip(
-                                  label: Text(filter.label),
-                                  selected: filter == _filter,
-                                  onSelected: _busy
-                                      ? null
-                                      : (_) {
-                                          setState(() => _filter = filter);
-                                          _rebuildPreview();
-                                        },
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                      child: SegmentedButton<_ScanQualityMode>(
-                        segments: const [
-                          ButtonSegment<_ScanQualityMode>(
-                            value: _ScanQualityMode.auto,
-                            label: Text('تلقائي'),
-                            icon: Icon(Icons.auto_awesome_rounded),
-                          ),
-                          ButtonSegment<_ScanQualityMode>(
-                            value: _ScanQualityMode.pro,
-                            label: Text('احترافي'),
-                            icon: Icon(Icons.workspace_premium_rounded),
-                          ),
-                          ButtonSegment<_ScanQualityMode>(
-                            value: _ScanQualityMode.fast,
-                            label: Text('سريع'),
-                            icon: Icon(Icons.speed_rounded),
-                          ),
-                        ],
-                        selected: {_qualityMode},
-                        onSelectionChanged: _busy
-                            ? null
-                            : (selection) {
-                                if (selection.isEmpty) {
-                                  return;
-                                }
-                                setState(() => _qualityMode = selection.first);
-                                _rebuildPreview();
-                              },
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                      child: Text(
-                        switch (_qualityMode) {
-                          _ScanQualityMode.auto =>
-                            'تلقائي: أعلى جودة ممكنة مع تحويل ذكي لو الجهاز بطيء.',
-                          _ScanQualityMode.pro =>
-                            'احترافي: أقصى تحسين للنص والورق، وقد يأخذ وقتًا أطول.',
-                          _ScanQualityMode.fast =>
-                            'سريع: أسرع معاينة وحفظ مع جودة ممتازة للأجهزة المتوسطة.',
-                        },
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        'وضع "مسح ذكي" أصبح يكتشف حدود الورقة، يصحح الميل والمنظور، يخفف الظلال والتجاعيد، وينظف الخلفية ليجعل الصفحة أقرب لنتيجة سكانر حقيقي.',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _busy
-                                  ? null
-                                  : () {
-                                      setState(
-                                        () => _quarterTurns =
-                                            (_quarterTurns + 3) % 4,
-                                      );
-                                      _rebuildPreview();
-                                    },
-                              icon: const Icon(Icons.rotate_left),
-                              label: const Text('تدوير'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: _busy ? null : _confirm,
-                              icon: const Icon(Icons.check_circle_outline),
-                              label: const Text('اعتماد الصفحة'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+      backgroundColor: const Color(0xFF0F1115),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF16181F),
+        elevation: 0,
+        title: Text(
+          _isEditingCrop ? 'تحديد حدود المستند' : 'مراجعة وتحسين المسح',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          if (!_isEditingCrop)
+            TextButton.icon(
+              icon: const Icon(Icons.crop_rounded, size: 18),
+              label: const Text('تعديل الحواف'),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white70,
+                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onPressed: _isBusy
+                  ? null
+                  : () {
+                      setState(() => _isEditingCrop = true);
+                    },
+            ),
+          TextButton(
+            onPressed: _isBusy
+                ? null
+                : () {
+                    if (_isEditingCrop) {
+                      setState(() => _isEditingCrop = false);
+                      _preparePreview();
+                    } else {
+                      _confirmAndSave();
+                    }
+                  },
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF00E676),
+              textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+            ),
+            child: Text(_isEditingCrop ? 'معاينة' : 'حفظ'),
+          ),
+        ],
+      ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Main Content View
+          Column(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Center(
+                    child: _isEditingCrop
+                        ? QuadCropEditor(
+                            key: _cropEditorKey,
+                            imagePath: widget.rawImagePath,
+                            initialCorners: _corners,
+                            imageWidth: widget.imageWidth,
+                            imageHeight: widget.imageHeight,
+                            onCornersChanged: (newCorners) {
+                              _corners = newCorners;
+                            },
+                          )
+                        : _buildPreviewDisplay(),
+                  ),
                 ),
               ),
-            );
-          },
+
+              // Bottom Control Panel
+              if (_isEditingCrop) _buildCropToolbar() else _buildReviewToolbar(theme),
+            ],
+          ),
+
+          // Loading Overlay
+          if (_isBusy)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E222D),
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black38, blurRadius: 16),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00E676)),
+                        strokeWidth: 3,
+                      ),
+                      if (_statusText != null) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          _statusText!,
+                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreviewDisplay() {
+    final preview = _currentPreviewPath;
+    if (preview == null) {
+      return const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00E676)),
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.file(
+        File(preview),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Center(
+          child: Icon(Icons.broken_image_rounded, size: 48, color: Colors.white38),
         ),
       ),
     );
   }
-}
 
-class _ScannerLoadingOverlay extends StatelessWidget {
-  const _ScannerLoadingOverlay({required this.controller});
+  Widget _buildCropToolbar() {
+    return Container(
+      color: const Color(0xFF16181F),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                icon: const Icon(Icons.restore_rounded, size: 18),
+                label: const Text('الحدود المكتشفة'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _corners = List<double>.from(widget.initialCorners.length == 8
+                        ? widget.initialCorners
+                        : [0.05, 0.05, 0.95, 0.05, 0.95, 0.95, 0.05, 0.95]);
+                  });
+                },
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.fullscreen_rounded, size: 18),
+                label: const Text('كامل الصورة'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                onPressed: () {
+                  setState(() {
+                    _corners = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+                  });
+                },
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.check_rounded, size: 20),
+                label: const Text('تطبيق القص'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00E676),
+                  foregroundColor: Colors.black,
+                  textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () {
+                  setState(() => _isEditingCrop = false);
+                  _preparePreview();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-  final AnimationController controller;
+  Widget _buildReviewToolbar(ThemeData theme) {
+    return Container(
+      color: const Color(0xFF16181F),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Filter Pills Horizontal List
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: _filters.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final filter = _filters[index];
+                  final isSelected = filter.key == _selectedFilter;
 
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: ColoredBox(
-        color: Colors.white.withValues(alpha: 0.28),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final travelHeight = (constraints.maxHeight - 120).clamp(
-              40.0,
-              400.0,
-            );
-
-            return Stack(
-              children: [
-                const Positioned(
-                  top: 24,
-                  left: 24,
-                  right: 24,
-                  child: Column(
-                    children: [
-                      Text(
-                        'جار تجهيز المستند',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(22),
+                    onTap: _isBusy ? null : () => _applyFilter(filter.key),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFF00E676) : const Color(0xFF222631),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: isSelected ? const Color(0xFF00E676) : Colors.white10,
+                          width: 1.2,
                         ),
                       ),
-                      SizedBox(height: 8),
-                      Text(
-                        'يتم تحسين الورقة وتنظيف الخلفية وإبراز النص.',
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedBuilder(
-                  animation: controller,
-                  builder: (context, child) {
-                    final top = 90 + (travelHeight * controller.value);
-                    return Positioned(
-                      top: top,
-                      left: 28,
-                      right: 28,
-                      child: child!,
-                    );
-                  },
-                  child: Column(
-                    children: [
-                      Container(
-                        height: 3,
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              Colors.transparent,
-                              Color(0xFF0F766E),
-                              Colors.transparent,
-                            ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            filter.icon,
+                            size: 17,
+                            color: isSelected ? Colors.black : Colors.white70,
                           ),
-                          borderRadius: BorderRadius.circular(99),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x660F766E),
-                              blurRadius: 12,
-                              spreadRadius: 1,
+                          const SizedBox(width: 6),
+                          Text(
+                            filter.label,
+                            style: TextStyle(
+                              color: isSelected ? Colors.black : Colors.white,
+                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                              fontSize: 13,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      const LinearProgressIndicator(minHeight: 2),
-                    ],
-                  ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Actions row: Rotate & Edit Crop
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton.filledTonal(
+                      tooltip: 'تدوير 90 درجة',
+                      icon: const Icon(Icons.rotate_left_rounded, size: 22),
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFF222631),
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _isBusy ? null : _rotateLeft,
+                    ),
+                    const SizedBox(width: 10),
+                    TextButton.icon(
+                      icon: const Icon(Icons.crop_free_rounded, size: 20),
+                      label: const Text('إعادة ضبط حدود القص'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        backgroundColor: const Color(0xFF222631),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _isBusy
+                          ? null
+                          : () {
+                              setState(() => _isEditingCrop = true);
+                            },
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.done_all_rounded, size: 20),
+                      label: const Text('حفظ الصفحة'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E676),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+                        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _isBusy ? null : _confirmAndSave,
+                    ),
+                  ],
                 ),
-              ],
-            );
-          },
+              ),
+            ),
+          ],
         ),
       ),
     );

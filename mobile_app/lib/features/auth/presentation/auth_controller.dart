@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/document_folder_service.dart';
+import '../../chat/providers/chat_folders_provider.dart';
+import '../../../core/network/api_exception.dart';
 import '../data/auth_repository.dart';
 
 enum AuthStatus { initializing, unauthenticated, authenticated }
@@ -46,9 +49,6 @@ class AuthController extends Notifier<AuthState> {
       if (previous == next) {
         return;
       }
-      if (state.status != AuthStatus.authenticated) {
-        return;
-      }
       unawaited(logout());
     });
     initializeAuth();
@@ -87,6 +87,11 @@ class AuthController extends Notifier<AuthState> {
         state = const AuthState(status: AuthStatus.unauthenticated);
       }
     } catch (error) {
+      final is401 = error is ApiException && error.isUnauthorized;
+      if (is401) {
+        state = const AuthState(status: AuthStatus.unauthenticated);
+        return;
+      }
       final cachedUser = await repository.loadCachedUser();
       if (cachedUser != null) {
         final session = await repository.getSession();
@@ -150,18 +155,63 @@ class AuthController extends Notifier<AuthState> {
     _isLoggingOut = true;
     try {
       debugPrint('[AuthController] Logging out...');
-      ref.read(chatSocketServiceProvider).setPresenceOffline();
-      ref.read(chatSocketServiceProvider).disconnect();
 
-      await ref.read(pushNotificationServiceProvider).unregisterCurrentDevice();
-      await ref.read(authRepositoryProvider).logout();
-
+      // Immediately transition auth state to unauthenticated so the UI navigates to LoginScreen instantly.
       state = const AuthState(status: AuthStatus.unauthenticated);
+
+      // Reset active conversation
+      ref.read(activeConversationIdProvider.notifier).state = null;
+
+      // Invalidate all dependent providers to ensure clean in-memory state
+      ref.invalidate(chatOverviewControllerProvider);
+      ref.invalidate(chatRealtimeControllerProvider);
+      ref.invalidate(usersControllerProvider);
+      ref.invalidate(remoteDocumentsControllerProvider);
+      ref.invalidate(adminDocumentsControllerProvider);
+      ref.invalidate(announcementsControllerProvider);
+      ref.invalidate(adminAnnouncementsControllerProvider);
+      ref.invalidate(ticketsControllerProvider);
+      ref.invalidate(mobilePrinterControllerProvider);
+      ref.invalidate(pendingUploadsControllerProvider);
+      ref.invalidate(scanSessionControllerProvider);
+      ref.invalidate(documentFoldersProvider);
+      ref.invalidate(chatFoldersProvider);
+
+      // Disconnect socket
+      try {
+        ref.read(chatSocketServiceProvider).setPresenceOffline();
+        ref.read(chatSocketServiceProvider).disconnect();
+      } catch (_) {}
+
+      // Unregister push device (fast timeout to prevent blocking logout)
+      try {
+        await ref
+            .read(pushNotificationServiceProvider)
+            .unregisterCurrentDevice()
+            .timeout(const Duration(seconds: 3));
+      } catch (e) {
+        debugPrint('[AuthController] Unregister push device error: $e');
+      }
+
+      // Clear session in repository and notify backend (fast timeout)
+      try {
+        await ref
+            .read(authRepositoryProvider)
+            .logout()
+            .timeout(const Duration(seconds: 3));
+      } catch (e) {
+        debugPrint('[AuthController] Logout repository error: $e');
+      }
+
+      // Wipe cached chat data so the next user doesn't see stale messages
+      try {
+        await ref.read(chatLocalCacheProvider).clearAll();
+      } catch (_) {}
+
       debugPrint('[AuthController] Logged out successfully');
     } catch (e) {
       debugPrint('[AuthController] Logout error: $e');
       state = const AuthState(status: AuthStatus.unauthenticated);
-      rethrow;
     } finally {
       _isLoggingOut = false;
     }
@@ -194,11 +244,13 @@ class AuthController extends Notifier<AuthState> {
 
   Future<void> updateProfile({
     required String fullName,
+    String? jobTitle,
     String? password,
   }) async {
     final repository = ref.read(authRepositoryProvider);
     final user = await repository.updateProfile(
       fullName: fullName,
+      jobTitle: jobTitle,
       password: password,
     );
     final session = await repository.getSession();
@@ -222,9 +274,17 @@ class AuthController extends Notifier<AuthState> {
     );
   }
 
-  Future<void> uploadAvatar(String filePath) async {
+  Future<void> uploadAvatar(
+    String filePath, {
+    Uint8List? fileBytes,
+    String? fileName,
+  }) async {
     final repository = ref.read(authRepositoryProvider);
-    final user = await repository.uploadAvatar(filePath);
+    final user = await repository.uploadAvatar(
+      filePath,
+      fileBytes: fileBytes,
+      fileName: fileName,
+    );
     final session = await repository.getSession();
     state = AuthState(
       status: AuthStatus.authenticated,

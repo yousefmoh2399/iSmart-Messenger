@@ -150,17 +150,22 @@ void WaitForParentExit(DWORD parent_pid) {
 bool LaunchAndWaitElevated(
     const std::wstring& executable,
     const std::wstring& parameters,
-    DWORD* exit_code) {
+    DWORD* exit_code,
+    bool force_elevated = false) {
   SHELLEXECUTEINFOW info{};
   info.cbSize = sizeof(info);
   info.fMask = SEE_MASK_NOCLOSEPROCESS;
-  info.lpVerb = L"runas";
+  info.lpVerb = force_elevated ? L"runas" : nullptr;
   info.lpFile = executable.c_str();
   info.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
   info.nShow = SW_SHOWNORMAL;
 
   if (!ShellExecuteExW(&info)) {
-    *exit_code = GetLastError();
+    const DWORD err = GetLastError();
+    if (!force_elevated && (err == ERROR_ELEVATION_REQUIRED || err == ERROR_ACCESS_DENIED)) {
+      return LaunchAndWaitElevated(executable, parameters, exit_code, true);
+    }
+    *exit_code = err;
     return false;
   }
   if (info.hProcess == nullptr) {

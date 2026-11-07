@@ -295,6 +295,11 @@ class UserPreferencesController extends AsyncNotifier<UserPreferences> {
     final current = state.valueOrNull ?? UserPreferences.defaults();
     await savePreferences(current.copyWith(notificationToneId: value));
   }
+  Future<void> setNotificationDisplayMode(String value) async {
+    final current = state.valueOrNull ?? UserPreferences.defaults();
+    await savePreferences(current.copyWith(notificationDisplayModeId: value));
+  }
+
 }
 
 final apiBaseUrlStoreProvider = Provider<ApiBaseUrlStore>(
@@ -394,6 +399,10 @@ final authSessionManagerProvider = Provider<AuthSessionManager>((ref) {
         ref.invalidate(ticketsControllerProvider);
         ref.invalidate(closedTicketsControllerProvider);
         ref.invalidate(printerControllerProvider);
+
+        try {
+          ref.read(authControllerProvider.notifier).logout();
+        } catch (_) {}
       });
     },
   );
@@ -577,6 +586,8 @@ final desktopUpdateAgentProvider = Provider<DesktopUpdateAgent>((ref) {
 
 final chatAppVisibilityProvider = StateProvider<bool>((ref) => true);
 
+final chatAppForegroundProvider = StateProvider<bool>((ref) => true);
+
 final chatSectionVisibleProvider = StateProvider<bool>((ref) => true);
 
 final activeConversationIdProvider = StateProvider<String?>((ref) => null);
@@ -665,7 +676,8 @@ final appBootstrapProvider = FutureProvider<BootstrapStatus>((ref) async {
     try {
       final defaults = await ref
           .read(publicAppSettingsServiceProvider)
-          .fetchDefaults();
+          .fetchDefaults()
+          .timeout(const Duration(seconds: 4));
       final desktopBaseUrl = defaults.desktopBaseUrl?.trim();
       if (desktopBaseUrl != null && desktopBaseUrl.isNotEmpty) {
         await ref
@@ -674,7 +686,7 @@ final appBootstrapProvider = FutureProvider<BootstrapStatus>((ref) async {
       }
     } catch (_) {}
 
-    await ref.read(authControllerProvider.notifier).initializeAuth();
+    await ref.read(authControllerProvider.notifier).initializeAuth().timeout(const Duration(seconds: 6), onTimeout: () {});
 
     return BootstrapStatus.ready;
   } catch (_) {

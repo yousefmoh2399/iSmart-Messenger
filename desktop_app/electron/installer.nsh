@@ -1,23 +1,13 @@
+!include "LogicLib.nsh"
+
+!macro customInit
+  ; Ensure all instances of old or new process are terminated
+  nsExec::Exec 'taskkill /IM "iSmart Messenger.exe" /F'
+  nsExec::Exec 'taskkill /IM "ismart-messenger.exe" /F'
+!macroend
+
 !macro customUnInit
-  MessageBox MB_ICONQUESTION|MB_YESNOCANCEL "Why are you uninstalling iSmart Messenger?$\r$\n$\r$\nYes: It is not working as expected.$\r$\nNo: I no longer need it.$\r$\nCancel: Keep the app installed." IDYES reason_issue IDNO reason_unused
-  Abort
-
-  reason_issue:
-    StrCpy $0 "not_working_as_expected"
-    Goto write_reason
-
-  reason_unused:
-    StrCpy $0 "no_longer_needed"
-    Goto write_reason
-
-  write_reason:
-    FileOpen $1 "$TEMP\iSmartMessenger-uninstall-feedback.log" a
-    FileWrite $1 "reason=$0$\r$\n"
-    FileClose $1
-
   nsExec::ExecToLog 'taskkill /IM "iSmart Messenger.exe" /F'
-
-  MessageBox MB_ICONINFORMATION|MB_OK "iSmart Messenger will be closed if it is running.$\r$\n$\r$\nThe uninstaller will remove the installed app, cached session data, logs, and startup entries.$\r$\n$\r$\nYour chat, document, scan, and incoming file storage will be kept."
 !macroend
 
 !macro customUnInstall
@@ -45,5 +35,72 @@
   RMDir "$APPDATA\iSmart Messenger"
 
   DetailPrint "Keeping local chat and document storage..."
-  RMDir "$LOCALAPPDATA\iSmart Messenger"
+!macroend
+
+!macro customInstall
+  ReadRegStr $R0 SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" QuietUninstallString
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString "$R0"
+
+  ; Clean up legacy shortcuts and previous per-machine (Program Files) installation
+  DetailPrint "Cleaning up legacy shortcuts and older installations..."
+
+  ; Remove old shortcuts from Public/Common Desktop and Common Start Menu
+  SetShellVarContext all
+  Delete "$DESKTOP\iSmart Messenger.lnk"
+  Delete "$DESKTOP\ismart-messenger.lnk"
+  Delete "$SMPROGRAMS\iSmart Messenger.lnk"
+  Delete "$SMPROGRAMS\iSmart Messenger\iSmart Messenger.lnk"
+  RMDir "$SMPROGRAMS\iSmart Messenger"
+  SetShellVarContext current
+
+  ; Clean legacy startup entry in HKLM
+  DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "iSmart Messenger"
+
+  ; Directly delete legacy uninstaller in Program Files (x86) if present, WITHOUT executing it
+  ${If} ${FileExists} "$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe"
+    Delete "$PROGRAMFILES32\iSmart Messenger\Uninstall iSmart Messenger.exe"
+    RMDir /r "$PROGRAMFILES32\iSmart Messenger"
+  ${EndIf}
+
+  ; Clean legacy HKLM uninstall registry keys
+  SetRegView 64
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.ismart.messenger.webwrapper"
+  SetRegView 32
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\com.ismart.messenger.webwrapper"
+  SetRegView lastused
+
+  ; Install system fonts only if running as Admin (standard users skip safely as fonts are bundled in web assets)
+  ClearErrors
+  UserInfo::GetAccountType
+  Pop $0
+  ${If} $0 == "Admin"
+    ; Install Segoe UI Emoji font if missing on Windows (e.g. Windows 7 / POSReady / stripped Windows)
+    ; Guard with IfFileExists so NSIS build does not fail if font is absent from build resources.
+    ${IfNot} ${FileExists} "$FONTS\seguiemj.ttf"
+      IfFileExists "${BUILD_RESOURCES_DIR}\seguiemj.ttf" 0 SkipSegoeEmoji
+      DetailPrint "Installing Segoe UI Emoji font..."
+      SetOutPath "$FONTS"
+      File /oname=seguiemj.ttf "${BUILD_RESOURCES_DIR}\seguiemj.ttf"
+      WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Segoe UI Emoji (TrueType)" "seguiemj.ttf"
+      System::Call "gdi32::AddFontResource(t '$FONTS\seguiemj.ttf') i .r0"
+      SendMessage 0xFFFF 0x001D 0 0
+      SkipSegoeEmoji:
+    ${EndIf}
+
+    ; Install Noto Sans Arabic fonts for Windows 7 / POSReady to guarantee Arabic text rendering
+    ; Guard with IfFileExists so NSIS build does not fail if font is absent from build resources.
+    ${IfNot} ${FileExists} "$FONTS\NotoSansArabic-Regular.ttf"
+      IfFileExists "${BUILD_RESOURCES_DIR}\NotoSansArabic-Regular.ttf" 0 SkipNotoArabic
+      DetailPrint "Installing Arabic fonts..."
+      SetOutPath "$FONTS"
+      File /oname=NotoSansArabic-Regular.ttf "${BUILD_RESOURCES_DIR}\NotoSansArabic-Regular.ttf"
+      File /oname=NotoSansArabic-Bold.ttf "${BUILD_RESOURCES_DIR}\NotoSansArabic-Bold.ttf"
+      WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Noto Sans Arabic (TrueType)" "NotoSansArabic-Regular.ttf"
+      WriteRegStr HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" "Noto Sans Arabic Bold (TrueType)" "NotoSansArabic-Bold.ttf"
+      System::Call "gdi32::AddFontResource(t '$FONTS\NotoSansArabic-Regular.ttf') i .r0"
+      System::Call "gdi32::AddFontResource(t '$FONTS\NotoSansArabic-Bold.ttf') i .r0"
+      SendMessage 0xFFFF 0x001D 0 0
+      SkipNotoArabic:
+    ${EndIf}
+  ${EndIf}
 !macroend

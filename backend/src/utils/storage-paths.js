@@ -88,6 +88,10 @@ function getAvatarUploadsDir(userId) {
   return resolveUploadPath("avatars", userId);
 }
 
+function getConversationAvatarUploadsDir(conversationId) {
+  return resolveUploadPath("conversation_avatars", conversationId);
+}
+
 function getDocumentsUploadsDir(userId) {
   return resolveUploadPath(userId);
 }
@@ -226,6 +230,7 @@ module.exports = {
   getChatUploadsDir,
   getChatTransferUploadsDir,
   getAvatarUploadsDir,
+  getConversationAvatarUploadsDir,
   getDocumentsUploadsDir,
   ensureDirectory,
   fileExists,

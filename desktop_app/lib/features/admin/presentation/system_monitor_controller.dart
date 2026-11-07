@@ -5,6 +5,18 @@ import '../models/system_monitor_models.dart';
 
 class SystemMonitorState {
   const SystemMonitorState({
+    this.stats,
+    this.isLoadingStats = false,
+    this.deploymentData,
+    this.isLoadingDeployment = false,
+    this.requestTelemetry,
+    this.isLoadingTelemetry = false,
+    this.isExportingReport = false,
+    this.pollsData,
+    this.isLoadingPolls = false,
+    this.exportingPollId,
+    this.pollSearchQuery = '',
+    this.pollStatusFilter = 'all',
     this.sessions = const [],
     this.errors = const [],
     this.isLoadingSessions = false,
@@ -23,6 +35,19 @@ class SystemMonitorState {
     this.resolvedFilter,
   });
 
+  final SystemTelemetryStats? stats;
+  final bool isLoadingStats;
+  final BranchesDeploymentData? deploymentData;
+  final bool isLoadingDeployment;
+  final RequestTelemetryData? requestTelemetry;
+  final bool isLoadingTelemetry;
+  final bool isExportingReport;
+  final AdminPollsData? pollsData;
+  final bool isLoadingPolls;
+  final String? exportingPollId;
+  final String pollSearchQuery;
+  final String pollStatusFilter;
+
   final List<DeviceSession> sessions;
   final List<ClientErrorLog> errors;
   final bool isLoadingSessions;
@@ -33,7 +58,7 @@ class SystemMonitorState {
   final bool errorsHasMore;
   final int sessionsTotal;
   final int errorsTotal;
-  
+
   final String statusFilter;
   final String clientTypeFilter;
   final String searchQuery;
@@ -43,6 +68,18 @@ class SystemMonitorState {
   final bool? resolvedFilter;
 
   SystemMonitorState copyWith({
+    SystemTelemetryStats? stats,
+    bool? isLoadingStats,
+    BranchesDeploymentData? deploymentData,
+    bool? isLoadingDeployment,
+    RequestTelemetryData? requestTelemetry,
+    bool? isLoadingTelemetry,
+    bool? isExportingReport,
+    AdminPollsData? pollsData,
+    bool? isLoadingPolls,
+    String? exportingPollId,
+    String? pollSearchQuery,
+    String? pollStatusFilter,
     List<DeviceSession>? sessions,
     List<ClientErrorLog>? errors,
     bool? isLoadingSessions,
@@ -61,6 +98,20 @@ class SystemMonitorState {
     bool? resolvedFilter,
   }) {
     return SystemMonitorState(
+      stats: stats ?? this.stats,
+      isLoadingStats: isLoadingStats ?? this.isLoadingStats,
+      deploymentData: deploymentData ?? this.deploymentData,
+      isLoadingDeployment: isLoadingDeployment ?? this.isLoadingDeployment,
+      requestTelemetry: requestTelemetry ?? this.requestTelemetry,
+      isLoadingTelemetry: isLoadingTelemetry ?? this.isLoadingTelemetry,
+      isExportingReport: isExportingReport ?? this.isExportingReport,
+      pollsData: pollsData ?? this.pollsData,
+      isLoadingPolls: isLoadingPolls ?? this.isLoadingPolls,
+      exportingPollId: exportingPollId != null
+          ? (exportingPollId == '' ? null : exportingPollId)
+          : this.exportingPollId,
+      pollSearchQuery: pollSearchQuery ?? this.pollSearchQuery,
+      pollStatusFilter: pollStatusFilter ?? this.pollStatusFilter,
       sessions: sessions ?? this.sessions,
       errors: errors ?? this.errors,
       isLoadingSessions: isLoadingSessions ?? this.isLoadingSessions,
@@ -74,9 +125,17 @@ class SystemMonitorState {
       statusFilter: statusFilter ?? this.statusFilter,
       clientTypeFilter: clientTypeFilter ?? this.clientTypeFilter,
       searchQuery: searchQuery ?? this.searchQuery,
-      selectedUserId: selectedUserId != null ? (selectedUserId == '' ? null : selectedUserId) : this.selectedUserId,
-      selectedSessionId: selectedSessionId != null ? (selectedSessionId == '' ? null : selectedSessionId) : this.selectedSessionId,
-      resolvedFilter: resolvedFilter != null ? (resolvedFilter == true ? true : (resolvedFilter == false ? false : null)) : this.resolvedFilter,
+      selectedUserId: selectedUserId != null
+          ? (selectedUserId == '' ? null : selectedUserId)
+          : this.selectedUserId,
+      selectedSessionId: selectedSessionId != null
+          ? (selectedSessionId == '' ? null : selectedSessionId)
+          : this.selectedSessionId,
+      resolvedFilter: resolvedFilter != null
+          ? (resolvedFilter == true
+              ? true
+              : (resolvedFilter == false ? false : null))
+          : this.resolvedFilter,
     );
   }
 }
@@ -84,8 +143,147 @@ class SystemMonitorState {
 class SystemMonitorController extends Notifier<SystemMonitorState> {
   @override
   SystemMonitorState build() {
-    Future.microtask(() => refreshSessions());
+    Future.microtask(() => refreshAll());
     return const SystemMonitorState();
+  }
+
+  Future<void> refreshAll() async {
+    await Future.wait([
+      refreshStats(),
+      refreshDeployment(),
+      refreshTelemetry(),
+      refreshPolls(),
+      refreshSessions(),
+      loadErrors(),
+    ]);
+  }
+
+  Future<void> refreshStats() async {
+    state = state.copyWith(isLoadingStats: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final stats = await repo.getSystemStats();
+      state = state.copyWith(
+        stats: stats,
+        isLoadingStats: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingStats: false);
+    }
+  }
+
+  Future<void> refreshDeployment({String? targetVersion}) async {
+    state = state.copyWith(isLoadingDeployment: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final data = await repo.getBranchesDeployment(targetVersion: targetVersion);
+      state = state.copyWith(
+        deploymentData: data,
+        isLoadingDeployment: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingDeployment: false);
+    }
+  }
+
+  Future<void> refreshTelemetry() async {
+    state = state.copyWith(isLoadingTelemetry: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final data = await repo.getRequestTelemetry();
+      state = state.copyWith(
+        requestTelemetry: data,
+        isLoadingTelemetry: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingTelemetry: false);
+    }
+  }
+
+Future<void> refreshPolls({String? search, String? status}) async {
+    final s = search ?? state.pollSearchQuery;
+    final st = status ?? state.pollStatusFilter;
+    state = state.copyWith(
+      isLoadingPolls: true,
+      pollSearchQuery: s,
+      pollStatusFilter: st,
+    );
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      final data = await repo.getAdminPolls(search: s, status: st);
+      state = state.copyWith(
+        pollsData: data,
+        isLoadingPolls: false,
+      );
+    } catch (_) {
+      state = state.copyWith(isLoadingPolls: false);
+    }
+  }
+
+  Future<void> exportPoll(
+    String pollId, {
+    required String format,
+    required String title,
+  }) async {
+    state = state.copyWith(exportingPollId: pollId);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.exportAdminPoll(pollId, format: format, title: title);
+    } finally {
+      state = state.copyWith(exportingPollId: '');
+    }
+  }
+
+  Future<void> seedDefaultPolls() async {
+    state = state.copyWith(isLoadingPolls: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.seedDefaultPolls();
+      await refreshPolls();
+    } finally {
+      state = state.copyWith(isLoadingPolls: false);
+    }
+  }
+
+  Future<void> togglePollStatus(String pollId) async {
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.togglePollStatus(pollId);
+      await refreshPolls();
+    } catch (_) {}
+  }
+
+  Future<void> createAdminPoll({
+    required String question,
+    required List<String> options,
+    bool isAnonymous = false,
+    bool isMultipleChoice = false,
+    String? conversationId,
+  }) async {
+    state = state.copyWith(isLoadingPolls: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.createPoll(
+        question: question,
+        options: options,
+        isAnonymous: isAnonymous,
+        isMultipleChoice: isMultipleChoice,
+        conversationId: conversationId,
+      );
+      await refreshPolls();
+    } finally {
+      state = state.copyWith(isLoadingPolls: false);
+    }
+  }
+
+  Future<void> exportReport(String format, {String? targetVersion}) async {
+    state = state.copyWith(isExportingReport: true);
+    try {
+      final repo = ref.read(systemMonitorRepositoryProvider);
+      await repo.exportDeploymentReport(format: format, targetVersion: targetVersion);
+    } finally {
+      state = state.copyWith(isExportingReport: false);
+    }
   }
 
   Future<void> refreshSessions() async {
@@ -142,9 +340,13 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
     refreshSessions();
   }
 
-  Future<void> loadErrors({String? userId, String? sessionId, bool? resolved}) async {
+  Future<void> loadErrors({
+    String? userId,
+    String? sessionId,
+    bool? resolved,
+  }) async {
     state = state.copyWith(
-      isLoadingErrors: true, 
+      isLoadingErrors: true,
       errorsPage: 1,
       selectedUserId: userId ?? '',
       selectedSessionId: sessionId ?? '',
@@ -200,6 +402,7 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       state = state.copyWith(
         errors: state.errors.map((e) => e.id == id ? updated : e).toList(),
       );
+      refreshStats();
     } catch (_) {}
   }
 
@@ -208,6 +411,7 @@ class SystemMonitorController extends Notifier<SystemMonitorState> {
       final repo = ref.read(systemMonitorRepositoryProvider);
       await repo.deleteAllErrors();
       state = state.copyWith(errors: []);
+      refreshStats();
     } catch (_) {}
   }
 }

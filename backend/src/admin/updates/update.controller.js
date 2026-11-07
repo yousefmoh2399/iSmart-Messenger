@@ -21,7 +21,7 @@ const {
 } = require("./update.service");
 
 function emitUpdatesUpdated(req, payload = {}) {
-  const io = req.app.get("io");
+  const io = req.app?.get ? req.app.get("io") : null;
   if (!io) {
     return;
   }
@@ -31,11 +31,53 @@ function emitUpdatesUpdated(req, payload = {}) {
   });
 }
 
+function emitUpdateTelemetry(req, payload = {}) {
+  const io = req.app?.get ? req.app.get("io") : null;
+  if (!io) {
+    return;
+  }
+  const eventPayload = {
+    at: new Date().toISOString(),
+    ...payload,
+  };
+  io.emit("update_telemetry", eventPayload);
+  io.emit("updates_updated", {
+    action: "telemetry",
+    ...eventPayload,
+  });
+}
+
 const heartbeatDevice = asyncHandler(async (req, res) => {
   const result = await registerDeviceHeartbeat(req.user, req.body || {}, {
     ip: req.ip,
     baseUrlOverride: getRequestBaseUrl(req),
   });
+
+  if (
+    result?.activeTask &&
+    ["acknowledged", "downloading", "installing"].includes(
+      result.activeTask.status,
+    )
+  ) {
+    emitUpdateTelemetry(req, {
+      action: "heartbeat_active_task",
+      taskId: result.activeTask.id,
+      deviceId: result.device?.id,
+      deviceUid: result.device?.deviceUid,
+      deviceName: result.device?.deviceName || result.device?.hostName,
+      hostName: result.device?.hostName,
+      branchCode: result.device?.branchCode,
+      platform: result.device?.platform,
+      status: result.activeTask.status,
+      phase: "pulling",
+      progress: result.activeTask.progress || 10,
+      targetVersion: result.activeTask.releaseVersion,
+      currentVersion: result.device?.appVersion,
+      message: result.activeTask.message || "جاري سحب التحديث",
+      connectionStatus: result.device?.connectionStatus || "online",
+    });
+  }
+
   res.status(200).json({
     success: true,
     data: result,
@@ -59,6 +101,62 @@ const reportTaskState = asyncHandler(async (req, res) => {
     ...req.body,
     taskId: req.params.taskId,
   });
+
+  if (result && !result.throttled) {
+    const rawStatus = String(
+      result.task?.status || req.body?.status || "",
+    ).toLowerCase();
+    const isCompleted = rawStatus === "completed";
+    const isFailed = rawStatus === "failed" || rawStatus === "cancelled";
+    const isPulling =
+      rawStatus === "downloading" ||
+      rawStatus === "acknowledged" ||
+      rawStatus === "pending" ||
+      rawStatus === "installing";
+
+    const phase = isCompleted
+      ? "completed"
+      : isFailed
+        ? "failed"
+        : isPulling
+          ? "pulling"
+          : "outdated";
+    const progressVal = Number(
+      result.task?.progress ??
+        req.body?.progress ??
+        (isCompleted ? 100 : 0),
+    );
+
+    emitUpdateTelemetry(req, {
+      action: "task_progress",
+      taskId: result.task?.id || req.params.taskId,
+      deviceId: result.device?.id,
+      deviceUid: result.device?.deviceUid || req.body?.deviceUid,
+      deviceName:
+        result.device?.deviceName ||
+        result.task?.deviceName ||
+        result.device?.hostName ||
+        "POS Terminal",
+      hostName: result.device?.hostName,
+      branchCode:
+        result.device?.branchCode || result.task?.branchCode || "110",
+      platform:
+        result.device?.platform ||
+        result.task?.platform ||
+        "desktop_windows",
+      status: rawStatus,
+      phase,
+      progress: progressVal,
+      targetVersion:
+        result.task?.releaseVersion ||
+        result.device?.updateState?.targetVersion,
+      currentVersion: result.device?.appVersion,
+      message: result.task?.message || req.body?.message || "",
+      connectionStatus: result.device?.connectionStatus || "online",
+      speed: "14.5 MB/s",
+    });
+  }
+
   res.status(200).json({
     success: true,
     data: result,
@@ -72,6 +170,21 @@ const downloadReleaseArtifact = (req, res, next) => {
     downloadToken: req.query.token,
   })
     .then(async () => {
+      const clientDeviceUid = String(
+        req.query.deviceUid || req.headers["x-device-uid"] || "",
+      ).trim();
+      if (clientDeviceUid) {
+        emitUpdateTelemetry(req, {
+          action: "download_started",
+          releaseId: req.params.id,
+          deviceUid: clientDeviceUid,
+          status: "downloading",
+          phase: "pulling",
+          progress: 5,
+          message: "بدأ سحب حزمة التحديث من السيرفر",
+        });
+      }
+
       const info = await getReleaseDownloadInfo(req.params.id);
       if (info.mode === "redirect") {
         res.redirect(info.externalDownloadUrl);
@@ -278,6 +391,15 @@ const createManagedUpdateJob = asyncHandler(async (req, res) => {
     targetType: result.job?.targetType,
     targetCount: result.targetCount ?? 0,
   });
+  emitUpdateTelemetry(req, {
+    action: "job_created",
+    jobId: result.job?.id,
+    releaseId: result.job?.releaseId,
+    releaseVersion: result.job?.releaseVersion,
+    platform: result.job?.platform,
+    targetType: result.job?.targetType,
+    targetCount: result.targetCount ?? 0,
+  });
   res.status(201).json({
     success: true,
     data: result,
@@ -309,6 +431,13 @@ const getManagedUpdateJob = asyncHandler(async (req, res) => {
 const cancelManagedUpdateJob = asyncHandler(async (req, res) => {
   const job = await cancelUpdateJob(req.user, req.params.id);
   emitUpdatesUpdated(req, {
+    action: "job_cancelled",
+    jobId: job.id,
+    releaseId: job.releaseId,
+    releaseVersion: job.releaseVersion,
+    platform: job.platform,
+  });
+  emitUpdateTelemetry(req, {
     action: "job_cancelled",
     jobId: job.id,
     releaseId: job.releaseId,

@@ -1,3 +1,4 @@
+﻿const mongoose = require("mongoose");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const fs = require("fs/promises");
@@ -71,6 +72,7 @@ function serializeUser(user, permissions = null) {
     id: user._id.toString(),
     username: user.username,
     fullName: user.fullName,
+    jobTitle: user.jobTitle || "",
     role: user.role,
     departmentId: user.departmentId ? user.departmentId.toString() : null,
     departmentIds: Array.isArray(user.departmentIds)
@@ -94,6 +96,7 @@ function serializeUser(user, permissions = null) {
     chatPreferences: {
       themeId: user.chatPreferences?.themeId || "system",
       wallpaperId: user.chatPreferences?.wallpaperId || "default",
+      doodles: user.chatPreferences?.doodles !== false,
       customTheme,
     },
     createdAt: user.createdAt,
@@ -189,16 +192,29 @@ function buildUserSearchRegex(value) {
   return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 }
 
+function toMatchObjectIds(id) {
+  if (!id) return [];
+  const str = String(id).trim();
+  const values = [str];
+  if (mongoose.Types.ObjectId.isValid(str)) {
+    try {
+      values.push(new mongoose.Types.ObjectId(str));
+    } catch (_) {}
+  }
+  return values;
+}
+
 function addDepartmentMembershipFilter(query, departmentId) {
   if (!departmentId) {
     return;
   }
+  const matchValues = toMatchObjectIds(departmentId);
   query.$and = [
     ...(query.$and || []),
     {
       $or: [
-        { departmentId },
-        { departmentIds: departmentId },
+        { departmentId: { $in: matchValues } },
+        { departmentIds: { $in: matchValues } },
       ],
     },
   ];
@@ -220,7 +236,7 @@ async function resolveNamedIds(Model, value) {
 
 async function listUsers(actor = null, filters = {}) {
   const page = Math.max(1, Math.min(Number(filters.page || 1), 100000));
-  const limit = Math.max(1, Math.min(Number(filters.limit || 50), 100));
+  const limit = Math.max(1, Math.min(Number(filters.limit || 50), 500));
   const skip = (page - 1) * limit;
   const query = {};
   if (actor?.role === "manager" && actor.departmentId) {
@@ -248,6 +264,19 @@ async function listUsers(actor = null, filters = {}) {
       { fullName: searchRegex },
       { branchCode: searchRegex },
     );
+    const [matchingDeptIds, matchingBranchIds] = await Promise.all([
+      resolveNamedIds(Department, filters.search || filters.q),
+      resolveNamedIds(Branch, filters.search || filters.q),
+    ]);
+    if (matchingDeptIds.length) {
+      or.push(
+        { departmentId: { $in: matchingDeptIds } },
+        { departmentIds: { $in: matchingDeptIds } },
+      );
+    }
+    if (matchingBranchIds.length) {
+      or.push({ branchId: { $in: matchingBranchIds } });
+    }
   }
 
   const departmentIds = await resolveNamedIds(Department, filters.department);
@@ -299,19 +328,19 @@ async function getUserById(userId) {
   return user;
 }
 
-async function createUser(
-  {
+async function createUser(payload = {}, actor = null) {
+  const {
     username,
     password,
     fullName,
+    jobTitle,
     role,
     departmentId,
     departmentIds,
     branchId,
     permissions,
-  },
-  actor = null,
-) {
+    maxAttachmentSizeMB,
+  } = payload;
   const normalizedUsername = String(username).trim().toLowerCase();
   const existingUser = await User.findOne({
     username: normalizedUsername,
@@ -321,11 +350,41 @@ async function createUser(
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const resolvedDepartmentIds = await resolveDepartmentAssignments(
-    departmentIds,
-    departmentId,
-  );
-  const resolvedDepartmentId = resolvedDepartmentIds[0] || null;
+  const requestedPrimary = departmentId
+    ? String(departmentId).trim()
+    : null;
+
+  let candidateIds = [];
+  if (Array.isArray(departmentIds)) {
+    candidateIds = departmentIds
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+  } else if (requestedPrimary) {
+    candidateIds = [requestedPrimary];
+  }
+
+  if (requestedPrimary && !candidateIds.includes(requestedPrimary)) {
+    candidateIds.unshift(requestedPrimary);
+  }
+
+  const resolvedDepartmentIds = (
+    await resolveDepartmentAssignments(
+      candidateIds,
+      requestedPrimary,
+    )
+  ).map((entry) => entry.toString());
+
+  const resolvedDepartmentId = (requestedPrimary && resolvedDepartmentIds.includes(requestedPrimary))
+    ? requestedPrimary
+    : (resolvedDepartmentIds[0] || null);
+
+  const finalDepartmentIds = resolvedDepartmentId
+    ? [
+        resolvedDepartmentId,
+        ...resolvedDepartmentIds.filter((id) => id !== resolvedDepartmentId),
+      ]
+    : resolvedDepartmentIds;
+
   const branchAssignment = await resolveBranchAssignment(branchId);
   let user;
   try {
@@ -333,11 +392,13 @@ async function createUser(
       username: normalizedUsername,
       passwordHash,
       fullName: String(fullName).trim(),
+      jobTitle: jobTitle ? String(jobTitle).trim().slice(0, 150) : "",
       role: role || "user",
       permissionOverrides: normalizePermissionOverrides(permissions),
-      maxAttachmentSizeMB: maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
+      maxAttachmentSizeMB:
+        maxAttachmentSizeMB != null ? Number(maxAttachmentSizeMB) : undefined,
       departmentId: resolvedDepartmentId,
-      departmentIds: resolvedDepartmentIds,
+      departmentIds: finalDepartmentIds,
       branchId: branchAssignment.branchId,
       branchCode: branchAssignment.branchCode,
     });
@@ -348,7 +409,7 @@ async function createUser(
     throw error;
   }
 
-  for (const deptId of resolvedDepartmentIds) {
+  for (const deptId of finalDepartmentIds) {
     await Department.updateOne(
       { _id: deptId, deletedAt: null },
       { $inc: { membersCount: 1 } },
@@ -431,6 +492,10 @@ async function updateUser(actor, userId, payload) {
     user.fullName = String(payload.fullName).trim();
   }
 
+  if (payload.jobTitle !== undefined) {
+    user.jobTitle = String(payload.jobTitle || "").trim().slice(0, 150);
+  }
+
   if (payload.role != null && (actorIsAdmin || actorCanManageUsers)) {
     user.role = payload.role;
   }
@@ -449,19 +514,55 @@ async function updateUser(actor, userId, payload) {
       Object.prototype.hasOwnProperty.call(payload, "departmentIds")) &&
     (actorIsAdmin || actorCanManageUsers)
   ) {
-    const previousDepartmentIds = Array.isArray(user.departmentIds)
+    const previousDepartmentIds = Array.isArray(user.departmentIds) && user.departmentIds.length > 0
       ? user.departmentIds.map((entry) => entry.toString())
       : user.departmentId
         ? [user.departmentId.toString()]
         : [];
-    const nextDepartmentIds = (
+
+    const requestedPrimary = payload.departmentId
+      ? String(payload.departmentId).trim()
+      : null;
+
+    let candidateIds = [];
+    if (Array.isArray(payload.departmentIds)) {
+      candidateIds = payload.departmentIds
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean);
+    } else if (requestedPrimary) {
+      candidateIds = [requestedPrimary];
+    }
+
+    if (requestedPrimary && !candidateIds.includes(requestedPrimary)) {
+      candidateIds.unshift(requestedPrimary);
+    }
+
+    const resolvedIds = (
       await resolveDepartmentAssignments(
-        payload.departmentIds,
-        payload.departmentId,
+        candidateIds,
+        requestedPrimary,
       )
     ).map((entry) => entry.toString());
+
+    let nextPrimaryId = null;
+    if (requestedPrimary && resolvedIds.includes(requestedPrimary)) {
+      nextPrimaryId = requestedPrimary;
+    } else if (user.departmentId && resolvedIds.includes(user.departmentId.toString())) {
+      nextPrimaryId = user.departmentId.toString();
+    } else {
+      nextPrimaryId = resolvedIds[0] || null;
+    }
+
+    let nextDepartmentIds = resolvedIds;
+    if (nextPrimaryId) {
+      nextDepartmentIds = [
+        nextPrimaryId,
+        ...resolvedIds.filter((id) => id !== nextPrimaryId),
+      ];
+    }
+
     user.departmentIds = nextDepartmentIds;
-    user.departmentId = nextDepartmentIds[0] || null;
+    user.departmentId = nextPrimaryId;
 
     const removedDepartmentIds = previousDepartmentIds.filter(
       (entry) => !nextDepartmentIds.includes(entry),
@@ -600,6 +701,10 @@ async function updateProfile(actor, payload) {
     user.fullName = String(payload.fullName).trim().slice(0, 120);
   }
 
+  if (payload.jobTitle !== undefined) {
+    user.jobTitle = String(payload.jobTitle || "").trim().slice(0, 150);
+  }
+
   if (payload.chatPreferences && typeof payload.chatPreferences === "object") {
     const rawThemeId = payload.chatPreferences.themeId;
     const rawWallpaperId = payload.chatPreferences.wallpaperId;
@@ -619,6 +724,10 @@ async function updateProfile(actor, payload) {
         rawWallpaperId != null
           ? String(rawWallpaperId).trim().slice(0, 60)
           : user.chatPreferences?.wallpaperId || "default",
+      doodles:
+        typeof payload.chatPreferences.doodles === "boolean"
+          ? payload.chatPreferences.doodles
+          : user.chatPreferences?.doodles !== false,
       customTheme: {
         accentColorHex: normalizeColorHex(
           incomingCustomTheme?.accentColorHex,
@@ -642,11 +751,32 @@ async function updateProfile(actor, payload) {
     };
   }
 
+  let newSessionTokens = null;
   if (payload.password) {
     user.passwordHash = await bcrypt.hash(payload.password, 10);
     user.refreshTokenNonce = crypto.randomBytes(16).toString("hex");
-    user.refreshSessions = [];
     incrementTokenVersion(user);
+
+    const deviceUid =
+      payload.deviceUid ||
+      actor?.deviceUid ||
+      ("device-" + crypto.randomBytes(6).toString("hex"));
+    const { buildToken, buildRefreshToken } = require("./auth.service");
+    const refreshNonce = crypto.randomBytes(16).toString("hex");
+    const now = new Date();
+    user.refreshSessions = [
+      {
+        deviceUid,
+        nonce: refreshNonce,
+        deviceName: payload.deviceName || "Current Device",
+        platform: payload.platform || "desktop",
+        createdAt: now,
+        lastUsedAt: now,
+      },
+    ];
+    const token = buildToken(user, deviceUid);
+    const refreshToken = buildRefreshToken(user, refreshNonce, deviceUid);
+    newSessionTokens = { token, refreshToken };
   }
 
   await user.save();
@@ -660,7 +790,16 @@ async function updateProfile(actor, payload) {
       chatPreferences: user.chatPreferences || null,
     },
   });
-  return serializeUser(user, await getEffectivePermissionsForUser(user));
+  const serialized = serializeUser(user, await getEffectivePermissionsForUser(user));
+  if (newSessionTokens) {
+    return {
+      user: serialized,
+      token: newSessionTokens.token,
+      refreshToken: newSessionTokens.refreshToken,
+      passwordChanged: true,
+    };
+  }
+  return serialized;
 }
 
 async function updateUserAvatar(actor, file) {
@@ -796,11 +935,10 @@ async function logoutUserAll(actor, userId, io = null) {
   incrementTokenVersion(user);
   await user.save();
 
-  if (io) {
-    io.to(`user:${userId}`).emit("force_logout", {
-      reason: "admin_force_logout",
-    });
-  }
+  const { forceLogoutUserDevices } = require("../chat/sockets/chat.socket");
+  forceLogoutUserDevices(io, userId, {
+    reason: "admin_force_logout",
+  });
 
   await logAuditEvent({
     actorId: actor.id,
@@ -826,11 +964,19 @@ async function deleteUser(actor, userId) {
   }
 
   const Conversation = require("../chat/models/conversation.model");
-  // Delete direct conversations where this user is a member
-  await Conversation.deleteMany({
+  const Message = require("../chat/models/message.model");
+  const ConversationMemberState = require("../chat/models/conversation-member-state.model");
+  // Delete direct conversations (cascade: messages + member states) so partner's chat is also cleaned
+  const directConvs = await Conversation.find({
     type: "direct",
     members: userId,
-  });
+  }).select("_id").lean();
+  if (directConvs.length > 0) {
+    const directConvIds = directConvs.map((c) => c._id);
+    await Message.deleteMany({ conversationId: { $in: directConvIds } });
+    await ConversationMemberState.deleteMany({ conversationId: { $in: directConvIds } });
+    await Conversation.deleteMany({ _id: { $in: directConvIds } });
+  }
 
   // Pull user from members, admins, and broadcastPublisherIds in non-direct conversations
   await Conversation.updateMany(

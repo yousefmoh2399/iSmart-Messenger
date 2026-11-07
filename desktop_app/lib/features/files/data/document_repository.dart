@@ -81,13 +81,15 @@ class DocumentRepository {
 
   Future<RemoteDocumentsPage> fetchDocumentsPage({
     bool includeAll = false,
+    String? search,
     int page = 1,
-    int limit = 40,
+    int limit = 100,
   }) async {
     final response = await _apiClient.dio.get<Map<String, dynamic>>(
       '/api/documents',
       queryParameters: {
         if (includeAll) 'scope': 'all',
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
         'page': page,
         'limit': limit,
       },
@@ -107,11 +109,13 @@ class DocumentRepository {
 
   Future<List<RemoteDocument>> fetchDocuments({
     bool includeAll = false,
+    String? search,
     int page = 1,
-    int limit = 40,
+    int limit = 100,
   }) async {
     final result = await fetchDocumentsPage(
       includeAll: includeAll,
+      search: search,
       page: page,
       limit: limit,
     );

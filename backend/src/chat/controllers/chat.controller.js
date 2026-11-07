@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const ApiError = require("../../utils/api-error");
 const asyncHandler = require("../../utils/async-handler");
 const logger = require("../../utils/logger");
@@ -5,14 +6,20 @@ const { sendUploadFile } = require("../../utils/send-upload-file");
 const Conversation = require("../models/conversation.model");
 const User = require("../../models/user.model");
 const { listRoles } = require("../services/role.service");
+const { getUnreadCountsForUser } = require("../services/chat-member-state.service");
 const {
   getVisibleUsersForChat,
+  getConversationById,
+  getConversationRoom,
   listConversationsForUser,
   listManageableConversations,
   getConversationDetailsForUser,
   getConversationSnapshotForUserId,
   createConversation,
   updateConversation,
+  updateConversationAvatar,
+  removeConversationAvatar,
+  getConversationAvatarFilePath,
   updateConversationPreferences,
   setConversationPinnedMessage,
   clearConversationPinnedMessage,
@@ -44,16 +51,22 @@ const {
   restoreAttachmentFromSender,
   getMessageReadReceipts,
   votePollMessage,
+  togglePollMessage,
   exportPollToExcel,
+  assertConversationAccess,
 } = require("../services/chat.service");
 const { listAuditLogs } = require("../services/audit.service");
 const { listSystemErrors } = require("../services/system-error.service");
+const { sendScheduledNow } = require("../../services/scheduler.service");
 const {
   createChatTransfer,
   getChatTransferForUser,
 } = require("../services/chat-transfer.service");
 const { sendChatResponse } = require("../utils/chat-response");
-const { getUserDeliveryContext } = require("../sockets/chat.socket");
+const {
+  getUserDeliveryContext,
+  leaveUserFromConversationRoom,
+} = require("../sockets/chat.socket");
 const {
   sendChatPushNotifications,
   sendChatReactionPushNotifications,
@@ -83,9 +96,19 @@ async function resolveConversationAudienceUserIds(conversationId) {
   );
 
   if (conversation.type === "department" && conversation.departmentId) {
+    const rawDeptId = conversation.departmentId.toString();
+    const deptMatchValues = [
+      rawDeptId,
+      ...(mongoose.Types.ObjectId.isValid(rawDeptId)
+        ? [new mongoose.Types.ObjectId(rawDeptId)]
+        : []),
+    ];
     const departmentUsers = await User.find(
       {
-        departmentId: conversation.departmentId,
+        $or: [
+          { departmentId: { $in: deptMatchValues } },
+          { departmentIds: { $in: deptMatchValues } },
+        ],
         isActive: true,
       },
       "_id",
@@ -95,7 +118,25 @@ async function resolveConversationAudienceUserIds(conversationId) {
     }
   }
 
+  if (conversation.type === "broadcast") {
+    for (const p of conversation.broadcastPublisherIds || []) {
+      const pId = p?._id ? p._id.toString() : p?.toString?.() || String(p);
+      if (pId) userIds.add(pId);
+    }
+  }
+
   return [...userIds];
+}
+
+async function emitUnreadCount(io, userId, conversationId) {
+  try {
+    const unreadMap = await getUnreadCountsForUser(userId);
+    io.to(`user:${userId}`).emit("unread_count_updated", {
+      conversationId,
+      unreadCount: unreadMap[conversationId] || 0,
+      unreadMap,
+    });
+  } catch (_) {}
 }
 
 function emitMessageToRecipients(io, message, recipientUserIds = []) {
@@ -108,18 +149,59 @@ function emitMessageToRecipients(io, message, recipientUserIds = []) {
     deliveredUsers.add(String(userId));
   }
 
+  // Deduplicate across rooms using chained .to() so each socket receives receive_message exactly ONCE
+  let messageTarget = io.to(getConversationRoom(message.conversationId));
   if (message.senderId) {
-    io.to(`user:${message.senderId}`).emit("receive_message", message);
+    messageTarget = messageTarget.to(`user:${message.senderId}`);
   }
-
   for (const userId of deliveredUsers) {
-    io.to(`user:${userId}`).emit("receive_message", message);
-    io.to(`user:${userId}`).emit("message_delivered", {
+    messageTarget = messageTarget.to(`user:${userId}`);
+  }
+  messageTarget.emit("receive_message", message);
+
+  // Delivery receipts: sender needs to know when delivered!
+  for (const userId of deliveredUsers) {
+    let deliveryTarget = io.to(getConversationRoom(message.conversationId));
+    if (message.senderId) {
+      deliveryTarget = deliveryTarget.to(`user:${message.senderId}`);
+    }
+    deliveryTarget.emit("message_delivered", {
       conversationId: message.conversationId,
       messageId: message.id,
       userId,
     });
   }
+}
+
+
+async function emitMessageUpdated(io, message) {
+  if (!io || !message?.conversationId) return;
+  const audienceUserIds = await resolveConversationAudienceUserIds(
+    message.conversationId,
+  );
+  let target = io.to(getConversationRoom(message.conversationId));
+  if (message.senderId) {
+    target = target.to(`user:${message.senderId}`);
+  }
+  for (const userId of audienceUserIds) {
+    target = target.to(`user:${userId}`);
+  }
+  target.emit("message_updated", message);
+}
+
+async function emitMessageDeleted(io, conversationId, messageId) {
+  if (!io || !conversationId) return;
+  const audienceUserIds = await resolveConversationAudienceUserIds(
+    conversationId,
+  );
+  let target = io.to(getConversationRoom(conversationId));
+  for (const userId of audienceUserIds) {
+    target = target.to(`user:${userId}`);
+  }
+  target.emit("message_deleted", {
+    messageId,
+    conversationId,
+  });
 }
 
 async function emitConversationToUsers(io, conversationId, userIds = []) {
@@ -243,6 +325,14 @@ const getManageableConversations = asyncHandler(async (req, res) => {
 
 const createChatConversation = asyncHandler(async (req, res) => {
   const conversation = await createConversation(req.user, req.body);
+  const io = req.app.get("io");
+  const hasMessages = Boolean(
+    conversation.lastMessage &&
+    (conversation.lastMessage.id || conversation.lastMessage.createdAt)
+  );
+  if (io && (conversation.type !== "direct" || hasMessages)) {
+    emitConversationToMembers(io, conversation.id);
+  }
   sendChatResponse(res, {
     status: 201,
     data: { conversation },
@@ -278,6 +368,49 @@ const updateChatConversation = asyncHandler(async (req, res) => {
   sendChatResponse(res, {
     data: { conversation },
     legacy: { conversation },
+  });
+});
+
+
+const uploadConversationAvatar = asyncHandler(async (req, res) => {
+  const conversation = await updateConversationAvatar(
+    req.user,
+    req.params.id,
+    req.file,
+  );
+  const io = req.app.get("io");
+  if (io) {
+    emitConversationToMembers(io, conversation.id);
+  }
+  sendChatResponse(res, {
+    data: { conversation },
+    legacy: { conversation },
+  });
+});
+
+const deleteConversationAvatar = asyncHandler(async (req, res) => {
+  const conversation = await removeConversationAvatar(
+    req.user,
+    req.params.id,
+  );
+  const io = req.app.get("io");
+  if (io) {
+    emitConversationToMembers(io, conversation.id);
+  }
+  sendChatResponse(res, {
+    data: { conversation },
+    legacy: { conversation },
+  });
+});
+
+const downloadConversationAvatar = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const filePath = await getConversationAvatarFilePath(id);
+  await sendUploadFile(res, filePath, {
+    cacheControl: "private, max-age=300",
+    disposition: "inline",
+    notFoundMessage: "Avatar not found.",
+    logLabel: "conversation-avatar-download",
   });
 });
 
@@ -345,6 +478,9 @@ const deleteChatConversation = asyncHandler(async (req, res) => {
       for (const userId of deleted.memberIds || []) {
         io.to(`user:${userId}`).emit("conversation_deleted", payload);
       }
+    } else if (deleted.mode === "self_deleted") {
+      const payload = { conversationId: deleted.conversationId };
+      io.to(`user:${req.user.id}`).emit("conversation_deleted", payload);
     } else if (deleted.mode === "self_cleared" && deleted.conversation) {
       io.to(`user:${req.user.id}`).emit(
         "conversation_updated",
@@ -354,12 +490,12 @@ const deleteChatConversation = asyncHandler(async (req, res) => {
   }
   sendChatResponse(res, {
     data: {
-      deleted: deleted.mode === "global_deleted",
+      deleted: deleted.mode === "global_deleted" || deleted.mode === "self_deleted",
       cleared: deleted.mode === "self_cleared",
       conversation: deleted.conversation || null,
     },
     legacy: {
-      deleted: deleted.mode === "global_deleted",
+      deleted: deleted.mode === "global_deleted" || deleted.mode === "self_deleted",
       cleared: deleted.mode === "self_cleared",
       conversation: deleted.conversation || null,
     },
@@ -386,10 +522,18 @@ const joinChatConversation = asyncHandler(async (req, res) => {
 });
 
 const leaveChatConversation = asyncHandler(async (req, res) => {
-  await leaveConversation(req.user, req.params.id);
+  const result = await leaveConversation(req.user, req.params.id);
+  const io = req.app.get("io");
+  if (io) {
+    leaveUserFromConversationRoom(io, req.user.id, req.params.id);
+    emitConversationToMembers(io, req.params.id, [req.user.id]);
+    if (result?.systemMessage) {
+      emitMessageToRecipients(io, result.systemMessage);
+    }
+  }
   sendChatResponse(res, {
-    data: { left: true },
-    legacy: { left: true },
+    data: { left: true, conversation: result.conversation },
+    legacy: { left: true, conversation: result.conversation },
   });
 });
 
@@ -428,6 +572,11 @@ const removeMember = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
+    leaveUserFromConversationRoom(
+      io,
+      req.params.userId,
+      result.conversation.id,
+    );
     emitConversationToMembers(
       io,
       result.conversation.id,
@@ -490,34 +639,38 @@ const demoteMemberAdmin = asyncHandler(async (req, res) => {
 });
 
 const blockMember = asyncHandler(async (req, res) => {
-  const conversation = await blockConversationMember(
+  const result = await blockConversationMember(
     req.user,
     req.params.id,
     req.params.userId,
   );
   const io = req.app.get("io");
   if (io) {
-    emitConversationToMembers(io, conversation.id);
+    leaveUserFromConversationRoom(io, req.params.userId, result.conversation.id);
+    emitConversationToMembers(io, result.conversation.id, result.affectedUserIds);
+    if (result.systemMessage) {
+      emitMessageToRecipients(io, result.systemMessage);
+    }
   }
   sendChatResponse(res, {
-    data: { conversation },
-    legacy: { conversation },
+    data: { conversation: result.conversation },
+    legacy: { conversation: result.conversation },
   });
 });
 
 const unblockMember = asyncHandler(async (req, res) => {
-  const conversation = await unblockConversationMember(
+  const result = await unblockConversationMember(
     req.user,
     req.params.id,
     req.params.userId,
   );
   const io = req.app.get("io");
   if (io) {
-    emitConversationToMembers(io, conversation.id);
+    emitConversationToMembers(io, result.conversation.id, result.affectedUserIds);
   }
   sendChatResponse(res, {
-    data: { conversation },
-    legacy: { conversation },
+    data: { conversation: result.conversation },
+    legacy: { conversation: result.conversation },
   });
 });
 
@@ -634,10 +787,7 @@ const patchChatMessage = asyncHandler(async (req, res) => {
   const message = await updateMessage(req.user, req.params.id, req.body);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
     emitConversationToMembers(io, message.conversationId);
   }
   sendChatResponse(res, {
@@ -655,10 +805,8 @@ const reactToChatMessage = asyncHandler(async (req, res) => {
   const message = toggleResult.message;
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
+    emitConversationToMembers(io, message.conversationId);
     if (toggleResult.reactionAdded) {
       const senderId = String(message.senderId || "").trim();
       const reactorId = String(req.user.id);
@@ -709,7 +857,16 @@ const markSeen = asyncHandler(async (req, res) => {
   const messageIds = await markConversationSeen(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${req.params.id}`).emit("message_seen", {
+    const conversation = await getConversationById(req.params.id);
+    const memberIds = (conversation?.members || []).map((m) =>
+      m._id ? m._id.toString() : m.toString(),
+    );
+
+    let seenTarget = io.to(getConversationRoom(req.params.id));
+    for (const mId of memberIds) {
+      seenTarget = seenTarget.to(`user:${mId}`);
+    }
+    seenTarget.emit("message_seen", {
       conversationId: req.params.id,
       userId: req.user.id,
       messageIds,
@@ -737,12 +894,18 @@ const removeMessage = asyncHandler(async (req, res) => {
   const message = await deleteMessage(req.user, req.params.id);
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit("message_deleted", {
-      messageId: message.id,
-      conversationId: message.conversationId,
-    });
+    await emitMessageDeleted(io, message.conversationId, message.id);
     emitConversationToMembers(io, message.conversationId);
   }
+  sendChatResponse(res, {
+    data: { message },
+    legacy: { message },
+  });
+});
+
+const sendScheduledMessage = asyncHandler(async (req, res) => {
+  const io = req.app.get("io");
+  const message = await sendScheduledNow(req.user, req.params.id, io);
   sendChatResponse(res, {
     data: { message },
     legacy: { message },
@@ -853,10 +1016,7 @@ const restoreAttachment = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_updated",
-      message,
-    );
+    await emitMessageUpdated(io, message);
   }
   sendChatResponse(res, {
     data: { message },
@@ -888,6 +1048,21 @@ const getSystemErrors = asyncHandler(async (req, res) => {
   });
 });
 
+const togglePoll = asyncHandler(async (req, res) => {
+  const result = await togglePollMessage(req.user, req.params.id);
+
+  const io = req.app.get("io");
+  if (io) {
+    await emitMessageUpdated(io, result.message);
+  }
+
+  sendChatResponse(res, {
+    message: result.isClosed ? "تم إغلاق التصويت." : "تمت إعادة فتح التصويت.",
+    data: { message: result.message, isClosed: result.isClosed },
+    legacy: { message: result.message, isClosed: result.isClosed },
+  });
+});
+
 const votePoll = asyncHandler(async (req, res) => {
   const result = await votePollMessage(
     req.user,
@@ -897,10 +1072,7 @@ const votePoll = asyncHandler(async (req, res) => {
 
   const io = req.app.get("io");
   if (io) {
-    io.to(`conversation:${result.message.conversationId}`).emit(
-      "message_updated",
-      result.message,
-    );
+    await emitMessageUpdated(io, result.message);
   }
 
   sendChatResponse(res, {
@@ -931,7 +1103,9 @@ const getMessageReadReceiptsHandler = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  emitMessageUpdated,
   votePoll,
+  togglePoll,
   exportPoll,
   getChatDirectoryUsers,
   getChatRoles,
@@ -939,6 +1113,9 @@ module.exports = {
   getManageableConversations,
   createChatConversation,
   updateChatConversation,
+  uploadConversationAvatar,
+  deleteConversationAvatar,
+  downloadConversationAvatar,
   updateChatConversationPreferences,
   setGroupPinnedMessage,
   clearGroupPinnedMessage,
@@ -961,6 +1138,7 @@ module.exports = {
   markSeen,
   markSingleMessageSeen,
   removeMessage,
+  sendScheduledMessage,
   searchChatMessages,
   getFavoriteChatMessages,
   getPresence,

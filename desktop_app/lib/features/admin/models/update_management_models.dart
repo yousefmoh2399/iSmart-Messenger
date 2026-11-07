@@ -296,22 +296,28 @@ class DeviceHeartbeatResponse {
   const DeviceHeartbeatResponse({
     required this.pendingTasks,
     required this.heartbeatIntervalSeconds,
+    this.latestRelease,
   });
 
   final List<PendingUpdateTask> pendingTasks;
   final int heartbeatIntervalSeconds;
+  final ManagedUpdateRelease? latestRelease;
 
   factory DeviceHeartbeatResponse.fromJson(Map<String, dynamic> json) {
     final tasks = (json['pendingTasks'] as List<dynamic>? ?? const <dynamic>[])
         .whereType<Map<String, dynamic>>()
         .map(PendingUpdateTask.fromJson)
         .toList();
+    final latestReleaseRaw = json['latestRelease'];
     return DeviceHeartbeatResponse(
       pendingTasks: tasks,
       heartbeatIntervalSeconds: json['heartbeatIntervalSeconds'] is int
           ? json['heartbeatIntervalSeconds'] as int
           : int.tryParse(json['heartbeatIntervalSeconds']?.toString() ?? '') ??
                 30,
+      latestRelease: latestReleaseRaw is Map<String, dynamic>
+          ? ManagedUpdateRelease.fromJson(latestReleaseRaw)
+          : null,
     );
   }
 }

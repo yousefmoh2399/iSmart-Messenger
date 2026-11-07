@@ -87,6 +87,20 @@ class DesktopUpdateEvent {
   factory DesktopUpdateEvent.heartbeatError(String message) {
     return DesktopUpdateEvent(type: 'heartbeat_error', message: message);
   }
+
+  factory DesktopUpdateEvent.updateAvailable({
+    required String version,
+    required String message,
+    String? taskId,
+  }) {
+    return DesktopUpdateEvent(
+      type: 'update_available',
+      taskId: taskId,
+      status: 'available',
+      message: message,
+      progress: 0,
+    );
+  }
 }
 
 class DesktopUpdateAgent {
@@ -106,6 +120,7 @@ class DesktopUpdateAgent {
   AppUser? _currentUser;
   String? _deviceUid;
   DeviceHeartbeatResponse? _lastHeartbeatResponse;
+  Future<DeviceHeartbeatResponse?>? _activeHeartbeatFuture;
 
   static const int _progressReportStepPercent = 5;
   int _lastProgressReported = -1;
@@ -113,10 +128,19 @@ class DesktopUpdateAgent {
   bool _isReportingProgress = false;
   _QueuedTaskReport? _queuedProgressReport;
 
+  final ValueNotifier<bool> hasPreparedUpdateNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> hasUpdateAvailableNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<double?> downloadProgressNotifier = ValueNotifier<double?>(null);
+  final ValueNotifier<String?> statusMessageNotifier = ValueNotifier<String?>(null);
+
   Stream<DesktopUpdateEvent> get events => _eventsController.stream;
   DeviceHeartbeatResponse? get lastHeartbeatResponse => _lastHeartbeatResponse;
   String? get deviceUid => _deviceUid;
   AppUser? get currentUser => _currentUser;
+
+  void attachUser(AppUser user) {
+    _currentUser = user;
+  }
 
   void _addEvent(DesktopUpdateEvent event) {
     if (_disposed || _eventsController.isClosed) {
@@ -137,15 +161,18 @@ class DesktopUpdateAgent {
     await DesktopUpdatePaths.ensureInitialized();
     _deviceUid ??= await _loadOrCreateDeviceUid();
     await _reconcilePostRestartState();
+    await hasPreparedUpdate();
     await _emitPreparedUpdateStateIfNeeded();
+    // Register our device and LAN IP once on startup/login without background timers:
+    unawaited(_runHeartbeat());
   }
 
   Future<void> checkNow() async {
-    await _runHeartbeat();
+    await _runHeartbeat(throwOnError: false);
   }
 
   Future<DeviceHeartbeatResponse?> checkNowDetailed() async {
-    return _runHeartbeat();
+    return _runHeartbeat(throwOnError: true);
   }
 
   void setConnectionStatus(String status) {
@@ -175,16 +202,43 @@ class DesktopUpdateAgent {
     _eventsController.close();
   }
 
-  Future<DeviceHeartbeatResponse?> _runHeartbeat() async {
-    if (_disposed || _isHeartbeatRunning || _currentUser == null) {
+  Future<DeviceHeartbeatResponse?> _runHeartbeat({bool throwOnError = false}) async {
+    if (_disposed) {
       return _lastHeartbeatResponse;
     }
+    if (_activeHeartbeatFuture != null) {
+      try {
+        return await _activeHeartbeatFuture!;
+      } catch (error) {
+        if (throwOnError) rethrow;
+        return _lastHeartbeatResponse;
+      }
+    }
+
+    final future = _doRunHeartbeat();
+    _activeHeartbeatFuture = future;
+    try {
+      final response = await future;
+      return response;
+    } catch (error) {
+      if (throwOnError) rethrow;
+      return _lastHeartbeatResponse;
+    } finally {
+      _activeHeartbeatFuture = null;
+    }
+  }
+
+  Future<DeviceHeartbeatResponse> _doRunHeartbeat() async {
     _isHeartbeatRunning = true;
     try {
+      _deviceUid ??= await _loadOrCreateDeviceUid();
       final appVersion = await _resolveAppVersion();
       final electronInfo = kIsWeb && web_bridge.isElectron()
           ? await web_bridge.getElectronDeviceInfo()
           : const <String, dynamic>{};
+      final branchCode = _currentUser != null
+          ? _resolveBranchCode(_currentUser!)
+          : 'main';
       final response = await _repository.heartbeatDevice(
         deviceUid: _deviceUid!,
         deviceName: await _resolveDeviceName(),
@@ -198,12 +252,12 @@ class DesktopUpdateAgent {
                   ? electronInfo['localIp'].toString().trim()
                   : null)
             : await _resolvePrimaryLocalIpv4(),
-        branchCode: _resolveBranchCode(_currentUser!),
+        branchCode: branchCode,
         channel: 'stable',
         appVersion: appVersion,
         osName: kIsWeb
             ? (electronInfo['osName']?.toString().trim().isNotEmpty == true
-                  ? 'electron-${electronInfo['osName'].toString().trim()}'
+                  ? 'electron-' + electronInfo['osName'].toString().trim()
                   : 'web')
             : Platform.operatingSystem,
         osVersion: kIsWeb
@@ -223,21 +277,22 @@ class DesktopUpdateAgent {
       );
       _lastHeartbeatResponse = response;
       if (!kIsWeb && response.pendingTasks.isNotEmpty && !_isTaskRunning) {
-        await _executePendingTask(response.pendingTasks.first);
+        unawaited(_executePendingTask(response.pendingTasks.first));
       }
       return response;
     } catch (error) {
       _addEvent(DesktopUpdateEvent.heartbeatError(error.toString()));
-      return _lastHeartbeatResponse;
+      rethrow;
     } finally {
       _isHeartbeatRunning = false;
     }
   }
 
   Future<void> _executePendingTask(PendingUpdateTask task) async {
-    if (_isTaskRunning || _currentUser == null) {
+    if (_isTaskRunning) {
       return;
     }
+    _deviceUid ??= await _loadOrCreateDeviceUid();
     _isTaskRunning = true;
 
     _lastProgressReported = -1;
@@ -360,6 +415,7 @@ class DesktopUpdateAgent {
         artifactPath: artifactPath,
         artifactSha256: digest,
       );
+      hasPreparedUpdateNotifier.value = true;
 
       await _emitAndReport(
         taskId: task.id,
@@ -419,7 +475,12 @@ class DesktopUpdateAgent {
     required int progress,
     required String message,
   }) async {
+    _deviceUid ??= await _loadOrCreateDeviceUid();
     if (_deviceUid == null) {
+      return;
+    }
+    final isServerTask = RegExp(r'^[a-fA-F0-9]{24}$').hasMatch(taskId.trim());
+    if (!isServerTask) {
       return;
     }
     final isTerminalStatus = [
@@ -539,6 +600,36 @@ class DesktopUpdateAgent {
     }
   }
 
+    Future<bool> hasPreparedUpdate() async {
+    final taskState = await _stateStore.load();
+    final isReady = taskState.status == 'downloaded' &&
+        taskState.artifactPath != null &&
+        taskState.artifactPath!.trim().isNotEmpty &&
+        File(taskState.artifactPath!).existsSync();
+    hasPreparedUpdateNotifier.value = isReady;
+    return isReady;
+  }
+
+  Future<void> downloadRelease(ManagedUpdateRelease release) async {
+    if (_isTaskRunning || kIsWeb) {
+      return;
+    }
+    final currentVersion = await _resolveAppVersion();
+    if (_sameVersion(currentVersion, release.version)) {
+      statusMessageNotifier.value = 'هذا الجهاز محدث بالفعل للإصدار ' + release.version + '.';
+      return;
+    }
+
+    final task = PendingUpdateTask(
+      id: 'release-' + release.id,
+      status: 'pending',
+      progress: 0,
+      releaseVersion: release.version,
+      release: release,
+    );
+    await _executePendingTask(task);
+  }
+
   Future<DesktopUpdateState> loadState() => _stateStore.load();
 
   Future<void> restartToApplyPreparedUpdate() async {
@@ -567,6 +658,7 @@ class DesktopUpdateAgent {
       message: 'يتم الآن إغلاق التطبيق لإكمال تثبيت التحديث.',
     );
     await _stateStore.markInstalling();
+    hasPreparedUpdateNotifier.value = false;
 
     final installResult = await _runInstaller(
       taskId: taskId,
@@ -704,16 +796,48 @@ class DesktopUpdateAgent {
         includeLoopback: false,
         type: InternetAddressType.IPv4,
       );
+      final virtualRegex = RegExp(
+        r'(vmware|virtualbox|vbox|vethernet|hyper-v|wsl|loopback|npcap|pcap|tap|tun|tailscale|zerotier|hamachi|wireguard|nordlynx|anyconnect|fortinet|pulse|cisco|vpn|bluetooth)',
+        caseSensitive: false,
+      );
+      final physicalRegex = RegExp(
+        r'(ethernet|wi-fi|wifi|wlan|eth|local area connection|شبكة)',
+        caseSensitive: false,
+      );
+
+      final candidates = <({String ip, int score})>[];
+
       for (final iface in interfaces) {
+        final lowerName = iface.name.toLowerCase();
         for (final address in iface.addresses) {
           if (address.type != InternetAddressType.IPv4 || address.isLoopback) {
             continue;
           }
-          final value = address.address.trim();
-          if (value.isNotEmpty) {
-            return value;
+          final ip = address.address.trim();
+          if (ip.isEmpty ||
+              ip.startsWith('127.') ||
+              ip.startsWith('169.254.') ||
+              ip == '0.0.0.0') {
+            continue;
           }
+          var score = 100;
+          if (virtualRegex.hasMatch(lowerName)) score -= 90;
+          if (physicalRegex.hasMatch(lowerName)) score += 60;
+          if (ip.startsWith('172.')) {
+            score += 30;
+          } else if (ip.startsWith('192.168.')) {
+            score += 20;
+          } else if (ip.startsWith('10.')) {
+            score += 15;
+          }
+
+          candidates.add((ip: ip, score: score));
         }
+      }
+
+      if (candidates.isNotEmpty) {
+        candidates.sort((a, b) => b.score.compareTo(a.score));
+        return candidates.first.ip;
       }
     } catch (_) {}
     return null;
@@ -961,9 +1085,29 @@ class DesktopUpdateAgent {
       'ismart_messenger_updater.exe',
     );
     if (!File(helperExecutablePath).existsSync()) {
+      try {
+        final process = await Process.start(
+          invocation.executable,
+          invocation.attempts.isNotEmpty ? invocation.attempts.first : const <String>[],
+          mode: ProcessStartMode.detached,
+          runInShell: true,
+        );
+        if (process.pid > 0) {
+          return const _InstallerResult(
+            success: true,
+            message: 'تم تشغيل معالج التثبيت بنجاح. سيتم إغلاق التطبيق لإكمال التثبيت.',
+            completionHandledExternally: true,
+          );
+        }
+      } catch (e) {
+        return _InstallerResult(
+          success: false,
+          message: 'تعذر تشغيل ملف التثبيت المباشر: ' + e.toString(),
+        );
+      }
       return const _InstallerResult(
         success: false,
-        message: 'Windows update helper was not found next to the app.',
+        message: 'تعذر تشغيل معالج التثبيت.',
       );
     }
 
@@ -1122,4 +1266,4 @@ class _DigestSink implements Sink<Digest> {
 
   @override
   void close() {}
-}
+}

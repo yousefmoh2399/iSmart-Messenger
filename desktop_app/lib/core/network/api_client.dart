@@ -92,12 +92,22 @@ class ApiClient {
           );
 
           final isTransferEndpoint =
+              options.data is FormData ||
               requestPath.contains('/transfers') ||
               requestPath.contains('/upload') ||
               requestPath.contains('/download') ||
               requestPath.contains('/releases') ||
               requestPath.contains('/updates');
-          if (!isTransferEndpoint) {
+          final isFastEndpoint = requestPath.contains('/auth/login') ||
+              requestPath.contains('/auth/register') ||
+              requestPath.contains('/health');
+          if (isFastEndpoint) {
+            options.connectTimeout = const Duration(seconds: 10);
+            options.receiveTimeout = const Duration(seconds: 15);
+            if (!kIsWeb) {
+              options.sendTimeout = const Duration(seconds: 15);
+            }
+          } else if (!isTransferEndpoint) {
             options.receiveTimeout = const Duration(seconds: 90);
             if (!kIsWeb) {
               options.sendTimeout = const Duration(seconds: 90);
@@ -182,7 +192,8 @@ class ApiClient {
                   ? _sessionManager.mapRefreshFailure(refreshError)
                   : mapError(refreshError);
               final readable = _readableDioError(error, mapped);
-              if (requestOptions.extra['skipErrorLog'] != true) {
+              final isTempNetworkError = refreshError is RefreshNetworkException;
+              if (requestOptions.extra['skipErrorLog'] != true && !isTempNetworkError) {
                 unawaited(
                   AppErrorLogService.instance.recordDioException(
                     readable,
@@ -196,7 +207,9 @@ class ApiClient {
           }
 
           final readable = _readableDioError(error, mapError(error));
-          if (requestOptions.extra['skipErrorLog'] != true) {
+          final isCancelled = error.type == DioExceptionType.cancel ||
+              error.error is MissingAuthTokenException;
+          if (requestOptions.extra['skipErrorLog'] != true && !isCancelled) {
             unawaited(AppErrorLogService.instance.recordDioException(readable));
           }
           handler.reject(readable);
@@ -238,6 +251,7 @@ class ApiClient {
   bool _isPublicAuthPath(String requestPath) {
     return requestPath.contains('/api/auth/login') ||
         requestPath.contains('/api/auth/register') ||
+        requestPath.contains('/api/auth/logout') ||
         requestPath.contains('/api/auth/forgot-password') ||
         requestPath.contains('/api/auth/reset-password') ||
         requestPath.contains('/api/auth/refresh') ||
@@ -280,23 +294,28 @@ class ApiClient {
 
       final payload = error.response?.data;
       final statusCode = error.response?.statusCode;
-      final requestPath = error.requestOptions.path.toLowerCase();
-      final isLoginRequest = requestPath.contains('/api/auth/login');
 
       String? serverMessage;
       if (payload is Map<String, dynamic>) {
-        serverMessage =
+        if (payload['details'] is List) {
+          final detailsList = (payload['details'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map((d) => (d['message'] ?? d['msg'])?.toString().trim())
+              .whereType<String>()
+              .where((m) => m.isNotEmpty)
+              .toList();
+          if (detailsList.isNotEmpty) {
+            serverMessage = detailsList.join('\n');
+          }
+        }
+        serverMessage ??=
             (payload['message'] as String?)?.trim() ??
             (payload['error'] as String?)?.trim();
       }
 
       if (statusCode == 401) {
-        final lower = serverMessage?.toLowerCase() ?? '';
-        if (isLoginRequest || lower.contains('invalid username or password')) {
-          return const ApiException(
-            'اسم المستخدم أو كلمة المرور غير صحيحة.',
-            statusCode: 401,
-          );
+        if (serverMessage != null && serverMessage.isNotEmpty) {
+          return ApiException(serverMessage, statusCode: 401);
         }
         return const ApiException(
           'انتهت صلاحية الجلسة أو فشل التحقق. سجل الدخول مرة أخرى.',

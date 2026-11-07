@@ -26,6 +26,8 @@ class ChatPermissionSet {
     required this.canManagePrinters,
     required this.canSyncPrinters,
     required this.canExportPrinterReports,
+    this.canViewSnipeit = false,
+    this.canViewSystemMonitor = false,
   });
 
   final bool canCreateUsers;
@@ -48,6 +50,8 @@ class ChatPermissionSet {
   final bool canManagePrinters;
   final bool canSyncPrinters;
   final bool canExportPrinterReports;
+  final bool canViewSnipeit;
+  final bool canViewSystemMonitor;
 
   factory ChatPermissionSet.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
@@ -72,6 +76,8 @@ class ChatPermissionSet {
       canManagePrinters: map['canManagePrinters'] == true,
       canSyncPrinters: map['canSyncPrinters'] == true,
       canExportPrinterReports: map['canExportPrinterReports'] == true,
+      canViewSnipeit: map['canViewSnipeit'] == true,
+      canViewSystemMonitor: map['canViewSystemMonitor'] == true,
     );
   }
 
@@ -97,6 +103,8 @@ class ChatPermissionSet {
       'canManagePrinters': canManagePrinters,
       'canSyncPrinters': canSyncPrinters,
       'canExportPrinterReports': canExportPrinterReports,
+      'canViewSnipeit': canViewSnipeit,
+      'canViewSystemMonitor': canViewSystemMonitor,
     };
   }
 }
@@ -106,8 +114,10 @@ class ChatDirectoryUser {
     required this.id,
     required this.username,
     required this.fullName,
+    this.jobTitle = '',
     required this.role,
     required this.departmentId,
+    this.departmentIds = const [],
     required this.branchId,
     required this.branchCode,
     required this.isOnline,
@@ -121,8 +131,10 @@ class ChatDirectoryUser {
   final String id;
   final String username;
   final String fullName;
+  final String jobTitle;
   final String role;
   final String? departmentId;
+  final List<String> departmentIds;
   final String? branchId;
   final String branchCode;
   final bool isOnline;
@@ -135,14 +147,89 @@ class ChatDirectoryUser {
   String get displayName => fullName.trim().isEmpty ? username : fullName;
   bool get isIdle => presenceStatus == 'idle';
 
-  factory ChatDirectoryUser.fromJson(Map<String, dynamic> json) {
+  List<String> get allDepartmentIds {
+    if (departmentIds.isNotEmpty) return departmentIds;
+    if (departmentId != null && departmentId!.isNotEmpty) return [departmentId!];
+    return const [];
+  }
+
+  String formatDepartmentNames(Map<String, DepartmentSummary> departmentsById) {
+    final ids = allDepartmentIds;
+    if (ids.isEmpty) return '';
+    final names = ids
+        .map((id) => departmentsById[id]?.name)
+        .whereType<String>()
+        .where((n) => n.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    return names.join('، ');
+  }
+
+  ChatDirectoryUser copyWith({
+    String? id,
+    String? username,
+    String? fullName,
+    String? jobTitle,
+    String? role,
+    String? departmentId,
+    List<String>? departmentIds,
+    String? branchId,
+    String? branchCode,
+    bool? isOnline,
+    String? presenceStatus,
+    bool? isActive,
+    String? avatarUrl,
+    DateTime? lastSeen,
+    DateTime? lastActiveAt,
+  }) {
     return ChatDirectoryUser(
-      id: json['id'] as String,
+      id: id ?? this.id,
+      username: username ?? this.username,
+      fullName: fullName ?? this.fullName,
+      jobTitle: jobTitle ?? this.jobTitle,
+      role: role ?? this.role,
+      departmentId: departmentId ?? this.departmentId,
+      departmentIds: departmentIds ?? this.departmentIds,
+      branchId: branchId ?? this.branchId,
+      branchCode: branchCode ?? this.branchCode,
+      isOnline: isOnline ?? this.isOnline,
+      presenceStatus: presenceStatus ?? this.presenceStatus,
+      isActive: isActive ?? this.isActive,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      lastSeen: lastSeen ?? this.lastSeen,
+      lastActiveAt: lastActiveAt ?? this.lastActiveAt,
+    );
+  }
+
+  factory ChatDirectoryUser.fromJson(Map<String, dynamic> json) {
+    final parsedDepartmentId = json['departmentId'] is Map
+        ? (json['departmentId']['_id'] ?? json['departmentId']['id'])?.toString()
+        : json['departmentId']?.toString();
+    final parsedDepartmentIds = (json['departmentIds'] as List<dynamic>? ?? const [])
+        .map((entry) {
+          if (entry is Map) {
+            return (entry['_id'] ?? entry['id'])?.toString();
+          }
+          return entry?.toString();
+        })
+        .whereType<String>()
+        .where((id) => id.trim().isNotEmpty)
+        .toList();
+    final effectiveDepartmentIds = parsedDepartmentIds.isNotEmpty
+        ? parsedDepartmentIds
+        : [if (parsedDepartmentId != null && parsedDepartmentId.trim().isNotEmpty) parsedDepartmentId];
+
+    return ChatDirectoryUser(
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
       username: json['username'] as String? ?? '',
       fullName: json['fullName'] as String? ?? '',
+      jobTitle: (json['jobTitle'] as String?)?.trim() ?? '',
       role: json['role'] as String? ?? 'user',
-      departmentId: json['departmentId'] as String?,
-      branchId: json['branchId'] as String?,
+      departmentId: parsedDepartmentId,
+      departmentIds: effectiveDepartmentIds,
+      branchId: json['branchId'] is Map
+          ? (json['branchId']['_id'] ?? json['branchId']['id'])?.toString()
+          : json['branchId']?.toString(),
       branchCode: json['branchCode'] as String? ?? 'main',
       isOnline: json['isOnline'] as bool? ?? false,
       presenceStatus: json['presenceStatus'] as String? ?? 'offline',
@@ -155,6 +242,26 @@ class ChatDirectoryUser {
           ? DateTime.tryParse(json['lastActiveAt'] as String)
           : null,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'username': username,
+      'fullName': fullName,
+      'jobTitle': jobTitle,
+      'role': role,
+      'departmentId': departmentId,
+      'departmentIds': departmentIds,
+      'branchId': branchId,
+      'branchCode': branchCode,
+      'isOnline': isOnline,
+      'presenceStatus': presenceStatus,
+      'isActive': isActive,
+      'avatarUrl': avatarUrl,
+      'lastSeen': lastSeen?.toIso8601String(),
+      'lastActiveAt': lastActiveAt?.toIso8601String(),
+    };
   }
 }
 
@@ -192,18 +299,53 @@ class DepartmentSummary {
   final String? defaultConversationId;
 
   factory DepartmentSummary.fromJson(Map<String, dynamic> json) {
+    final rawDefaultConv = json['defaultConversationId'];
+    final defaultConversationId = rawDefaultConv is Map
+        ? (rawDefaultConv['_id'] ?? rawDefaultConv['id'])?.toString()
+        : rawDefaultConv?.toString();
     return DepartmentSummary(
-      id: json['id'] as String,
-      name: json['name'] as String? ?? '',
-      code: json['code'] as String? ?? '',
-      description: json['description'] as String? ?? '',
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      code: json['code']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
       managers: (json['managers'] as List<dynamic>? ?? const [])
-          .map((entry) => entry.toString())
+          .where((entry) => entry != null)
+          .map(
+            (entry) => entry is Map
+                ? (entry['_id'] ?? entry['id'])?.toString() ?? ''
+                : entry.toString(),
+          )
+          .where((entry) => entry.isNotEmpty)
           .toList(),
-      membersCount: json['membersCount'] as int? ?? 0,
-      defaultConversationId: json['defaultConversationId'] as String?,
+      membersCount: (json['membersCount'] as num?)?.toInt() ?? 0,
+      defaultConversationId:
+          defaultConversationId != null && defaultConversationId.isNotEmpty
+          ? defaultConversationId
+          : null,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'description': description,
+      'managers': managers,
+      'membersCount': membersCount,
+      'defaultConversationId': defaultConversationId,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DepartmentSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class BranchSummary {
@@ -223,13 +365,33 @@ class BranchSummary {
 
   factory BranchSummary.fromJson(Map<String, dynamic> json) {
     return BranchSummary(
-      id: json['id'] as String,
-      name: json['name'] as String? ?? '',
-      code: json['code'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      membersCount: json['membersCount'] as int? ?? 0,
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      code: json['code']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      membersCount: (json['membersCount'] as num?)?.toInt() ?? 0,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'description': description,
+      'membersCount': membersCount,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BranchSummary &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 class ChatRole {
@@ -245,41 +407,130 @@ class ChatRole {
 
   factory ChatRole.fromJson(Map<String, dynamic> json) {
     return ChatRole(
-      id: json['id'] as String,
-      roleName: json['roleName'] as String? ?? 'user',
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      roleName: json['roleName']?.toString() ?? 'user',
       permissions: ChatPermissionSet.fromJson(
         json['permissions'] as Map<String, dynamic>?,
       ),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'roleName': roleName,
+      'permissions': permissions.toJson(),
+    };
+  }
 }
 
 class ChatLastMessage {
   const ChatLastMessage({
+    this.id,
     required this.content,
     required this.senderId,
     required this.senderName,
     required this.messageType,
+    this.seenBy = const <ChatReceipt>[],
+    this.deliveredTo = const <ChatReceipt>[],
+    this.status = 'sent',
     required this.createdAt,
   });
 
+  final String? id;
   final String content;
   final String? senderId;
   final String senderName;
   final String messageType;
+  final List<ChatReceipt> seenBy;
+  final List<ChatReceipt> deliveredTo;
+  final String status;
   final DateTime? createdAt;
+
+  bool isSeenByAny(String currentUserId) {
+    if (status == 'read' || status == 'seen') return true;
+    final trimmedMe = currentUserId.trim();
+    if (trimmedMe.isEmpty) {
+      return seenBy.isNotEmpty;
+    }
+    return seenBy.any((entry) => entry.userId.trim().isNotEmpty && entry.userId.trim() != trimmedMe);
+  }
+
+  bool isDeliveredToAny(String currentUserId) {
+    if (status == 'delivered' || isSeenByAny(currentUserId)) return true;
+    final trimmedMe = currentUserId.trim();
+    if (trimmedMe.isEmpty) {
+      return deliveredTo.isNotEmpty;
+    }
+    return deliveredTo.any((entry) => entry.userId.trim().isNotEmpty && entry.userId.trim() != trimmedMe);
+  }
+
+  ChatLastMessage copyWith({
+    String? id,
+    String? content,
+    String? senderId,
+    String? senderName,
+    String? messageType,
+    List<ChatReceipt>? seenBy,
+    List<ChatReceipt>? deliveredTo,
+    String? status,
+    DateTime? createdAt,
+  }) {
+    return ChatLastMessage(
+      id: id ?? this.id,
+      content: content ?? this.content,
+      senderId: senderId ?? this.senderId,
+      senderName: senderName ?? this.senderName,
+      messageType: messageType ?? this.messageType,
+      seenBy: seenBy ?? this.seenBy,
+      deliveredTo: deliveredTo ?? this.deliveredTo,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
 
   factory ChatLastMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
+    final rawSender = map['senderId'] ?? map['sender'];
+    final senderId = rawSender is Map
+        ? (rawSender['_id'] ?? rawSender['id'])?.toString()
+        : rawSender?.toString();
+    final rawSeenBy = map['seenBy'];
+    final rawDeliveredTo = map['deliveredTo'];
     return ChatLastMessage(
-      content: (map['content'] ?? map['text'] ?? '') as String,
-      senderId: map['senderId'] as String?,
-      senderName: map['senderName'] as String? ?? '',
-      messageType: map['messageType'] as String? ?? 'text',
+      id: (map['id'] ?? map['_id'])?.toString(),
+      content: (map['content'] ?? map['text'] ?? '').toString(),
+      senderId: senderId,
+      senderName: map['senderName']?.toString() ??
+          (rawSender is Map ? (rawSender['fullName'] ?? rawSender['username'])?.toString() ?? '' : ''),
+      messageType: map['messageType']?.toString() ?? 'text',
+      seenBy: (rawSeenBy is List ? rawSeenBy : const [])
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      deliveredTo: (rawDeliveredTo is List ? rawDeliveredTo : const [])
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+      status: map['status']?.toString() ?? 'sent',
       createdAt: map['createdAt'] is String
           ? DateTime.tryParse(map['createdAt'] as String)
           : null,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      if (id != null) 'id': id,
+      'content': content,
+      'senderId': senderId,
+      'senderName': senderName,
+      'messageType': messageType,
+      'seenBy': seenBy.map((e) => e.toJson()).toList(),
+      'deliveredTo': deliveredTo.map((e) => e.toJson()).toList(),
+      'status': status,
+      'createdAt': createdAt?.toIso8601String(),
+    };
   }
 }
 
@@ -302,18 +553,33 @@ class ChatPinnedMessage {
 
   factory ChatPinnedMessage.fromJson(Map<String, dynamic>? json) {
     final map = json ?? const <String, dynamic>{};
+    final rawSetBy = map['setBy'];
+    final setBy = rawSetBy is Map
+        ? (rawSetBy['_id'] ?? rawSetBy['id'])?.toString()
+        : rawSetBy?.toString();
     return ChatPinnedMessage(
-      messageId: map['messageId'] as String?,
-      content: map['content'] as String? ?? '',
-      setBy: map['setBy'] as String?,
-      setByName: map['setByName'] as String? ?? '',
-      createdAt: map['createdAt'] != null
+      messageId: map['messageId']?.toString(),
+      content: map['content']?.toString() ?? '',
+      setBy: setBy,
+      setByName: map['setByName']?.toString() ?? '',
+      createdAt: map['createdAt'] is String
           ? DateTime.tryParse(map['createdAt'] as String)
           : null,
-      updatedAt: map['updatedAt'] != null
+      updatedAt: map['updatedAt'] is String
           ? DateTime.tryParse(map['updatedAt'] as String)
           : null,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'messageId': messageId,
+      'content': content,
+      'setBy': setBy,
+      'setByName': setByName,
+      'createdAt': createdAt?.toIso8601String(),
+      'updatedAt': updatedAt?.toIso8601String(),
+    };
   }
 }
 
@@ -323,6 +589,7 @@ class ChatConversation {
     required this.type,
     required this.name,
     required this.description,
+    this.avatarUrl,
     required this.departmentId,
     required this.createdBy,
     required this.members,
@@ -335,9 +602,14 @@ class ChatConversation {
     required this.unreadCount,
     required this.isArchived,
     required this.isMuted,
+    this.mutedUntil,
     required this.isPinned,
     required this.isFavorite,
     required this.isActive,
+    this.isMember = true,
+    this.membershipStatus = 'active',
+    this.canSend = true,
+    this.isBlocked = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -346,6 +618,7 @@ class ChatConversation {
   final String type;
   final String name;
   final String description;
+  final String? avatarUrl;
   final String? departmentId;
   final String? createdBy;
   final List<ChatDirectoryUser> members;
@@ -358,11 +631,32 @@ class ChatConversation {
   final int unreadCount;
   final bool isArchived;
   final bool isMuted;
+  final DateTime? mutedUntil;
   final bool isPinned;
   final bool isFavorite;
   final bool isActive;
+  final bool isMember;
+  final String membershipStatus;
+  final bool canSend;
+  final bool isBlocked;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  bool get isRemoved => membershipStatus == 'removed';
+  bool get isLeft => membershipStatus == 'left';
+  bool get isUserBlocked => isBlocked || membershipStatus == 'blocked';
+
+  bool get isEffectivelyMuted {
+    if (!isMuted) return false;
+    if (mutedUntil == null) return true;
+    return mutedUntil!.isAfter(DateTime.now());
+  }
+
+  bool isSelfChat(String currentUserId) {
+    if (type != 'direct') return false;
+    if (members.isEmpty) return true;
+    return members.every((entry) => entry.id == currentUserId);
+  }
 
   String displayTitle(String currentUserId) {
     if (name.trim().isNotEmpty) {
@@ -374,6 +668,9 @@ class ChatConversation {
       if (otherUsers.isNotEmpty) {
         return otherUsers.first.displayName;
       }
+      if (isSelfChat(currentUserId)) {
+        return 'الرسائل المحفوظة';
+      }
     }
 
     return 'محادثة بدون اسم';
@@ -382,6 +679,7 @@ class ChatConversation {
   ChatConversation copyWith({
     String? name,
     String? description,
+    String? avatarUrl,
     List<ChatDirectoryUser>? members,
     List<ChatDirectoryUser>? admins,
     List<String>? broadcastPublisherIds,
@@ -392,9 +690,15 @@ class ChatConversation {
     int? unreadCount,
     bool? isArchived,
     bool? isMuted,
+    DateTime? mutedUntil,
+    bool clearMutedUntil = false,
     bool? isPinned,
     bool? isFavorite,
     bool? isActive,
+    bool? isMember,
+    String? membershipStatus,
+    bool? canSend,
+    bool? isBlocked,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -403,6 +707,7 @@ class ChatConversation {
       type: type,
       name: name ?? this.name,
       description: description ?? this.description,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
       departmentId: departmentId,
       createdBy: createdBy,
       members: members ?? this.members,
@@ -419,22 +724,40 @@ class ChatConversation {
       unreadCount: unreadCount ?? this.unreadCount,
       isArchived: isArchived ?? this.isArchived,
       isMuted: isMuted ?? this.isMuted,
+      mutedUntil: clearMutedUntil ? null : (mutedUntil ?? this.mutedUntil),
       isPinned: isPinned ?? this.isPinned,
       isFavorite: isFavorite ?? this.isFavorite,
       isActive: isActive ?? this.isActive,
+      isMember: isMember ?? this.isMember,
+      membershipStatus: membershipStatus ?? this.membershipStatus,
+      canSend: canSend ?? this.canSend,
+      isBlocked: isBlocked ?? this.isBlocked,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
   factory ChatConversation.fromJson(Map<String, dynamic> json) {
+    final rawDept = json['departmentId'];
+    final departmentId = rawDept is Map
+        ? (rawDept['_id'] ?? rawDept['id'])?.toString()
+        : rawDept?.toString();
+    final rawCreatedBy = json['createdBy'];
+    final createdBy = rawCreatedBy is Map
+        ? (rawCreatedBy['_id'] ?? rawCreatedBy['id'])?.toString()
+        : rawCreatedBy?.toString();
+    String fallbackName = json['name']?.toString() ?? '';
+    if (fallbackName.trim().isEmpty && rawDept is Map) {
+      fallbackName = rawDept['name']?.toString() ?? '';
+    }
     return ChatConversation(
-      id: json['id'] as String,
-      type: json['type'] as String? ?? 'direct',
-      name: json['name'] as String? ?? '',
-      description: json['description'] as String? ?? '',
-      departmentId: json['departmentId'] as String?,
-      createdBy: json['createdBy'] as String?,
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      type: json['type']?.toString() ?? 'direct',
+      name: fallbackName,
+      description: json['description']?.toString() ?? '',
+      avatarUrl: json['avatarUrl']?.toString(),
+      departmentId: departmentId,
+      createdBy: createdBy,
       members: (json['members'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(ChatDirectoryUser.fromJson)
@@ -445,12 +768,22 @@ class ChatConversation {
           .toList(),
       broadcastPublisherIds: _normalizeStringList(
         (json['broadcastPublisherIds'] as List<dynamic>?)
-            ?.map((entry) => entry.toString())
+            ?.where((entry) => entry != null)
+            .map(
+              (entry) => entry is Map
+                  ? (entry['_id'] ?? entry['id'])?.toString() ?? ''
+                  : entry.toString(),
+            )
             .toList(),
       ),
       blockedMemberIds: _normalizeStringList(
         (json['blockedMemberIds'] as List<dynamic>?)
-            ?.map((entry) => entry.toString())
+            ?.where((entry) => entry != null)
+            .map(
+              (entry) => entry is Map
+                  ? (entry['_id'] ?? entry['id'])?.toString() ?? ''
+                  : entry.toString(),
+            )
             .toList(),
       ),
       blockedMembers: (json['blockedMembers'] as List<dynamic>? ?? const [])
@@ -467,19 +800,58 @@ class ChatConversation {
               json['lastMessage'] as Map<String, dynamic>,
             )
           : null,
-      unreadCount: json['unreadCount'] as int? ?? 0,
+      unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       isArchived: json['isArchived'] == true,
       isMuted: json['isMuted'] == true,
+      mutedUntil: json['mutedUntil'] != null
+          ? DateTime.tryParse(json['mutedUntil'].toString())
+          : null,
       isPinned: json['isPinned'] == true,
       isFavorite: json['isFavorite'] == true,
       isActive: json['isActive'] != false,
+      isMember: json['isMember'] != false,
+      membershipStatus: json['membershipStatus']?.toString() ?? 'active',
+      canSend: json['canSend'] != false,
+      isBlocked: json['isBlocked'] == true,
       createdAt:
-          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       updatedAt:
-          DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
           DateTime.now(),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'type': type,
+      'name': name,
+      'description': description,
+      'avatarUrl': avatarUrl,
+      'departmentId': departmentId,
+      'createdBy': createdBy,
+      'members': members.map((e) => e.toJson()).toList(),
+      'admins': admins.map((e) => e.toJson()).toList(),
+      'broadcastPublisherIds': broadcastPublisherIds,
+      'blockedMemberIds': blockedMemberIds,
+      'blockedMembers': blockedMembers.map((e) => e.toJson()).toList(),
+      'pinnedMessage': pinnedMessage?.toJson(),
+      'lastMessage': lastMessage?.toJson(),
+      'unreadCount': unreadCount,
+      'isArchived': isArchived,
+      'isMuted': isMuted,
+      'mutedUntil': mutedUntil?.toIso8601String(),
+      'isPinned': isPinned,
+      'isFavorite': isFavorite,
+      'isActive': isActive,
+      'isMember': isMember,
+      'membershipStatus': membershipStatus,
+      'canSend': canSend,
+      'isBlocked': isBlocked,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+    };
   }
 }
 
@@ -489,9 +861,17 @@ class ChatReceipt {
   final String userId;
   final DateTime? at;
 
+  Map<String, dynamic> toJson() {
+    return {'userId': userId, 'at': at?.toIso8601String()};
+  }
+
   factory ChatReceipt.fromJson(Map<String, dynamic> json) {
     return ChatReceipt(
-      userId: json['userId'] as String,
+      userId: (json['userId'] is Map
+              ? (json['userId']['_id'] ?? json['userId']['id'])
+              : json['userId'])
+          ?.toString() ??
+          '',
       at: json['at'] is String ? DateTime.tryParse(json['at'] as String) : null,
     );
   }
@@ -511,6 +891,8 @@ class ChatMessage {
     required this.mimeType,
     required this.replyToMessageId,
     required this.isDeleted,
+    this.isScheduled = false,
+    this.scheduledFor,
     required this.metadata,
     required this.createdAt,
     required this.updatedAt,
@@ -530,11 +912,16 @@ class ChatMessage {
   final String? mimeType;
   final String? replyToMessageId;
   final bool isDeleted;
+  final bool isScheduled;
+  final DateTime? scheduledFor;
   final Map<String, dynamic>? metadata;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<ChatReceipt> seenBy;
   final List<ChatReceipt> deliveredTo;
+
+  bool get isFailed => id.startsWith('temp_') && metadata?['status'] == 'failed';
+  bool get isPending => id.startsWith('temp_') && metadata?['status'] == 'pending';
 
   bool get isAudioMessage =>
       messageType == 'audio' ||
@@ -546,8 +933,17 @@ class ChatMessage {
 
   /// Sticker files are regular local image attachments, marked in metadata to
   /// stay compatible with older servers and clients.
-  bool get isStickerMessage => metadata?['sticker'] == true;
+  bool get isStickerMessage =>
+      metadata?['sticker'] == true || metadata?['isSticker'] == true;
   bool get isPollMessage => messageType == 'poll' || messageType == 'checklist';
+  bool get isPollClosed {
+    if (!isPollMessage) return false;
+    final poll = metadata?['poll'];
+    if (poll is Map<String, dynamic>) {
+      return poll['isClosed'] == true;
+    }
+    return metadata?['isClosed'] == true;
+  }
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';
   bool get hasAttachment => fileUrl != null && fileUrl!.isNotEmpty;
@@ -604,11 +1000,13 @@ class ChatMessage {
 
   bool get attachmentDownloadAllowed =>
       _attachmentPolicy?['allowDownload'] != false;
-  bool get attachmentForwardAllowed =>
-      _attachmentPolicy?['allowForward'] != false;
+  bool get attachmentForwardAllowed {
+    if (metadata?['allowForward'] == false) return false;
+    return _attachmentPolicy?['allowForward'] != false;
+  }
   bool get isAttachmentViewOnly =>
-      hasAttachment &&
-      (!attachmentDownloadAllowed || !attachmentForwardAllowed);
+      !attachmentForwardAllowed ||
+      (hasAttachment && !attachmentDownloadAllowed);
   List<String> get broadcastTargetDepartmentIds {
     final broadcastTargets = metadata?['broadcastTargets'];
     if (broadcastTargets is! Map) {
@@ -645,6 +1043,36 @@ class ChatMessage {
       return false;
     }
     return broadcastTargets['sentToAllDepartments'] == true;
+  }
+
+  List<String> get broadcastTargetUserIds {
+    final broadcastTargets = metadata?['broadcastTargets'];
+    if (broadcastTargets is! Map) {
+      return const <String>[];
+    }
+    final raw = broadcastTargets['userIds'];
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((entry) => entry.toString())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
+  }
+
+  List<String> get broadcastTargetUserNames {
+    final broadcastTargets = metadata?['broadcastTargets'];
+    if (broadcastTargets is! Map) {
+      return const <String>[];
+    }
+    final raw = broadcastTargets['userNames'];
+    if (raw is! List) {
+      return const <String>[];
+    }
+    return raw
+        .map((entry) => entry.toString())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
   }
 
   String? get forwardedFromName {
@@ -701,6 +1129,8 @@ class ChatMessage {
     String? mimeType,
     String? replyToMessageId,
     bool? isDeleted,
+    bool? isScheduled,
+    DateTime? scheduledFor,
     Map<String, dynamic>? metadata,
     DateTime? updatedAt,
     List<ChatReceipt>? seenBy,
@@ -719,6 +1149,8 @@ class ChatMessage {
       mimeType: mimeType ?? this.mimeType,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
       isDeleted: isDeleted ?? this.isDeleted,
+      isScheduled: isScheduled ?? this.isScheduled,
+      scheduledFor: scheduledFor ?? this.scheduledFor,
       metadata: metadata ?? this.metadata,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -727,25 +1159,78 @@ class ChatMessage {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'conversationId': conversationId,
+      'senderId': senderId,
+      'sender': sender?.toJson(),
+      'content': content,
+      'messageType': messageType,
+      'fileUrl': fileUrl,
+      'fileName': fileName,
+      'fileSize': fileSize,
+      'mimeType': mimeType,
+      'replyToMessageId': replyToMessageId,
+      'isDeleted': isDeleted,
+      'isScheduled': isScheduled,
+      'scheduledFor': scheduledFor?.toIso8601String(),
+      'metadata': metadata,
+      'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
+      'seenBy': seenBy.map((e) => e.toJson()).toList(),
+      'deliveredTo': deliveredTo.map((e) => e.toJson()).toList(),
+    };
+  }
+
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
-      id: json['id'] as String,
-      conversationId: json['conversationId'] as String,
-      senderId: json['senderId'] as String,
-      sender: json['sender'] is Map<String, dynamic>
-          ? ChatDirectoryUser.fromJson(json['sender'] as Map<String, dynamic>)
+      id: (json['_id'] ?? json['id'])?.toString() ?? '',
+      conversationId: json['conversationId']?.toString() ?? '',
+      senderId: (json['senderId'] is Map
+              ? (json['senderId']['_id'] ?? json['senderId']['id'])
+              : json['senderId'])
+          ?.toString() ??
+          '',
+      sender: json['sender'] is Map
+          ? ChatDirectoryUser.fromJson(
+              Map<String, dynamic>.from(json['sender'] as Map),
+            )
           : null,
       content: json['content'] as String? ?? '',
       messageType: json['messageType'] as String? ?? 'text',
       fileUrl: resolveMediaUrl(json['fileUrl'] as String?),
       fileName: json['fileName'] as String?,
-      fileSize: json['fileSize'] as int?,
+      fileSize: (json['fileSize'] as num?)?.toInt(),
       mimeType: json['mimeType'] as String?,
-      replyToMessageId: json['replyToMessageId'] as String?,
+      replyToMessageId: json['replyToMessageId']?.toString(),
       isDeleted: json['isDeleted'] == true,
-      metadata: json['metadata'] is Map<String, dynamic>
-          ? Map<String, dynamic>.from(json['metadata'] as Map<String, dynamic>)
+      isScheduled: json['isScheduled'] == true,
+      scheduledFor: json['scheduledFor'] is String
+          ? DateTime.tryParse(json['scheduledFor'] as String)
           : null,
+      metadata: () {
+        final raw = json['metadata'];
+        final meta = raw is Map<String, dynamic>
+            ? Map<String, dynamic>.from(raw)
+            : (raw is Map
+                ? Map<String, dynamic>.from(raw)
+                : <String, dynamic>{});
+        final msgId = (json['_id'] ?? json['id'])?.toString() ?? '';
+        // If message has an official server ID (not temp_), it was confirmed by the server.
+        // It can NEVER be in failed status. Strip any historical/stale failed status.
+        if (!msgId.startsWith('temp_')) {
+          meta.remove('status');
+          meta.remove('error');
+        }
+        final topLevelClientMsgId = json['clientMessageId']?.toString();
+        if (topLevelClientMsgId != null &&
+            topLevelClientMsgId.isNotEmpty &&
+            !meta.containsKey('clientMessageId')) {
+          meta['clientMessageId'] = topLevelClientMsgId;
+        }
+        return meta.isEmpty ? null : meta;
+      }(),
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now(),
@@ -753,12 +1238,12 @@ class ChatMessage {
           DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
           DateTime.now(),
       seenBy: (json['seenBy'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
       deliveredTo: (json['deliveredTo'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .map(ChatReceipt.fromJson)
+          .whereType<Map>()
+          .map((e) => ChatReceipt.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
     );
   }

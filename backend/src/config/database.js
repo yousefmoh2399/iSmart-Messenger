@@ -1,11 +1,14 @@
 const mongoose = require("mongoose");
 const { mongodbUri } = require("./env");
 
-mongoose.set("bufferCommands", false);
+mongoose.set("bufferCommands", true);
 
 async function connectDatabase() {
   await mongoose.connect(mongodbUri, {
-    serverSelectionTimeoutMS: 5000,
+    serverSelectionTimeoutMS: 8000,
+    maxPoolSize: 100,
+    minPoolSize: 10,
+    socketTimeoutMS: 45000,
   });
 }
 

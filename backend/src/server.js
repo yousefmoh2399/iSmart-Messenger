@@ -48,6 +48,7 @@ const { closeRedisClient }           = require("./config/redis");
 const logger                         = require("./utils/logger");
 const mongoose                       = require("mongoose");
 const { ensureBootstrapAdmins }      = require("./services/bootstrap-admin.service");
+const { sanitizeBroadcastConversations } = require("./chat/services/chat.service");
 const {
   startPrinterScheduler,
   stopPrinterScheduler,
@@ -62,6 +63,7 @@ async function startServer() {
   await ensureDefaultRoles();
   await ensureDirectoryIndexes();
   await ensureBootstrapAdmins();
+  await sanitizeBroadcastConversations();
 
   const server = http.createServer(app);
   serverRef = server;

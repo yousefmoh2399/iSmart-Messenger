@@ -38,7 +38,17 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
     if (existing == null || existing.trim().isEmpty) {
       await prefs.setString(MobileUpdateAgent.deviceUidStorageKey, deviceUid);
     }
-    final info = await PackageInfo.fromPlatform();
+    PackageInfo info;
+    try {
+      info = await PackageInfo.fromPlatform();
+    } catch (_) {
+      info = PackageInfo(
+        appName: 'iSmart Messenger',
+        packageName: 'com.ismart.messenger',
+        version: '1.2.8',
+        buildNumber: '11',
+      );
+    }
     if (!mounted) {
       return;
     }

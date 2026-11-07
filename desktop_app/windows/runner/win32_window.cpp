@@ -150,7 +150,13 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  if (child_content_ != nullptr) {
+    ShowWindow(child_content_, SW_SHOW);
+    UpdateWindow(child_content_);
+  }
+  const bool res = ShowWindow(window_handle_, SW_SHOWNORMAL);
+  UpdateWindow(window_handle_);
+  return res;
 }
 
 // static
@@ -253,8 +259,10 @@ void Win32Window::SetChildContent(HWND content) {
   RECT frame = GetClientArea();
 
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
-             frame.bottom - frame.top, true);
+             frame.bottom - frame.top, TRUE);
 
+  ShowWindow(content, SW_SHOW);
+  UpdateWindow(content);
   SetFocus(child_content_);
 }
 

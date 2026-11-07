@@ -8,7 +8,8 @@ function validateRequest(req, res, next) {
       field: entry.path,
       message: entry.msg,
     }));
-    next(new ApiError(400, "فشل التحقق من البيانات.", details));
+    const firstMsg = details[0]?.message || "فشل التحقق من البيانات.";
+    next(new ApiError(400, firstMsg, details));
     return;
   }
 
