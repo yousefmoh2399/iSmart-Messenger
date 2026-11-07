@@ -45,7 +45,7 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
       info = PackageInfo(
         appName: 'iSmart Messenger',
         packageName: 'com.ismart.messenger',
-        version: '1.2.7',
+        version: '1.2.8',
         buildNumber: '11',
       );
     }
