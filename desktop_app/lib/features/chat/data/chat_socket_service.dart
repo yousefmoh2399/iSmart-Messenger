@@ -301,6 +301,7 @@ class ChatSocketService implements PrintStatusEmitter {
     bind('announcements_updated');
     bind('app_settings_updated');
     bind('updates_updated');
+    bind('update_telemetry');
     bind('departments_updated');
     bind('branches_updated');
     bind('users_updated');

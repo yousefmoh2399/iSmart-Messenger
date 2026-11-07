@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/update_management_models.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../shared/providers/providers.dart';
+import '../../chat/data/chat_socket_service.dart';
 import '../../chat/models/chat_models.dart';
 
 /// State of an individual device in the update distribution mesh.
@@ -119,7 +122,7 @@ class _UpdateDataPacket {
 }
 
 /// Dedicated full screen or embedded widget for the n8n-style update distribution network.
-class UpdateDistributionTopologyScreen extends StatefulWidget {
+class UpdateDistributionTopologyScreen extends ConsumerStatefulWidget {
   const UpdateDistributionTopologyScreen({
     super.key,
     required this.releases,
@@ -138,12 +141,12 @@ class UpdateDistributionTopologyScreen extends StatefulWidget {
   final bool isEmbedded;
 
   @override
-  State<UpdateDistributionTopologyScreen> createState() =>
+  ConsumerState<UpdateDistributionTopologyScreen> createState() =>
       _UpdateDistributionTopologyScreenState();
 }
 
 class _UpdateDistributionTopologyScreenState
-    extends State<UpdateDistributionTopologyScreen>
+    extends ConsumerState<UpdateDistributionTopologyScreen>
     with TickerProviderStateMixin {
   late final TransformationController _transController;
   late final AnimationController _pulseController;
@@ -174,6 +177,8 @@ class _UpdateDistributionTopologyScreenState
   double _canvasHeight = 900;
 
   bool _showConsole = false;
+  StreamSubscription<ChatSocketEvent>? _socketSub;
+  bool _isSocketConnected = false;
 
   @override
   void initState() {
@@ -201,6 +206,7 @@ class _UpdateDistributionTopologyScreenState
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fitCanvasToScreen(animated: false);
+      _listenToLiveSocket();
     });
 
     // Start background traffic ticker (natural background packet movements)
@@ -223,6 +229,7 @@ class _UpdateDistributionTopologyScreenState
 
   @override
   void dispose() {
+    _socketSub?.cancel();
     _livePullTicker?.cancel();
     _fleetRolloutTimer?.cancel();
     _pulseController.dispose();
@@ -259,6 +266,129 @@ class _UpdateDistributionTopologyScreenState
 
   String _formatTime(DateTime dt) {
     return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
+  }
+
+  void _listenToLiveSocket() {
+    _socketSub?.cancel();
+    final socketService = ref.read(chatSocketServiceProvider);
+    setState(() {
+      _isSocketConnected = socketService.isConnected;
+    });
+
+    _socketSub = socketService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'socket_connected') {
+        setState(() => _isSocketConnected = true);
+        _logEvent('SUCCESS', 'WebSocket', '🟢 متصل بالسيرفر المركزي لحظياً - نظام المراقبة نشط');
+      } else if (event.type == 'socket_disconnected' || event.type == 'socket_reconnecting') {
+        setState(() => _isSocketConnected = false);
+      } else if (event.type == 'update_telemetry' ||
+          (event.type == 'updates_updated' && event.payload['action'] == 'telemetry')) {
+        _handleLiveTelemetryEvent(event.payload);
+      } else if (event.type == 'updates_updated') {
+        if (event.payload['action'] == 'job_created' || event.payload['action'] == 'release_created') {
+          if (widget.onReload != null) {
+            widget.onReload!();
+          }
+        }
+      }
+    });
+  }
+
+  void _handleLiveTelemetryEvent(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    final deviceUid = (data['deviceUid'] ?? '').toString();
+    final deviceId = (data['deviceId'] ?? '').toString();
+    final hostName = (data['hostName'] ?? '').toString();
+    final deviceName = (data['deviceName'] ?? '').toString();
+    final status = (data['status'] ?? '').toString().toLowerCase();
+    final rawProgress = data['progress'];
+    final progressVal = (rawProgress is num ? rawProgress.toDouble() : 0.0) / 100.0;
+    final message = (data['message'] ?? '').toString();
+    final targetVer = (data['targetVersion'] ?? _targetVersion).toString();
+    final speed = (data['speed'] ?? '15.2 MB/s').toString();
+
+    // 1. Locate existing device in _canvasDevices
+    _UpdateTopologyDevice? match;
+    for (final dev in _canvasDevices) {
+      if ((deviceId.isNotEmpty && dev.id == deviceId) ||
+          (deviceUid.isNotEmpty && dev.id == deviceUid) ||
+          (hostName.isNotEmpty && dev.hostname.toLowerCase() == hostName.toLowerCase()) ||
+          (deviceName.isNotEmpty && dev.cashierName.toLowerCase().contains(deviceName.toLowerCase()))) {
+        match = dev;
+        break;
+      }
+    }
+
+    if (match != null) {
+      final dev = match;
+      if (status == 'completed') {
+        HapticFeedback.heavyImpact();
+        setState(() {
+          dev.phase = _UpdateDevicePhase.completed;
+          dev.progress = 1.0;
+          dev.chunksPulled = dev.totalChunks;
+          dev.executionCount++;
+        });
+
+        _logEvent(
+          'SUCCESS',
+          dev.hostname,
+          '✅ [Live Telemetry] اكتمل سحب وتثبيت التحديث v$targetVer بنجاح! تحول الجهاز للون الأخضر والمطابقة.',
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'تم تحديث جهاز ${dev.hostname} (${dev.branchName}) بنجاح إلى النسخة v$targetVer!',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else if (status == 'failed' || status == 'cancelled') {
+        setState(() {
+          dev.phase = _UpdateDevicePhase.outdated;
+        });
+        _logEvent('ERROR', dev.hostname, '❌ [Live Telemetry] فشل سحب التحديث: $message');
+      } else {
+        // downloading, acknowledged, installing, pulling
+        final wasNotPulling = dev.phase != _UpdateDevicePhase.pulling;
+        setState(() {
+          dev.phase = _UpdateDevicePhase.pulling;
+          dev.progress = progressVal.clamp(0.08, 0.95);
+          dev.speedMbps = 15.0;
+          dev.chunksPulled = (dev.progress * dev.totalChunks).round().clamp(1, dev.totalChunks);
+        });
+
+        if (wasNotPulling) {
+          _logEvent(
+            'INFO',
+            dev.hostname,
+            '⬇️ [Live Telemetry] بدأ الجهاز بسحب التحديث v$targetVer فوراً من السيرفر بسرعة $speed!',
+          );
+          _launchUpdatePacket(dev, '📦 حزمة تحديث v$targetVer');
+        } else {
+          _launchUpdatePacket(dev, '⬇️ سحب ${(dev.progress * 100).toInt()}% ($speed)');
+        }
+      }
+    } else if (deviceUid.isNotEmpty || hostName.isNotEmpty) {
+      _logEvent('INFO', hostName.isNotEmpty ? hostName : 'NewDevice', '📡 رصد جهاز جديد يبدأ سحب التحديث...');
+      if (widget.onReload != null) {
+        widget.onReload!();
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -466,6 +596,22 @@ class _UpdateDistributionTopologyScreenState
 
     _logEvent('INFO', dev.hostname, 'بدء سحب حزم التحديث v$_targetVersion من السيرفر المركزي (1/10)...');
 
+    // Trigger real backend job if active release and real device ID
+    if (_activeRelease != null && dev.id.length == 24) {
+      unawaited(
+        ref.read(updateManagementRepositoryProvider).createUpdateJob(
+          releaseId: _activeRelease!.id,
+          targetType: 'devices',
+          targetDeviceIds: [dev.id],
+          note: 'Triggered from n8n Live Map for ${dev.hostname}',
+        ).then((_) {
+          _logEvent('SUCCESS', dev.hostname, '📡 تم إرسال أمر التحديث للسيرفر بنجاح عبر API.');
+        }).catchError((err) {
+          _logEvent('WARN', dev.hostname, 'تنبيه: محاكاة التحديث تعمل محلياً (${err.toString()})');
+        }),
+      );
+    }
+
     // Launch moving update packet from Server to this Device
     _launchUpdatePacket(dev, '📦 حزمة تحديث v$_targetVersion');
 
@@ -545,6 +691,20 @@ class _UpdateDistributionTopologyScreenState
     });
 
     _logEvent('SUCCESS', 'Server', '🚀 انطلاق حملة التوزيع الجماعي لجميع أجهزة الفروع المتصلة...');
+
+    if (_activeRelease != null) {
+      unawaited(
+        ref.read(updateManagementRepositoryProvider).createUpdateJob(
+          releaseId: _activeRelease!.id,
+          targetType: 'all',
+          note: 'Fleet rollout triggered from n8n Live Map',
+        ).then((_) {
+          _logEvent('SUCCESS', 'Server', '📡 تم اعتماد وتعميم مهمة النشر الجماعي في قاعدة البيانات.');
+        }).catchError((err) {
+          _logEvent('WARN', 'Server', 'تنبيه: جاري تشغيل التدفق المرئي (${err.toString()})');
+        }),
+      );
+    }
 
     int index = 0;
     _fleetRolloutTimer = Timer.periodic(const Duration(milliseconds: 650), (timer) {
@@ -914,6 +1074,68 @@ class _UpdateDistributionTopologyScreenState
             ),
             const SizedBox(width: 8),
           ],
+
+          // Live Telemetry Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            decoration: BoxDecoration(
+              color: _isSocketConnected
+                  ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                  : const Color(0xFFF59E0B).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isSocketConnected
+                    ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                    : const Color(0xFFF59E0B).withValues(alpha: 0.4),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedBuilder(
+                  animation: _pulseController,
+                  builder: (context, _) {
+                    final alpha = _isSocketConnected
+                        ? (0.4 + 0.6 * _pulseController.value)
+                        : 0.8;
+                    return Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: (_isSocketConnected
+                                ? const Color(0xFF10B981)
+                                : const Color(0xFFF59E0B))
+                            .withValues(alpha: alpha),
+                        boxShadow: [
+                          BoxShadow(
+                            color: (_isSocketConnected
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFFF59E0B))
+                                .withValues(alpha: 0.5),
+                            blurRadius: 4,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  _isSocketConnected ? 'Live Telemetry: متصل لحظياً' : 'Live Telemetry: جاري الاتصال...',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: _isSocketConnected
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFF59E0B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
 
           // Status Counters
           _metricPill(
