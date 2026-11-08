@@ -116,7 +116,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                         ),
                         SizedBox(width: 6),
                         Text(
-                          'بنية الربط والتشغيل المباشر (Live Telemetry Architecture)',
+                          'عمارة الربط والشبكة الدائرية للأجهزة (Circular n8n Architecture)',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -169,7 +169,7 @@ class _N8nWorkflowDiagramWidgetState extends State<N8nWorkflowDiagramWidget>
                       ),
                       icon: const Icon(Icons.open_in_full_rounded, size: 14),
                       label: const Text(
-                        'خريطة العمليات وشبكة الأجهزة الحية (n8n Live Map)',
+                        'خريطة العمارة والشبكة الدائرية (Circular n8n Map)',
                         style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                       ),
                     ),

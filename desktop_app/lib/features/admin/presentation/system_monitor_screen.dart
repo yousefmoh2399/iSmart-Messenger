@@ -6,6 +6,7 @@ import '../models/system_monitor_models.dart';
 import 'system_monitor_controller.dart';
 import 'widgets/branches_deployment_view.dart';
 import 'widgets/admin_polls_view.dart';
+import 'live_operations_topology_screen.dart';
 
 class SystemMonitorScreen extends ConsumerStatefulWidget {
   const SystemMonitorScreen({
@@ -28,6 +29,113 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _openLiveTopologyScreen(
+    BuildContext context,
+    SystemMonitorState state,
+    SystemMonitorController notifier,
+    bool isDark,
+    ColorScheme cs,
+  ) {
+    HapticFeedback.selectionClick();
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, anim, secAnim) => LiveOperationsTopologyScreen(
+          state: state,
+          notifier: notifier,
+          isDark: isDark,
+          cs: cs,
+        ),
+        transitionsBuilder: (context, anim, secAnim, child) {
+          return FadeTransition(opacity: anim, child: child);
+        },
+      ),
+    );
+  }
+
+  Widget _buildCircularTowerQuickBanner({
+    required BuildContext context,
+    required SystemMonitorState state,
+    required SystemMonitorController notifier,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color accentColor,
+    required bool isDark,
+    required ColorScheme cs,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF161B26) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: accentColor.withValues(alpha: isDark ? 0.30 : 0.22),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: isDark ? 0.10 : 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: accentColor, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.icon(
+            onPressed: () => _openLiveTopologyScreen(context, state, notifier, isDark, cs),
+            style: FilledButton.styleFrom(
+              backgroundColor: accentColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.open_in_new_rounded, size: 15),
+            label: const Text(
+              'فتح الشبكة الدائرية',
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatBytes(int bytes) {
@@ -215,15 +323,36 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
             label: Text(isLoading ? 'جاري الفحص...' : 'تحديث البيانات'),
           );
 
+          final topologyBtn = FilledButton.icon(
+            onPressed: () => _openLiveTopologyScreen(context, state, notifier, isDark, cs),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6D5A), // n8n Coral
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: const Icon(Icons.donut_large_rounded, size: 18),
+            label: const Text(
+              'خريطة العمارة والشبكة الدائرية',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          );
+
           return isCompact
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     titleSection,
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: actionBtn,
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        actionBtn,
+                        topologyBtn,
+                      ],
                     ),
                   ],
                 )
@@ -232,6 +361,8 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                     Expanded(child: titleSection),
                     const SizedBox(width: 14),
                     actionBtn,
+                    const SizedBox(width: 8),
+                    topologyBtn,
                   ],
                 );
         },

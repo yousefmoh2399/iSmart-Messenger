@@ -525,32 +525,47 @@ class _UpdateDistributionTopologyScreenState
       return true;
     }).toList();
 
-    const cardWidth = 310.0;
-    const cardHeight = 104.0;
-    const gapY = 16.0;
+    const cardWidth = 300.0;
+    const cardHeight = 100.0;
     final devCount = filtered.length;
 
-    final isDualCol = devCount > 5;
-    final totalRows = isDualCol ? ((devCount + 1) ~/ 2) : devCount;
-    final devicesRackHeight = math.max(680.0, totalRows * (cardHeight + gapY) + 120.0);
+    // Concentric floors based on device count
+    final maxRadius = devCount <= 10
+        ? 620.0
+        : (devCount <= 22 ? 960.0 : 1320.0);
+    _canvasWidth = maxRadius * 2 + 340.0;
+    _canvasHeight = maxRadius * 2 + 340.0;
+    final centerX = _canvasWidth / 2.0;
+    final centerY = _canvasHeight / 2.0;
 
-    _canvasHeight = math.max(850.0, devicesRackHeight);
+    // SERVER POSITION: Center of Circular Canvas (Green Hub)
+    _serverPosition = Offset(centerX - (_serverSize.width / 2.0), centerY - (_serverSize.height / 2.0));
 
-    // SERVER POSITION (On the Left Side, Green)
-    _serverPosition = Offset(60.0, (_canvasHeight / 2.0) - (_serverSize.height / 2.0));
-
-    // DEVICES POSITION (On the Right Side, Red by default until updated)
-    final devicesStartX = _serverPosition.dx + _serverSize.width + 240.0;
-
+    // Devices distributed radially on concentric circular building floors
     for (int i = 0; i < filtered.length; i++) {
       final d = filtered[i];
-      final col = isDualCol ? (i % 2) : 0;
-      final row = isDualCol ? (i ~/ 2) : i;
 
-      final posX = devicesStartX + col * (cardWidth + 30.0);
-      final posY = 60.0 + row * (cardHeight + gapY);
+      final double radius;
+      final double angle;
+      if (i < 10) {
+        // Floor 1 (Ring 1)
+        final countOnRing = math.min(10, devCount);
+        radius = 580.0;
+        angle = -math.pi / 2 + (i * 2 * math.pi / countOnRing);
+      } else if (i < 24) {
+        // Floor 2 (Ring 2)
+        final countOnRing = math.min(14, devCount - 10);
+        radius = 940.0;
+        angle = -math.pi / 2 + (math.pi / 12) + ((i - 10) * 2 * math.pi / countOnRing);
+      } else {
+        // Floor 3 (Ring 3)
+        final countOnRing = devCount - 24;
+        radius = 1300.0;
+        angle = -math.pi / 2 + (math.pi / 24) + ((i - 24) * 2 * math.pi / countOnRing);
+      }
 
-      final portRatio = devCount <= 1 ? 0.5 : (i / (devCount - 1)).clamp(0.12, 0.88);
+      final posX = centerX + radius * math.cos(angle) - (cardWidth / 2.0);
+      final posY = centerY + radius * math.sin(angle) - (cardHeight / 2.0);
       final isAlreadyTarget = d['version'] == _targetVersion;
 
       final dev = _UpdateTopologyDevice(
@@ -567,7 +582,7 @@ class _UpdateDistributionTopologyScreenState
         os: d['os'] as String,
         position: Offset(posX, posY),
         size: const Size(cardWidth, cardHeight),
-        portOffset: portRatio,
+        portOffset: 0.5,
         phase: isAlreadyTarget ? _UpdateDevicePhase.completed : _UpdateDevicePhase.outdated,
         progress: isAlreadyTarget ? 1.0 : 0.0,
       );
@@ -575,9 +590,6 @@ class _UpdateDistributionTopologyScreenState
       _canvasDevices.add(dev);
       _devicesMap[dev.id] = dev;
     }
-
-    final totalWidth = devicesStartX + (isDualCol ? cardWidth * 2 + 80 : cardWidth + 80) + 100;
-    _canvasWidth = math.max(1900.0, totalWidth);
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -777,13 +789,17 @@ class _UpdateDistributionTopologyScreenState
   void _fitCanvasToScreen({bool animated = true}) {
     final mediaSize = MediaQuery.of(context).size;
     final availableWidth = mediaSize.width - (_selectedDeviceId != null && mediaSize.width >= 1150 ? 380 : 0);
-    final scale = (availableWidth / _canvasWidth).clamp(0.40, 1.05);
+    final availableHeight = mediaSize.height - 130;
+
+    final scaleW = availableWidth / _canvasWidth;
+    final scaleH = availableHeight / _canvasHeight;
+    final scale = (math.min(scaleW, scaleH) * 0.94).clamp(0.24, 1.15);
 
     final targetX = (availableWidth - (_canvasWidth * scale)) / 2;
-    final targetY = (mediaSize.height - (_canvasHeight * scale)) / 2 - 20;
+    final targetY = (availableHeight - (_canvasHeight * scale)) / 2;
 
     final targetMatrix = Matrix4.identity()
-      ..translate(targetX.clamp(-350.0, 100.0), targetY.clamp(-180.0, 100.0))
+      ..translate(targetX, targetY)
       ..scale(scale);
 
     if (animated) {
@@ -1260,15 +1276,17 @@ class _UpdateDistributionTopologyScreenState
               ),
             ),
 
-            // Layer B: Cubic Bezier Connection Wires (Server ➔ Devices)
+            // Layer B: Radial Connection Wires (Server ➔ Devices)
             Positioned.fill(
-              child: CustomPaint(
-                painter: _UpdateWiresPainter(
-                  serverPosition: _serverPosition,
-                  serverSize: _serverSize,
-                  devices: _canvasDevices,
-                  selectedDeviceId: _selectedDeviceId,
-                  isDark: isDark,
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _UpdateWiresPainter(
+                    serverPosition: _serverPosition,
+                    serverSize: _serverSize,
+                    devices: _canvasDevices,
+                    selectedDeviceId: _selectedDeviceId,
+                    isDark: isDark,
+                  ),
                 ),
               ),
             ),
@@ -2011,13 +2029,33 @@ class _UpdateGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dotPaint = Paint()
-      ..color = isDark ? const Color(0xFF222938) : const Color(0xFFCBD5E1)
+      ..color = isDark ? const Color(0xFF1E2433) : const Color(0xFFE2E8F0)
       ..style = PaintingStyle.fill;
 
-    const spacing = 24.0;
-    for (double x = 12; x < size.width; x += spacing) {
-      for (double y = 12; y < size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 1.2, dotPaint);
+    const spacing = 28.0;
+    for (double x = 14; x < size.width; x += spacing) {
+      for (double y = 14; y < size.height; y += spacing) {
+        canvas.drawCircle(Offset(x, y), 1.0, dotPaint);
+      }
+    }
+
+    // Concentric Floor Orbit Rings
+    final center = Offset(size.width / 2.0, size.height / 2.0);
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    final floorRadii = [580.0, 940.0, 1300.0];
+    final floorColors = [
+      const Color(0xFF10B981),
+      const Color(0xFF06B6D4),
+      const Color(0xFFFF6D5A),
+    ];
+
+    for (int i = 0; i < floorRadii.length; i++) {
+      if (floorRadii[i] < size.width / 2) {
+        ringPaint.color = floorColors[i].withValues(alpha: isDark ? 0.22 : 0.18);
+        canvas.drawCircle(center, floorRadii[i], ringPaint);
       }
     }
   }
@@ -2045,32 +2083,52 @@ class _UpdateWiresPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final wirePaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
+      ..strokeWidth = 1.8
       ..strokeCap = StrokeCap.round;
 
-    final serverOutput = Offset(
-      serverPosition.dx + serverSize.width,
-      serverPosition.dy + (serverSize.height / 2),
+    final glowWirePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.0
+      ..strokeCap = StrokeCap.round;
+
+    final sCenter = Offset(
+      serverPosition.dx + serverSize.width / 2.0,
+      serverPosition.dy + serverSize.height / 2.0,
     );
 
     for (final dev in devices) {
+      final tCenter = Offset(
+        dev.position.dx + dev.size.width / 2.0,
+        dev.position.dy + dev.size.height / 2.0,
+      );
+
+      final angle = math.atan2(tCenter.dy - sCenter.dy, tCenter.dx - sCenter.dx);
+
+      final p1 = Offset(
+        sCenter.dx + math.cos(angle) * (serverSize.width / 2.1),
+        sCenter.dy + math.sin(angle) * (serverSize.height / 2.1),
+      );
       final p2 = Offset(
-        dev.position.dx,
-        dev.position.dy + (dev.size.height / 2),
+        tCenter.dx - math.cos(angle) * (dev.size.width / 2.1),
+        tCenter.dy - math.sin(angle) * (dev.size.height / 2.1),
       );
 
       final isHighlighted = selectedDeviceId == dev.id || dev.isPulling;
+      wirePaint.color = dev.accentColor.withValues(alpha: isHighlighted ? 0.95 : 0.40);
+      wirePaint.strokeWidth = isHighlighted ? 2.6 : 1.6;
 
-      // Color matches device phase (Red while outdated/pulling, Green when completed!)
-      wirePaint.color = dev.accentColor.withValues(alpha: isHighlighted ? 0.9 : 0.45);
-      wirePaint.strokeWidth = isHighlighted ? 2.6 : 1.8;
+      final dist = (p2 - p1).distance * 0.40;
+      final c1 = Offset(p1.dx + math.cos(angle) * dist, p1.dy + math.sin(angle) * dist);
+      final c2 = Offset(p2.dx - math.cos(angle) * dist, p2.dy - math.sin(angle) * dist);
 
-      final path = Path()..moveTo(serverOutput.dx, serverOutput.dy);
-      final deltaX = (p2.dx - serverOutput.dx).abs() * 0.5;
-      final c1 = Offset(serverOutput.dx + math.max(60.0, deltaX), serverOutput.dy);
-      final c2 = Offset(p2.dx - math.max(60.0, deltaX), p2.dy);
-
+      final path = Path()..moveTo(p1.dx, p1.dy);
       path.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, p2.dx, p2.dy);
+
+      if (isHighlighted) {
+        glowWirePaint.color = dev.accentColor.withValues(alpha: 0.35);
+        canvas.drawPath(path, glowWirePaint);
+      }
+
       canvas.drawPath(path, wirePaint);
     }
   }
@@ -2099,26 +2157,38 @@ class _UpdatePacketsPainter extends CustomPainter {
     final dotPaint = Paint()..style = PaintingStyle.fill;
     final glowPaint = Paint()..style = PaintingStyle.fill;
 
-    final p1 = Offset(
-      serverPosition.dx + serverSize.width,
-      serverPosition.dy + (serverSize.height / 2),
+    final sCenter = Offset(
+      serverPosition.dx + serverSize.width / 2.0,
+      serverPosition.dy + serverSize.height / 2.0,
     );
 
     for (final pkt in packets) {
       final dev = devicesMap[pkt.targetDeviceId];
       if (dev == null) continue;
 
-      final p2 = Offset(
-        dev.position.dx,
-        dev.position.dy + (dev.size.height / 2),
+      final tCenter = Offset(
+        dev.position.dx + dev.size.width / 2.0,
+        dev.position.dy + dev.size.height / 2.0,
       );
 
-      final t = pkt.progress(now);
-      final deltaX = (p2.dx - p1.dx).abs() * 0.5;
-      final c1 = Offset(p1.dx + math.max(60.0, deltaX), p1.dy);
-      final c2 = Offset(p2.dx - math.max(60.0, deltaX), p2.dy);
+      final angle = math.atan2(tCenter.dy - sCenter.dy, tCenter.dx - sCenter.dx);
 
-      // Comet trail
+      final p1 = Offset(
+        sCenter.dx + math.cos(angle) * (serverSize.width / 2.1),
+        sCenter.dy + math.sin(angle) * (serverSize.height / 2.1),
+      );
+      final p2 = Offset(
+        tCenter.dx - math.cos(angle) * (dev.size.width / 2.1),
+        tCenter.dy - math.sin(angle) * (dev.size.height / 2.1),
+      );
+
+      final dist = (p2 - p1).distance * 0.40;
+      final c1 = Offset(p1.dx + math.cos(angle) * dist, p1.dy + math.sin(angle) * dist);
+      final c2 = Offset(p2.dx - math.cos(angle) * dist, p2.dy - math.sin(angle) * dist);
+
+      final t = pkt.progress(now);
+
+      // Comet trail particles
       for (int i = 3; i >= 1; i--) {
         final trailT = (t - (i * 0.04)).clamp(0.0, 1.0);
         if (trailT > 0.0) {
@@ -2132,19 +2202,19 @@ class _UpdatePacketsPainter extends CustomPainter {
 
       final pt = _evalCubicBezier(p1, c1, c2, p2, t);
 
-      // 1. Halo
+      // Glowing Halo
       glowPaint.color = pkt.color.withValues(alpha: 0.45);
       canvas.drawCircle(pt, 9.0, glowPaint);
 
-      // 2. White Core
+      // White Core
       dotPaint.color = Colors.white;
       canvas.drawCircle(pt, 3.8, dotPaint);
 
-      // 3. Colored Core
+      // Colored Center
       final corePaint = Paint()..color = pkt.color;
       canvas.drawCircle(pt, 2.3, corePaint);
 
-      // 4. Floating Action Chip Label Above Packet
+      // Floating Action Chip Label Above Packet
       if (pkt.label.isNotEmpty) {
         final tp = TextPainter(
           text: TextSpan(
