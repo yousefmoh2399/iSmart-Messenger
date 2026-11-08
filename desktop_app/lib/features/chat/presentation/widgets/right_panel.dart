@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,13 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import 'package:open_filex/open_filex.dart';
 
 import '../../../../shared/models/app_user.dart';
 import '../../../../shared/providers/providers.dart';
-import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
+import '../chat_transfer_manager.dart';
 import 'authenticated_attachment_image.dart';
 import 'chat_ui_helpers.dart';
 
@@ -434,68 +434,61 @@ Future<void> _downloadAttachmentFromPanel(
     );
     return;
   }
+  if (openAfterDownload) {
+    final transferManager = ref.read(chatTransferManagerProvider.notifier);
+    unawaited(
+      transferManager.startDownload(
+        message: message,
+        openAfterDownload: true,
+        onCompleted: (savedPath) {
+          if (!context.mounted) return;
+          final fileName = p.basename(savedPath);
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: Color(0xFF34C759),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'تم حفظ $fileName في مجلد الملفات وفتحه بنجاح',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'عرض في المجلد',
+                textColor: const Color(0xFF007AFF),
+                onPressed: () =>
+                    ChatTransferManager.revealDownloadedFileInFolder(savedPath),
+              ),
+            ),
+          );
+        },
+        onError: (errMsg) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errMsg)),
+          );
+        },
+      ),
+    );
+    return;
+  }
+
   try {
     final repo = ref.read(chatRepositoryProvider);
     final savedPath = await repo.saveAttachmentToLocalStorage(message);
 
     if (!context.mounted) {
-      return;
-    }
-
-    if (openAfterDownload) {
-      if (kIsWeb) {
-        if (web_bridge.isElectron()) {
-          await web_bridge.openElectronLocalFile(savedPath);
-        }
-      } else {
-        final openResult = await OpenFilex.open(savedPath);
-        if (openResult.type != ResultType.done && !kIsWeb && Platform.isWindows) {
-          try {
-            await Process.run('cmd', ['/c', 'start', '', savedPath], runInShell: true);
-          } catch (_) {}
-        }
-      }
-      if (context.mounted) {
-        final fileName = p.basename(savedPath);
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(
-                  Icons.check_circle_rounded,
-                  color: Color(0xFF34C759),
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'تم حفظ $fileName في مجلد الملفات وفتحه بنجاح',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'عرض في المجلد',
-              textColor: const Color(0xFF007AFF),
-              onPressed: () {
-                if (kIsWeb && web_bridge.isElectron()) {
-                  try {
-                    web_bridge.openElectronInboxFileLocation(savedPath);
-                  } catch (_) {
-                    web_bridge.openElectronLocalFile(p.dirname(savedPath));
-                  }
-                } else if (!kIsWeb && Platform.isWindows) {
-                  Process.run('explorer.exe', ['/select,', savedPath]);
-                }
-              },
-            ),
-          ),
-        );
-      }
       return;
     }
 

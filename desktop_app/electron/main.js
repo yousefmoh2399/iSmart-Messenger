@@ -1014,7 +1014,7 @@ function createWindow(startUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       webSecurity: false,
       allowRunningInsecureContent: true,
       defaultFontFamily: {

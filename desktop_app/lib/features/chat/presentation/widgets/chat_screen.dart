@@ -31,6 +31,7 @@ import '../../data/chat_socket_service.dart';
 import '../../models/chat_models.dart';
 import '../../utils/chat_attachment_policy.dart';
 import '../chat_appearance.dart';
+import '../chat_transfer_manager.dart';
 import 'attachment_send_dialogs.dart';
 import 'chat_forward_dialog.dart';
 import 'broadcast_target_picker_dialog.dart';
@@ -105,9 +106,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   int _activeSearchMatchIndex = 0;
   String? _focusedMessageId;
   Timer? _focusedMessageClearTimer;
-  bool _isUploadingAttachment = false;
-  double _uploadProgress = 0;
-  String? _uploadingFileName;
+
   bool _isDownloadingAttachment = false;
   double _downloadProgress = 0;
   String? _downloadingFileName;
@@ -1384,16 +1383,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }) async {
     if (_isSendingText) return;
 
-    if (_isUploadingAttachment) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('انتظر حتى يكتمل رفع الملف الحالي أولًا.'),
-          ),
-        );
-      }
-      return;
-    }
+
 
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     final conversation =
@@ -2095,28 +2085,25 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
 
-    int sentCount = 0;
-    int skippedCount = 0;
     final mediaGroupId = 'album_${DateTime.now().microsecondsSinceEpoch}';
-    for (final path in paths) {
-      final success = await _sendPreparedFile(
-        conversation: conversation,
-        sendPath: path,
-        displayName: p.basename(path),
-        restrictForwardAndDownload: restrictForwardAndDownload,
-        fixedBroadcastMetadata: fixedBroadcastMetadata,
-        extraMetadata: {
-          'mediaGroupId': mediaGroupId,
-          'mediaGroupSize': paths.length,
-        },
-        showFailureSnackbar: false,
-      );
-      if (success) {
-        sentCount++;
-      } else {
-        skippedCount++;
-      }
-    }
+    final results = await Future.wait(
+      paths.map(
+        (path) => _sendPreparedFile(
+          conversation: conversation,
+          sendPath: path,
+          displayName: p.basename(path),
+          restrictForwardAndDownload: restrictForwardAndDownload,
+          fixedBroadcastMetadata: fixedBroadcastMetadata,
+          extraMetadata: {
+            'mediaGroupId': mediaGroupId,
+            'mediaGroupSize': paths.length,
+          },
+          showFailureSnackbar: false,
+        ),
+      ),
+    );
+    final sentCount = results.where((ok) => ok).length;
+    final skippedCount = results.length - sentCount;
 
     if (!mounted) {
       return;
@@ -2206,28 +2193,25 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
 
-    int sentCount = 0;
-    int skippedCount = 0;
     final mediaGroupId = 'album_${DateTime.now().microsecondsSinceEpoch}';
-    for (final path in paths) {
-      final success = await _sendPreparedFile(
-        conversation: conversation,
-        sendPath: path,
-        displayName: p.basename(path),
-        restrictForwardAndDownload: restrictForwardAndDownload,
-        fixedBroadcastMetadata: fixedBroadcastMetadata,
-        showFailureSnackbar: false,
-        extraMetadata: {
-          'mediaGroupId': mediaGroupId,
-          'mediaGroupSize': paths.length,
-        },
-      );
-      if (success) {
-        sentCount++;
-      } else {
-        skippedCount++;
-      }
-    }
+    final results = await Future.wait(
+      paths.map(
+        (path) => _sendPreparedFile(
+          conversation: conversation,
+          sendPath: path,
+          displayName: p.basename(path),
+          restrictForwardAndDownload: restrictForwardAndDownload,
+          fixedBroadcastMetadata: fixedBroadcastMetadata,
+          showFailureSnackbar: false,
+          extraMetadata: {
+            'mediaGroupId': mediaGroupId,
+            'mediaGroupSize': paths.length,
+          },
+        ),
+      ),
+    );
+    final sentCount = results.where((ok) => ok).length;
+    final skippedCount = results.length - sentCount;
 
     if (!mounted) {
       return;
@@ -2944,35 +2928,32 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
     }
 
-    int sentCount = 0;
-    int skippedCount = 0;
     final mediaGroupId = isImageBatch
         ? 'album_${DateTime.now().microsecondsSinceEpoch}'
         : null;
-    for (final file in usableFiles) {
-      final success = await _sendPreparedFile(
-        conversation: conversation,
-        sendPath: file.name,
-        displayName: file.name,
-        restrictForwardAndDownload: restrictForwardAndDownload,
-        fileBytes: file.bytes,
-        sourceFileName: file.name,
-        knownFileSize: file.size,
-        fixedBroadcastMetadata: fixedBroadcastMetadata,
-        showFailureSnackbar: false,
-        extraMetadata: mediaGroupId == null
-            ? null
-            : {
-                'mediaGroupId': mediaGroupId,
-                'mediaGroupSize': usableFiles.length,
-              },
-      );
-      if (success) {
-        sentCount++;
-      } else {
-        skippedCount++;
-      }
-    }
+    final results = await Future.wait(
+      usableFiles.map(
+        (file) => _sendPreparedFile(
+          conversation: conversation,
+          sendPath: file.name,
+          displayName: file.name,
+          restrictForwardAndDownload: restrictForwardAndDownload,
+          fileBytes: file.bytes,
+          sourceFileName: file.name,
+          knownFileSize: file.size,
+          fixedBroadcastMetadata: fixedBroadcastMetadata,
+          showFailureSnackbar: false,
+          extraMetadata: mediaGroupId == null
+              ? null
+              : {
+                  'mediaGroupId': mediaGroupId,
+                  'mediaGroupSize': usableFiles.length,
+                },
+        ),
+      ),
+    );
+    final sentCount = results.where((ok) => ok).length;
+    final skippedCount = results.length - sentCount;
 
     if (!mounted) {
       return;
@@ -3028,8 +3009,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return false;
     }
 
+    final targetConversationId = conversation.id;
+    final capturedReplyTo = _replyingTo;
     final metadata = <String, dynamic>{
-      ...?_replyMetadata(_replyingTo),
+      ...?_replyMetadata(capturedReplyTo),
       ...?broadcastMetadata,
       ...?extraMetadata,
       if (_extractMentions(displayName).isNotEmpty)
@@ -3043,61 +3026,37 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       if (isSticker) 'sticker': true,
     };
 
-    setState(() {
-      _isUploadingAttachment = true;
-      _uploadProgress = 0;
-      _uploadingFileName = displayName;
-    });
-
-    try {
-      await ref
-          .read(
-            conversationMessagesControllerProvider(_conversationId).notifier,
-          )
-          .sendFile(
-            sendPath,
-            fileBytes: fileBytes,
-            sourceFileName: sourceFileName ?? displayName,
-            content: caption,
-            replyToMessageId: _replyingTo?.id,
-            customFileName: displayName,
-            metadata: metadata,
-            onProgress: (sent, total) {
-              if (!mounted) {
-                return;
-              }
-              setState(() {
-                _uploadProgress = total <= 0
-                    ? 0
-                    : (sent / total).clamp(0, 1).toDouble();
-              });
-            },
-          );
-      if (!mounted) {
-        return true;
-      }
+    if (mounted && _replyingTo != null) {
       setState(() {
         _replyingTo = null;
         _editingMessage = null;
       });
-      _scrollToBottom();
-      return true;
-    } catch (e) {
-      if (showFailureSnackbar && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(messageFromChatDioError(e))));
-      }
-      return false;
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUploadingAttachment = false;
-          _uploadProgress = 0;
-          _uploadingFileName = null;
-        });
-      }
     }
+
+    final transferManager = _container.read(chatTransferManagerProvider.notifier);
+    final success = await transferManager.startUpload(
+      conversationId: targetConversationId,
+      sendPath: sendPath,
+      displayName: displayName,
+      metadata: metadata,
+      caption: caption,
+      fileBytes: fileBytes,
+      sourceFileName: sourceFileName ?? displayName,
+      replyToMessageId: capturedReplyTo?.id,
+      onCompleted: () {
+        if (mounted && _conversationId == targetConversationId) {
+          _scrollToBottom();
+        }
+      },
+      onError: (errMsg) {
+        if (showFailureSnackbar && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errMsg)),
+          );
+        }
+      },
+    );
+    return success;
   }
 
   Future<bool?> _confirmBatchFileSend(List<String> paths) async {
@@ -3404,93 +3363,61 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       );
       return;
     }
-    try {
-      if (mounted) {
-        setState(() {
-          _isDownloadingAttachment = true;
-          _downloadProgress = 0;
-          _downloadingFileName = message.fileName ?? 'مرفق';
-        });
-      }
-      final savedPath = await ref
-          .read(chatRepositoryProvider)
-          .saveAttachmentToLocalStorage(
-            message,
-            onProgress: (received, total) {
-              if (!mounted) {
-                return;
-              }
-              setState(() {
-                _downloadProgress = total <= 0
-                    ? 0
-                    : (received / total).clamp(0, 1).toDouble();
-              });
-            },
-          );
-      if (!mounted) {
-        return;
-      }
-
-      if (kIsWeb && !web_bridge.isElectron()) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'تم تنزيل ${message.fileName ?? 'المرفق'} من المتصفح.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      final fileName = p.basename(savedPath);
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF34C759),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'تم حفظ $fileName في مجلد الملفات بنجاح',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+    final transferManager = _container.read(chatTransferManagerProvider.notifier);
+    unawaited(
+      transferManager.startDownload(
+        message: message,
+        openAfterDownload: false,
+        onCompleted: (savedPath) {
+          if (!mounted) return;
+          if (kIsWeb && !web_bridge.isElectron()) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'تم تنزيل ${message.fileName ?? 'المرفق'} من المتصفح.',
                 ),
               ),
-            ],
-          ),
-          duration: const Duration(seconds: 4),
-          action: SnackBarAction(
-            label: 'عرض في المجلد',
-            textColor: const Color(0xFF007AFF),
-            onPressed: () => _revealFileInFolder(savedPath),
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            error.toString().trim().isEmpty
-                ? 'تعذر تنزيل المرفق حاليًا'
-                : error.toString(),
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDownloadingAttachment = false;
-          _downloadProgress = 0;
-          _downloadingFileName = null;
-        });
-      }
-    }
+            );
+            return;
+          }
+          final fileName = p.basename(savedPath);
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: Color(0xFF34C759),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'تم حفظ $fileName في مجلد الملفات بنجاح',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'عرض في المجلد',
+                textColor: const Color(0xFF007AFF),
+                onPressed: () => _revealFileInFolder(savedPath),
+              ),
+            ),
+          );
+        },
+        onError: (errMsg) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errMsg)),
+          );
+        },
+      ),
+    );
   }
   Future<void> _saveReceivedSticker(ChatMessage message) async {
     if (!message.attachmentDownloadAllowed) {
@@ -3572,84 +3499,53 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    try {
-      if (mounted) {
-        setState(() {
-          _isDownloadingAttachment = true;
-          _downloadProgress = 0;
-          _downloadingFileName = message.fileName ?? 'مرفق';
-        });
-      }
-
-      final repo = ref.read(chatRepositoryProvider);
-      final savedPath = await repo.saveAttachmentToLocalStorage(
-        message,
-        onProgress: (received, total) {
+    final transferManager = _container.read(chatTransferManagerProvider.notifier);
+    unawaited(
+      transferManager.startDownload(
+        message: message,
+        openAfterDownload: true,
+        onCompleted: (savedPath) {
           if (!mounted) return;
-          setState(() {
-            _downloadProgress = total <= 0
-                ? 0
-                : (received / total).clamp(0, 1).toDouble();
-          });
-        },
-      );
-
-      if (!mounted) return;
-
-      await _openLocalFilePath(savedPath, message);
-
-      if (mounted) {
-        final fileName = p.basename(savedPath);
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(
-                  Icons.check_circle_rounded,
-                  color: Color(0xFF34C759),
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'تم حفظ $fileName في مجلد الملفات وفتحه بنجاح',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+          final fileName = p.basename(savedPath);
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: Color(0xFF34C759),
+                    size: 20,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'تم حفظ $fileName في مجلد الملفات وفتحه بنجاح',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'عرض في المجلد',
+                textColor: const Color(0xFF007AFF),
+                onPressed: () => _revealFileInFolder(savedPath),
+              ),
             ),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'عرض في المجلد',
-              textColor: const Color(0xFF007AFF),
-              onPressed: () => _revealFileInFolder(savedPath),
+          );
+        },
+        onError: (errMsg) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('تعذر فتح الملف: $errMsg'),
             ),
-          ),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              error.toString().trim().isEmpty
-                  ? 'تعذر حفظ أو فتح الملف حاليًا'
-                  : 'تعذر فتح الملف: $error',
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDownloadingAttachment = false;
-          _downloadProgress = 0;
-          _downloadingFileName = null;
-        });
-      }
-    }
+          );
+        },
+      ),
+    );
   }
   Future<void> _printAttachment(ChatMessage message) async {
     if (!message.isPrintableAttachment) {
@@ -5296,6 +5192,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                   }),
                 ),
 
+              ChatMultiTransferBanner(
+                conversationId: _conversationId,
+                isDark: isDark,
+              ),
               if (_isDownloadingAttachment)
                 _DesktopDownloadBanner(
                   fileName: _downloadingFileName ?? 'مرفق',
@@ -5399,9 +5299,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 controller: _messageController,
                 focusNode: _messageFocusNode,
                 isEditing: _editingMessage != null,
-                isUploading: _isUploadingAttachment,
-                uploadProgress: _uploadProgress,
-                uploadLabel: _uploadingFileName,
+                isUploading: false,
                 enterSendsMessage: enterSendsMessage,
                 onChanged: (_) => _scheduleStopTyping(),
                 onSend: _sendText,
