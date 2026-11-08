@@ -246,10 +246,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
+        color: isDark ? const Color(0xFF131926) : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
         boxShadow: [
@@ -619,10 +621,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
       width: width,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
+        color: isDark ? const Color(0xFF131926) : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
         boxShadow: [
@@ -729,10 +733,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
+        color: isDark ? const Color(0xFF131926) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
       ),
@@ -1014,10 +1020,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
   ) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
+        color: isDark ? const Color(0xFF131926) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
       ),
@@ -1498,10 +1506,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
+        color: isDark ? const Color(0xFF131926) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
       ),
@@ -1697,10 +1707,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
       padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
+        color: isDark ? const Color(0xFF131926) : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFE2E8F0),
         ),
       ),
       child: Column(
@@ -2005,7 +2017,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           builder: (_, scrollController) {
             return Container(
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF111827) : Colors.white,
+                color: isDark ? const Color(0xFF131926) : Colors.white,
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(18)),
               ),
