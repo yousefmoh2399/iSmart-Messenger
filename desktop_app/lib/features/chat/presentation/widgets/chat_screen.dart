@@ -3203,7 +3203,11 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _revealFileInFolder(String filePath) async {
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
-        await web_bridge.openElectronLocalFile(p.dirname(filePath));
+        try {
+          await web_bridge.openElectronInboxFileLocation(filePath);
+        } catch (_) {
+          await web_bridge.openElectronLocalFile(p.dirname(filePath));
+        }
       }
       return;
     }

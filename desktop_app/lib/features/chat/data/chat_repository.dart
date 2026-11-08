@@ -792,19 +792,35 @@ class ChatRepository {
     return targetPath;
   }
 
-  Future<Directory> resolveEffectiveSaveDirectory({String? customPath}) async {
+  Future<String> resolveEffectiveSaveDirectoryPath({String? customPath}) async {
     final preferred = customPath?.trim().isNotEmpty == true
         ? customPath!.trim()
         : _preferences.localStorageDirectoryPath?.trim();
     if (preferred != null && preferred.isNotEmpty) {
-      final dir = Directory(preferred);
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
+      if (!kIsWeb) {
+        try {
+          final dir = Directory(preferred);
+          if (!await dir.exists()) {
+            await dir.create(recursive: true);
+          }
+        } catch (_) {}
       }
-      return dir;
+      return preferred;
     }
 
-    if (!kIsWeb && Platform.isWindows) {
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        try {
+          final root = await web_bridge.getElectronStorageRoot();
+          if (root != null && root.trim().isNotEmpty) {
+            return root.trim();
+          }
+        } catch (_) {}
+      }
+      return '';
+    }
+
+    if (Platform.isWindows) {
       try {
         final downloads = await getDownloadsDirectory();
         if (downloads != null && await downloads.exists()) {
@@ -812,12 +828,29 @@ class ChatRepository {
           if (!await ismartDir.exists()) {
             await ismartDir.create(recursive: true);
           }
-          return ismartDir;
+          return ismartDir.path;
         }
       } catch (_) {}
     }
 
-    return _localStorage.resolveRootDirectory();
+    try {
+      final rootDir = await _localStorage.resolveRootDirectory();
+      return rootDir.path;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<Directory> resolveEffectiveSaveDirectory({String? customPath}) async {
+    if (kIsWeb) {
+      throw UnsupportedError('resolveEffectiveSaveDirectory is not supported on web. Use resolveEffectiveSaveDirectoryPath instead.');
+    }
+    final path = await resolveEffectiveSaveDirectoryPath(customPath: customPath);
+    final dir = Directory(path);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
   }
 
   String _resolveCleanFileName(ChatMessage message) {
@@ -896,10 +929,17 @@ class ChatRepository {
 
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
-        final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
-        final candidate = p.join(targetDir.path, safeFileName);
-        final exists = await web_bridge.electronFileExists(candidate);
-        if (exists) return candidate;
+        final targetDirPath = await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
+        if (targetDirPath.isNotEmpty) {
+          final candidate = p.join(targetDirPath, safeFileName);
+          final exists = await web_bridge.electronFileExists(candidate);
+          if (exists) return candidate;
+        }
+        return await web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: safeFileName,
+          preferredDirectoryPath: targetDirPath.isNotEmpty ? targetDirPath : null,
+        );
       }
       return null;
     }
@@ -925,12 +965,13 @@ class ChatRepository {
     String? customSaveDirectory,
     void Function(int received, int total)? onProgress,
   }) async {
-    final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
     final safeFileName = _resolveCleanFileName(message);
 
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
-        final existingPath = p.join(targetDir.path, safeFileName);
+        final targetDirPath = await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
+        final existingPath = targetDirPath.isNotEmpty ? p.join(targetDirPath, safeFileName) : safeFileName;
+
         final bytes = await _readLocalAttachmentBytes(message) ??
             await _downloadAttachmentBytesWithRestore(
               message,
@@ -942,7 +983,7 @@ class ChatRepository {
           bytes: bytes,
           fileName: safeFileName,
           mimeType: message.mimeType,
-          preferredDirectoryPath: targetDir.path,
+          preferredDirectoryPath: targetDirPath.isNotEmpty ? targetDirPath : null,
         );
         return saved ?? existingPath;
       }
@@ -961,6 +1002,7 @@ class ChatRepository {
     }
 
     // Native Desktop (Windows / macOS / Linux)
+    final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
     final baseName = p.basenameWithoutExtension(safeFileName);
     final extension = p.extension(safeFileName);
     final primaryCandidate = p.join(targetDir.path, safeFileName);
@@ -1199,6 +1241,10 @@ class ChatRepository {
       return null;
     }
 
+    if (kIsWeb) {
+      return null;
+    }
+
     final fileName = p.basename(message.fileName ?? 'attachment');
     final cacheDirectory = await _localStorage.chatDirectory(
       preferredPath: _preferences.localStorageDirectoryPath,
@@ -1231,13 +1277,15 @@ class ChatRepository {
   ) async {
     if (bytes.isEmpty) return;
     try {
-      if (kIsWeb && web_bridge.isElectron()) {
-        await web_bridge.cacheElectronChatAttachment(
-          messageId: message.id,
-          fileName: message.fileName ?? 'attachment',
-          bytes: bytes,
-          preferredDirectoryPath: _preferences.localStorageDirectoryPath,
-        );
+      if (kIsWeb) {
+        if (web_bridge.isElectron()) {
+          await web_bridge.cacheElectronChatAttachment(
+            messageId: message.id,
+            fileName: message.fileName ?? 'attachment',
+            bytes: bytes,
+            preferredDirectoryPath: _preferences.localStorageDirectoryPath,
+          );
+        }
         return;
       }
 

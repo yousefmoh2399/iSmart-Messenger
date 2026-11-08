@@ -482,10 +482,14 @@ Future<void> _downloadAttachmentFromPanel(
               label: 'عرض في المجلد',
               textColor: const Color(0xFF007AFF),
               onPressed: () {
-                if (!kIsWeb && Platform.isWindows) {
+                if (kIsWeb && web_bridge.isElectron()) {
+                  try {
+                    web_bridge.openElectronInboxFileLocation(savedPath);
+                  } catch (_) {
+                    web_bridge.openElectronLocalFile(p.dirname(savedPath));
+                  }
+                } else if (!kIsWeb && Platform.isWindows) {
                   Process.run('explorer.exe', ['/select,', savedPath]);
-                } else if (kIsWeb && web_bridge.isElectron()) {
-                  web_bridge.openElectronLocalFile(p.dirname(savedPath));
                 }
               },
             ),
@@ -503,6 +507,15 @@ Future<void> _downloadAttachmentFromPanel(
     );
 
     if (destinationPath == null || destinationPath.trim().isEmpty) {
+      return;
+    }
+
+    if (kIsWeb) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم حفظ ${message.fileName ?? 'المرفق'} بنجاح')),
+        );
+      }
       return;
     }
 
