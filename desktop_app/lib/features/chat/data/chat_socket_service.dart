@@ -328,6 +328,7 @@ class ChatSocketService implements PrintStatusEmitter {
     bind('quick_replies_updated');
     bind('reminders_updated');
     bind('workspace_docs_updated');
+    bind('api_request_telemetry');
 
     socket.connect();
     _socket = socket;

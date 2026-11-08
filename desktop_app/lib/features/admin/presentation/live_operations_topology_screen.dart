@@ -3,7 +3,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../shared/providers/providers.dart';
+import '../../chat/data/chat_socket_service.dart';
 import 'system_monitor_controller.dart';
 
 /// Representation of an active branch device currently performing a live action on the n8n canvas.
@@ -25,6 +28,8 @@ class _ActiveCanvasDevice {
     required this.color,
     required this.icon,
     required this.startedAt,
+    this.method = 'GET',
+    this.endpoint = '',
   });
 
   final String id;
@@ -38,13 +43,16 @@ class _ActiveCanvasDevice {
   final String targetEngineId;
   final String targetEngineName;
   final int slotIndex;
-  final Offset position;
+  Offset position;
   final Color color;
   final IconData icon;
   final DateTime startedAt;
+  final String method;
+  final String endpoint;
 
   bool isCompleted = false;
   int latencyMs = 0;
+  int statusCode = 200;
   int remainingSeconds = 5;
   double flowProgress = 0.0;
 }
@@ -108,7 +116,7 @@ class _CoreServiceNode {
   final String description;
   final Color color;
   final IconData icon;
-  final Offset position;
+  Offset position;
   final Size size;
   final Map<String, String> metrics;
   final Map<String, dynamic> details;
@@ -121,7 +129,7 @@ class _CoreServiceNode {
 /// Core Server is in the middle, services are around it.
 /// Branch devices appear dynamically with animation only when they send an action,
 /// connect with an n8n Bézier line showing the action, and disappear 5 seconds after completion!
-class LiveOperationsTopologyScreen extends StatefulWidget {
+class LiveOperationsTopologyScreen extends ConsumerStatefulWidget {
   const LiveOperationsTopologyScreen({
     super.key,
     required this.state,
@@ -136,20 +144,20 @@ class LiveOperationsTopologyScreen extends StatefulWidget {
   final ColorScheme cs;
 
   @override
-  State<LiveOperationsTopologyScreen> createState() =>
+  ConsumerState<LiveOperationsTopologyScreen> createState() =>
       _LiveOperationsTopologyScreenState();
 }
 
 class _LiveOperationsTopologyScreenState
-    extends State<LiveOperationsTopologyScreen>
+    extends ConsumerState<LiveOperationsTopologyScreen>
     with SingleTickerProviderStateMixin {
   int _activeTab = 0; // 0 = n8n Live Flow, 1 = Fleet Directory, 2 = Event Log
 
   late final AnimationController _wireFlowController;
-  Timer? _autoPulseTimer;
+  final TransformationController _interactiveController = TransformationController();
+  StreamSubscription<ChatSocketEvent>? _socketSub;
   Timer? _countdownTicker;
 
-  bool _autoPulseActive = true;
   String? _selectedNodeId;
   int _inspectorTabIndex = 0;
 
@@ -171,9 +179,9 @@ class _LiveOperationsTopologyScreenState
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // Canvas Coordinates (1080 x 640 Canvas)
-  final double _canvasWidth = 1080;
-  final double _canvasHeight = 640;
+  double _lastCanvasWidth = 1100.0;
+  double _lastCanvasHeight = 680.0;
+  bool _isSocketConnected = false;
 
   @override
   void initState() {
@@ -193,18 +201,10 @@ class _LiveOperationsTopologyScreenState
       _tickDeviceCountdowns();
     });
 
-    // Auto-pulse: periodically spawns a natural device request every 4 seconds
-    _autoPulseTimer = Timer.periodic(const Duration(milliseconds: 4200), (_) {
-      if (!mounted || !_autoPulseActive) return;
-      if (_activeTab == 0 && _activeDevices.length < 3) {
-        _triggerRandomDeviceAction();
-      }
-    });
-
-    // Start with 1 demo action immediately so the screen looks vibrant on launch
+    // Start listening to real WebSocket telemetry from backend
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _triggerRandomDeviceAction();
+        _listenToLiveSocket();
       }
     });
   }
@@ -222,7 +222,8 @@ class _LiveOperationsTopologyScreenState
   @override
   void dispose() {
     _wireFlowController.dispose();
-    _autoPulseTimer?.cancel();
+    _interactiveController.dispose();
+    _socketSub?.cancel();
     _countdownTicker?.cancel();
     _searchCtrl.dispose();
     super.dispose();
@@ -560,19 +561,253 @@ class _LiveOperationsTopologyScreenState
 
   void _buildInitialLogs() {
     _liveLogs.clear();
-    final now = DateTime.now();
-    _liveLogs.add({
-      'time': _formatTime(now.subtract(const Duration(seconds: 1))),
-      'level': 'SUCCESS',
-      'source': 'Gateway',
-      'message': 'شبكة n8n التفاعلية جاهزة: الأجهزة تظهر عند إرسال أي حركة وتختفي تلقائياً بعد 5 ثوانٍ.',
+    final recent = widget.state.requestTelemetry?.recentRequests ?? [];
+    if (recent.isNotEmpty) {
+      for (final req in recent.take(15)) {
+        final timeStr = _formatTime(req.timestamp);
+        final visuals = _mapEndpointVisuals(req.method, req.path);
+        final userOrHost = (req.fullName != null && req.fullName!.isNotEmpty)
+            ? req.fullName!
+            : ((req.username != null && req.username!.isNotEmpty) ? req.username! : req.clientIp);
+        final engId = _mapEndpointToEngine(req.path);
+        final engName = _coreNodesMap[engId]?.name ?? 'بوابة الاتصال';
+        _liveLogs.add({
+          'time': timeStr,
+          'level': req.statusCode >= 400 ? 'WARN' : 'SUCCESS',
+          'source': userOrHost,
+          'message': '${visuals.label} [${req.method} ${req.path}] من $userOrHost ➔ $engName [${req.statusCode} • ${req.durationMs}ms]',
+        });
+      }
+    }
+
+    if (_liveLogs.isEmpty) {
+      final now = DateTime.now();
+      _liveLogs.add({
+        'time': _formatTime(now),
+        'level': 'SUCCESS',
+        'source': 'Gateway',
+        'message': 'شبكة n8n في وضع المراقبة اللحظية: متصل بالسيرفر وينتظر طلبات حقيقية من الفروع والأجهزة.',
+      });
+      _liveLogs.add({
+        'time': _formatTime(now.subtract(const Duration(seconds: 2))),
+        'level': 'INFO',
+        'source': 'SocketRouter',
+        'message': 'السيرفر المركزي في المنتصف والمحركات الخمسة متصلة به بمسارات n8n انسيابية.',
+      });
+    }
+  }
+
+  void _listenToLiveSocket() {
+    _socketSub?.cancel();
+    final socketService = ref.read(chatSocketServiceProvider);
+    setState(() {
+      _isSocketConnected = socketService.isConnected;
     });
-    _liveLogs.add({
-      'time': _formatTime(now.subtract(const Duration(seconds: 4))),
-      'level': 'INFO',
-      'source': 'SocketRouter',
-      'message': 'السيرفر المركزي في المنتصف والمحركات الخمسة متصلة به بمسارات n8n انسيابية.',
+
+    _socketSub = socketService.events.listen((event) {
+      if (!mounted) return;
+      if (event.type == 'socket_connected') {
+        setState(() => _isSocketConnected = true);
+        _logSystemEvent('SUCCESS', 'WebSocket', '🟢 متصل بالسيرفر المركزي لحظياً - نظام المراقبة نشط');
+      } else if (event.type == 'socket_disconnected' || event.type == 'socket_reconnecting') {
+        setState(() => _isSocketConnected = false);
+      } else if (event.type == 'api_request_telemetry') {
+        _handleRealApiRequest(event.payload);
+      } else if (event.type == 'receive_message') {
+        _handleRealChatMessage(event.payload);
+      } else if (event.type == 'update_telemetry') {
+        _handleRealUpdateTelemetry(event.payload);
+      }
     });
+  }
+
+  void _logSystemEvent(String level, String source, String message) {
+    setState(() {
+      _liveLogs.insert(0, {
+        'time': _formatTime(DateTime.now()),
+        'level': level,
+        'source': source,
+        'message': message,
+      });
+      if (_liveLogs.length > 60) _liveLogs.removeLast();
+    });
+  }
+
+  void _handleRealApiRequest(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    final clientIp = (data['clientIp'] ?? '-').toString();
+    final method = (data['method'] ?? 'GET').toString().toUpperCase();
+    final path = (data['path'] ?? '/').toString();
+    final statusCode = data['statusCode'] is num ? (data['statusCode'] as num).toInt() : 200;
+    final durationMs = data['durationMs'] is num ? (data['durationMs'] as num).toInt() : 12;
+
+    final userMap = data['user'] as Map<String, dynamic>?;
+    final username = (userMap?['username'] ?? '').toString();
+    final fullName = (userMap?['fullName'] ?? '').toString();
+    final branchCode = (userMap?['branchCode'] ?? '').toString();
+
+    // Match device from fleet or create dynamic entry
+    _FleetDeviceModel? matchedDev;
+    for (final d in _allFleetDevices) {
+      if (username.isNotEmpty && d.username.toLowerCase() == username.toLowerCase()) {
+        matchedDev = d;
+        break;
+      }
+      if (clientIp.isNotEmpty && clientIp != '-' && d.ipAddress == clientIp) {
+        matchedDev = d;
+        break;
+      }
+      if (branchCode.isNotEmpty && d.branchCode == branchCode) {
+        matchedDev = d;
+        break;
+      }
+    }
+
+    matchedDev ??= _FleetDeviceModel(
+      id: 'dyn_${DateTime.now().microsecondsSinceEpoch}',
+      hostname: fullName.isNotEmpty ? fullName : (username.isNotEmpty ? username : 'محطة $clientIp'),
+      fullName: fullName.isNotEmpty ? fullName : (username.isNotEmpty ? username : 'كاشير الفرع'),
+      username: username.isNotEmpty ? username : clientIp,
+      branchName: branchCode.isNotEmpty ? 'فرع $branchCode' : 'شبكة النظام',
+      branchCode: branchCode.isNotEmpty ? branchCode : 'MAIN',
+      ipAddress: clientIp,
+      appVersion: widget.state.deploymentData?.summary.targetAppVersion ?? '1.1.22',
+      isOutdated: false,
+      isOnline: true,
+      clientType: 'desktop',
+      os: 'Windows 11',
+      lastSeenAt: DateTime.now(),
+    );
+
+    final engId = _mapEndpointToEngine(path);
+    final visuals = _mapEndpointVisuals(method, path);
+
+    _spawnRealActionOnCanvas(
+      dev: matchedDev,
+      actionLabel: visuals.label,
+      engineId: engId,
+      color: visuals.color,
+      icon: visuals.icon,
+      latencyMs: durationMs,
+      statusCode: statusCode,
+      method: method,
+      endpoint: path,
+    );
+  }
+
+  void _handleRealChatMessage(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    final sender = payload['sender'] as Map<String, dynamic>? ?? {};
+    final fullName = (sender['fullName'] ?? sender['username'] ?? 'مستخدم').toString();
+    final username = (sender['username'] ?? '').toString();
+
+    _FleetDeviceModel? matchedDev;
+    for (final d in _allFleetDevices) {
+      if (username.isNotEmpty && d.username.toLowerCase() == username.toLowerCase()) {
+        matchedDev = d;
+        break;
+      }
+    }
+    matchedDev ??= _FleetDeviceModel(
+      id: 'chat_${DateTime.now().microsecondsSinceEpoch}',
+      hostname: fullName,
+      fullName: fullName,
+      username: username,
+      branchName: 'المحادثات المباشرة',
+      branchCode: '00',
+      ipAddress: '127.0.0.1',
+      appVersion: '1.1.22',
+      isOutdated: false,
+      isOnline: true,
+      clientType: 'desktop',
+      os: 'Windows 11',
+      lastSeenAt: DateTime.now(),
+    );
+
+    _spawnRealActionOnCanvas(
+      dev: matchedDev,
+      actionLabel: '💬 رسالة شات لحظية',
+      engineId: 'node_chat_engine',
+      color: const Color(0xFF6366F1),
+      icon: Icons.chat_bubble_outline_rounded,
+      latencyMs: 6,
+      statusCode: 200,
+      method: 'SOCKET',
+      endpoint: 'receive_message',
+    );
+  }
+
+  void _handleRealUpdateTelemetry(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    final host = (payload['hostName'] ?? 'جهاز فرع').toString();
+    final targetVer = (payload['targetVersion'] ?? '1.1.22').toString();
+    final progress = payload['progress'] ?? 0;
+
+    _FleetDeviceModel? matchedDev;
+    for (final d in _allFleetDevices) {
+      if (d.hostname.toLowerCase() == host.toLowerCase()) {
+        matchedDev = d;
+        break;
+      }
+    }
+    matchedDev ??= _allFleetDevices.isNotEmpty ? _allFleetDevices.first : null;
+    if (matchedDev == null) return;
+
+    _spawnRealActionOnCanvas(
+      dev: matchedDev,
+      actionLabel: '📦 سحب تحديث v$targetVer ($progress%)',
+      engineId: 'node_release_engine',
+      color: const Color(0xFFF59E0B),
+      icon: Icons.system_update_alt_rounded,
+      latencyMs: 14,
+      statusCode: 200,
+      method: 'TELEMETRY',
+      endpoint: '/api/releases/telemetry',
+    );
+  }
+
+  String _mapEndpointToEngine(String path) {
+    final p = path.toLowerCase();
+    if (p.contains('/chat') || p.contains('/messages') || p.contains('/conversations')) {
+      return 'node_chat_engine';
+    }
+    if (p.contains('/documents') || p.contains('/orders') || p.contains('/inventory') || p.contains('/transfers')) {
+      return 'node_doc_engine';
+    }
+    if (p.contains('/print') || p.contains('/printer') || p.contains('/spool')) {
+      return 'node_printer_engine';
+    }
+    if (p.contains('/release') || p.contains('/update') || p.contains('/deployment')) {
+      return 'node_release_engine';
+    }
+    if (p.contains('/system') || p.contains('/telemetry') || p.contains('/auth') || p.contains('/users') || p.contains('/branches') || p.contains('/polls')) {
+      return 'node_database';
+    }
+    return 'node_gateway';
+  }
+
+  ({String label, Color color, IconData icon}) _mapEndpointVisuals(String method, String path) {
+    final p = path.toLowerCase();
+    if (p.contains('/chat') || p.contains('/messages')) {
+      return (label: method == 'POST' ? '💬 إرسال رسالة شات' : '💬 قراءة رسائل الشات', color: const Color(0xFF6366F1), icon: Icons.chat_bubble_outline_rounded);
+    }
+    if (p.contains('/documents') || p.contains('/orders')) {
+      return (label: method == 'POST' ? '📄 حفظ مستند / طلب' : '📄 استعلام المستندات', color: const Color(0xFF8B5CF6), icon: Icons.inventory_2_outlined);
+    }
+    if (p.contains('/print')) {
+      return (label: '🖨️ أمر طباعة مستند', color: const Color(0xFFEC4899), icon: Icons.print_rounded);
+    }
+    if (p.contains('/release') || p.contains('/update')) {
+      return (label: '📦 فحص / تنزيل التحديث', color: const Color(0xFFF59E0B), icon: Icons.system_update_alt_rounded);
+    }
+    if (p.contains('/auth/login')) {
+      return (label: '🔑 تسجيل دخول موظف', color: const Color(0xFF10B981), icon: Icons.vpn_key_rounded);
+    }
+    if (p.contains('/telemetry') || p.contains('/stats') || p.contains('/system')) {
+      return (label: '📊 نبضة تشخيص النظام', color: const Color(0xFF06B6D4), icon: Icons.insights_rounded);
+    }
+    return (label: '⚡ طلب $method $path', color: const Color(0xFF06B6D4), icon: Icons.bolt_rounded);
   }
 
   String _formatTime(DateTime dt) {
@@ -582,8 +817,17 @@ class _LiveOperationsTopologyScreenState
   // ══════════════════════════════════════════════════════════════════════════════
   // DYNAMIC DEVICE ACTION TRIGGER & 5-SECOND COUNTDOWN
   // ══════════════════════════════════════════════════════════════════════════════
-  void _triggerDeviceActionOnCanvas(_FleetDeviceModel dev, {String? customAction, String? customEngine}) {
-    // Find first available slot (0..4)
+  void _spawnRealActionOnCanvas({
+    required _FleetDeviceModel dev,
+    required String actionLabel,
+    required String engineId,
+    required Color color,
+    required IconData icon,
+    required int latencyMs,
+    required int statusCode,
+    required String method,
+    required String endpoint,
+  }) {
     int freeSlot = -1;
     for (int i = 0; i < _slotOccupied.length; i++) {
       if (!_slotOccupied[i]) {
@@ -593,29 +837,13 @@ class _LiveOperationsTopologyScreenState
     }
 
     if (freeSlot == -1) {
-      // All slots full, reuse slot 0
       freeSlot = 0;
       _activeDevices.removeWhere((d) => d.slotIndex == 0);
     }
 
     _slotOccupied[freeSlot] = true;
-
-    // Slot positions on Left Column (X = 50, Y = 50, 165, 280, 395, 510)
-    final slotY = 50.0 + (freeSlot * 115.0);
-    final slotPos = Offset(50, slotY);
-
-    final possibleActions = [
-      (label: '💬 إرسال رسالة كاشير', engineId: 'node_chat_engine', engineName: 'محرك المحادثات', color: const Color(0xFFFF6D5A), icon: Icons.chat_bubble_rounded),
-      (label: '🖨️ أمر طباعة فاتورة', engineId: 'node_printer_engine', engineName: 'سيرفر الطباعة', color: const Color(0xFFEC4899), icon: Icons.print_rounded),
-      (label: '🧾 مزامنة طلب مخزن', engineId: 'node_doc_engine', engineName: 'محرك المستندات', color: const Color(0xFF8B5CF6), icon: Icons.inventory_2_rounded),
-      (label: '📦 فحص نسخة التحديث', engineId: 'node_release_engine', engineName: 'سيرفر التحديثات', color: const Color(0xFFF59E0B), icon: Icons.system_update_alt_rounded),
-      (label: '⚡ نبضة اتصال حي', engineId: 'node_gateway', engineName: 'بوابة الاتصال', color: const Color(0xFF06B6D4), icon: Icons.bolt_rounded),
-    ];
-
-    final chosen = possibleActions[math.Random().nextInt(possibleActions.length)];
-    final actLabel = customAction ?? chosen.label;
-    final engId = customEngine ?? chosen.engineId;
-    final engName = _coreNodesMap[engId]?.name ?? chosen.engineName;
+    final engName = _coreNodesMap[engineId]?.name ?? 'بوابة الاتصال';
+    final slotPos = _computeDeviceSlotPosition(freeSlot, _lastCanvasWidth, _lastCanvasHeight);
 
     final activeDev = _ActiveCanvasDevice(
       id: 'act_${DateTime.now().microsecondsSinceEpoch}',
@@ -625,51 +853,120 @@ class _LiveOperationsTopologyScreenState
       branchName: dev.branchName,
       branchCode: dev.branchCode,
       ipAddress: dev.ipAddress,
-      actionLabel: actLabel,
-      targetEngineId: engId,
+      actionLabel: actionLabel,
+      targetEngineId: engineId,
       targetEngineName: engName,
       slotIndex: freeSlot,
       position: slotPos,
-      color: chosen.color,
-      icon: chosen.icon,
+      color: color,
+      icon: icon,
       startedAt: DateTime.now(),
+      method: method,
+      endpoint: endpoint,
     );
+
+    activeDev.isCompleted = true;
+    activeDev.latencyMs = latencyMs;
+    activeDev.statusCode = statusCode;
+    activeDev.remainingSeconds = 5;
+
+    final gw = _coreNodesMap['node_gateway'];
+    if (gw != null) gw.executionCount++;
+    final eng = _coreNodesMap[engineId];
+    if (eng != null) eng.executionCount++;
+
+    HapticFeedback.lightImpact();
 
     setState(() {
       _activeDevices.add(activeDev);
-    });
-
-    // Simulate completion in 850ms, then start the 5-second countdown
-    Timer(const Duration(milliseconds: 850), () {
-      if (!mounted) return;
-      HapticFeedback.lightImpact();
-      setState(() {
-        activeDev.isCompleted = true;
-        activeDev.latencyMs = 8 + math.Random().nextInt(14);
-        activeDev.remainingSeconds = 5;
-
-        // Increment execution counts on fixed nodes
-        final gw = _coreNodesMap['node_gateway'];
-        if (gw != null) gw.executionCount++;
-        final eng = _coreNodesMap[engId];
-        if (eng != null) eng.executionCount++;
-
-        _liveLogs.insert(0, {
-          'time': _formatTime(DateTime.now()),
-          'level': 'SUCCESS',
-          'source': activeDev.hostname,
-          'message': '${activeDev.actionLabel} من ${activeDev.hostname} (${activeDev.branchName}) ➔ البوابة المركزية ➔ $engName [200 OK • ${activeDev.latencyMs}ms]',
-        });
-        if (_liveLogs.length > 50) _liveLogs.removeLast();
+      _liveLogs.insert(0, {
+        'time': _formatTime(DateTime.now()),
+        'level': statusCode >= 400 ? 'WARN' : 'SUCCESS',
+        'source': activeDev.hostname,
+        'message': '$actionLabel من ${activeDev.hostname} (${activeDev.branchName}) ➔ البوابة المركزية ➔ $engName [$statusCode • ${latencyMs}ms]',
       });
+      if (_liveLogs.length > 60) _liveLogs.removeLast();
     });
   }
 
-  void _triggerRandomDeviceAction() {
+  void _triggerDeviceActionOnCanvas(_FleetDeviceModel dev, {String? customAction, String? customEngine}) {
+    final engId = customEngine ?? 'node_gateway';
+    _spawnRealActionOnCanvas(
+      dev: dev,
+      actionLabel: customAction ?? '⚡ فحص مباشر للمحطة',
+      engineId: engId,
+      color: const Color(0xFF06B6D4),
+      icon: Icons.bolt_rounded,
+      latencyMs: 9,
+      statusCode: 200,
+      method: 'TEST',
+      endpoint: '/api/devices/${dev.username}/ping',
+    );
+  }
+
+  void _triggerDiagnosticTestPulse() {
     final onlineList = _allFleetDevices.where((d) => d.isOnline).toList();
-    if (onlineList.isEmpty) return;
-    final randomDev = onlineList[math.Random().nextInt(onlineList.length)];
-    _triggerDeviceActionOnCanvas(randomDev);
+    final dev = onlineList.isNotEmpty ? onlineList.first : _allFleetDevices.first;
+    _spawnRealActionOnCanvas(
+      dev: dev,
+      actionLabel: '⚡ نبضة فحص يدوي للمنظومة',
+      engineId: 'node_gateway',
+      color: const Color(0xFF06B6D4),
+      icon: Icons.bolt_rounded,
+      latencyMs: 7,
+      statusCode: 200,
+      method: 'GET',
+      endpoint: '/api/system-telemetry/ping',
+    );
+  }
+
+  Offset _computeDeviceSlotPosition(int slotIndex, double canvasWidth, double canvasHeight) {
+    final gwX = (canvasWidth - 270.0) / 2.0;
+    final devX = math.max(30.0, gwX - 270.0 - 80.0);
+    const cardHeight = 90.0;
+    const gap = 16.0;
+    const totalHeight = (5 * cardHeight) + (4 * gap); // 514
+    final startY = math.max(30.0, (canvasHeight - totalHeight) / 2.0);
+    return Offset(devX, startY + (slotIndex * (cardHeight + gap)));
+  }
+
+  void _updateNodePositions(double canvasWidth, double canvasHeight) {
+    _lastCanvasWidth = canvasWidth;
+    _lastCanvasHeight = canvasHeight;
+
+    // 1. Gateway Center Position
+    final gwX = (canvasWidth - 270.0) / 2.0;
+    final gwY = (canvasHeight - 100.0) / 2.0;
+    final gwNode = _coreNodesMap['node_gateway'];
+    if (gwNode != null) {
+      gwNode.position = Offset(gwX, gwY);
+    }
+
+    // 2. 5 Core Engines in Right Column
+    final engX = math.min(canvasWidth - 265.0, gwX + 270.0 + 80.0);
+    const engHeight = 88.0;
+    const engGap = 18.0;
+    const totalEngHeight = (5 * engHeight) + (4 * engGap); // 512
+    final engStartY = math.max(30.0, (canvasHeight - totalEngHeight) / 2.0);
+
+    final engineIds = [
+      'node_chat_engine',
+      'node_doc_engine',
+      'node_printer_engine',
+      'node_release_engine',
+      'node_database',
+    ];
+    for (int i = 0; i < engineIds.length; i++) {
+      final engNode = _coreNodesMap[engineIds[i]];
+      if (engNode != null) {
+        engNode.position = Offset(engX, engStartY + (i * (engHeight + engGap)));
+      }
+    }
+
+    // 3. Active Devices in Left Column
+    for (final dev in _activeDevices) {
+      dev.position = _computeDeviceSlotPosition(dev.slotIndex, canvasWidth, canvasHeight);
+    }
   }
 
   void _tickDeviceCountdowns() {
@@ -889,16 +1186,16 @@ class _LiveOperationsTopologyScreenState
 
               // Manual Simulate Action Button
               FilledButton.icon(
-                onPressed: _triggerRandomDeviceAction,
+                onPressed: _triggerDiagnosticTestPulse,
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF6D5A),
+                  backgroundColor: const Color(0xFF06B6D4),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 icon: const Icon(Icons.bolt_rounded, size: 16),
                 label: const Text(
-                  '⚡ إرسال حركة جهاز',
+                  '⚡ تجربة فحص يدوي',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
                 ),
               ),
@@ -964,132 +1261,168 @@ class _LiveOperationsTopologyScreenState
   Widget _buildN8nCanvasTab(bool isDark) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Auto scale to fit viewport if smaller than canvas
-        final scaleX = constraints.maxWidth / _canvasWidth;
-        final scaleY = constraints.maxHeight / _canvasHeight;
-        final fitScale = math.min(math.min(scaleX, scaleY), 1.05).clamp(0.65, 1.15);
+        final availableW = constraints.maxWidth;
+        final availableH = constraints.maxHeight;
+        final canvasWidth = math.max(availableW, 1100.0);
+        final canvasHeight = math.max(availableH, 680.0);
 
-        return Center(
-          child: Transform.scale(
-            scale: fitScale,
-            child: SizedBox(
-              width: _canvasWidth,
-              height: _canvasHeight,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // Layer 1: Dot Matrix Grid Background
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _N8nCanvasGridPainter(isDark: isDark),
-                    ),
-                  ),
+        _updateNodePositions(canvasWidth, canvasHeight);
+        final gwNode = _coreNodesMap['node_gateway'];
+        final gwPos = gwNode?.position ?? Offset((canvasWidth - 270.0) / 2.0, (canvasHeight - 100.0) / 2.0);
+        final gwSize = gwNode?.size ?? const Size(270, 100);
 
-                  // Layer 2: Fixed Core Service Wires (Gateway ➔ 5 Microservices)
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _N8nCoreWiresPainter(
-                        coreNodes: _coreNodes,
-                        coreNodesMap: _coreNodesMap,
-                        selectedNodeId: _selectedNodeId,
-                        isDark: isDark,
+        return Stack(
+          children: [
+            InteractiveViewer(
+              transformationController: _interactiveController,
+              minScale: 0.5,
+              maxScale: 1.8,
+              boundaryMargin: const EdgeInsets.all(250),
+              constrained: false,
+              child: SizedBox(
+                width: canvasWidth,
+                height: canvasHeight,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Layer 1: Dot Matrix Grid Background
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _N8nCanvasGridPainter(isDark: isDark),
                       ),
                     ),
-                  ),
 
-                  // Layer 3: Dynamic Animated Wires from Calling Devices ➔ Gateway
-                  Positioned.fill(
-                    child: AnimatedBuilder(
-                      animation: _wireFlowController,
-                      builder: (context, _) {
-                        return CustomPaint(
-                          painter: _N8nCallingDevicesWiresPainter(
-                            activeDevices: _activeDevices,
-                            gatewayPosition: const Offset(420, 260),
-                            gatewaySize: const Size(270, 100),
-                            flowProgress: _wireFlowController.value,
-                            isDark: isDark,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  // Layer 4: Empty State Watermark if no devices calling right now
-                  if (_activeDevices.isEmpty)
-                    Positioned(
-                      left: 60,
-                      top: 250,
-                      child: Container(
-                        width: 250,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF141722).withValues(alpha: 0.7) : Colors.white.withValues(alpha: 0.8),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isDark ? const Color(0xFF222938) : const Color(0xFFCBD5E1),
-                            style: BorderStyle.solid,
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.bolt_rounded, size: 28, color: Color(0xFFFF6D5A)),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'شبكة n8n في وضع الاستعداد',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'تظهر أجهزة الفروع هنا لحظة إرسال أي طلب وتختفي بعد 5 ثوانٍ',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 10),
-                            FilledButton.icon(
-                              onPressed: _triggerRandomDeviceAction,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFFFF6D5A),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              icon: const Icon(Icons.play_arrow_rounded, size: 14),
-                              label: const Text(
-                                'تجربة حركة الآن',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-                              ),
-                            ),
-                          ],
+                    // Layer 2: Fixed Core Service Wires (Gateway ➔ 5 Microservices)
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _N8nCoreWiresPainter(
+                          coreNodes: _coreNodes,
+                          coreNodesMap: _coreNodesMap,
+                          selectedNodeId: _selectedNodeId,
+                          isDark: isDark,
                         ),
                       ),
                     ),
 
-                  // Layer 5: Fixed Core Service Cards (Center Server + 5 Engines)
-                  for (final node in _coreNodes)
-                    Positioned(
-                      left: node.position.dx,
-                      top: node.position.dy,
-                      child: _buildCoreNodeCard(node, isDark),
+                    // Layer 3: Dynamic Animated Wires from Calling Devices ➔ Gateway
+                    Positioned.fill(
+                      child: AnimatedBuilder(
+                        animation: _wireFlowController,
+                        builder: (context, _) {
+                          return CustomPaint(
+                            painter: _N8nCallingDevicesWiresPainter(
+                              activeDevices: _activeDevices,
+                              gatewayPosition: gwPos,
+                              gatewaySize: gwSize,
+                              flowProgress: _wireFlowController.value,
+                              isDark: isDark,
+                            ),
+                          );
+                        },
+                      ),
                     ),
 
-                  // Layer 6: Dynamic Calling Devices (Fade in, show action, fade out after 5s)
-                  for (final activeDev in _activeDevices)
-                    Positioned(
-                      left: activeDev.position.dx,
-                      top: activeDev.position.dy,
-                      child: _buildCallingDeviceCard(activeDev, isDark),
-                    ),
-                ],
+                    // Layer 4: Empty State Watermark if no devices calling right now
+                    if (_activeDevices.isEmpty)
+                      Positioned(
+                        left: math.max(30.0, gwPos.dx - 270.0 - 80.0),
+                        top: gwPos.dy + 5,
+                        child: _buildIdleLiveMonitorBanner(isDark),
+                      ),
+
+                    // Layer 5: Fixed Core Service Cards (Center Server + 5 Engines)
+                    for (final node in _coreNodes)
+                      Positioned(
+                        left: node.position.dx,
+                        top: node.position.dy,
+                        child: _buildCoreNodeCard(node, isDark),
+                      ),
+
+                    // Layer 6: Dynamic Calling Devices (Appear, pulse, fade out after 5s)
+                    for (final activeDev in _activeDevices)
+                      Positioned(
+                        left: activeDev.position.dx,
+                        top: activeDev.position.dy,
+                        child: _buildCallingDeviceCard(activeDev, isDark),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
+
+            // Floating Controls HUD (Canvas Tab)
+            Positioned(
+              left: 20,
+              bottom: 20,
+              child: _buildCanvasFloatingHUD(isDark),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildIdleLiveMonitorBanner(bool isDark) {
+    return Container(
+      width: 270,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141722).withValues(alpha: 0.85) : Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.sensors_rounded, size: 24, color: Color(0xFF10B981)),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'شبكة n8n في وضع المراقبة اللحظية 🟢',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            'متصل بالسيرفر المركزي وينتظر طلبات حقيقية من الفروع والأجهزة... تظهر الشاشات فور حدوث أي طلب وتختفي بعد 5 ثوانٍ.',
+            style: TextStyle(
+              fontSize: 10,
+              height: 1.4,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _triggerDiagnosticTestPulse,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF06B6D4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.bolt_rounded, size: 14),
+            label: const Text(
+              '⚡ تجربة فحص يدوي',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1411,7 +1744,7 @@ class _LiveOperationsTopologyScreenState
                   ),
                   const Spacer(),
                   Text(
-                    dev.isCompleted ? '${dev.latencyMs}ms • 200 OK' : 'جارٍ المعالجة...',
+                    dev.isCompleted ? '${dev.latencyMs}ms • ${dev.statusCode}' : 'جارٍ المعالجة...',
                     style: TextStyle(
                       fontSize: 9.5,
                       fontWeight: FontWeight.w700,
@@ -1432,7 +1765,7 @@ class _LiveOperationsTopologyScreenState
   // ══════════════════════════════════════════════════════════════════════════════
   Widget _buildCanvasFloatingHUD(bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF141722).withValues(alpha: 0.95) : Colors.white.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(12),
@@ -1449,21 +1782,60 @@ class _LiveOperationsTopologyScreenState
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            _autoPulseActive ? Icons.sensors_rounded : Icons.sensors_off_rounded,
-            size: 18,
-            color: _autoPulseActive ? const Color(0xFF10B981) : Colors.grey,
+          // Zoom In
+          IconButton(
+            icon: const Icon(Icons.zoom_in_rounded, size: 18),
+            tooltip: 'تكبير اللوحة',
+            onPressed: () {
+              final val = _interactiveController.value.clone()..scale(1.2, 1.2);
+              _interactiveController.value = val;
+            },
+            visualDensity: VisualDensity.compact,
+          ),
+          // Zoom Out
+          IconButton(
+            icon: const Icon(Icons.zoom_out_rounded, size: 18),
+            tooltip: 'تصغير اللوحة',
+            onPressed: () {
+              final val = _interactiveController.value.clone()..scale(0.833, 0.833);
+              _interactiveController.value = val;
+            },
+            visualDensity: VisualDensity.compact,
+          ),
+          // Reset Zoom
+          IconButton(
+            icon: const Icon(Icons.restart_alt_rounded, size: 18),
+            tooltip: 'إعادة ضبط العرض',
+            onPressed: () {
+              _interactiveController.value = Matrix4.identity();
+            },
+            visualDensity: VisualDensity.compact,
           ),
           const SizedBox(width: 8),
-          Text(
-            _autoPulseActive ? 'النبض التلقائي لحركات الفروع: نشط' : 'النبض التلقائي: متوقف',
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-          ),
+          Container(width: 1, height: 20, color: isDark ? Colors.white24 : Colors.black12),
           const SizedBox(width: 10),
-          Switch(
-            value: _autoPulseActive,
-            activeColor: const Color(0xFF10B981),
-            onChanged: (val) => setState(() => _autoPulseActive = val),
+          Icon(
+            _isSocketConnected ? Icons.sensors_rounded : Icons.sensors_off_rounded,
+            size: 16,
+            color: _isSocketConnected ? const Color(0xFF10B981) : Colors.amber,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _isSocketConnected ? 'البث اللحظي للطلبات: نشط 🟢' : 'جاري الاتصال بالسيرفر...',
+            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.icon(
+            onPressed: _triggerDiagnosticTestPulse,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF06B6D4).withValues(alpha: 0.16),
+              foregroundColor: const Color(0xFF06B6D4),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.bolt_rounded, size: 14),
+            label: const Text('⚡ فحص تجريبي يدوي', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800)),
           ),
         ],
       ),

@@ -37,7 +37,7 @@ class _ActivePullingDevice {
   final String originalVersion;
   final String targetVersion;
   final int slotIndex;
-  final Offset position;
+  Offset position;
 
   double progress = 0.08;
   double speedMbps = 14.8;
@@ -138,21 +138,28 @@ class _UpdateDistributionTopologyScreenState
   String _searchFilter = '';
   String _selectedBranch = 'all';
 
-  // Canvas Dimensions
-  final double _canvasWidth = 1080;
-  final double _canvasHeight = 640;
-  final Offset _serverPosition = const Offset(390, 260);
+  // Canvas Dimensions & Transformation
+  final TransformationController _interactiveController = TransformationController();
   final Size _serverSize = const Size(300, 115);
+  Offset _serverPosition = const Offset(390, 260);
+  double _lastCanvasWidth = 1100.0;
+  double _lastCanvasHeight = 660.0;
 
-  // 6 Symmetrical Slots around the Center Server
-  final List<Offset> _slotCoordinates = const [
-    Offset(60, 70),   // Slot 0: Top-Left
-    Offset(60, 260),  // Slot 1: Mid-Left
-    Offset(60, 450),  // Slot 2: Bottom-Left
-    Offset(740, 70),  // Slot 3: Top-Right
-    Offset(740, 260), // Slot 4: Mid-Right
-    Offset(740, 450), // Slot 5: Bottom-Right
-  ];
+  Offset _computeSlotCoordinate(int slotIndex, double canvasWidth, double canvasHeight) {
+    const totalSlotsPerSide = 3;
+    final isLeft = slotIndex < totalSlotsPerSide;
+    final sideIndex = isLeft ? slotIndex : (slotIndex - totalSlotsPerSide);
+
+    final serverX = (canvasWidth - _serverSize.width) / 2.0;
+    final leftX = math.max(30.0, serverX - 280.0 - 90.0);
+    final rightX = math.min(canvasWidth - 280.0 - 30.0, serverX + _serverSize.width + 90.0);
+    final x = isLeft ? leftX : rightX;
+
+    const totalHeight = (totalSlotsPerSide * 98.0) + ((totalSlotsPerSide - 1) * 30.0);
+    final startY = math.max(40.0, (canvasHeight - totalHeight) / 2.0);
+    final y = startY + (sideIndex * (98.0 + 30.0));
+    return Offset(x, y);
+  }
 
   @override
   void initState() {
@@ -194,6 +201,7 @@ class _UpdateDistributionTopologyScreenState
   @override
   void dispose() {
     _pulseController.dispose();
+    _interactiveController.dispose();
     _countdownTicker?.cancel();
     _fleetRolloutTimer?.cancel();
     for (final t in _devicePullTimers) {
@@ -474,7 +482,7 @@ class _UpdateDistributionTopologyScreenState
     }
 
     _slotsOccupied[freeSlot] = true;
-    final slotPos = _slotCoordinates[freeSlot];
+    final slotPos = _computeSlotCoordinate(freeSlot, _lastCanvasWidth, _lastCanvasHeight);
 
     final activeDev = _ActivePullingDevice(
       id: dev.id,
@@ -904,65 +912,237 @@ class _UpdateDistributionTopologyScreenState
   Widget _buildN8nUpdateFlowTab(bool isDark) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final scaleX = constraints.maxWidth / _canvasWidth;
-        final scaleY = constraints.maxHeight / _canvasHeight;
-        final fitScale = math.min(math.min(scaleX, scaleY), 1.05).clamp(0.65, 1.15);
+        final availableW = constraints.maxWidth;
+        final availableH = constraints.maxHeight;
+        final canvasWidth = math.max(availableW, 1100.0);
+        final canvasHeight = math.max(availableH, 660.0);
+        _lastCanvasWidth = canvasWidth;
+        _lastCanvasHeight = canvasHeight;
 
-        return Center(
-          child: Transform.scale(
-            scale: fitScale,
-            child: SizedBox(
-              width: _canvasWidth,
-              height: _canvasHeight,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // Layer 1: Dot Matrix Grid Background
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _N8nUpdateCanvasGridPainter(isDark: isDark),
+        final serverX = (canvasWidth - _serverSize.width) / 2.0;
+        final serverY = (canvasHeight - _serverSize.height) / 2.0;
+        _serverPosition = Offset(serverX, serverY);
+
+        // Update dynamic positions for all pulling devices
+        for (final dev in _canvasPullingDevices) {
+          dev.position = _computeSlotCoordinate(dev.slotIndex, canvasWidth, canvasHeight);
+        }
+
+        return Stack(
+          children: [
+            InteractiveViewer(
+              transformationController: _interactiveController,
+              minScale: 0.5,
+              maxScale: 1.8,
+              boundaryMargin: const EdgeInsets.all(250),
+              constrained: false,
+              child: SizedBox(
+                width: canvasWidth,
+                height: canvasHeight,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    // Layer 1: Dot Matrix Grid Background
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _N8nUpdateCanvasGridPainter(isDark: isDark),
+                      ),
                     ),
-                  ),
 
-                  // Layer 2: Animated Bézier Wires from Server ➔ Pulling Devices
-                  Positioned.fill(
-                    child: AnimatedBuilder(
-                      animation: _pulseController,
-                      builder: (context, _) {
-                        return CustomPaint(
-                          painter: _N8nUpdateWiresPainter(
-                            serverPosition: _serverPosition,
-                            serverSize: _serverSize,
-                            devices: _canvasPullingDevices,
-                            flowProgress: _pulseController.value,
-                            targetVersion: _targetVersion,
-                            isDark: isDark,
-                          ),
-                        );
-                      },
+                    // Layer 2: Animated Bézier Wires from Server ➔ Pulling Devices
+                    Positioned.fill(
+                      child: AnimatedBuilder(
+                        animation: _pulseController,
+                        builder: (context, _) {
+                          return CustomPaint(
+                            painter: _N8nUpdateWiresPainter(
+                              serverPosition: _serverPosition,
+                              serverSize: _serverSize,
+                              devices: _canvasPullingDevices,
+                              flowProgress: _pulseController.value,
+                              targetVersion: _targetVersion,
+                              isDark: isDark,
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                  ),
 
-                  // Layer 3: Central Server Node (GREEN 🟢 in the Center)
-                  Positioned(
-                    left: _serverPosition.dx,
-                    top: _serverPosition.dy,
-                    child: _buildCentralServerHeroNode(isDark),
-                  ),
-
-                  // Layer 4: Symmetrical Pulling Device Cards (Appear around Server)
-                  for (final dev in _canvasPullingDevices)
+                    // Layer 3: Central Server Node (GREEN 🟢 in the Center)
                     Positioned(
-                      left: dev.position.dx,
-                      top: dev.position.dy,
-                      child: _buildPullingDeviceNode(dev, isDark),
+                      left: _serverPosition.dx,
+                      top: _serverPosition.dy,
+                      child: _buildCentralServerHeroNode(isDark),
                     ),
-                ],
+
+                    // Layer 4: Symmetrical Pulling Device Cards (Appear around Server)
+                    for (final dev in _canvasPullingDevices)
+                      Positioned(
+                        left: dev.position.dx,
+                        top: dev.position.dy,
+                        child: _buildPullingDeviceNode(dev, isDark),
+                      ),
+
+                    // Layer 5: Resting Banner if no devices pulling
+                    if (_canvasPullingDevices.isEmpty)
+                      Positioned(
+                        left: (canvasWidth - 360.0) / 2.0,
+                        top: _serverPosition.dy + _serverSize.height + 35.0,
+                        child: _buildUpdateIdleBanner(isDark),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
+
+            // Floating Canvas Controls (Zoom In, Zoom Out, Reset, Realtime Socket Status)
+            Positioned(
+              left: 20,
+              bottom: 20,
+              child: _buildUpdateCanvasFloatingHUD(isDark),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildUpdateIdleBanner(bool isDark) {
+    return Container(
+      width: 360,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141722).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.cloud_done_rounded, size: 20, color: Color(0xFF10B981)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'شبكة سحب التحديثات في وضع الجاهزية 🟢',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'تظهر الأجهزة حول السيرفر فوراً عند بدء سحب التحديث مع مسار البيانات المباشر وتختفي بعد 5 ثوانٍ من اكتمال التثبيت.',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    height: 1.35,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUpdateCanvasFloatingHUD(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141722).withValues(alpha: 0.95) : Colors.white.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Zoom In
+          IconButton(
+            icon: const Icon(Icons.zoom_in_rounded, size: 18),
+            tooltip: 'تكبير اللوحة',
+            onPressed: () {
+              final val = _interactiveController.value.clone()..scale(1.2, 1.2);
+              _interactiveController.value = val;
+            },
+            visualDensity: VisualDensity.compact,
+          ),
+          // Zoom Out
+          IconButton(
+            icon: const Icon(Icons.zoom_out_rounded, size: 18),
+            tooltip: 'تصغير اللوحة',
+            onPressed: () {
+              final val = _interactiveController.value.clone()..scale(0.833, 0.833);
+              _interactiveController.value = val;
+            },
+            visualDensity: VisualDensity.compact,
+          ),
+          // Reset Zoom
+          IconButton(
+            icon: const Icon(Icons.restart_alt_rounded, size: 18),
+            tooltip: 'إعادة ضبط العرض',
+            onPressed: () {
+              _interactiveController.value = Matrix4.identity();
+            },
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 8),
+          Container(width: 1, height: 20, color: isDark ? Colors.white24 : Colors.black12),
+          const SizedBox(width: 10),
+          Icon(
+            _isSocketConnected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+            size: 16,
+            color: _isSocketConnected ? const Color(0xFF10B981) : Colors.amber,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _isSocketConnected ? 'الربط اللحظي للتحديثات: نشط 🟢' : 'جاري الاتصال بالسيرفر...',
+            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.icon(
+            onPressed: () {
+              final outdated = _allFleetDevices.where((d) => !d.isUpdated).toList();
+              if (outdated.isNotEmpty) {
+                _triggerDevicePull(outdated.first);
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.16),
+              foregroundColor: const Color(0xFF10B981),
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.downloading_rounded, size: 14),
+            label: const Text('⚡ تجربة سحب جهاز', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
     );
   }
 

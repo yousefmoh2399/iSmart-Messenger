@@ -62,13 +62,29 @@ function requestTelemetryMiddleware(req, res, next) {
         statusCode: sc,
         durationMs: duration,
         clientIp: req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "-",
-        user: req.user ? { username: req.user.username, fullName: req.user.fullName, role: req.user.role } : null,
+        user: req.user
+          ? {
+              username: req.user.username,
+              fullName: req.user.fullName,
+              role: req.user.role,
+              branchCode: req.user.branchCode || "MAIN",
+              deviceUid: req.user.deviceUid || null,
+            }
+          : null,
       };
 
       recentRequests.unshift(entry);
       if (recentRequests.length > MAX_RECENT_REQUESTS) {
         recentRequests.pop();
       }
+
+      // Real-time Socket.IO emission to connected admin monitors
+      try {
+        const io = req.app?.get?.("io");
+        if (io) {
+          io.emit("api_request_telemetry", entry);
+        }
+      } catch (_) {}
     }
   });
 
