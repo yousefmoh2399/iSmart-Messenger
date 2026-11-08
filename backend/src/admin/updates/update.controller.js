@@ -252,6 +252,26 @@ const downloadReleaseArtifact = (req, res, next) => {
       } else {
         res.setHeader("Content-Length", fileSize);
         const stream = fsSync.createReadStream(filePath);
+        let bytesSent = 0;
+        let lastEmittedPct = 5;
+        stream.on("data", (chunk) => {
+          bytesSent += chunk.length;
+          if (clientDeviceUid && fileSize > 0) {
+            const pct = Math.min(95, Math.round((bytesSent / fileSize) * 100));
+            if (pct - lastEmittedPct >= 15) {
+              lastEmittedPct = pct;
+              emitUpdateTelemetry(req, {
+                action: "download_progress",
+                releaseId: req.params.id,
+                deviceUid: clientDeviceUid,
+                status: "downloading",
+                phase: "pulling",
+                progress: pct,
+                message: `جاري سحب حزمة التحديث من السيرفر (${pct}%)`,
+              });
+            }
+          }
+        });
         stream.on("error", (err) => {
           console.error(
             `[UpdateController] Stream error for ${req.params.id}:`,
