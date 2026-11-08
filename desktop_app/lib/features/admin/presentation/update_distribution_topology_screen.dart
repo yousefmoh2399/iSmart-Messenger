@@ -10,17 +10,11 @@ import '../../chat/data/chat_socket_service.dart';
 import '../../chat/models/chat_models.dart';
 import '../models/update_management_models.dart';
 
-/// Supported view modes for update distribution.
-enum _UpdateTopologyViewMode {
-  flowMap,   // Structured 3-Tier Enterprise Flow Map (Zero overlap, clean bus routing)
-  fleetGrid, // High-speed responsive cards matrix by branch
-}
-
-/// State of an individual device in the update distribution mesh.
+/// State of an individual device in the update distribution network.
 enum _UpdateDevicePhase {
-  outdated,    // 🔴 Red: Outdated version, waiting for update
-  pulling,     // 🔴 Pulse: Actively pulling/downloading update chunks from server
-  completed,   // 🟢 Green: Successfully updated to target version!
+  outdated,  // 🔴 Red: Outdated version, waiting for update
+  pulling,   // 🔴 Rose Pulse: Actively pulling/downloading update chunks from server
+  completed, // 🟢 Green: Successfully updated to target version!
 }
 
 /// Representation of a branch cluster containing its fleet of devices.
@@ -28,17 +22,11 @@ class _UpdateBranchCluster {
   _UpdateBranchCluster({
     required this.branchCode,
     required this.branchName,
-    required this.x,
-    required this.y,
-    required this.width,
     required this.devices,
   });
 
   final String branchCode;
   final String branchName;
-  final double x;
-  final double y;
-  final double width;
   final List<_UpdateTopologyDevice> devices;
 
   int get totalCount => devices.length;
@@ -47,7 +35,7 @@ class _UpdateBranchCluster {
   int get pullingCount => devices.where((d) => d.isPulling).length;
 }
 
-/// Dynamic simulation model for a device on the update canvas.
+/// Model for a device in the update distribution command center.
 class _UpdateTopologyDevice {
   _UpdateTopologyDevice({
     required this.id,
@@ -61,9 +49,6 @@ class _UpdateTopologyDevice {
     required this.targetVersion,
     required this.isOnline,
     required this.os,
-    required this.position,
-    required this.size,
-    required this.portOffset,
     this.phase = _UpdateDevicePhase.outdated,
     this.progress = 0.0,
     this.speedMbps = 0.0,
@@ -83,9 +68,6 @@ class _UpdateTopologyDevice {
   final String targetVersion;
   final bool isOnline;
   final String os;
-  Offset position;
-  final Size size;
-  final double portOffset;
 
   _UpdateDevicePhase phase;
   double progress; // 0.0 to 1.0
@@ -103,7 +85,7 @@ class _UpdateTopologyDevice {
       case _UpdateDevicePhase.completed:
         return const Color(0xFF10B981); // 🟢 Green
       case _UpdateDevicePhase.pulling:
-        return const Color(0xFFF43F5E); // 🔴 Rose / Pulse Red
+        return const Color(0xFFF43F5E); // 🔴 Rose / Active Pull
       case _UpdateDevicePhase.outdated:
         return const Color(0xFFEF4444); // 🔴 Red
     }
@@ -123,35 +105,9 @@ class _UpdateTopologyDevice {
   }
 }
 
-/// Data packet streaming update chunks from Server to Device along structured bus wires.
-class _UpdateDataPacket {
-  _UpdateDataPacket({
-    required this.id,
-    required this.targetDeviceId,
-    required this.label,
-    required this.color,
-    required this.startedAt,
-    required this.duration,
-    required this.portOffset,
-  });
-
-  final String id;
-  final String targetDeviceId;
-  final String label;
-  final Color color;
-  final DateTime startedAt;
-  final Duration duration;
-  final double portOffset;
-
-  double progress(DateTime now) {
-    final elapsed = now.difference(startedAt).inMilliseconds;
-    return (elapsed / duration.inMilliseconds).clamp(0.0, 1.0);
-  }
-
-  bool isFinished(DateTime now) => progress(now) >= 1.0;
-}
-
-/// Dedicated full screen or embedded widget for the n8n-style update distribution network.
+/// High-performance, zero-lag, 100% organized n8n-style Update Distribution Network.
+/// Uses native responsive Flutter layout (zero overlapping cards, zero crossing wires,
+/// zero 60fps canvas lag).
 class UpdateDistributionTopologyScreen extends ConsumerStatefulWidget {
   const UpdateDistributionTopologyScreen({
     super.key,
@@ -176,40 +132,23 @@ class UpdateDistributionTopologyScreen extends ConsumerStatefulWidget {
 }
 
 class _UpdateDistributionTopologyScreenState
-    extends ConsumerState<UpdateDistributionTopologyScreen>
-    with TickerProviderStateMixin {
-  late final TransformationController _transController;
-  late final AnimationController _pulseController;
-  late final AnimationController _flyAnimController;
-  Animation<Matrix4>? _flyMatrixAnimation;
-
-  Timer? _livePullTicker;
+    extends ConsumerState<UpdateDistributionTopologyScreen> {
   Timer? _fleetRolloutTimer;
-  Timer? _packetCleanTimer;
+  final List<Timer> _devicePullTimers = [];
 
-  _UpdateTopologyViewMode _viewMode = _UpdateTopologyViewMode.flowMap;
-
-  final List<_UpdateTopologyDevice> _canvasDevices = [];
+  final List<_UpdateTopologyDevice> _allDevices = [];
   final Map<String, _UpdateTopologyDevice> _devicesMap = {};
   final List<_UpdateBranchCluster> _branchClusters = [];
-  final List<_UpdateDataPacket> _packets = [];
   final List<Map<String, dynamic>> _distributionLogs = [];
-
-  // Server Node Coordinates
-  late Offset _serverPosition;
-  final Size _serverSize = const Size(380, 116);
 
   String _targetVersion = '1.1.22';
   ManagedUpdateRelease? _activeRelease;
 
   bool _isAutoRolloutActive = false;
   String _searchFilter = '';
-  final String _selectedBranch = 'all';
+  String _statusFilter = 'all'; // 'all', 'completed', 'pulling', 'outdated'
+  String _selectedBranch = 'all';
   String? _selectedDeviceId;
-
-  double _canvasWidth = 1600;
-  double _canvasHeight = 900;
-  Size _viewportSize = Size.zero;
 
   bool _showConsole = false;
   StreamSubscription<ChatSocketEvent>? _socketSub;
@@ -218,45 +157,14 @@ class _UpdateDistributionTopologyScreenState
   @override
   void initState() {
     super.initState();
-    _transController = TransformationController();
-
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 1),
-    )..repeat();
-
-    _flyAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
-    _flyAnimController.addListener(() {
-      if (_flyMatrixAnimation != null) {
-        _transController.value = _flyMatrixAnimation!.value;
-      }
-    });
-
     _initTargetRelease();
     _buildDistributionMesh();
     _buildInitialLogs();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _fitCanvasToScreen(animated: false);
         _listenToLiveSocket();
       }
-    });
-
-    // Dedicated packet cleaner timer: removes completed packets cleanly without setState churn
-    _packetCleanTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted) return;
-      final now = DateTime.now();
-      _packets.removeWhere((p) => p.isFinished(now));
-    });
-
-    // Start background traffic ticker (natural background packet movements)
-    _livePullTicker = Timer.periodic(const Duration(milliseconds: 1600), (_) {
-      if (!mounted) return;
-      _spawnBackgroundUpdatePacket();
     });
   }
 
@@ -274,12 +182,10 @@ class _UpdateDistributionTopologyScreenState
   @override
   void dispose() {
     _socketSub?.cancel();
-    _livePullTicker?.cancel();
     _fleetRolloutTimer?.cancel();
-    _packetCleanTimer?.cancel();
-    _pulseController.dispose();
-    _flyAnimController.dispose();
-    _transController.dispose();
+    for (final t in _devicePullTimers) {
+      t.cancel();
+    }
     super.dispose();
   }
 
@@ -299,13 +205,13 @@ class _UpdateDistributionTopologyScreenState
       'time': _formatTime(now.subtract(const Duration(seconds: 2))),
       'level': 'SUCCESS',
       'source': 'ReleaseHub',
-      'message': 'خادم التحديثات المركزي: الإصدار v$_targetVersion معتمد ومتاح بنظام التجزئة (Chunked Deployment).',
+      'message': 'خادم التحديثات المركزي جاهز بالنسخة المعتمدة v$_targetVersion (🟢 أخضر).',
     });
     _distributionLogs.add({
       'time': _formatTime(now.subtract(const Duration(seconds: 6))),
       'level': 'INFO',
       'source': 'SocketRouter',
-      'message': 'تم فحص أجهزة الفروع، تم العثور على أجهزة تعمل بإصدارات سابقة وبحاجة للتحديث.',
+      'message': 'تم تنظيم أجهزة الفروع حسب الحالة: الأخضر (محدث) والأحمر (بحاجة لسحب التحديث).',
     });
   }
 
@@ -354,9 +260,8 @@ class _UpdateDistributionTopologyScreenState
     final targetVer = (data['targetVersion'] ?? _targetVersion).toString();
     final speed = (data['speed'] ?? '15.2 MB/s').toString();
 
-    // 1. Locate existing device in _canvasDevices
     _UpdateTopologyDevice? match;
-    for (final dev in _canvasDevices) {
+    for (final dev in _allDevices) {
       if ((deviceId.isNotEmpty && dev.id == deviceId) ||
           (deviceUid.isNotEmpty && dev.id == deviceUid) ||
           (hostName.isNotEmpty && dev.hostname.toLowerCase() == hostName.toLowerCase()) ||
@@ -380,7 +285,7 @@ class _UpdateDistributionTopologyScreenState
         _logEvent(
           'SUCCESS',
           dev.hostname,
-          '✅ [Live Telemetry] اكتمل سحب وتثبيت التحديث v$targetVer بنجاح! تحول الجهاز للون الأخضر والمطابقة.',
+          '✅ [Live Telemetry] اكتمل سحب وتثبيت التحديث v$targetVer بنجاح! تحول الجهاز للون الأخضر.',
         );
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -408,12 +313,11 @@ class _UpdateDistributionTopologyScreenState
         });
         _logEvent('ERROR', dev.hostname, '❌ [Live Telemetry] فشل سحب التحديث: $message');
       } else {
-        // downloading, acknowledged, installing, pulling
         final wasNotPulling = dev.phase != _UpdateDevicePhase.pulling;
         setState(() {
           dev.phase = _UpdateDevicePhase.pulling;
           dev.progress = progressVal.clamp(0.08, 0.95);
-          dev.speedMbps = 15.0;
+          dev.speedMbps = 15.4;
           dev.chunksPulled = (dev.progress * dev.totalChunks).round().clamp(1, dev.totalChunks);
         });
 
@@ -423,9 +327,6 @@ class _UpdateDistributionTopologyScreenState
             dev.hostname,
             '⬇️ [Live Telemetry] بدأ الجهاز بسحب التحديث v$targetVer فوراً من السيرفر بسرعة $speed!',
           );
-          _launchUpdatePacket(dev, '📦 حزمة تحديث v$targetVer');
-        } else {
-          _launchUpdatePacket(dev, '⬇️ سحب ${(dev.progress * 100).toInt()}% ($speed)');
         }
       }
     } else if (deviceUid.isNotEmpty || hostName.isNotEmpty) {
@@ -437,14 +338,19 @@ class _UpdateDistributionTopologyScreenState
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // MESH BUILDER: STRUCTURED 3-TIER ENTERPRISE TOPOLOGY (ZERO COLLISION)
+  // DATA BUILDER: ORGANIZED BRANCH CLUSTERS
   // ══════════════════════════════════════════════════════════════════════════════
   void _buildDistributionMesh() {
-    _canvasDevices.clear();
+    // Preserve existing phase/progress if rebuilding on filter change
+    final previousStates = <String, ({_UpdateDevicePhase phase, double progress, int chunks})>{};
+    for (final old in _allDevices) {
+      previousStates[old.id] = (phase: old.phase, progress: old.progress, chunks: old.chunksPulled);
+    }
+
+    _allDevices.clear();
     _devicesMap.clear();
     _branchClusters.clear();
 
-    // 1. Gather devices from props or demo fallback
     final rawList = <Map<String, dynamic>>[];
 
     if (widget.devices.isNotEmpty) {
@@ -470,7 +376,7 @@ class _UpdateDistributionTopologyScreenState
           'id': d.id,
           'hostname': host,
           'cashierName': cashier,
-          'username': d.lastKnownUsername,
+          'username': d.lastKnownUsername ?? '-',
           'branchName': bName,
           'branchCode': d.branchCode,
           'ipAddress': d.localIp ?? '192.168.${d.branchCode}.15',
@@ -480,7 +386,6 @@ class _UpdateDistributionTopologyScreenState
         });
       }
     } else {
-      // Fallback fleet representing real multi-branch workstations
       rawList.addAll([
         {
           'id': 'dev_hrm_01',
@@ -557,110 +462,76 @@ class _UpdateDistributionTopologyScreenState
       ]);
     }
 
-    // Filter devices
-    final filtered = rawList.where((d) {
-      if (_selectedBranch != 'all' && d['branchCode'] != _selectedBranch) return false;
+    for (final d in rawList) {
+      final id = d['id'] as String;
+      final isAlreadyTarget = d['version'] == _targetVersion;
+      final prev = previousStates[id];
+
+      final dev = _UpdateTopologyDevice(
+        id: id,
+        hostname: d['hostname'] as String,
+        cashierName: d['cashierName'] as String,
+        username: d['username'] as String,
+        branchName: d['branchName'] as String,
+        branchCode: d['branchCode'] as String,
+        ipAddress: d['ipAddress'] as String,
+        originalVersion: d['version'] as String,
+        targetVersion: _targetVersion,
+        isOnline: d['isOnline'] as bool,
+        os: d['os'] as String,
+        phase: prev != null
+            ? prev.phase
+            : (isAlreadyTarget ? _UpdateDevicePhase.completed : _UpdateDevicePhase.outdated),
+        progress: prev != null ? prev.progress : (isAlreadyTarget ? 1.0 : 0.0),
+        chunksPulled: prev != null ? prev.chunks : (isAlreadyTarget ? 10 : 0),
+      );
+
+      _allDevices.add(dev);
+      _devicesMap[dev.id] = dev;
+    }
+
+    _rebuildFilteredClusters();
+  }
+
+  void _rebuildFilteredClusters() {
+    _branchClusters.clear();
+
+    final filtered = _allDevices.where((dev) {
+      if (_selectedBranch != 'all' && dev.branchCode != _selectedBranch) return false;
+      if (_statusFilter == 'completed' && !dev.isCompleted) return false;
+      if (_statusFilter == 'pulling' && !dev.isPulling) return false;
+      if (_statusFilter == 'outdated' && !dev.isOutdated) return false;
+
       if (_searchFilter.isNotEmpty) {
         final q = _searchFilter.toLowerCase();
-        final matchHost = (d['hostname'] as String).toLowerCase().contains(q);
-        final matchName = (d['cashierName'] as String).toLowerCase().contains(q);
-        final matchBranch = (d['branchName'] as String).toLowerCase().contains(q);
-        final matchIp = (d['ipAddress'] as String).contains(q);
+        final matchHost = dev.hostname.toLowerCase().contains(q);
+        final matchName = dev.cashierName.toLowerCase().contains(q);
+        final matchBranch = dev.branchName.toLowerCase().contains(q);
+        final matchIp = dev.ipAddress.contains(q);
         if (!matchHost && !matchName && !matchBranch && !matchIp) return false;
       }
       return true;
     }).toList();
 
-    // 2. Group devices by branch
-    final Map<String, List<Map<String, dynamic>>> branchGroups = {};
-    for (final d in filtered) {
-      final bCode = d['branchCode'] as String;
-      branchGroups.putIfAbsent(bCode, () => []).add(d);
+    final Map<String, List<_UpdateTopologyDevice>> branchGroups = {};
+    for (final dev in filtered) {
+      branchGroups.putIfAbsent(dev.branchCode, () => []).add(dev);
     }
 
-    // 3. Layout geometry calculations:
-    // Top Server Node: Top Center (X_center, Y=36)
-    // Horizontal Distribution Bus at Y=190
-    // Branch Column Headers at Y=230
-    // Device Cards stack neatly at Y=290, 396, 502...
-    const cardWidth = 280.0;
-    const cardHeight = 90.0;
-    const colWidth = 280.0;
-    const colGap = 36.0;
-
-    final branchCodes = branchGroups.keys.toList();
-    final totalCols = math.max(branchCodes.length, 1);
-    final totalColumnsWidth = totalCols * colWidth + (totalCols - 1) * colGap;
-
-    _canvasWidth = math.max(totalColumnsWidth + 160.0, 1500.0);
-
-    // Calculate max height based on the branch with the most devices
-    int maxDevicesInBranch = 1;
-    for (final list in branchGroups.values) {
-      if (list.length > maxDevicesInBranch) {
-        maxDevicesInBranch = list.length;
-      }
-    }
-    _canvasHeight = math.max(300.0 + (maxDevicesInBranch * (cardHeight + 16.0)) + 120.0, 780.0);
-
-    final centerX = _canvasWidth / 2.0;
-    _serverPosition = Offset(centerX - (_serverSize.width / 2.0), 36.0);
-
-    final startX = (centerX - (totalColumnsWidth / 2.0)).clamp(40.0, double.infinity);
-
-    // Build branch clusters and place devices with ZERO collision
-    for (int col = 0; col < branchCodes.length; col++) {
-      final bCode = branchCodes[col];
-      final devList = branchGroups[bCode]!;
-      final colX = startX + col * (colWidth + colGap);
-      final colY = 230.0;
-
-      final clusterDevs = <_UpdateTopologyDevice>[];
-
-      for (int row = 0; row < devList.length; row++) {
-        final d = devList[row];
-        final devX = colX;
-        final devY = 290.0 + (row * (cardHeight + 14.0));
-        final isAlreadyTarget = d['version'] == _targetVersion;
-
-        final dev = _UpdateTopologyDevice(
-          id: d['id'] as String,
-          hostname: d['hostname'] as String,
-          cashierName: d['cashierName'] as String,
-          username: d['username'] as String,
-          branchName: d['branchName'] as String,
-          branchCode: d['branchCode'] as String,
-          ipAddress: d['ipAddress'] as String,
-          originalVersion: d['version'] as String,
-          targetVersion: _targetVersion,
-          isOnline: d['isOnline'] as bool,
-          os: d['os'] as String,
-          position: Offset(devX, devY),
-          size: const Size(cardWidth, cardHeight),
-          portOffset: 0.5,
-          phase: isAlreadyTarget ? _UpdateDevicePhase.completed : _UpdateDevicePhase.outdated,
-          progress: isAlreadyTarget ? 1.0 : 0.0,
-        );
-
-        _canvasDevices.add(dev);
-        _devicesMap[dev.id] = dev;
-        clusterDevs.add(dev);
-      }
-
-      final bName = devList.isNotEmpty ? (devList.first['branchName'] as String) : 'فرع $bCode';
+    for (final entry in branchGroups.entries) {
+      final bCode = entry.key;
+      final devs = entry.value;
+      final bName = devs.isNotEmpty ? devs.first.branchName : 'فرع $bCode';
       _branchClusters.add(_UpdateBranchCluster(
         branchCode: bCode,
         branchName: bName,
-        x: colX,
-        y: colY,
-        width: colWidth,
-        devices: clusterDevs,
+        devices: devs,
       ));
     }
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // SIMULATION & PULL ACTIONS (Device transitions Red ➔ Green)
+  // PULL & ROLLOUT ACTIONS (RED ➔ ROSE PROGRESS ➔ GREEN)
   // ══════════════════════════════════════════════════════════════════════════════
   void _triggerDevicePull(_UpdateTopologyDevice dev) {
     if (dev.isPulling || dev.isCompleted) return;
@@ -669,32 +540,30 @@ class _UpdateDistributionTopologyScreenState
     setState(() {
       dev.phase = _UpdateDevicePhase.pulling;
       dev.progress = 0.1;
-      dev.speedMbps = 12.4 + math.Random().nextDouble() * 8.0;
+      dev.speedMbps = 14.2 + math.Random().nextDouble() * 6.0;
       dev.chunksPulled = 1;
+      _rebuildFilteredClusters();
     });
 
-    _logEvent('INFO', dev.hostname, 'بدء سحب حزم التحديث v$_targetVersion من السيرفر المركزي (1/10)...');
+    _logEvent('INFO', dev.hostname, '⬇️ بدء سحب حزم التحديث v$_targetVersion من السيرفر المركزي (1/10)...');
 
-    // Trigger real backend job if active release and real device ID
     if (_activeRelease != null && dev.id.length == 24) {
       unawaited(
         ref.read(updateManagementRepositoryProvider).createUpdateJob(
           releaseId: _activeRelease!.id,
           targetType: 'devices',
           targetDeviceIds: [dev.id],
-          note: 'Triggered from n8n Live Map for ${dev.hostname}',
+          note: 'Triggered from Update Distribution Center for ${dev.hostname}',
         ).then((_) {
-          _logEvent('SUCCESS', dev.hostname, '📡 تم إرسال أمر التحديث للسيرفر بنجاح عبر API.');
+          _logEvent('SUCCESS', dev.hostname, '📡 تم إرسال أمر التحديث الفعلي للسيرفر بنجاح عبر API.');
         }).catchError((err) {
           _logEvent('WARN', dev.hostname, 'تنبيه: محاكاة التحديث تعمل محلياً (${err.toString()})');
         }),
       );
     }
 
-    // Launch moving update packet from Server to this Device along bus wires
-    _launchUpdatePacket(dev, '📦 حزمة تحديث v$_targetVersion');
-
-    Timer.periodic(const Duration(milliseconds: 380), (timer) {
+    late final Timer pullTimer;
+    pullTimer = Timer.periodic(const Duration(milliseconds: 350), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -703,17 +572,17 @@ class _UpdateDistributionTopologyScreenState
         setState(() {
           dev.chunksPulled++;
           dev.progress = (dev.chunksPulled / dev.totalChunks).clamp(0.0, 1.0);
-          dev.speedMbps = 14.0 + math.Random().nextDouble() * 6.0;
+          dev.speedMbps = 14.5 + math.Random().nextDouble() * 5.5;
         });
-        _launchUpdatePacket(dev, '⬇️ سحب Chunk ${dev.chunksPulled}/10');
       } else {
         timer.cancel();
-        // Completed! Turn from Red to Green!
+        _devicePullTimers.remove(pullTimer);
         HapticFeedback.heavyImpact();
         setState(() {
           dev.phase = _UpdateDevicePhase.completed;
           dev.progress = 1.0;
           dev.executionCount++;
+          _rebuildFilteredClusters();
         });
 
         _logEvent(
@@ -743,12 +612,26 @@ class _UpdateDistributionTopologyScreenState
         );
       }
     });
+    _devicePullTimers.add(pullTimer);
+  }
+
+  void _triggerBranchRollout(_UpdateBranchCluster cluster) {
+    final outdated = cluster.devices.where((d) => d.isOutdated).toList();
+    if (outdated.isEmpty) return;
+
+    HapticFeedback.mediumImpact();
+    _logEvent('INFO', cluster.branchName, '🚀 بدء سحب التحديث لجميع أجهزة ${cluster.branchName} (${outdated.length} أجهزة)...');
+    for (int i = 0; i < outdated.length; i++) {
+      Future.delayed(Duration(milliseconds: i * 350), () {
+        if (mounted) _triggerDevicePull(outdated[i]);
+      });
+    }
   }
 
   void _triggerFleetRollout() {
     if (_isAutoRolloutActive) return;
 
-    final outdatedList = _canvasDevices.where((d) => d.isOutdated && d.isOnline).toList();
+    final outdatedList = _allDevices.where((d) => d.isOutdated && d.isOnline).toList();
     if (outdatedList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -756,7 +639,7 @@ class _UpdateDistributionTopologyScreenState
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           content: const Text(
-            'كافة أجهزة المنظومة محدثة بالكامل إلى أحدث إصدار معتمد!',
+            'كافة أجهزة المنظومة محدثة بالكامل باللون الأخضر إلى أحدث إصدار معتمد!',
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
@@ -776,7 +659,7 @@ class _UpdateDistributionTopologyScreenState
         ref.read(updateManagementRepositoryProvider).createUpdateJob(
           releaseId: _activeRelease!.id,
           targetType: 'all',
-          note: 'Fleet rollout triggered from n8n Live Map',
+          note: 'Fleet rollout triggered from Update Distribution Center',
         ).then((_) {
           _logEvent('SUCCESS', 'Server', '📡 تم اعتماد وتعميم مهمة النشر الجماعي في قاعدة البيانات.');
         }).catchError((err) {
@@ -786,10 +669,10 @@ class _UpdateDistributionTopologyScreenState
     }
 
     int index = 0;
-    _fleetRolloutTimer = Timer.periodic(const Duration(milliseconds: 650), (timer) {
+    _fleetRolloutTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
       if (!mounted || index >= outdatedList.length) {
         timer.cancel();
-        setState(() => _isAutoRolloutActive = false);
+        if (mounted) setState(() => _isAutoRolloutActive = false);
         return;
       }
       final targetDev = outdatedList[index];
@@ -800,39 +683,21 @@ class _UpdateDistributionTopologyScreenState
 
   void _resetSimulation() {
     _fleetRolloutTimer?.cancel();
+    for (final t in _devicePullTimers) {
+      t.cancel();
+    }
+    _devicePullTimers.clear();
     HapticFeedback.selectionClick();
     setState(() {
       _isAutoRolloutActive = false;
-      for (final d in _canvasDevices) {
+      for (final d in _allDevices) {
         d.phase = _UpdateDevicePhase.outdated;
         d.progress = 0.0;
         d.chunksPulled = 0;
       }
-      _packets.clear();
+      _rebuildFilteredClusters();
       _buildInitialLogs();
     });
-  }
-
-  /// Launch moving update packet from Server to Device WITHOUT calling setState churn.
-  /// The pulse AnimatedBuilder handles rendering smoothly at 60fps.
-  void _launchUpdatePacket(_UpdateTopologyDevice dev, String label) {
-    _packets.add(_UpdateDataPacket(
-      id: 'pkt_upd_${DateTime.now().microsecondsSinceEpoch}',
-      targetDeviceId: dev.id,
-      label: label,
-      color: dev.accentColor,
-      startedAt: DateTime.now(),
-      duration: const Duration(milliseconds: 750),
-      portOffset: dev.portOffset,
-    ));
-  }
-
-  void _spawnBackgroundUpdatePacket() {
-    final activeOrPulling = _canvasDevices.where((d) => d.isPulling).toList();
-    if (activeOrPulling.isNotEmpty) {
-      final dev = activeOrPulling[math.Random().nextInt(activeOrPulling.length)];
-      _launchUpdatePacket(dev, '📦 حزمة تحديث (${(dev.progress * 100).toInt()}%)');
-    }
   }
 
   void _logEvent(String level, String source, String message) {
@@ -851,116 +716,88 @@ class _UpdateDistributionTopologyScreenState
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // RESPONSIVE AUTO-FIT & ZOOM (WORKS SMOOTHLY IN BOTH FULLSCREEN & EMBEDDED)
-  // ══════════════════════════════════════════════════════════════════════════════
-  void _fitCanvasToScreen({bool animated = true}) {
-    final mediaWidth = _viewportSize.width > 0 ? _viewportSize.width : MediaQuery.of(context).size.width;
-    final mediaHeight = _viewportSize.height > 0 ? _viewportSize.height : MediaQuery.of(context).size.height;
-
-    final availableWidth = mediaWidth - (_selectedDeviceId != null && mediaWidth >= 1150 ? 380 : 0);
-    final availableHeight = mediaHeight - (widget.isEmbedded ? 20 : 100);
-
-    final scaleW = availableWidth / _canvasWidth;
-    final scaleH = availableHeight / _canvasHeight;
-    final scale = (math.min(scaleW, scaleH) * 0.96).clamp(0.35, 1.15);
-
-    final targetX = (availableWidth - (_canvasWidth * scale)) / 2;
-    final targetY = (availableHeight - (_canvasHeight * scale)) / 2;
-
-    final targetMatrix = Matrix4.identity()
-      ..translate(targetX, targetY)
-      ..scale(scale);
-
-    if (animated) {
-      _flyMatrixAnimation = Matrix4Tween(
-        begin: _transController.value,
-        end: targetMatrix,
-      ).animate(CurvedAnimation(
-        parent: _flyAnimController,
-        curve: Curves.easeOutCubic,
-      ));
-      _flyAnimController.forward(from: 0.0);
-    } else {
-      _transController.value = targetMatrix;
-    }
-  }
-
-  void _zoomBy(double factor) {
-    final curMatrix = _transController.value;
-    final mediaWidth = _viewportSize.width > 0 ? _viewportSize.width : MediaQuery.of(context).size.width;
-    final mediaHeight = _viewportSize.height > 0 ? _viewportSize.height : MediaQuery.of(context).size.height;
-    final center = Offset(mediaWidth / 2, mediaHeight / 2);
-
-    final newMatrix = curMatrix.clone()
-      ..translate(center.dx, center.dy)
-      ..scale(factor)
-      ..translate(-center.dx, -center.dy);
-
-    _transController.value = newMatrix;
-  }
-
-  void _resetZoom() {
-    _fitCanvasToScreen(animated: true);
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // MAIN BUILD
+  // MAIN BUILD (100% NATIVE RESPONSIVE SCROLLING LAYOUT - ZERO LAG)
   // ══════════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final totalCount = _canvasDevices.length;
-    final completedCount = _canvasDevices.where((d) => d.isCompleted).length;
-    final outdatedCount = _canvasDevices.where((d) => d.isOutdated).length;
-    final pullingCount = _canvasDevices.where((d) => d.isPulling).length;
+    final totalCount = _allDevices.length;
+    final completedCount = _allDevices.where((d) => d.isCompleted).length;
+    final outdatedCount = _allDevices.where((d) => d.isOutdated).length;
+    final pullingCount = _allDevices.where((d) => d.isPulling).length;
 
     final content = LayoutBuilder(
       builder: (context, constraints) {
-        _viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
-        final isWideScreen = constraints.maxWidth >= 1150;
+        final isWideScreen = constraints.maxWidth >= 1100;
 
         return Column(
           children: [
-            // 1. TOP HEADER & TELEMETRY STRIP
+            // 1. TOP COMMAND TOOLBAR
             _buildTopToolbar(isDark, totalCount, completedCount, outdatedCount, pullingCount),
 
-            // 2. MAIN WORKSPACE VIEW
+            // 2. MAIN WORKSPACE AREA
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    child: Stack(
+                    child: Column(
                       children: [
-                        if (_viewMode == _UpdateTopologyViewMode.flowMap)
-                          _buildStructuredFlowMap(isDark)
-                        else
-                          _buildBranchFleetMatrix(isDark),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // TIER 1: CENTRAL UPDATE SERVER HUB (GREEN MASTER NODE)
+                                _buildCentralServerHeroCard(
+                                  isDark: isDark,
+                                  totalCount: totalCount,
+                                  completedCount: completedCount,
+                                  pullingCount: pullingCount,
+                                  outdatedCount: outdatedCount,
+                                ),
 
-                        // Floating HUD Navigation (Zoom Controls in Map Mode)
-                        if (_viewMode == _UpdateTopologyViewMode.flowMap)
-                          Positioned(
-                            left: 20,
-                            bottom: _showConsole ? 220 : 20,
-                            child: _buildFloatingControls(isDark),
+                                // VISUAL PIPELINE CONNECTOR (SERVER ➔ BRANCHES)
+                                _buildVisualDistributionPipeline(
+                                  isDark: isDark,
+                                  pullingCount: pullingCount,
+                                  completedCount: completedCount,
+                                  totalCount: totalCount,
+                                ),
+
+                                // FILTER & SEARCH BAR FOR BRANCHES
+                                _buildFilterAndBranchBar(
+                                  isDark: isDark,
+                                  totalCount: totalCount,
+                                  completedCount: completedCount,
+                                  pullingCount: pullingCount,
+                                  outdatedCount: outdatedCount,
+                                ),
+                                const SizedBox(height: 16),
+
+                                // TIER 2: ORGANIZED BRANCH CLUSTERS & DEVICE CARDS
+                                if (_branchClusters.isEmpty)
+                                  _buildEmptyState(isDark)
+                                else
+                                  for (final cluster in _branchClusters)
+                                    _buildBranchClusterPanel(cluster, isDark),
+                              ],
+                            ),
                           ),
-
-                        // Bottom Live Distribution Terminal
-                        Positioned(
-                          bottom: 16,
-                          left: _viewMode == _UpdateTopologyViewMode.flowMap ? 180 : 16,
-                          right: 16,
-                          child: _buildBottomConsole(isDark),
                         ),
+
+                        // BOTTOM COLLAPSIBLE LIVE TELEMETRY CONSOLE
+                        _buildBottomConsole(isDark),
                       ],
                     ),
                   ),
 
-                  // Side Device Inspector (Wide Screens)
+                  // SIDE DEVICE INSPECTOR (Wide Screens)
                   if (isWideScreen && _selectedDeviceId != null)
                     SizedBox(
-                      width: 380,
+                      width: 360,
                       child: _buildDeviceInspector(isDark),
                     ),
                 ],
@@ -974,11 +811,11 @@ class _UpdateDistributionTopologyScreenState
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: isDark ? const Color(0xFF10131A) : const Color(0xFFF8FAFC),
+        backgroundColor: isDark ? const Color(0xFF0D1117) : const Color(0xFFF8FAFC),
         body: SafeArea(child: content),
-        endDrawer: _selectedDeviceId != null && MediaQuery.of(context).size.width < 1150
+        endDrawer: _selectedDeviceId != null && MediaQuery.of(context).size.width < 1100
             ? Drawer(
-                width: 380,
+                width: 360,
                 child: _buildDeviceInspector(isDark),
               )
             : null,
@@ -987,7 +824,7 @@ class _UpdateDistributionTopologyScreenState
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // 1. TOP HEADER & TELEMETRY STRIP
+  // 1. TOP COMMAND TOOLBAR (RESPONSIVE WRAP - ZERO OVERFLOW)
   // ══════════════════════════════════════════════════════════════════════════════
   Widget _buildTopToolbar(
     bool isDark,
@@ -997,9 +834,9 @@ class _UpdateDistributionTopologyScreenState
     int pullingCount,
   ) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF141722) : Colors.white,
+        color: isDark ? const Color(0xFF141824) : Colors.white,
         border: Border(
           bottom: BorderSide(
             color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
@@ -1007,697 +844,770 @@ class _UpdateDistributionTopologyScreenState
           ),
         ),
       ),
-      child: Row(
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 10,
         children: [
-          if (!widget.isEmbedded) ...[
-            IconButton(
-              icon: const Icon(Icons.arrow_forward_rounded, size: 20),
-              tooltip: 'العودة',
-              onPressed: () => Navigator.of(context).pop(),
-              style: IconButton.styleFrom(
-                backgroundColor: isDark ? const Color(0xFF1E2536) : const Color(0xFFF1F5F9),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          // Title
-          Container(
-            padding: const EdgeInsets.all(5),
-            decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(7),
-            ),
-            child: const Icon(Icons.cloud_sync_rounded, size: 18, color: Color(0xFF10B981)),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // Title & Back Button
+          Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
+              if (!widget.isEmbedded) ...[
+                IconButton(
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+                  tooltip: 'العودة',
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: IconButton.styleFrom(
+                    backgroundColor: isDark ? const Color(0xFF1E2536) : const Color(0xFFF1F5F9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.hub_rounded, size: 20, color: Color(0xFF10B981)),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'شبكة سحب وتوزيع التحديثات المباشرة',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'شبكة سحب وتوزيع التحديثات المباشرة (n8n Live Network)',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'السيرفر: v$_targetVersion 🟢',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF10B981),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(4),
+                  const SizedBox(height: 2),
+                  Text(
+                    'السيرفر باللون الأخضر يغذي الفروع: الأجهزة القديمة باللون الأحمر تتحول للأخضر فور اكتمال السحب',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                     ),
-                    child: Text(
-                      'v$_targetVersion معتمد',
-                      style: const TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF10B981),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          // Actions & Live Socket Badge
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // WebSocket Live Indicator
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: (_isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444))
+                      .withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: (_isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444))
+                        .withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 6),
+                    Text(
+                      _isSocketConnected ? 'ربط لحظي بالسيرفر (WebSocket)' : 'محاكاة محلية',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: _isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              Text(
-                'مراقبة فورية منظمة: السيرفر يغذي الفروع عبر مسارات توزيع ذكية بدون أي تداخل',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              const SizedBox(width: 10),
+
+              // Push Update to All Button
+              FilledButton.icon(
+                onPressed: _isAutoRolloutActive ? null : _triggerFleetRollout,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: _isAutoRolloutActive
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.rocket_launch_rounded, size: 16),
+                label: Text(
+                  _isAutoRolloutActive ? 'جارٍ سحب التحديث للفروع...' : 'نشر التحديث لكل الفروع الآن',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Reset Simulation Button
+              OutlinedButton.icon(
+                onPressed: _resetSimulation,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: BorderSide(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                  ),
+                ),
+                icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                label: const Text(
+                  'إعادة المحاكاة',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
-          ),
-          const Spacer(),
-
-          // View Mode Switcher Pills
-          Container(
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E2536) : const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _viewModeButton(
-                  mode: _UpdateTopologyViewMode.flowMap,
-                  icon: Icons.account_tree_rounded,
-                  label: 'مخطط التوزيع',
-                  isDark: isDark,
-                ),
-                _viewModeButton(
-                  mode: _UpdateTopologyViewMode.fleetGrid,
-                  icon: Icons.grid_view_rounded,
-                  label: 'مصفوفة الأجهزة',
-                  isDark: isDark,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // Search Field
-          SizedBox(
-            width: 140,
-            height: 32,
-            child: TextField(
-              onChanged: (val) {
-                setState(() {
-                  _searchFilter = val.trim();
-                  _buildDistributionMesh();
-                });
-              },
-              style: TextStyle(fontSize: 11, color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
-                hintText: 'بحث بالجهاز...',
-                hintStyle: const TextStyle(fontSize: 10.5),
-                prefixIcon: const Icon(Icons.search_rounded, size: 14),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                filled: true,
-                fillColor: isDark ? const Color(0xFF1E2536) : const Color(0xFFF1F5F9),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-
-          // WebSocket Live Indicator
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: (_isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: (_isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.3),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: _isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _isSocketConnected ? 'بث لحظي' : 'غير متصل',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: _isSocketConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-
-          // Status Counters
-          _statusPill('إجمالي', totalCount, const Color(0xFF64748B), isDark),
-          const SizedBox(width: 6),
-          _statusPill('محدث ✓', completedCount, const Color(0xFF10B981), isDark),
-          const SizedBox(width: 6),
-          _statusPill('يسحب ⬇️', pullingCount, const Color(0xFFF43F5E), isDark),
-          const SizedBox(width: 6),
-          _statusPill('قديم ⚠️', outdatedCount, const Color(0xFFEF4444), isDark),
-
-          const SizedBox(width: 12),
-
-          // Action: Fleet Rollout (Push to all outdated)
-          FilledButton.icon(
-            onPressed: _isAutoRolloutActive ? null : _triggerFleetRollout,
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            icon: _isAutoRolloutActive
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.rocket_launch_rounded, size: 15),
-            label: Text(
-              _isAutoRolloutActive ? 'جارٍ النشر...' : 'نشر التحديث للفروع',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // Reset Simulation
-          IconButton(
-            onPressed: _resetSimulation,
-            tooltip: 'إعادة المحاكاة',
-            icon: const Icon(Icons.restart_alt_rounded, size: 18),
-            style: IconButton.styleFrom(
-              backgroundColor: isDark ? const Color(0xFF1E2536) : const Color(0xFFF1F5F9),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _viewModeButton({
-    required _UpdateTopologyViewMode mode,
-    required IconData icon,
-    required String label,
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 2. TIER 1: CENTRAL UPDATE SERVER HERO CARD (GREEN)
+  // ══════════════════════════════════════════════════════════════════════════════
+  Widget _buildCentralServerHeroCard({
     required bool isDark,
+    required int totalCount,
+    required int completedCount,
+    required int pullingCount,
+    required int outdatedCount,
   }) {
-    final isSelected = _viewMode == mode;
-    return InkWell(
-      onTap: () {
-        setState(() => _viewMode = mode);
-        if (mode == _UpdateTopologyViewMode.flowMap) {
-          WidgetsBinding.instance.addPostFrameCallback((_) => _fitCanvasToScreen(animated: false));
-        }
-      },
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? (isDark ? const Color(0xFF2E384D) : Colors.white)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: isSelected
-              ? [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)]
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 14,
-              color: isSelected ? const Color(0xFF10B981) : (isDark ? Colors.white60 : Colors.black54),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                color: isSelected ? (isDark ? Colors.white : Colors.black87) : (isDark ? Colors.white60 : Colors.black54),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _statusPill(String label, int count, Color color, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label, style: TextStyle(fontSize: 9.5, color: isDark ? Colors.white70 : Colors.black87)),
-          const SizedBox(width: 4),
-          Text(
-            '$count',
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // VIEW MODE 1: STRUCTURED 3-TIER FLOW MAP (ZERO OVERLAP, CLEAN BUS LINES)
-  // ══════════════════════════════════════════════════════════════════════════════
-  Widget _buildStructuredFlowMap(bool isDark) {
-    return InteractiveViewer(
-      transformationController: _transController,
-      constrained: false,
-      boundaryMargin: const EdgeInsets.all(400),
-      minScale: 0.35,
-      maxScale: 2.2,
-      child: SizedBox(
-        width: _canvasWidth,
-        height: _canvasHeight,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            // Layer A: Static Grid (Cached)
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  size: Size(_canvasWidth, _canvasHeight),
-                  painter: _UpdateGridPainter(isDark: isDark),
-                ),
-              ),
-            ),
-
-            // Layer B: Clean Bus & Feeder Distribution Lines (Cached)
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _UpdateBusWiresPainter(
-                    serverPosition: _serverPosition,
-                    serverSize: _serverSize,
-                    branchClusters: _branchClusters,
-                    selectedDeviceId: _selectedDeviceId,
-                    isDark: isDark,
-                  ),
-                ),
-              ),
-            ),
-
-            // Layer C: Flowing Animated Update Packets
-            Positioned.fill(
-              child: AnimatedBuilder(
-                animation: _pulseController,
-                builder: (context, _) {
-                  return CustomPaint(
-                    painter: _UpdateFlowPacketsPainter(
-                      serverPosition: _serverPosition,
-                      serverSize: _serverSize,
-                      branchClusters: _branchClusters,
-                      devicesMap: _devicesMap,
-                      packets: _packets,
-                      now: DateTime.now(),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            // Layer D1: CENTRAL SERVER NODE (TOP CENTER)
-            Positioned(
-              left: _serverPosition.dx,
-              top: _serverPosition.dy,
-              child: _buildCentralServerNode(isDark),
-            ),
-
-            // Layer D2: BRANCH CLUSTER HEADERS & DEVICE CARDS (COLLISION-FREE)
-            for (final cluster in _branchClusters) ...[
-              // Branch Header Badge
-              Positioned(
-                left: cluster.x,
-                top: cluster.y,
-                child: _buildBranchHeaderBadge(cluster, isDark),
-              ),
-
-              // Device Cards
-              for (final dev in cluster.devices) ...[
-                Positioned(
-                  left: dev.position.dx,
-                  top: dev.position.dy,
-                  child: _buildDeviceNodeCard(dev, _selectedDeviceId == dev.id, isDark),
-                ),
-              ],
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // VIEW MODE 2: HIGH-SPEED RESPONSIVE FLEET MATRIX (ZERO PANNING NEEDED)
-  // ══════════════════════════════════════════════════════════════════════════════
-  Widget _buildBranchFleetMatrix(bool isDark) {
-    if (_branchClusters.isEmpty) {
-      return Center(
-        child: Text(
-          'لا توجد أجهزة مطابقة للبحث',
-          style: TextStyle(color: isDark ? Colors.white60 : Colors.black54),
-        ),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 90),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final cluster in _branchClusters) ...[
-            Container(
-              margin: const EdgeInsets.only(bottom: 18),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF141722) : Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Branch Header
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1A1F2E) : const Color(0xFFF1F5F9),
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF10B981)),
-                        const SizedBox(width: 8),
-                        Text(
-                          cluster.branchName,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'كود ${cluster.branchCode}',
-                            style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Color(0xFF10B981)),
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${cluster.completedCount} محدث • ${cluster.outdatedCount} قديم',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: cluster.outdatedCount > 0 ? const Color(0xFFEF4444) : const Color(0xFF10B981),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Device Cards Grid
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Wrap(
-                      spacing: 14,
-                      runSpacing: 14,
-                      children: [
-                        for (final dev in cluster.devices)
-                          _buildDeviceNodeCard(dev, _selectedDeviceId == dev.id, isDark),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // CENTRAL SERVER NODE (TOP CENTER)
-  // ══════════════════════════════════════════════════════════════════════════════
-  Widget _buildCentralServerNode(bool isDark) {
     const greenColor = Color(0xFF10B981);
     final fileName = _activeRelease?.fileName ?? 'iSmartMessenger-Setup-v$_targetVersion.exe';
     final fileSizeMb = _activeRelease != null && _activeRelease!.fileSize > 0
         ? (_activeRelease!.fileSize / (1024 * 1024)).toStringAsFixed(1)
         : '84.5';
+    final completionPercent = totalCount > 0 ? ((completedCount / totalCount) * 100).round() : 100;
 
     return Container(
-      width: _serverSize.width,
-      height: _serverSize.height,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF161B26) : Colors.white,
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF0E221D), const Color(0xFF141824)]
+              : [const Color(0xFFECFDF5), Colors.white],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+        ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: greenColor, width: 2.2),
+        border: Border.all(color: greenColor, width: 2.0),
         boxShadow: [
           BoxShadow(
-            color: greenColor.withValues(alpha: 0.35),
-            blurRadius: 20,
-            offset: const Offset(0, 5),
+            color: greenColor.withValues(alpha: isDark ? 0.20 : 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Stack(
-        clipBehavior: Clip.none,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Top Hub Status Tag
-          Positioned(
-            top: -10,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-              decoration: BoxDecoration(
-                color: greenColor,
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(color: greenColor.withValues(alpha: 0.45), blurRadius: 8),
-                ],
-              ),
-              child: const Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 16,
+            runSpacing: 12,
+            children: [
+              // Server Identity
+              Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.hub_rounded, color: Colors.white, size: 12),
-                  SizedBox(width: 4),
-                  Text(
-                    'خادم التحديثات المركزي • READY',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: greenColor.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: greenColor, width: 1.5),
                     ),
+                    child: const Icon(Icons.dns_rounded, color: greenColor, size: 26),
                   ),
-                ],
-              ),
-            ),
-          ),
-
-          // Output Trunk Port Center (Bottom)
-          Positioned(
-            left: (_serverSize.width / 2) - 6,
-            bottom: -6,
-            child: Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: greenColor,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-            ),
-          ),
-
-          // Content
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: greenColor.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: greenColor.withValues(alpha: 0.4)),
-                      ),
-                      child: const Icon(Icons.dns_rounded, color: greenColor, size: 22),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(width: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Row(
-                            children: [
-                              Text(
-                                'حزمة التحديث المعتمدة v$_targetVersion',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800,
-                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: greenColor.withValues(alpha: 0.18),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Text(
-                                  'معتمد',
-                                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: greenColor),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            fileName,
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontFamily: 'monospace',
-                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: greenColor,
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            child: const Text(
+                              'خادم التحديثات المركزي • ONLINE 🟢',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'الإصدار المرفوع والمعتمد: v$_targetVersion',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-
-                // Metrics Pill Row
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF10131A) : const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _serverMetric('الحجم', '$fileSizeMb MB', isDark),
-                      _serverMetric('البيئة', 'Windows x64', isDark),
-                      _serverMetric('البروتوكول', 'HTTP Stream / WS', isDark),
+                      const SizedBox(height: 4),
+                      Text(
+                        'ملف التوزيع: $fileName ($fileSizeMb MB) • بروتوكول: HTTP Chunked Stream + WebSocket Telemetry',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontFamily: 'monospace',
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                        ),
+                      ),
                     ],
                   ),
+                ],
+              ),
+
+              // 4 Live KPI Counters
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  _buildServerKpiBox(
+                    label: 'إجمالي الأجهزة',
+                    count: totalCount,
+                    color: const Color(0xFF38BDF8),
+                    icon: Icons.devices_rounded,
+                    isDark: isDark,
+                  ),
+                  _buildServerKpiBox(
+                    label: 'محدث بالأخضر ✓',
+                    count: completedCount,
+                    color: const Color(0xFF10B981),
+                    icon: Icons.check_circle_rounded,
+                    isDark: isDark,
+                  ),
+                  _buildServerKpiBox(
+                    label: 'يسحب الآن ⬇️',
+                    count: pullingCount,
+                    color: const Color(0xFFF43F5E),
+                    icon: Icons.downloading_rounded,
+                    isDark: isDark,
+                  ),
+                  _buildServerKpiBox(
+                    label: 'نسخة قديمة بالأحمر ⚠️',
+                    count: outdatedCount,
+                    color: const Color(0xFFEF4444),
+                    icon: Icons.warning_rounded,
+                    isDark: isDark,
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+          // Fleet Overall Progress Bar
+          Row(
+            children: [
+              Text(
+                'نسبة اكتمال تحديث الشبكة بالكامل: $completionPercent%',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: completionPercent == 100 ? greenColor : (isDark ? Colors.white70 : Colors.black87),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: totalCount > 0 ? (completedCount / totalCount).clamp(0.0, 1.0) : 1.0,
+                    minHeight: 8,
+                    backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                    valueColor: const AlwaysStoppedAnimation<Color>(greenColor),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _serverMetric(String label, String value, bool isDark) {
-    return Column(
-      children: [
-        Text(label, style: TextStyle(fontSize: 8.5, color: isDark ? Colors.white54 : Colors.black45)),
-        const SizedBox(height: 1),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF10B981)),
-        ),
-      ],
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════════
-  // BRANCH CLUSTER HEADER BADGE
-  // ══════════════════════════════════════════════════════════════════════════════
-  Widget _buildBranchHeaderBadge(_UpdateBranchCluster cluster, bool isDark) {
-    final hasOutdated = cluster.outdatedCount > 0;
-    final color = hasOutdated ? const Color(0xFFEF4444) : const Color(0xFF10B981);
-
+  Widget _buildServerKpiBox({
+    required String label,
+    required int count,
+    required Color color,
+    required IconData icon,
+    required bool isDark,
+  }) {
     return Container(
-      width: cluster.width,
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF161B26) : Colors.white,
+        color: isDark ? const Color(0xFF101520) : Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.6), width: 1.4),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1.2),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.storefront_rounded, size: 16, color: color),
+          Icon(icon, color: color, size: 17),
           const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  cluster.branchName,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: color,
+                  height: 1.1,
                 ),
+              ),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // VISUAL PIPELINE CONNECTOR (CLEAN NON-OVERLAPPING FLOW BUS)
+  // ══════════════════════════════════════════════════════════════════════════════
+  Widget _buildVisualDistributionPipeline({
+    required bool isDark,
+    required int pullingCount,
+    required int completedCount,
+    required int totalCount,
+  }) {
+    final isActivelyPulling = pullingCount > 0;
+    final busColor = isActivelyPulling ? const Color(0xFFF43F5E) : const Color(0xFF10B981);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        children: [
+          Container(
+            width: 3,
+            height: 16,
+            color: busColor.withValues(alpha: 0.6),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+            decoration: BoxDecoration(
+              color: busColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: busColor.withValues(alpha: 0.45)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isActivelyPulling ? Icons.downloading_rounded : Icons.hub_rounded,
+                  size: 14,
+                  color: busColor,
+                ),
+                const SizedBox(width: 6),
                 Text(
-                  'كود ${cluster.branchCode} • ${cluster.totalCount} كاشيرات',
+                  isActivelyPulling
+                      ? '⚡ جاري بث وسحب حزم التحديث الآن إلى $pullingCount جهاز بالفروع...'
+                      : 'مسار التوزيع المباشر من السيرفر المركزي إلى الفروع ($completedCount/$totalCount محدث)',
                   style: TextStyle(
-                    fontSize: 8.5,
-                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: busColor,
                   ),
                 ),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            width: 3,
+            height: 16,
+            color: busColor.withValues(alpha: 0.6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 3. FILTER & SEARCH BAR
+  // ══════════════════════════════════════════════════════════════════════════════
+  Widget _buildFilterAndBranchBar({
+    required bool isDark,
+    required int totalCount,
+    required int completedCount,
+    required int pullingCount,
+    required int outdatedCount,
+  }) {
+    // Collect unique branches for dropdown
+    final branchOptions = <String, String>{'all': 'كل الفروع'};
+    for (final d in _allDevices) {
+      branchOptions[d.branchCode] = '${d.branchName} (${d.branchCode})';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141824) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          // Status Filter Chips
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildFilterChip(
+                id: 'all',
+                label: 'كل الأجهزة ($totalCount)',
+                color: const Color(0xFF38BDF8),
+                isDark: isDark,
+              ),
+              _buildFilterChip(
+                id: 'outdated',
+                label: 'بحاجة لتحديث 🔴 ($outdatedCount)',
+                color: const Color(0xFFEF4444),
+                isDark: isDark,
+              ),
+              _buildFilterChip(
+                id: 'pulling',
+                label: 'يسحب التحديث الآن ⬇️ ($pullingCount)',
+                color: const Color(0xFFF43F5E),
+                isDark: isDark,
+              ),
+              _buildFilterChip(
+                id: 'completed',
+                label: 'محدث بالأخضر 🟢 ($completedCount)',
+                color: const Color(0xFF10B981),
+                isDark: isDark,
+              ),
+            ],
+          ),
+
+          // Branch Selector & Search Input
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Branch Dropdown
+              Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF222938) : const Color(0xFFCBD5E1),
+                  ),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: branchOptions.containsKey(_selectedBranch) ? _selectedBranch : 'all',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                    dropdownColor: isDark ? const Color(0xFF141824) : Colors.white,
+                    items: branchOptions.entries
+                        .map((e) => DropdownMenuItem(
+                              value: e.key,
+                              child: Text(e.value),
+                            ))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setState(() {
+                        _selectedBranch = val;
+                        _rebuildFilteredClusters();
+                      });
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Search Box
+              SizedBox(
+                width: 210,
+                height: 36,
+                child: TextField(
+                  onChanged: (val) {
+                    setState(() {
+                      _searchFilter = val.trim();
+                      _rebuildFilteredClusters();
+                    });
+                  },
+                  style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white : Colors.black87),
+                  decoration: InputDecoration(
+                    hintText: 'بحث باسم الجهاز أو الكاشير أو IP...',
+                    hintStyle: const TextStyle(fontSize: 10.5),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 16),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required String id,
+    required String label,
+    required Color color,
+    required bool isDark,
+  }) {
+    final isSelected = _statusFilter == id;
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() {
+          _statusFilter = id;
+          _rebuildFilteredClusters();
+        });
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withValues(alpha: 0.18)
+              : (isDark ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9)),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? color : (isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0)),
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: isSelected ? color : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 4. TIER 2: ORGANIZED BRANCH CLUSTER PANEL & DEVICE CARDS
+  // ══════════════════════════════════════════════════════════════════════════════
+  Widget _buildBranchClusterPanel(_UpdateBranchCluster cluster, bool isDark) {
+    final allUpdated = cluster.outdatedCount == 0 && cluster.pullingCount == 0;
+    final hasPulling = cluster.pullingCount > 0;
+    final branchAccent = allUpdated
+        ? const Color(0xFF10B981)
+        : (hasPulling ? const Color(0xFFF43F5E) : const Color(0xFFEF4444));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141824) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: branchAccent.withValues(alpha: isDark ? 0.45 : 0.35),
+          width: 1.4,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Branch Header Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(4),
+              color: branchAccent.withValues(alpha: isDark ? 0.12 : 0.07),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+              border: Border(
+                bottom: BorderSide(color: branchAccent.withValues(alpha: 0.25)),
+              ),
             ),
-            child: Text(
-              hasOutdated ? '${cluster.outdatedCount} بحاجة لتحديث' : 'محدث بالكامل ✓',
-              style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: color),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(7),
+                      decoration: BoxDecoration(
+                        color: branchAccent.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(Icons.storefront_rounded, size: 18, color: branchAccent),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      cluster.branchName,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0D1117) : Colors.white,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: branchAccent.withValues(alpha: 0.4)),
+                      ),
+                      child: Text(
+                        'كود الفرع: ${cluster.branchCode}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: branchAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Branch Status Summary Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: branchAccent.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        allUpdated
+                            ? '🟢 جميع أجهزة الفرع محدثة بالكامل (${cluster.completedCount}/${cluster.totalCount})'
+                            : (hasPulling
+                                ? '⬇️ جاري سحب التحديث في ${cluster.pullingCount} جهاز...'
+                                : '🔴 يوجد ${cluster.outdatedCount} جهاز باللون الأحمر بحاجة لتحديث'),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: branchAccent,
+                        ),
+                      ),
+                    ),
+                    if (cluster.outdatedCount > 0) ...[
+                      const SizedBox(width: 10),
+                      FilledButton.icon(
+                        onPressed: () => _triggerBranchRollout(cluster),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFEF4444),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          minimumSize: const Size(0, 32),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.download_rounded, size: 14),
+                        label: const Text(
+                          'تحديث الفرع بالكامل',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Responsive Grid of Device Workstation Cards
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: [
+                for (final dev in cluster.devices)
+                  _buildDeviceCard(dev, _selectedDeviceId == dev.id, isDark),
+              ],
             ),
           ),
         ],
@@ -1706,9 +1616,9 @@ class _UpdateDistributionTopologyScreenState
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // DEVICE WORKSTATION NODE CARD (RED ➔ ROSE PULSE ➔ GREEN)
+  // DEVICE WORKSTATION CARD (RED WHEN OUTDATED ➔ GREEN WHEN UPDATED)
   // ══════════════════════════════════════════════════════════════════════════════
-  Widget _buildDeviceNodeCard(
+  Widget _buildDeviceCard(
     _UpdateTopologyDevice dev,
     bool isSelected,
     bool isDark,
@@ -1719,255 +1629,267 @@ class _UpdateDistributionTopologyScreenState
       onTap: () {
         HapticFeedback.selectionClick();
         setState(() => _selectedDeviceId = dev.id);
-        if (MediaQuery.of(context).size.width < 1150) {
+        if (MediaQuery.of(context).size.width < 1100) {
           Scaffold.of(context).openEndDrawer();
         }
       },
-      borderRadius: BorderRadius.circular(12),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: dev.size.width,
-        height: dev.size.height,
+      borderRadius: BorderRadius.circular(13),
+      child: Container(
+        width: 315,
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF161B26) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          color: isDark ? const Color(0xFF0D1117) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(13),
           border: Border.all(
-            color: isSelected ? cardColor : (dev.isPulling ? const Color(0xFFF43F5E) : cardColor.withValues(alpha: 0.55)),
-            width: isSelected || dev.isPulling ? 2.2 : 1.3,
+            color: isSelected
+                ? cardColor
+                : (dev.isPulling ? const Color(0xFFF43F5E) : cardColor.withValues(alpha: 0.65)),
+            width: isSelected || dev.isPulling ? 2.2 : 1.5,
           ),
           boxShadow: [
             BoxShadow(
-              color: cardColor.withValues(alpha: dev.isPulling ? 0.35 : (dev.isCompleted ? 0.2 : 0.12)),
-              blurRadius: isSelected || dev.isPulling ? 14 : 6,
-              offset: const Offset(0, 3),
+              color: cardColor.withValues(alpha: dev.isPulling ? 0.22 : 0.10),
+              blurRadius: isSelected || dev.isPulling ? 12 : 6,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
-        child: Stack(
-          clipBehavior: Clip.none,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Top Input Port Handle (facing the branch bus)
-            Positioned(
-              left: (dev.size.width / 2) - 5,
-              top: -5,
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF10131A) : Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: cardColor, width: 2),
-                ),
-              ),
-            ),
-
-            // Top Status Badge (RED when outdated, GREEN when completed)
-            Positioned(
-              top: -8,
-              right: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: cardColor,
-                  borderRadius: BorderRadius.circular(6),
-                  boxShadow: [
-                    BoxShadow(color: cardColor.withValues(alpha: 0.35), blurRadius: 4),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      dev.isCompleted
-                          ? Icons.check_circle_rounded
-                          : (dev.isPulling ? Icons.downloading_rounded : Icons.warning_amber_rounded),
-                      color: Colors.white,
-                      size: 10,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      dev.statusBadgeLabel,
-                      style: const TextStyle(
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Content
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
+            // Top Status Strip (Clear Red vs Green banner)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: cardColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: cardColor.withValues(alpha: 0.35)),
-                        ),
-                        child: Icon(
-                          dev.isCompleted ? Icons.desktop_windows_rounded : Icons.desktop_access_disabled_rounded,
-                          color: cardColor,
-                          size: 17,
-                        ),
+                      Icon(
+                        dev.isCompleted
+                            ? Icons.check_circle_rounded
+                            : (dev.isPulling ? Icons.downloading_rounded : Icons.warning_amber_rounded),
+                        color: Colors.white,
+                        size: 12,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              dev.hostname,
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w800,
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              dev.cashierName,
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                      const SizedBox(width: 4),
+                      Text(
+                        dev.statusBadgeLabel,
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
                         ),
                       ),
                     ],
                   ),
+                ),
+                Text(
+                  dev.ipAddress,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
 
-                  // Middle Progress Bar if pulling
-                  if (dev.isPulling) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: dev.progress,
-                        backgroundColor: cardColor.withValues(alpha: 0.15),
-                        valueColor: AlwaysStoppedAnimation<Color>(cardColor),
-                        minHeight: 4,
-                      ),
-                    ),
-                  ],
-
-                  // Bottom info row + Pull Trigger button
-                  Row(
+            // Device Hostname & Cashier Info
+            Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: cardColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: cardColor.withValues(alpha: 0.4)),
+                  ),
+                  child: Icon(
+                    dev.isCompleted ? Icons.desktop_windows_rounded : Icons.computer_rounded,
+                    color: cardColor,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        dev.ipAddress,
+                        dev.hostname,
                         style: TextStyle(
-                          fontSize: 9,
-                          fontFamily: 'monospace',
-                          color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const Spacer(),
-
-                      // Action button if not completed
-                      if (!dev.isCompleted && !dev.isPulling)
-                        InkWell(
-                          onTap: () => _triggerDevicePull(dev),
-                          borderRadius: BorderRadius.circular(5),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEF4444).withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(5),
-                              border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.download_rounded, size: 10, color: Color(0xFFEF4444)),
-                                SizedBox(width: 3),
-                                Text(
-                                  'سحب التحديث',
-                                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Color(0xFFEF4444)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      else if (dev.isCompleted)
-                        const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.verified_rounded, size: 11, color: Color(0xFF10B981)),
-                            SizedBox(width: 3),
-                            Text(
-                              'متوافق 100%',
-                              style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: Color(0xFF10B981)),
-                            ),
-                          ],
+                      const SizedBox(height: 2),
+                      Text(
+                        '${dev.cashierName} (${dev.username})',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // Live Progress Bar if pulling, or Version Comparison Row
+            if (dev.isPulling) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'جاري سحب الحزمة (${dev.chunksPulled}/${dev.totalChunks} Chunks)',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: cardColor,
+                    ),
+                  ),
+                  Text(
+                    '${dev.speedMbps.toStringAsFixed(1)} MB/s',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w800,
+                      color: cardColor,
+                    ),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: dev.progress,
+                  backgroundColor: cardColor.withValues(alpha: 0.15),
+                  valueColor: AlwaysStoppedAnimation<Color>(cardColor),
+                  minHeight: 6,
+                ),
+              ),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF141824) : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      dev.isCompleted
+                          ? 'النسخة الحالية: v${dev.targetVersion} ✓'
+                          : 'النسخة: v${dev.originalVersion} ➔ v${dev.targetVersion}',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: cardColor,
+                      ),
+                    ),
+                    if (!dev.isCompleted)
+                      InkWell(
+                        onTap: () => _triggerDevicePull(dev),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.download_rounded, size: 12, color: Colors.white),
+                              SizedBox(width: 4),
+                              Text(
+                                'سحب التحديث الآن',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.verified_rounded, size: 13, color: Color(0xFF10B981)),
+                          SizedBox(width: 4),
+                          Text(
+                            'مطابق للسيرفر',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF10B981),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // FLOATING CANVAS CONTROLS (ZOOM & FIT)
-  // ══════════════════════════════════════════════════════════════════════════════
-  Widget _buildFloatingControls(bool isDark) {
+  Widget _buildEmptyState(bool isDark) {
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(40),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF141722).withValues(alpha: 0.95) : Colors.white.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(10),
+        color: isDark ? const Color(0xFF141824) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
-          width: 1,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            icon: const Icon(Icons.zoom_in_rounded, size: 18),
-            tooltip: 'تكبير (+)',
-            onPressed: () => _zoomBy(1.2),
+          Icon(
+            Icons.devices_other_rounded,
+            size: 42,
+            color: isDark ? Colors.white38 : Colors.black26,
           ),
-          IconButton(
-            icon: const Icon(Icons.zoom_out_rounded, size: 18),
-            tooltip: 'تصغير (-)',
-            onPressed: () => _zoomBy(0.8),
-          ),
-          IconButton(
-            icon: const Icon(Icons.fit_screen_rounded, size: 18),
-            tooltip: 'ملاءمة المخطط',
-            onPressed: () => _fitCanvasToScreen(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.restart_alt_rounded, size: 18),
-            tooltip: 'إعادة الضبط',
-            onPressed: () => _resetZoom(),
+          const SizedBox(height: 12),
+          Text(
+            'لا توجد أجهزة مطابقة للفلتر الحالي',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
           ),
         ],
       ),
@@ -1980,163 +1902,110 @@ class _UpdateDistributionTopologyScreenState
   Widget _buildBottomConsole(bool isDark) {
     final latestLog = _distributionLogs.isNotEmpty ? _distributionLogs.first : null;
 
-    if (!_showConsole) {
-      return InkWell(
-        onTap: () => setState(() => _showConsole = true),
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF141722).withValues(alpha: 0.95) : Colors.white.withValues(alpha: 0.95),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.06),
-                blurRadius: 10,
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF10B981),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'حركة توزيع وسحب الحزم:',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  latestLog != null ? '${latestLog['time']} • ${latestLog['message']}' : 'الشبكة جاهزة للبث...',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontFamily: 'monospace',
-                    color: isDark ? const Color(0xFFA5B4FC) : const Color(0xFF4F46E5),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(Icons.keyboard_arrow_up_rounded, size: 16),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Container(
-      height: 180,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0E1118) : const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? const Color(0xFF222938) : const Color(0xFF334155),
+        color: isDark ? const Color(0xFF141824) : Colors.white,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
+          ),
         ),
-        boxShadow: const [
-          BoxShadow(color: Colors.black45, blurRadius: 16, offset: Offset(0, 4)),
-        ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFF1E2536))),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.terminal_rounded, size: 15, color: Color(0xFF10B981)),
-                const SizedBox(width: 8),
-                const Text(
-                  'سجل عمليات سحب وتثبيت التحديثات بالفروع (Live Rollout Stream)',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.white),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 15, color: Colors.white70),
-                  onPressed: () => setState(() => _showConsole = false),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
+          InkWell(
+            onTap: () => setState(() => _showConsole = !_showConsole),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              child: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF10B981),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'سجل عمليات سحب وتوزيع التحديثات المباشر:',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      latestLog != null
+                          ? '[${latestLog['time']}] ${latestLog['message']}'
+                          : 'الشبكة جاهزة للبث...',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _showConsole ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
+                    size: 18,
+                  ),
+                ],
+              ),
             ),
           ),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              itemCount: _distributionLogs.length,
-              itemBuilder: (context, index) {
-                final item = _distributionLogs[index];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2.5),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '[${item['time']}]',
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          fontFamily: 'monospace',
-                          color: Color(0xFF64748B),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: item['level'] == 'SUCCESS'
-                              ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                              : const Color(0xFF38BDF8).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: Text(
-                          item['level'] as String? ?? 'INFO',
-                          style: TextStyle(
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w800,
-                            color: item['level'] == 'SUCCESS'
-                                ? const Color(0xFF10B981)
-                                : const Color(0xFF38BDF8),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '<${item['source']}>',
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF94A3B8),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          item['message'] as String? ?? '',
+          if (_showConsole)
+            Container(
+              height: 150,
+              color: const Color(0xFF090D16),
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                itemCount: _distributionLogs.length,
+                itemBuilder: (context, index) {
+                  final item = _distributionLogs[index];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2.5),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '[${item['time']}]',
                           style: const TextStyle(
                             fontSize: 10,
                             fontFamily: 'monospace',
-                            color: Colors.white,
+                            color: Color(0xFF64748B),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+                        const SizedBox(width: 8),
+                        Text(
+                          '<${item['source']}>',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace',
+                            color: Color(0xFF10B981),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            item['message'] as String? ?? '',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontFamily: 'monospace',
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -2151,9 +2020,9 @@ class _UpdateDistributionTopologyScreenState
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF141722) : Colors.white,
+        color: isDark ? const Color(0xFF141824) : Colors.white,
         border: Border(
-          left: BorderSide(
+          right: BorderSide(
             color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0),
             width: 1,
           ),
@@ -2182,7 +2051,11 @@ class _UpdateDistributionTopologyScreenState
                       ),
                       Text(
                         dev.statusBadgeLabel,
-                        style: TextStyle(fontSize: 10.5, color: dev.accentColor, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: dev.accentColor,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ],
                   ),
@@ -2199,23 +2072,33 @@ class _UpdateDistributionTopologyScreenState
               padding: const EdgeInsets.all(16),
               children: [
                 _specItem('الموظف المسؤول', dev.cashierName, isDark),
+                _specItem('اسم المستخدم', dev.username, isDark),
                 _specItem('الفرع', dev.branchName, isDark),
                 _specItem('كود الفرع', dev.branchCode, isDark),
-                _specItem('عنوان IP', dev.ipAddress, isDark),
+                _specItem('عنوان IP الداخلي', dev.ipAddress, isDark),
                 _specItem('نظام التشغيل', dev.os, isDark),
                 _specItem('الإصدار الحالي بالجهاز', 'v${dev.currentDisplayVersion}', isDark),
-                _specItem('الإصدار المعتمد بالسيرفر', 'v$_targetVersion', isDark),
-                _specItem('حالة المطابقة', dev.isCompleted ? 'مطابق ومحدث بالكامل ✓' : 'بحاجة لتحديث ⚠️', isDark),
+                _specItem('الإصدار المعتمد بالسيرفر', 'v$_targetVersion 🟢', isDark),
+                _specItem(
+                  'حالة المطابقة',
+                  dev.isCompleted ? 'مطابق ومحدث بالكامل ✓' : 'نسخة قديمة بحاجة لتحديث ⚠️',
+                  isDark,
+                ),
                 const SizedBox(height: 16),
                 if (!dev.isCompleted)
                   FilledButton.icon(
-                    onPressed: () => _triggerDevicePull(dev),
+                    onPressed: dev.isPulling ? null : () => _triggerDevicePull(dev),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     icon: const Icon(Icons.download_rounded, size: 18),
-                    label: const Text('سحب وتثبيت التحديث الآن', style: TextStyle(fontWeight: FontWeight.w800)),
+                    label: Text(
+                      dev.isPulling ? 'جارٍ سحب التحديث...' : 'سحب وتثبيت التحديث الآن',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
                   ),
               ],
             ),
@@ -2228,272 +2111,19 @@ class _UpdateDistributionTopologyScreenState
   Widget _specItem(String key, String value, bool isDark) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0E1118) : const Color(0xFFF8FAFC),
+        color: isDark ? const Color(0xFF0D1117) : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: isDark ? const Color(0xFF222938) : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         children: [
-          Text(key, style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.black54)),
+          Text(key, style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white60 : Colors.black54)),
           const Spacer(),
-          Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+          Text(value, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
         ],
       ),
     );
   }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// CANVAS PAINTERS FOR STRUCTURED ENTERPRISE FLOW MAP
-// ══════════════════════════════════════════════════════════════════════════════
-
-/// Static painter for the background dot matrix.
-class _UpdateGridPainter extends CustomPainter {
-  const _UpdateGridPainter({required this.isDark});
-  final bool isDark;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final dotPaint = Paint()
-      ..color = isDark ? const Color(0xFF1E2433) : const Color(0xFFE2E8F0)
-      ..style = PaintingStyle.fill;
-
-    const spacing = 28.0;
-    for (double x = 14; x < size.width; x += spacing) {
-      for (double y = 14; y < size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 1.0, dotPaint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _UpdateGridPainter oldDelegate) => oldDelegate.isDark != isDark;
-}
-
-/// Clean bus lines connecting Server ➔ Main Bus ➔ Branch Headers ➔ Device Cards.
-/// No wire ever cuts across or obscures any card!
-class _UpdateBusWiresPainter extends CustomPainter {
-  const _UpdateBusWiresPainter({
-    required this.serverPosition,
-    required this.serverSize,
-    required this.branchClusters,
-    required this.selectedDeviceId,
-    required this.isDark,
-  });
-
-  final Offset serverPosition;
-  final Size serverSize;
-  final List<_UpdateBranchCluster> branchClusters;
-  final String? selectedDeviceId;
-  final bool isDark;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (branchClusters.isEmpty) return;
-
-    final trunkPaint = Paint()
-      ..color = (isDark ? const Color(0xFF10B981) : const Color(0xFF059669)).withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round;
-
-    final branchLinePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6
-      ..strokeCap = StrokeCap.round;
-
-    final glowPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4.0
-      ..strokeCap = StrokeCap.round;
-
-    final serverBottom = Offset(
-      serverPosition.dx + (serverSize.width / 2.0),
-      serverPosition.dy + serverSize.height,
-    );
-
-    const busY = 190.0;
-
-    // 1. Vertical trunk from server down to bus
-    final trunkPath = Path()
-      ..moveTo(serverBottom.dx, serverBottom.dy)
-      ..lineTo(serverBottom.dx, busY);
-    canvas.drawPath(trunkPath, trunkPaint);
-
-    // 2. Horizontal bus spanning across active branches
-    final minColX = branchClusters.first.x + (branchClusters.first.width / 2.0);
-    final maxColX = branchClusters.last.x + (branchClusters.last.width / 2.0);
-
-    final busPath = Path()
-      ..moveTo(math.min(minColX, serverBottom.dx), busY)
-      ..lineTo(math.max(maxColX, serverBottom.dx), busY);
-    canvas.drawPath(busPath, trunkPaint);
-
-    // 3. Drop lines from bus down to each branch header and then to each device
-    for (final cluster in branchClusters) {
-      final clusterCenterX = cluster.x + (cluster.width / 2.0);
-
-      // Drop from bus to branch header top
-      final dropPath = Path()
-        ..moveTo(clusterCenterX, busY)
-        ..lineTo(clusterCenterX, cluster.y);
-      canvas.drawPath(dropPath, trunkPaint);
-
-      // Spine from branch header bottom down to devices
-      final branchBottom = Offset(clusterCenterX, cluster.y + 44.0);
-      if (cluster.devices.isNotEmpty) {
-        final lastDev = cluster.devices.last;
-        final spineEndY = lastDev.position.dy + 8.0;
-
-        final spinePath = Path()
-          ..moveTo(branchBottom.dx, branchBottom.dy)
-          ..lineTo(branchBottom.dx, spineEndY);
-
-        branchLinePaint.color = (isDark ? const Color(0xFF2E384D) : const Color(0xFFCBD5E1));
-        canvas.drawPath(spinePath, branchLinePaint);
-
-        // Feed each device at top input port
-        for (final dev in cluster.devices) {
-          final isHighlighted = selectedDeviceId == dev.id || dev.isPulling;
-          final devPort = Offset(dev.position.dx + (dev.size.width / 2.0), dev.position.dy);
-
-          final feederPath = Path()
-            ..moveTo(branchBottom.dx, devPort.dy - 6.0)
-            ..lineTo(devPort.dx, devPort.dy);
-
-          branchLinePaint.color = isHighlighted
-              ? dev.accentColor
-              : (isDark ? const Color(0xFF2E384D) : const Color(0xFFCBD5E1));
-          branchLinePaint.strokeWidth = isHighlighted ? 2.2 : 1.4;
-
-          if (isHighlighted) {
-            glowPaint.color = dev.accentColor.withValues(alpha: 0.35);
-            canvas.drawPath(feederPath, glowPaint);
-          }
-
-          canvas.drawPath(feederPath, branchLinePaint);
-        }
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _UpdateBusWiresPainter oldDelegate) {
-    return oldDelegate.selectedDeviceId != selectedDeviceId ||
-        oldDelegate.isDark != isDark ||
-        oldDelegate.branchClusters.length != branchClusters.length;
-  }
-}
-
-/// Flowing animated data packets traveling along the exact structured bus path.
-class _UpdateFlowPacketsPainter extends CustomPainter {
-  const _UpdateFlowPacketsPainter({
-    required this.serverPosition,
-    required this.serverSize,
-    required this.branchClusters,
-    required this.devicesMap,
-    required this.packets,
-    required this.now,
-  });
-
-  final Offset serverPosition;
-  final Size serverSize;
-  final List<_UpdateBranchCluster> branchClusters;
-  final Map<String, _UpdateTopologyDevice> devicesMap;
-  final List<_UpdateDataPacket> packets;
-  final DateTime now;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final dotPaint = Paint()..style = PaintingStyle.fill;
-    final glowPaint = Paint()..style = PaintingStyle.fill;
-
-    final serverBottom = Offset(
-      serverPosition.dx + (serverSize.width / 2.0),
-      serverPosition.dy + serverSize.height,
-    );
-    const busY = 190.0;
-
-    for (final pkt in packets) {
-      final dev = devicesMap[pkt.targetDeviceId];
-      if (dev == null) continue;
-
-      final devPort = Offset(dev.position.dx + (dev.size.width / 2.0), dev.position.dy);
-      final branchCenterX = devPort.dx;
-
-      // 4-segment path:
-      // Segment 1: Server Bottom (0.0) -> Bus (0.25)
-      // Segment 2: Bus X_server -> Bus X_branch (0.25 -> 0.50)
-      // Segment 3: Bus -> Branch Header (0.50 -> 0.70)
-      // Segment 4: Branch Header -> Device Port (0.70 -> 1.0)
-      final t = pkt.progress(now);
-
-      final Offset pt;
-      if (t < 0.25) {
-        final subT = t / 0.25;
-        pt = Offset(serverBottom.dx, serverBottom.dy + (busY - serverBottom.dy) * subT);
-      } else if (t < 0.50) {
-        final subT = (t - 0.25) / 0.25;
-        pt = Offset(serverBottom.dx + (branchCenterX - serverBottom.dx) * subT, busY);
-      } else if (t < 0.70) {
-        final subT = (t - 0.50) / 0.20;
-        pt = Offset(branchCenterX, busY + (230.0 - busY) * subT);
-      } else {
-        final subT = (t - 0.70) / 0.30;
-        pt = Offset(branchCenterX, 274.0 + (devPort.dy - 274.0) * subT);
-      }
-
-      // Comet trail
-      for (int i = 3; i >= 1; i--) {
-        final trailPaint = Paint()
-          ..color = pkt.color.withValues(alpha: 0.25 / i)
-          ..style = PaintingStyle.fill;
-        canvas.drawCircle(Offset(pt.dx, pt.dy - (i * 2.5)), 2.8 - (i * 0.5), trailPaint);
-      }
-
-      // Glowing Halo
-      glowPaint.color = pkt.color.withValues(alpha: 0.45);
-      canvas.drawCircle(pt, 8.5, glowPaint);
-
-      // White Core
-      dotPaint.color = Colors.white;
-      canvas.drawCircle(pt, 3.5, dotPaint);
-
-      // Colored Center
-      final corePaint = Paint()..color = pkt.color;
-      canvas.drawCircle(pt, 2.0, corePaint);
-
-      // Floating Action Chip Label Above Packet
-      if (pkt.label.isNotEmpty) {
-        final tp = TextPainter(
-          text: TextSpan(
-            text: pkt.label,
-            style: const TextStyle(
-              fontSize: 8.5,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-            ),
-          ),
-          textDirection: TextDirection.rtl,
-        )..layout();
-
-        final labelBg = RRect.fromRectAndRadius(
-          Rect.fromCenter(
-            center: Offset(pt.dx, pt.dy - 14),
-            width: tp.width + 10,
-            height: tp.height + 5,
-          ),
-          const Radius.circular(5),
-        );
-        final bgPaint = Paint()..color = pkt.color.withValues(alpha: 0.92);
-        canvas.drawRRect(labelBg, bgPaint);
-        tp.paint(canvas, Offset(pt.dx - (tp.width / 2), pt.dy - 14 - (tp.height / 2)));
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _UpdateFlowPacketsPainter oldDelegate) => true;
 }
