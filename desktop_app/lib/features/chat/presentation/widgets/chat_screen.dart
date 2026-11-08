@@ -3200,6 +3200,24 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  Future<void> _revealFileInFolder(String filePath) async {
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        await web_bridge.openElectronLocalFile(p.dirname(filePath));
+      }
+      return;
+    }
+    if (Platform.isWindows) {
+      try {
+        await Process.run('explorer.exe', ['/select,', filePath]);
+        return;
+      } catch (_) {}
+    }
+    try {
+      await OpenFilex.open(p.dirname(filePath));
+    } catch (_) {}
+  }
+
   Future<void> _openLocalFilePath(String localPath, ChatMessage message) async {
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
@@ -3240,12 +3258,13 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           SnackBar(
             content: Text(
               openResult.type == ResultType.noAppToOpen
-                  ? 'لا يوجد برنامج مثبت لفتح هذا الملف (${p.extension(localPath)}).'
-                  : 'تعذر فتح الملف: ${openResult.message}',
+                  ? 'تم حفظ الملف، ولكن لا يوجد برنامج مثبت لفتحه (${p.extension(localPath)}).'
+                  : 'تم حفظ الملف. تعذر فتحه تلقائيًا: ${openResult.message}',
             ),
             action: SnackBarAction(
-              label: 'نقل / حفظ في...',
-              onPressed: () => _saveAttachmentAs(message),
+              label: 'عرض في المجلد',
+              textColor: const Color(0xFF007AFF),
+              onPressed: () => _revealFileInFolder(localPath),
             ),
           ),
         );
@@ -3366,6 +3385,10 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       return _saveAttachmentAs(message);
     }
 
+    if (openAfterDownload) {
+      return _openAttachment(message);
+    }
+
     if (!message.attachmentDownloadAllowed) {
       if (!mounted) {
         return;
@@ -3385,9 +3408,9 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           _downloadingFileName = message.fileName ?? 'مرفق';
         });
       }
-      final localPath = await ref
+      final savedPath = await ref
           .read(chatRepositoryProvider)
-          .downloadAttachment(
+          .saveAttachmentToLocalStorage(
             message,
             onProgress: (received, total) {
               if (!mounted) {
@@ -3415,15 +3438,35 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         return;
       }
 
-      if (openAfterDownload) {
-        await _openLocalFilePath(localPath, message);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم تنزيل ${message.fileName ?? 'المرفق'} بنجاح'),
+      final fileName = p.basename(savedPath);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF34C759),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'تم حفظ $fileName في مجلد الملفات بنجاح',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-        );
-      }
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'عرض في المجلد',
+            textColor: const Color(0xFF007AFF),
+            onPressed: () => _revealFileInFolder(savedPath),
+          ),
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3516,9 +3559,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _openAttachment(ChatMessage message) async {
-    if (message.isImageMessage) {
-      return _showImagePreview(message);
-    }
     if (!message.attachmentDownloadAllowed) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3527,13 +3567,85 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
       }
       return;
     }
-    final repo = ref.read(chatRepositoryProvider);
-    final cachedPath = await repo.getCachedAttachmentPath(message);
-    if (cachedPath != null && cachedPath.isNotEmpty) {
-      await _openLocalFilePath(cachedPath, message);
-      return;
+
+    try {
+      if (mounted) {
+        setState(() {
+          _isDownloadingAttachment = true;
+          _downloadProgress = 0;
+          _downloadingFileName = message.fileName ?? 'مرفق';
+        });
+      }
+
+      final repo = ref.read(chatRepositoryProvider);
+      final savedPath = await repo.saveAttachmentToLocalStorage(
+        message,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            _downloadProgress = total <= 0
+                ? 0
+                : (received / total).clamp(0, 1).toDouble();
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      await _openLocalFilePath(savedPath, message);
+
+      if (mounted) {
+        final fileName = p.basename(savedPath);
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF34C759),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'تم حفظ $fileName في مجلد الملفات وفتحه بنجاح',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'عرض في المجلد',
+              textColor: const Color(0xFF007AFF),
+              onPressed: () => _revealFileInFolder(savedPath),
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error.toString().trim().isEmpty
+                  ? 'تعذر حفظ أو فتح الملف حاليًا'
+                  : 'تعذر فتح الملف: $error',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloadingAttachment = false;
+          _downloadProgress = 0;
+          _downloadingFileName = null;
+        });
+      }
     }
-    await _downloadAttachment(message, openAfterDownload: true);
   }
   Future<void> _printAttachment(ChatMessage message) async {
     if (!message.isPrintableAttachment) {
@@ -3727,6 +3839,15 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _showImagePreview(ChatMessage message) async {
     if (!mounted || message.fileUrl == null || message.fileUrl!.isEmpty) {
       return;
+    }
+
+    if (message.attachmentDownloadAllowed) {
+      unawaited(
+        ref
+            .read(chatRepositoryProvider)
+            .saveAttachmentToLocalStorage(message)
+            .catchError((_) => ''),
+      );
     }
 
     final allMessages =

@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/network/media_url_resolver.dart';
@@ -789,6 +790,214 @@ class ChatRepository {
     await File(targetPath).writeAsBytes(response, flush: true);
 
     return targetPath;
+  }
+
+  Future<Directory> resolveEffectiveSaveDirectory({String? customPath}) async {
+    final preferred = customPath?.trim().isNotEmpty == true
+        ? customPath!.trim()
+        : _preferences.localStorageDirectoryPath?.trim();
+    if (preferred != null && preferred.isNotEmpty) {
+      final dir = Directory(preferred);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return dir;
+    }
+
+    if (!kIsWeb && Platform.isWindows) {
+      try {
+        final downloads = await getDownloadsDirectory();
+        if (downloads != null && await downloads.exists()) {
+          final ismartDir = Directory(p.join(downloads.path, 'iSmart Messenger'));
+          if (!await ismartDir.exists()) {
+            await ismartDir.create(recursive: true);
+          }
+          return ismartDir;
+        }
+      } catch (_) {}
+    }
+
+    return _localStorage.resolveRootDirectory();
+  }
+
+  String _resolveCleanFileName(ChatMessage message) {
+    var rawName = (message.fileName ?? '').trim();
+    if (rawName.isEmpty) {
+      final shortId = message.id.length > 8 ? message.id.substring(0, 8) : message.id;
+      rawName = 'ملف_$shortId';
+    }
+    var safeName = _localStorage.sanitizeFileName(rawName);
+    if (p.extension(safeName).isEmpty) {
+      final ext = _resolveFallbackExtension(
+        mimeType: message.mimeType,
+        fileUrl: message.fileUrl,
+        messageType: message.messageType,
+        isImage: message.isImageMessage,
+        isPdf: message.isPdfMessage,
+        isAudio: message.isAudioMessage,
+      );
+      if (ext.isNotEmpty) {
+        safeName = '$safeName$ext';
+      }
+    }
+    return safeName;
+  }
+
+  String _resolveFallbackExtension({
+    String? mimeType,
+    String? fileUrl,
+    String? messageType,
+    bool isImage = false,
+    bool isPdf = false,
+    bool isAudio = false,
+  }) {
+    final mime = (mimeType ?? '').trim().toLowerCase();
+    if (mime.isNotEmpty) {
+      if (mime == 'application/pdf') return '.pdf';
+      if (mime.contains('spreadsheet') || mime.contains('excel')) return '.xlsx';
+      if (mime.contains('wordprocessing') || mime.contains('msword')) return '.docx';
+      if (mime.contains('presentation') || mime.contains('powerpoint')) return '.pptx';
+      if (mime == 'image/jpeg' || mime == 'image/jpg') return '.jpg';
+      if (mime == 'image/png') return '.png';
+      if (mime == 'image/webp') return '.webp';
+      if (mime == 'image/gif') return '.gif';
+      if (mime == 'application/zip') return '.zip';
+      if (mime == 'application/x-rar-compressed') return '.rar';
+      if (mime == 'text/plain') return '.txt';
+      if (mime.startsWith('image/')) return '.jpg';
+      if (mime.startsWith('video/')) return '.mp4';
+      if (mime.startsWith('audio/')) return '.mp3';
+    }
+
+    if (fileUrl != null && fileUrl.isNotEmpty) {
+      try {
+        final uri = Uri.tryParse(fileUrl);
+        final path = uri?.path ?? fileUrl;
+        final ext = p.extension(path).toLowerCase();
+        if (ext.isNotEmpty && ext.length <= 6 && RegExp(r'^\.[a-z0-9]+$').hasMatch(ext)) {
+          return ext;
+        }
+      } catch (_) {}
+    }
+
+    if (isImage || messageType == 'image') return '.jpg';
+    if (isAudio || messageType == 'audio') return '.mp3';
+    if (isPdf || messageType == 'pdf') return '.pdf';
+    if (messageType == 'video') return '.mp4';
+    return '';
+  }
+
+  Future<String?> getSavedAttachmentPath(
+    ChatMessage message, {
+    String? customSaveDirectory,
+  }) async {
+    if (message.fileUrl == null || message.fileUrl!.isEmpty) return null;
+    final safeFileName = _resolveCleanFileName(message);
+
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
+        final candidate = p.join(targetDir.path, safeFileName);
+        final exists = await web_bridge.electronFileExists(candidate);
+        if (exists) return candidate;
+      }
+      return null;
+    }
+
+    final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
+    final candidatePath = p.join(targetDir.path, safeFileName);
+    final candidateFile = File(candidatePath);
+    if (await candidateFile.exists()) {
+      if (message.fileSize != null && message.fileSize! > 0) {
+        final len = await candidateFile.length();
+        if (len == message.fileSize) {
+          return candidatePath;
+        }
+      } else {
+        return candidatePath;
+      }
+    }
+    return null;
+  }
+
+  Future<String> saveAttachmentToLocalStorage(
+    ChatMessage message, {
+    String? customSaveDirectory,
+    void Function(int received, int total)? onProgress,
+  }) async {
+    final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
+    final safeFileName = _resolveCleanFileName(message);
+
+    if (kIsWeb) {
+      if (web_bridge.isElectron()) {
+        final existingPath = p.join(targetDir.path, safeFileName);
+        final bytes = await _readLocalAttachmentBytes(message) ??
+            await _downloadAttachmentBytesWithRestore(
+              message,
+              _downloadUrlFor(message.fileUrl!),
+              onProgress: onProgress,
+            );
+        await _cacheAttachmentPreviewBytes(message, bytes);
+        final saved = await web_bridge.downloadBytes(
+          bytes: bytes,
+          fileName: safeFileName,
+          mimeType: message.mimeType,
+          preferredDirectoryPath: targetDir.path,
+        );
+        return saved ?? existingPath;
+      }
+
+      final bytes = await _downloadAttachmentBytesWithRestore(
+        message,
+        _downloadUrlFor(message.fileUrl!),
+        onProgress: onProgress,
+      );
+      await web_bridge.downloadBytes(
+        bytes: bytes,
+        fileName: safeFileName,
+        mimeType: message.mimeType,
+      );
+      return safeFileName;
+    }
+
+    // Native Desktop (Windows / macOS / Linux)
+    final baseName = p.basenameWithoutExtension(safeFileName);
+    final extension = p.extension(safeFileName);
+    final primaryCandidate = p.join(targetDir.path, safeFileName);
+    final primaryFile = File(primaryCandidate);
+
+    if (await primaryFile.exists()) {
+      final existingSize = await primaryFile.length();
+      if (message.fileSize == null || message.fileSize! <= 0 || existingSize == message.fileSize) {
+        return primaryCandidate;
+      }
+    }
+
+    Uint8List? bytes = await _readLocalAttachmentBytes(message);
+    if (bytes == null || bytes.isEmpty) {
+      bytes = await _downloadAttachmentBytesWithRestore(
+        message,
+        _downloadUrlFor(message.fileUrl!),
+        onProgress: onProgress,
+      );
+      await _cacheAttachmentPreviewBytes(message, bytes);
+    }
+
+    var finalPath = primaryCandidate;
+    var counter = 1;
+    var candidateFile = File(finalPath);
+    while (await candidateFile.exists()) {
+      final existingLen = await candidateFile.length();
+      if (existingLen == bytes.length) {
+        return finalPath;
+      }
+      finalPath = p.join(targetDir.path, '$baseName ($counter)$extension');
+      candidateFile = File(finalPath);
+      counter++;
+    }
+
+    await candidateFile.writeAsBytes(bytes, flush: true);
+    return finalPath;
   }
   Future<Uint8List> fetchAttachmentBytes(ChatMessage message) async {
     return _downloadAttachmentBytesWithRestore(

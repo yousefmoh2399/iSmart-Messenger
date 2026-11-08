@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -9,6 +10,7 @@ import 'package:open_filex/open_filex.dart';
 
 import '../../../../shared/models/app_user.dart';
 import '../../../../shared/providers/providers.dart';
+import '../../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
 import 'authenticated_attachment_image.dart';
@@ -433,16 +435,63 @@ Future<void> _downloadAttachmentFromPanel(
     return;
   }
   try {
-    final localPath = await ref
-        .read(chatRepositoryProvider)
-        .downloadAttachment(message);
+    final repo = ref.read(chatRepositoryProvider);
+    final savedPath = await repo.saveAttachmentToLocalStorage(message);
 
     if (!context.mounted) {
       return;
     }
 
     if (openAfterDownload) {
-      await OpenFilex.open(localPath);
+      if (kIsWeb) {
+        if (web_bridge.isElectron()) {
+          await web_bridge.openElectronLocalFile(savedPath);
+        }
+      } else {
+        final openResult = await OpenFilex.open(savedPath);
+        if (openResult.type != ResultType.done && !kIsWeb && Platform.isWindows) {
+          try {
+            await Process.run('cmd', ['/c', 'start', '', savedPath], runInShell: true);
+          } catch (_) {}
+        }
+      }
+      if (context.mounted) {
+        final fileName = p.basename(savedPath);
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Color(0xFF34C759),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'تم حفظ $fileName في مجلد الملفات وفتحه بنجاح',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'عرض في المجلد',
+              textColor: const Color(0xFF007AFF),
+              onPressed: () {
+                if (!kIsWeb && Platform.isWindows) {
+                  Process.run('explorer.exe', ['/select,', savedPath]);
+                } else if (kIsWeb && web_bridge.isElectron()) {
+                  web_bridge.openElectronLocalFile(p.dirname(savedPath));
+                }
+              },
+            ),
+          ),
+        );
+      }
       return;
     }
 
@@ -457,7 +506,7 @@ Future<void> _downloadAttachmentFromPanel(
       return;
     }
 
-    await File(localPath).copy(destinationPath);
+    await File(savedPath).copy(destinationPath);
 
     if (!context.mounted) {
       return;
