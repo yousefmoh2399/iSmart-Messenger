@@ -2814,6 +2814,124 @@ ipcMain.handle("window:set-theme", async (_event, payload = {}) => {
   return { success: true, mode: currentWindowTheme };
 });
 
+
+function getWindowsClipboardFilePathsPS() {
+  return new Promise((resolve) => {
+    if (process.platform !== "win32") {
+      resolve([]);
+      return;
+    }
+    const psCommand = [
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;",
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      "if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {",
+      "  $files = [System.Windows.Forms.Clipboard]::GetFileDropList();",
+      "  @($files) | ConvertTo-Json -Compress",
+      "} else {",
+      "  '[]'",
+      "}"
+    ].join(" ");
+
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-STA", "-Command", psCommand],
+      { windowsHide: true, timeout: 4000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) {
+          resolve([]);
+          return;
+        }
+        const raw = String(stdout || "").trim();
+        if (!raw || raw === "null") {
+          resolve([]);
+          return;
+        }
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            resolve(parsed.map((p) => String(p || "").trim()).filter(Boolean));
+          } else if (typeof parsed === "string" && parsed.trim()) {
+            resolve([parsed.trim()]);
+          } else {
+            resolve([]);
+          }
+        } catch (_) {
+          resolve([]);
+        }
+      },
+    );
+  });
+}
+
+ipcMain.handle("clipboard:read-files", async () => {
+  try {
+    const { clipboard } = require("electron");
+    const files = [];
+
+    // 1. Check for copied files from Windows Explorer (CF_HDROP / FileDropList)
+    const droppedPaths = await getWindowsClipboardFilePathsPS();
+    if (droppedPaths.length > 0) {
+      for (const filePath of droppedPaths) {
+        try {
+          if (!fs.existsSync(filePath)) continue;
+          const stat = fs.statSync(filePath);
+          if (!stat.isFile()) continue;
+          const fileName = path.basename(filePath);
+          if (stat.size > MAX_ELECTRON_FETCH_BYTES) {
+            return {
+              success: false,
+              hasFiles: true,
+              error: `حجم الملف (${fileName}) كبير جدًا للنسخ المباشر.`,
+            };
+          }
+          const buffer = fs.readFileSync(filePath);
+          files.push({
+            name: fileName,
+            path: filePath,
+            size: stat.size,
+            base64: buffer.toString("base64"),
+            isImage: STORAGE_IMAGE_EXTS.has(path.extname(fileName).toLowerCase()),
+          });
+        } catch (fileErr) {
+          console.warn("[electron] clipboard file read error:", fileErr);
+        }
+      }
+      if (files.length > 0) {
+        return { success: true, hasFiles: true, files };
+      }
+    }
+
+    // 2. Check for copied bitmap/screenshot image in clipboard
+    // Only treat as image paste if clipboard does not simply have plain text without image,
+    // or if clipboard.readImage() is non-empty.
+    const clipImage = clipboard.readImage();
+    if (clipImage && !clipImage.isEmpty()) {
+      const pngBuffer = clipImage.toPNG();
+      if (pngBuffer && pngBuffer.length > 0) {
+        const fileName = `clipboard_${Date.now()}.png`;
+        files.push({
+          name: fileName,
+          path: fileName,
+          size: pngBuffer.length,
+          base64: pngBuffer.toString("base64"),
+          isImage: true,
+        });
+        return { success: true, hasFiles: true, files };
+      }
+    }
+
+    return { success: true, hasFiles: false, files: [] };
+  } catch (error) {
+    console.error("[electron] clipboard:read-files error", error);
+    return {
+      success: false,
+      hasFiles: false,
+      files: [],
+      error: String(error.message || error),
+    };
+  }
+});
+
 ipcMain.handle("window:list-open-windows", async () => {
   try {
     if (process.platform !== "win32") {

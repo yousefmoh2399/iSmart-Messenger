@@ -20,6 +20,7 @@ class ChatInput extends StatefulWidget {
     this.onSendChecklist,
     this.onSendGif,
     this.onOpenQuickReplies,
+    this.onPasteFromClipboard,
     this.isEditing = false,
     this.isUploading = false,
     this.uploadProgress = 0,
@@ -41,6 +42,7 @@ class ChatInput extends StatefulWidget {
   final VoidCallback? onSendChecklist;
   final VoidCallback? onSendGif;
   final VoidCallback? onOpenQuickReplies;
+  final Future<bool> Function()? onPasteFromClipboard;
   final bool isEditing;
   final bool isUploading;
   final double uploadProgress;
@@ -96,6 +98,26 @@ class _ChatInputState extends State<ChatInput> {
     _internalFocusNode?.dispose();
     _sendButtonFocusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleCustomPasteShortcut() async {
+    if (!widget.enabled) return;
+    if (widget.onPasteFromClipboard != null) {
+      final handledAsFile = await widget.onPasteFromClipboard!();
+      if (handledAsFile || !mounted) {
+        return;
+      }
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty || !mounted) {
+      return;
+    }
+    widget.controller.value = ChatInput.insertTextAtSelection(
+      widget.controller.value,
+      text,
+    );
+    widget.onChanged(widget.controller.text);
   }
 
   void _submitMessage() {
@@ -393,8 +415,32 @@ class _ChatInputState extends State<ChatInput> {
                     child: ChatTextFieldPasteMenu(
                       controller: widget.controller,
                       enabled: widget.enabled,
+                      onPasteFromClipboard: widget.onPasteFromClipboard,
                       child: Focus(
                         onKeyEvent: (node, event) {
+                          if (event is KeyDownEvent || event is KeyRepeatEvent) {
+                            final isControlOrMeta =
+                                HardwareKeyboard.instance.isControlPressed ||
+                                HardwareKeyboard.instance.isMetaPressed;
+                            final isShiftOnly =
+                                HardwareKeyboard.instance.isShiftPressed &&
+                                !isControlOrMeta &&
+                                !HardwareKeyboard.instance.isAltPressed;
+                            final isPasteShortcut =
+                                (isControlOrMeta &&
+                                    !HardwareKeyboard.instance.isAltPressed &&
+                                    event.logicalKey == LogicalKeyboardKey.keyV) ||
+                                (isShiftOnly &&
+                                    event.logicalKey == LogicalKeyboardKey.insert);
+                            if (isPasteShortcut &&
+                                widget.enabled &&
+                                widget.onPasteFromClipboard != null) {
+                              if (event is KeyDownEvent) {
+                                _handleCustomPasteShortcut();
+                              }
+                              return KeyEventResult.handled;
+                            }
+                          }
                           if (event is KeyDownEvent) {
                             final isEnter =
                                 event.logicalKey == LogicalKeyboardKey.enter ||

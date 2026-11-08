@@ -175,6 +175,7 @@ contextBridge.exposeInMainWorld("electronBridge", {
   startUpdate: (payload) => ipcRenderer.invoke("updater:start-update", payload),
   applyUpdate: (payload) => ipcRenderer.invoke("updater:apply-update", payload),
   listOpenWindows: () => ipcRenderer.invoke("window:list-open-windows"),
+  readClipboardFiles: () => ipcRenderer.invoke("clipboard:read-files"),
   captureWindow: (payload) => ipcRenderer.invoke("window:capture-window", payload),
   captureScreen: () => ipcRenderer.invoke("window:capture-screen"),
   openRdp: (payload) => ipcRenderer.invoke("shell:open-rdp", payload),

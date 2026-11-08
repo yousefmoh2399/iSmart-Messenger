@@ -341,3 +341,10 @@ Future<Map<String, dynamic>> electronGetStorageBreakdown({String? directoryPath}
 
 Future<bool> electronClearStorageCache({required String category, String? directoryPath}) async =>
     false;
+
+Future<Map<String, dynamic>> electronReadClipboardFiles() async =>
+    const <String, dynamic>{
+      'success': false,
+      'hasFiles': false,
+      'files': <Map<String, dynamic>>[],
+    };

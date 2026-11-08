@@ -210,6 +210,9 @@ Map<String, dynamic> _asStringMap(Object? value) {
       'inbox',
       'auditLogs',
       'notifications',
+      'hasFiles',
+      'files',
+      'error',
     ]) {
       if (value.hasProperty(key)) {
         result[key] = value[key];
@@ -1208,4 +1211,50 @@ Future<bool> electronClearStorageCache({required String category, String? direct
     'directoryPath': directoryPath,
   }));
   return result['success'] == true;
+}
+
+Future<Map<String, dynamic>> electronReadClipboardFiles() async {
+  if (!isElectron()) {
+    return const <String, dynamic>{
+      'success': false,
+      'hasFiles': false,
+      'files': <Map<String, dynamic>>[],
+    };
+  }
+  try {
+    final raw = await _callElectron('readClipboardFiles');
+    final map = _asStringMap(raw);
+    final rawFiles = map['files'];
+    final parsedFiles = <Map<String, dynamic>>[];
+    if (rawFiles is List) {
+      for (final item in rawFiles) {
+        if (item is Map) {
+          parsedFiles.add(Map<String, dynamic>.from(item));
+        } else if (item is JsObject) {
+          final fileMap = <String, dynamic>{};
+          for (final k in const ['name', 'path', 'size', 'base64', 'isImage']) {
+            if (item.hasProperty(k)) {
+              fileMap[k] = item[k];
+            }
+          }
+          if (fileMap.isNotEmpty) {
+            parsedFiles.add(fileMap);
+          }
+        }
+      }
+    }
+    return <String, dynamic>{
+      'success': map['success'] == true,
+      'hasFiles': map['hasFiles'] == true && parsedFiles.isNotEmpty,
+      'files': parsedFiles,
+      if (map['error'] != null) 'error': map['error'].toString(),
+    };
+  } catch (e) {
+    return <String, dynamic>{
+      'success': false,
+      'hasFiles': false,
+      'files': const <Map<String, dynamic>>[],
+      'error': e.toString(),
+    };
+  }
 }

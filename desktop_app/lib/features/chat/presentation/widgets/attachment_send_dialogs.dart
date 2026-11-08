@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -15,12 +16,16 @@ class AttachmentSendDraft {
     required this.displayName,
     required this.restrictForwardAndDownload,
     this.caption,
+    this.fileBytes,
+    this.fileSize,
   });
 
   final String filePath;
   final String displayName;
   final bool restrictForwardAndDownload;
   final String? caption;
+  final Uint8List? fileBytes;
+  final int? fileSize;
 }
 
 enum _MarkupTool { pen, circle }
@@ -89,21 +94,30 @@ String _formatFileSize(int bytes) {
 /// Displays the WhatsApp-style attachment send flow on desktop.
 Future<AttachmentSendDraft?> showAttachmentSendDialog(
   BuildContext context,
-  String originalPath,
-) async {
+  String originalPath, {
+  Uint8List? initialBytes,
+  int? knownFileSize,
+}) async {
   if (_isImagePath(originalPath)) {
     return showDialog<AttachmentSendDraft>(
       context: context,
       barrierDismissible: false,
       barrierColor: Colors.black.withOpacity(0.75),
-      builder: (_) => _WhatsAppMediaEditorDialog(imagePath: originalPath),
+      builder: (_) => _WhatsAppMediaEditorDialog(
+        imagePath: originalPath,
+        initialBytes: initialBytes,
+      ),
     );
   }
 
   return showDialog<AttachmentSendDraft>(
     context: context,
     barrierDismissible: true,
-    builder: (_) => _DocumentAttachmentSendDialog(filePath: originalPath),
+    builder: (_) => _DocumentAttachmentSendDialog(
+      filePath: originalPath,
+      initialBytes: initialBytes,
+      knownFileSize: knownFileSize,
+    ),
   );
 }
 
@@ -112,9 +126,13 @@ Future<AttachmentSendDraft?> showAttachmentSendDialog(
 // =============================================================================
 
 class _WhatsAppMediaEditorDialog extends StatefulWidget {
-  const _WhatsAppMediaEditorDialog({required this.imagePath});
+  const _WhatsAppMediaEditorDialog({
+    required this.imagePath,
+    this.initialBytes,
+  });
 
   final String imagePath;
+  final Uint8List? initialBytes;
 
   @override
   State<_WhatsAppMediaEditorDialog> createState() =>
@@ -167,7 +185,7 @@ class _WhatsAppMediaEditorDialogState
 
   Future<void> _loadImage() async {
     try {
-      final bytes = await File(widget.imagePath).readAsBytes();
+      final bytes = widget.initialBytes ?? await File(widget.imagePath).readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       codec.dispose();
@@ -212,6 +230,8 @@ class _WhatsAppMediaEditorDialogState
         displayName: p.basename(widget.imagePath),
         restrictForwardAndDownload: _restrictForwardAndDownload,
         caption: caption.isNotEmpty ? caption : null,
+        fileBytes: widget.initialBytes,
+        fileSize: widget.initialBytes?.length,
       ),
     );
   }
@@ -224,16 +244,18 @@ class _WhatsAppMediaEditorDialogState
     });
 
     try {
-      final finalPath = await _exportProcessedImage();
+      final exported = await _exportProcessedImage();
       if (!mounted) return;
 
       final caption = _captionController.text.trim();
       Navigator.of(context).pop(
         AttachmentSendDraft(
-          filePath: finalPath,
-          displayName: p.basename(finalPath),
+          filePath: exported.path,
+          displayName: p.basename(exported.path),
           restrictForwardAndDownload: _restrictForwardAndDownload,
           caption: caption.isNotEmpty ? caption : null,
+          fileBytes: exported.bytes,
+          fileSize: exported.bytes?.length,
         ),
       );
     } catch (_) {
@@ -244,14 +266,14 @@ class _WhatsAppMediaEditorDialogState
     }
   }
 
-  Future<String> _exportProcessedImage() async {
+  Future<({String path, Uint8List? bytes})> _exportProcessedImage() async {
     final image = _image;
     final hasEdits = _quarterTurns != 0 ||
         _strokes.isNotEmpty ||
         _circles.isNotEmpty;
 
     if (image == null || !hasEdits) {
-      return widget.imagePath;
+      return (path: widget.imagePath, bytes: widget.initialBytes);
     }
 
     final origW = image.width.toDouble();
@@ -327,17 +349,18 @@ class _WhatsAppMediaEditorDialogState
     final rendered = await picture.toImage(targetW.toInt(), targetH.toInt());
     final byteData = await rendered.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null) {
-      return widget.imagePath;
+      return (path: widget.imagePath, bytes: widget.initialBytes);
     }
 
     final outBytes = byteData.buffer.asUint8List();
+    final fileName = 'ismart_desktop_media_${DateTime.now().microsecondsSinceEpoch}.png';
+    if (kIsWeb) {
+      return (path: fileName, bytes: outBytes);
+    }
     final tempDir = await AppPathUtils.getSafeTemporaryDirectory();
-    final outputPath = p.join(
-      tempDir.path,
-      'ismart_desktop_media_${DateTime.now().microsecondsSinceEpoch}.png',
-    );
+    final outputPath = p.join(tempDir.path, fileName);
     await File(outputPath).writeAsBytes(outBytes, flush: true);
-    return outputPath;
+    return (path: outputPath, bytes: outBytes);
   }
 
   Offset _clampPoint(Offset local) {
@@ -789,9 +812,15 @@ class _WhatsAppMediaEditorDialogState
 // =============================================================================
 
 class _DocumentAttachmentSendDialog extends StatefulWidget {
-  const _DocumentAttachmentSendDialog({required this.filePath});
+  const _DocumentAttachmentSendDialog({
+    required this.filePath,
+    this.initialBytes,
+    this.knownFileSize,
+  });
 
   final String filePath;
+  final Uint8List? initialBytes;
+  final int? knownFileSize;
 
   @override
   State<_DocumentAttachmentSendDialog> createState() =>
@@ -813,6 +842,14 @@ class _DocumentAttachmentSendDialogState
   }
 
   Future<void> _readFileSize() async {
+    final preknown = widget.knownFileSize ?? widget.initialBytes?.length;
+    if (preknown != null && preknown > 0) {
+      setState(() {
+        _fileBytes = preknown;
+      });
+      return;
+    }
+    if (kIsWeb) return;
     try {
       final size = await File(widget.filePath).length();
       if (!mounted) return;
@@ -838,6 +875,8 @@ class _DocumentAttachmentSendDialogState
         caption: _captionController.text.trim().isNotEmpty
             ? _captionController.text.trim()
             : null,
+        fileBytes: widget.initialBytes,
+        fileSize: _fileBytes > 0 ? _fileBytes : widget.initialBytes?.length,
       ),
     );
   }
@@ -853,6 +892,8 @@ class _DocumentAttachmentSendDialogState
         displayName: rawName.isEmpty ? fallbackName : rawName,
         restrictForwardAndDownload: _restrictForwardAndDownload,
         caption: caption.isNotEmpty ? caption : null,
+        fileBytes: widget.initialBytes,
+        fileSize: _fileBytes > 0 ? _fileBytes : widget.initialBytes?.length,
       ),
     );
   }

@@ -2001,6 +2001,230 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  Future<List<({String path, Uint8List? bytes, String name})>>
+  _readNativeWindowsClipboardFiles() async {
+    if (kIsWeb || !Platform.isWindows) {
+      return const <({String path, Uint8List? bytes, String name})>[];
+    }
+    try {
+      const psScript = r'''
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
+  $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+  @{ type = 'files'; paths = @($files) } | ConvertTo-Json -Compress
+} elseif ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+  $img = [System.Windows.Forms.Clipboard]::GetImage()
+  if ($null -ne $img) {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("clipboard_" + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() + ".png")
+    $img.Save($tmp, [System.Drawing.Imaging.ImageFormat]::Png)
+    $img.Dispose()
+    @{ type = 'files'; paths = @($tmp) } | ConvertTo-Json -Compress
+  } else {
+    '{"type":"none"}'
+  }
+} else {
+  '{"type":"none"}'
+}
+''';
+      final result = await Process.run(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-STA', '-Command', psScript],
+        runInShell: false,
+      );
+      if (result.exitCode != 0) {
+        return const <({String path, Uint8List? bytes, String name})>[];
+      }
+      final stdoutStr = (result.stdout?.toString() ?? '').trim();
+      if (stdoutStr.isEmpty) {
+        return const <({String path, Uint8List? bytes, String name})>[];
+      }
+      final decoded = jsonDecode(stdoutStr);
+      if (decoded is Map && decoded['type'] == 'files') {
+        final rawPaths = decoded['paths'];
+        final out = <({String path, Uint8List? bytes, String name})>[];
+        if (rawPaths is List) {
+          for (final item in rawPaths) {
+            final filePath = item?.toString().trim() ?? '';
+            if (filePath.isEmpty) continue;
+            final f = File(filePath);
+            if (await f.exists()) {
+              out.add((path: filePath, bytes: null, name: p.basename(filePath)));
+            }
+          }
+        }
+        return out;
+      }
+    } catch (_) {}
+    return const <({String path, Uint8List? bytes, String name})>[];
+  }
+
+  Future<bool> _handlePasteFromClipboard() async {
+    final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
+    final conversation =
+        overview?.conversations
+            .where((c) => c.id == _conversationId)
+            .firstOrNull ??
+        widget.conversation;
+    if (_isReadOnlyConversation(conversation)) {
+      return false;
+    }
+
+    // 1. Electron (kIsWeb) clipboard file & image check
+    if (kIsWeb) {
+      if (!web_bridge.isElectron()) {
+        return false;
+      }
+      final clipRes = await web_bridge.electronReadClipboardFiles();
+      if (clipRes['hasFiles'] != true) {
+        final err = clipRes['error']?.toString().trim() ?? '';
+        if (err.isNotEmpty && clipRes['success'] == false && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(err)),
+          );
+          return true;
+        }
+        return false;
+      }
+
+      final rawFiles = clipRes['files'];
+      if (rawFiles is! List || rawFiles.isEmpty) {
+        return false;
+      }
+
+      final platformFiles = <PlatformFile>[];
+      for (final item in rawFiles) {
+        if (item is! Map) continue;
+        final name = item['name']?.toString().trim() ?? 'clipboard_file';
+        final b64 = item['base64']?.toString() ?? '';
+        if (b64.isEmpty) continue;
+        try {
+          final bytes = base64Decode(b64);
+          if (bytes.isNotEmpty) {
+            platformFiles.add(
+              PlatformFile(
+                name: name,
+                size: bytes.length,
+                bytes: bytes,
+              ),
+            );
+          }
+        } catch (_) {}
+      }
+
+      if (platformFiles.isEmpty) {
+        return false;
+      }
+
+      if (platformFiles.length == 1) {
+        final single = platformFiles.first;
+        if (!mounted) return true;
+        final sendDraft = await showAttachmentSendDialog(
+          context,
+          single.name,
+          initialBytes: single.bytes,
+          knownFileSize: single.size,
+        );
+        if (sendDraft == null) {
+          return true;
+        }
+        await _sendPreparedFile(
+          conversation: conversation,
+          sendPath: sendDraft.filePath,
+          displayName: sendDraft.displayName,
+          restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+          caption: sendDraft.caption,
+          fileBytes: sendDraft.fileBytes ?? single.bytes,
+          sourceFileName: sendDraft.displayName,
+          knownFileSize: sendDraft.fileSize ?? single.size,
+        );
+        return true;
+      }
+
+      final allImages = platformFiles.every((f) {
+        final ext = p.extension(f.name).toLowerCase();
+        return const {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'}
+            .contains(ext);
+      });
+      await _sendPickedWebFiles(
+        conversation: conversation,
+        files: platformFiles,
+        isImageBatch: allImages,
+      );
+      return true;
+    }
+
+    // 2. Native Windows Desktop clipboard file & image check
+    final copiedFiles = await _readNativeWindowsClipboardFiles();
+    if (copiedFiles.isEmpty) {
+      return false;
+    }
+
+    final paths = copiedFiles.map((f) => f.path).toList();
+    if (paths.length == 1) {
+      if (!mounted) return true;
+      final sendDraft = await showAttachmentSendDialog(context, paths.first);
+      if (sendDraft == null) {
+        return true;
+      }
+      await _sendPreparedFile(
+        conversation: conversation,
+        sendPath: sendDraft.filePath,
+        displayName: sendDraft.displayName,
+        restrictForwardAndDownload: sendDraft.restrictForwardAndDownload,
+        caption: sendDraft.caption,
+      );
+      return true;
+    }
+
+    final restrictForwardAndDownload = await _confirmBatchFileSend(paths);
+    if (restrictForwardAndDownload == null) {
+      return true;
+    }
+
+    Map<String, dynamic>? fixedBroadcastMetadata;
+    if (conversation.type == 'broadcast') {
+      fixedBroadcastMetadata = await _pickBroadcastTargetsMetadata();
+      if (fixedBroadcastMetadata == null) {
+        return true;
+      }
+    }
+
+    final mediaGroupId = 'album_${DateTime.now().microsecondsSinceEpoch}';
+    final results = await Future.wait(
+      paths.map(
+        (path) => _sendPreparedFile(
+          conversation: conversation,
+          sendPath: path,
+          displayName: p.basename(path),
+          restrictForwardAndDownload: restrictForwardAndDownload,
+          fixedBroadcastMetadata: fixedBroadcastMetadata,
+          extraMetadata: {
+            'mediaGroupId': mediaGroupId,
+            'mediaGroupSize': paths.length,
+          },
+          showFailureSnackbar: false,
+        ),
+      ),
+    );
+    final sentCount = results.where((ok) => ok).length;
+    final skippedCount = results.length - sentCount;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            skippedCount == 0
+                ? 'تم إرسال $sentCount ملف.'
+                : 'تم إرسال $sentCount ملف وتخطي $skippedCount ملف بسبب الحجم.',
+          ),
+        ),
+      );
+    }
+    return true;
+  }
+
   Future<void> _sendFile([String? droppedPath]) async {
     final overview = ref.read(chatOverviewControllerProvider).valueOrNull;
     final conversation =
@@ -5311,6 +5535,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
                 onSendPoll: _createPoll,
                 onSendChecklist: _createChecklist,
                 onSendGif: _openGifPicker,
+                onPasteFromClipboard: _handlePasteFromClipboard,
                 onOpenQuickReplies: () {
                   setState(() {
                     if (_slashReplyQuery != null) {
