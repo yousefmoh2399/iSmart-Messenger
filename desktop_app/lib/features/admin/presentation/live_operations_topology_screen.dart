@@ -201,7 +201,7 @@ class _LiveOperationsTopologyScreenState
   final Map<String, _TopologyNode> _nodesMap = {};
   final List<_DataPacket> _packets = [];
   final List<Map<String, dynamic>> _liveLogs = [];
-  List<_TopologyFloor> _floors = [];
+  final List<_TopologyFloor> _floors = const [];
 
   // Simulation State
   bool _isSimulating = false;
@@ -522,70 +522,36 @@ class _LiveOperationsTopologyScreenState
       return true;
     }).toList();
 
-    // ── CONCENTRIC FLOORS DETERMINATION ─────────────────────────────────────────
-    final totalDevs = filteredDevices.length;
-    final floorsList = <_TopologyFloor>[
-      const _TopologyFloor(
-        floorNumber: 1,
-        radius: 440.0,
-        title: '🏢 الدور 1: المحركات المركزية وقواعد البيانات',
-        subtitle: 'Core Engines & MongoDB ReplicaSet',
-        accentColor: Color(0xFF6366F1),
-        icon: Icons.layers_rounded,
-      ),
-    ];
-
-    int maxFloor = 1;
-    if (totalDevs > 0) {
-      maxFloor = 2;
-      floorsList.add(const _TopologyFloor(
-        floorNumber: 2,
-        radius: 800.0,
-        title: '🏢 الدور 2: محطات وكاشيرات الفروع الرئيسية',
-        subtitle: 'Primary Branch Workstations',
-        accentColor: Color(0xFFFF6D5A),
-        icon: Icons.storefront_rounded,
-      ));
-    }
-    if (totalDevs > 10) {
-      maxFloor = 3;
-      floorsList.add(const _TopologyFloor(
-        floorNumber: 3,
-        radius: 1160.0,
-        title: '🏢 الدور 3: محطات العمل الإضافية ونقاط البيع',
-        subtitle: 'Extended Workstations & Secondary Cashiers',
-        accentColor: Color(0xFF06B6D4),
-        icon: Icons.point_of_sale_rounded,
-      ));
-    }
-    if (totalDevs > 24) {
-      maxFloor = 4;
-      floorsList.add(const _TopologyFloor(
-        floorNumber: 4,
-        radius: 1520.0,
-        title: '🏢 الدور 4: أجهزة الإدارة والمحطات المتنقلة',
-        subtitle: 'Mobile Management & Field Stations',
-        accentColor: Color(0xFF10B981),
-        icon: Icons.devices_other_rounded,
-      ));
+    // ── 3-TIER ENTERPRISE ARCHITECTURE: GATEWAY ➔ ENGINES ➔ BRANCH FLEETS ─────
+    // 1. Group client devices cleanly by branch
+    final Map<String, List<_DeviceModel>> branchGroups = {};
+    for (final d in filteredDevices) {
+      branchGroups.putIfAbsent(d.branchCode, () => []).add(d);
     }
 
-    _floors = floorsList;
+    const engineCardW = 230.0;
+    const engineCardH = 88.0;
+    const engineGap = 20.0;
+    const totalEnginesW = 6 * engineCardW + 5 * engineGap; // 1480.0
 
-    // Dynamic canvas dimensions centered perfectly around the circular tower
-    final double maxRadius = maxFloor == 1
-        ? 620.0
-        : (maxFloor == 2
-            ? 980.0
-            : (maxFloor == 3 ? 1340.0 : 1720.0));
-    _canvasWidth = maxRadius * 2 + 320.0;
-    _canvasHeight = maxRadius * 2 + 320.0;
+    const branchColW = 270.0;
+    const branchColGap = 28.0;
+    final branchCodes = branchGroups.keys.toList();
+    final totalCols = math.max(branchCodes.length, 1);
+    final totalBranchesW = totalCols * branchColW + (totalCols - 1) * branchColGap;
+
+    _canvasWidth = math.max(math.max(totalEnginesW, totalBranchesW) + 160.0, 1600.0);
+
+    int maxDevs = 1;
+    for (final list in branchGroups.values) {
+      if (list.length > maxDevs) maxDevs = list.length;
+    }
+    _canvasHeight = math.max(340.0 + (maxDevs * 104.0) + 120.0, 820.0);
     final centerX = _canvasWidth / 2.0;
-    final centerY = _canvasHeight / 2.0;
 
-    // ── STAGE 1: CENTRAL CORE HUB (سيرفر المنظومة في المنتصف) ────────────────────
-    const gatewayWidth = 340.0;
-    const gatewayHeight = 126.0;
+    // ── STAGE 1: CENTRAL GATEWAY HUB (TOP CENTER) ──────────────────────────────
+    const gatewayWidth = 360.0;
+    const gatewayHeight = 110.0;
     final gatewayNode = _TopologyNode(
       id: 'node_gateway',
       stageIndex: 1,
@@ -619,7 +585,7 @@ class _LiveOperationsTopologyScreenState
         'routedTo': 'chat_engine',
         'verificationTimeMs': 2,
       },
-      position: Offset(centerX - gatewayWidth / 2.0, centerY - gatewayHeight / 2.0),
+      position: Offset(centerX - gatewayWidth / 2.0, 36.0),
       size: const Size(gatewayWidth, gatewayHeight),
       connectedNodeIds: [
         'node_chat_engine',
@@ -627,40 +593,22 @@ class _LiveOperationsTopologyScreenState
         'node_printer_engine',
         'node_release_engine',
       ],
-      floorNumber: 0,
+      floorNumber: 1,
       radialAngle: 0.0,
     );
     _nodes.add(gatewayNode);
 
-    // ── STAGE 2: FLOOR 1 (RING 1: CORE ENGINES & STORAGE - R = 440px) ───────────
-    const engineWidth = 260.0;
-    const engineHeight = 94.0;
-    const r1 = 440.0;
-
-    // 6 services evenly distributed along circle (angles: -90, -30, 30, 90, 150, 210 degrees)
-    final engineAngles = [
-      -math.pi / 2,         // 12 o'clock: Chat Engine
-      -math.pi / 6,         // 2 o'clock: Doc Engine
-      math.pi / 6,          // 4 o'clock: Storage Hub
-      math.pi / 2,          // 6 o'clock: MongoDB Cluster
-      5 * math.pi / 6,      // 8 o'clock: Release Hub
-      -5 * math.pi / 6,     // 10 o'clock: Printer Engine
-    ];
-
-    Offset posForAngle(double angle, double r, double w, double h) {
-      return Offset(
-        centerX + r * math.cos(angle) - (w / 2.0),
-        centerY + r * math.sin(angle) - (h / 2.0),
-      );
-    }
+    // ── STAGE 2: CORE MICROSERVICES & STORAGE (HORIZONTAL BUS) ──────────────────
+    final enginesStartX = centerX - (totalEnginesW / 2.0);
+    const engineY = 190.0;
 
     final chatEngineNode = _TopologyNode(
       id: 'node_chat_engine',
       stageIndex: 2,
-      name: 'محرك المحادثات والرسائل اللحظية',
+      name: 'محرك المحادثات والرسائل',
       subtitle: 'Real-time Messaging & Event Bus',
       category: 'CORE LOGIC',
-      description: 'معالجة الرسائل، توزيع الإشعارات اللحظية، تحديث مؤشرات القراءة، وإدارة قنوات البث.',
+      description: 'معالجة الرسائل، توزيع الإشعارات اللحظية، وتحديث مؤشرات القراءة.',
       color: const Color(0xFF6366F1), // Indigo
       icon: Icons.chat_bubble_outline_rounded,
       isOnline: true,
@@ -686,20 +634,20 @@ class _LiveOperationsTopologyScreenState
         'broadcastEvent': 'message:received',
         'dispatchStatus': 'delivered',
       },
-      position: posForAngle(engineAngles[0], r1, engineWidth, engineHeight),
-      size: const Size(engineWidth, engineHeight),
+      position: Offset(enginesStartX + 0 * (engineCardW + engineGap), engineY),
+      size: const Size(engineCardW, engineCardH),
       connectedNodeIds: ['node_database'],
-      floorNumber: 1,
-      radialAngle: engineAngles[0],
+      floorNumber: 2,
+      radialAngle: 0.0,
     );
 
     final docEngineNode = _TopologyNode(
       id: 'node_doc_engine',
       stageIndex: 2,
-      name: 'محرك المستندات وطلبات الفروع',
+      name: 'محرك المستندات والطلبات',
       subtitle: 'Documents & Orders Pipeline',
       category: 'CORE LOGIC',
-      description: 'معالجة تحويلات الفروع، فواتير الشراء، وأوامر الصرف مع تدقيق الصلاحيات الإدارية.',
+      description: 'معالجة تحويلات الفروع، فواتير الشراء، وأوامر الصرف مع تدقيق الصلاحيات.',
       color: const Color(0xFF8B5CF6), // Purple
       icon: Icons.inventory_2_outlined,
       isOnline: true,
@@ -724,42 +672,71 @@ class _LiveOperationsTopologyScreenState
         'persisted': true,
         'auditLogged': true,
       },
-      position: posForAngle(engineAngles[1], r1, engineWidth, engineHeight),
-      size: const Size(engineWidth, engineHeight),
+      position: Offset(enginesStartX + 1 * (engineCardW + engineGap), engineY),
+      size: const Size(engineCardW, engineCardH),
       connectedNodeIds: ['node_database', 'node_storage'],
-      floorNumber: 1,
-      radialAngle: engineAngles[1],
+      floorNumber: 2,
+      radialAngle: 0.0,
     );
 
-    final storageNode = _TopologyNode(
-      id: 'node_storage',
-      stageIndex: 3,
-      name: 'مستودع المرفقات السحابي والتخزين',
-      subtitle: 'Local Storage & Release Cache',
-      category: 'STORAGE',
-      description: 'أرشفة المرفقات والصور، وحزم تحديثات البرنامج الجاهزة للنشر المباشر للفروع.',
-      color: const Color(0xFF0284C7), // Blue
-      icon: Icons.cloud_done_rounded,
+    final printerEngineNode = _TopologyNode(
+      id: 'node_printer_engine',
+      stageIndex: 2,
+      name: 'سيرفر الطباعة والفواتير',
+      subtitle: 'Print Spooler & ESC/POS',
+      category: 'CORE LOGIC',
+      description: 'إدارة طابعات الباركود والإيصالات بالفروع وجدولة أوامر الطباعة.',
+      color: const Color(0xFFEC4899), // Pink
+      icon: Icons.print_rounded,
       isOnline: true,
       statusTag: 'READY',
+      executionMs: 7,
+      metrics: {
+        'بروتوكول الطباعة': 'ESC/POS Network',
+        'حالة الطابعات': 'جاهزة للطباعة',
+        'زمن الإرسال': '4ms',
+      },
+      details: {
+        'Driver Engine': 'Thermal Receipt & Barcode Spooler',
+        'Spool Buffer': 'Active',
+      },
+      inputPayload: {'jobType': 'receipt', 'template': 'standard_80mm'},
+      outputPayload: {'printed': true, 'latencyMs': 4},
+      position: Offset(enginesStartX + 2 * (engineCardW + engineGap), engineY),
+      size: const Size(engineCardW, engineCardH),
+      connectedNodeIds: const [],
+      floorNumber: 2,
+      radialAngle: 0.0,
+    );
+
+    final releaseEngineNode = _TopologyNode(
+      id: 'node_release_engine',
+      stageIndex: 2,
+      name: 'سيرفر التحديثات ونشر الحزم',
+      subtitle: 'Auto-Update & Version Cache',
+      category: 'CORE LOGIC',
+      description: 'مقارنة إصدارات الأجهزة بالنسخة المعتمدة v$targetVer وتوفير التحديث التلقائي.',
+      color: const Color(0xFFF59E0B), // Amber
+      icon: Icons.system_update_alt_rounded,
+      isOnline: true,
+      statusTag: 'v$targetVer',
       executionMs: 6,
       metrics: {
         'الإصدار المعتمد': 'v$targetVer',
-        'مجلد التحديثات': 'جاهز للمزامنة',
-        'بروتوكول النقل': 'HTTP Chunked',
+        'حزم التحديث': 'Windows / Android',
+        'نظام النشر': 'Chunked Stream',
       },
       details: {
-        'Storage Path': '/data/ismart/uploads',
-        'Update Directory': '/data/ismart/releases',
-        'Active Release': 'v$targetVer',
+        'Target Release': 'v$targetVer',
+        'Package Directory': '/data/ismart/releases',
       },
-      inputPayload: {'platform': 'windows', 'version': targetVer},
-      outputPayload: {'status': 'ready'},
-      position: posForAngle(engineAngles[2], r1, engineWidth, engineHeight),
-      size: const Size(engineWidth, engineHeight),
-      connectedNodeIds: const [],
-      floorNumber: 1,
-      radialAngle: engineAngles[2],
+      inputPayload: {'checkVersion': 'v$targetVer'},
+      outputPayload: {'hasUpdate': false},
+      position: Offset(enginesStartX + 3 * (engineCardW + engineGap), engineY),
+      size: const Size(engineCardW, engineCardH),
+      connectedNodeIds: ['node_storage'],
+      floorNumber: 2,
+      radialAngle: 0.0,
     );
 
     final databaseNode = _TopologyNode(
@@ -768,7 +745,7 @@ class _LiveOperationsTopologyScreenState
       name: 'عنقود قاعدة بيانات MongoDB',
       subtitle: 'Primary Cluster ReplicaSet',
       category: 'DATABASE',
-      description: 'الحفظ الدائم لسجلات المحادثات، بيانات الفروع، الجلسات النشطة، والمستخدمين.',
+      description: 'الحفظ الدائم لسجلات المحادثات، بيانات الفروع، الجلسات، والمستخدمين.',
       color: const Color(0xFF10B981), // Emerald
       icon: Icons.storage_rounded,
       isOnline: dbStatus == 'connected',
@@ -793,112 +770,66 @@ class _LiveOperationsTopologyScreenState
         'acknowledged': true,
         'writeTimeMs': 3.2,
       },
-      position: posForAngle(engineAngles[3], r1, engineWidth, engineHeight),
-      size: const Size(engineWidth, engineHeight),
+      position: Offset(enginesStartX + 4 * (engineCardW + engineGap), engineY),
+      size: const Size(engineCardW, engineCardH),
       connectedNodeIds: const [],
-      floorNumber: 1,
-      radialAngle: engineAngles[3],
+      floorNumber: 2,
+      radialAngle: 0.0,
     );
 
-    final releaseEngineNode = _TopologyNode(
-      id: 'node_release_engine',
-      stageIndex: 2,
-      name: 'سيرفر التحديثات وتوزيع الحزم',
-      subtitle: 'Auto-Update & Version Cache',
-      category: 'CORE LOGIC',
-      description: 'مقارنة إصدارات الأجهزة بالنسخة المعتمدة v$targetVer وتوفير التحديث التلقائي الفوري.',
-      color: const Color(0xFFF59E0B), // Amber
-      icon: Icons.system_update_alt_rounded,
+    final storageNode = _TopologyNode(
+      id: 'node_storage',
+      stageIndex: 3,
+      name: 'مستودع المرفقات والتخزين',
+      subtitle: 'Local Storage & Release Cache',
+      category: 'STORAGE',
+      description: 'أرشفة المرفقات والصور، وحزم تحديثات البرنامج الجاهزة للنشر المباشر للفروع.',
+      color: const Color(0xFF0284C7), // Blue
+      icon: Icons.cloud_done_rounded,
       isOnline: true,
-      statusTag: 'v$targetVer',
+      statusTag: 'READY',
       executionMs: 6,
       metrics: {
         'الإصدار المعتمد': 'v$targetVer',
-        'حزم التحديث': 'Windows / Android',
-        'نظام النشر': 'Chunked Stream',
+        'مجلد التحديثات': 'جاهز للمزامنة',
+        'بروتوكول النقل': 'HTTP Chunked',
       },
       details: {
-        'Target Release': 'v$targetVer',
-        'Package Directory': '/data/ismart/releases',
+        'Storage Path': '/data/ismart/uploads',
+        'Update Directory': '/data/ismart/releases',
+        'Active Release': 'v$targetVer',
       },
-      inputPayload: {'checkVersion': 'v$targetVer'},
-      outputPayload: {'hasUpdate': false},
-      position: posForAngle(engineAngles[4], r1, engineWidth, engineHeight),
-      size: const Size(engineWidth, engineHeight),
-      connectedNodeIds: ['node_storage'],
-      floorNumber: 1,
-      radialAngle: engineAngles[4],
-    );
-
-    final printerEngineNode = _TopologyNode(
-      id: 'node_printer_engine',
-      stageIndex: 2,
-      name: 'سيرفر إدارة الطباعة والفواتير',
-      subtitle: 'Network Print Spooler & ESC/POS',
-      category: 'CORE LOGIC',
-      description: 'إدارة طابعات الباركود والإيصالات بالفروع، مراقبة مستويات الورق، وجدولة أوامر الطباعة.',
-      color: const Color(0xFFEC4899), // Pink
-      icon: Icons.print_rounded,
-      isOnline: true,
-      statusTag: 'READY',
-      executionMs: 7,
-      metrics: {
-        'بروتوكول الطباعة': 'ESC/POS Network',
-        'حالة الطابعات': 'جاهزة للطباعة',
-        'زمن الإرسال': '4ms',
-      },
-      details: {
-        'Driver Engine': 'Thermal Receipt & Barcode Spooler',
-        'Spool Buffer': 'Active',
-      },
-      inputPayload: {'jobType': 'receipt', 'template': 'standard_80mm'},
-      outputPayload: {'printed': true, 'latencyMs': 4},
-      position: posForAngle(engineAngles[5], r1, engineWidth, engineHeight),
-      size: const Size(engineWidth, engineHeight),
+      inputPayload: {'platform': 'windows', 'version': targetVer},
+      outputPayload: {'status': 'ready'},
+      position: Offset(enginesStartX + 5 * (engineCardW + engineGap), engineY),
+      size: const Size(engineCardW, engineCardH),
       connectedNodeIds: const [],
-      floorNumber: 1,
-      radialAngle: engineAngles[5],
+      floorNumber: 2,
+      radialAngle: 0.0,
     );
 
     _nodes.addAll([
       chatEngineNode,
       docEngineNode,
-      storageNode,
-      databaseNode,
-      releaseEngineNode,
       printerEngineNode,
+      releaseEngineNode,
+      databaseNode,
+      storageNode,
     ]);
 
-    // ── STAGE 3: CONCENTRIC FLOORS (FLOOR 2, 3, 4 - BRANCH WORKSTATIONS & POS) ──
-    const cardWidth = 280.0;
-    const cardHeight = 96.0;
+    // ── STAGE 3: BRANCH WORKSTATIONS & POS FLEET (STRUCTURED COLUMNS) ───────────
+    const cardWidth = 270.0;
+    const cardHeight = 90.0;
+    final branchesStartX = (centerX - (totalBranchesW / 2.0)).clamp(40.0, double.infinity);
 
-    // Distribute devices across floors:
-    // Floor 2 (R = 800px): takes up to 10 devices
-    // Floor 3 (R = 1160px): takes next 14 devices
-    // Floor 4 (R = 1520px): takes remainder
-    final floor2Devices = <_DeviceModel>[];
-    final floor3Devices = <_DeviceModel>[];
-    final floor4Devices = <_DeviceModel>[];
+    for (int col = 0; col < branchCodes.length; col++) {
+      final bCode = branchCodes[col];
+      final devList = branchGroups[bCode]!;
+      final colX = branchesStartX + col * (branchColW + branchColGap);
 
-    for (int i = 0; i < filteredDevices.length; i++) {
-      if (i < 10) {
-        floor2Devices.add(filteredDevices[i]);
-      } else if (i < 24) {
-        floor3Devices.add(filteredDevices[i]);
-      } else {
-        floor4Devices.add(filteredDevices[i]);
-      }
-    }
-
-    void placeDevicesOnFloor(List<_DeviceModel> list, int floorNum, double radius, double angleOffset) {
-      final count = list.length;
-      if (count == 0) return;
-
-      for (int i = 0; i < count; i++) {
-        final d = list[i];
-        final angle = -math.pi / 2 + angleOffset + (i * 2 * math.pi / count);
-        final pos = posForAngle(angle, radius, cardWidth, cardHeight);
+      for (int row = 0; row < devList.length; row++) {
+        final d = devList[row];
+        final devY = 330.0 + (row * (cardHeight + 14.0));
 
         final devNode = _TopologyNode(
           id: d.id,
@@ -907,7 +838,7 @@ class _LiveOperationsTopologyScreenState
           subtitle: '${d.fullName} • ${d.branchName}',
           category: d.clientType == 'mobile' ? 'تطبيق جوال' : 'محطة كاشير POS',
           description: 'محطة عمل بـ ${d.branchName} • عنوان IP: ${d.ipAddress} • نظام: ${d.os}',
-          color: d.isOnline ? const Color(0xFFFF6D5A) : const Color(0xFF64748B), // n8n Coral
+          color: d.isOnline ? const Color(0xFFFF6D5A) : const Color(0xFF64748B), // Coral
           icon: d.clientType == 'mobile' ? Icons.smartphone_rounded : Icons.desktop_windows_rounded,
           isOnline: d.isOnline,
           statusTag: d.isOnline ? 'ONLINE' : 'OFFLINE',
@@ -920,8 +851,8 @@ class _LiveOperationsTopologyScreenState
           branchName: d.branchName,
           branchCode: d.branchCode,
           clientType: d.clientType,
-          floorNumber: floorNum,
-          radialAngle: angle,
+          floorNumber: 3,
+          radialAngle: 0.0,
           metrics: {
             'الموظف': d.fullName,
             'الفرع': d.branchName,
@@ -938,33 +869,25 @@ class _LiveOperationsTopologyScreenState
             'App Version': 'v${d.appVersion}',
             'Target Version': 'v$targetVer',
             'OS Platform': d.os,
-            'Client Type': d.clientType,
-            'Floor Level': 'الدور $floorNum',
-            'Status': d.isOnline ? 'متصل الآن (Online)' : 'غير متصل (Offline)',
-            'Last Seen': d.lastSeenAt != null ? d.lastSeenAt!.toLocal().toString().split('.')[0] : 'نشط الآن',
           },
           inputPayload: {
             'device': d.hostname,
-            'user': d.username,
-            'version': d.appVersion,
-            'branch': d.branchName,
+            'branchCode': d.branchCode,
+            'clientType': d.clientType,
+            'ping': 'heartbeat',
           },
           outputPayload: {
-            'status': d.isOnline ? 'heartbeat_ok' : 'offline',
-            'socketConnected': d.isOnline,
-            'latencyMs': d.isOnline ? 12 : 0,
+            'connected': d.isOnline,
+            'status': d.isOnline ? 'active' : 'idle',
           },
-          position: pos,
+          position: Offset(colX, devY),
           size: const Size(cardWidth, cardHeight),
           connectedNodeIds: ['node_gateway'],
         );
+
         _nodes.add(devNode);
       }
     }
-
-    placeDevicesOnFloor(floor2Devices, 2, 800.0, 0.0);
-    placeDevicesOnFloor(floor3Devices, 3, 1160.0, math.pi / 12);
-    placeDevicesOnFloor(floor4Devices, 4, 1520.0, math.pi / 24);
 
     for (final n in _nodes) {
       _nodesMap[n.id] = n;
@@ -2394,10 +2317,10 @@ class _LiveOperationsTopologyScreenState
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _floorQuickPill(0, '🏢 كامل البرج', isDark),
+              _floorQuickPill(0, '🌐 كامل المنظومة', isDark),
               const SizedBox(width: 4),
               for (final fl in _floors) ...[
-                _floorQuickPill(fl.floorNumber, 'الدور ${fl.floorNumber}', isDark),
+                _floorQuickPill(fl.floorNumber, fl.floorNumber == 1 ? 'بوابة الاتصال' : (fl.floorNumber == 2 ? 'المحركات' : 'الفروع'), isDark),
                 const SizedBox(width: 4),
               ],
             ],
@@ -2915,34 +2838,29 @@ class _N8nStaticFloorGridPainter extends CustomPainter {
       }
     }
 
-    // 2. Concentric Building Floor Orbit Rings
-    final ringPaint = Paint()
+    // 2. Structured Section Tier Dividers
+    final tierDividers = [
+      (y: 16.0, title: '⚡ بوابة الاتصال والراوتر المركزي (Tier 1: Gateway & Router)', color: const Color(0xFF06B6D4)),
+      (y: 160.0, title: '⚙️ المحركات المركزية وقواعد البيانات (Tier 2: Core Engines & MongoDB)', color: const Color(0xFF6366F1)),
+      (y: 300.0, title: '🏢 شبكة محطات وكاشيرات الفروع (Tier 3: Branch Fleets)', color: const Color(0xFFFF6D5A)),
+    ];
+
+    final linePaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6;
+      ..strokeWidth = 1.0;
 
-    final glowPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5;
+    for (final tier in tierDividers) {
+      linePaint.color = tier.color.withValues(alpha: isDark ? 0.20 : 0.15);
+      canvas.drawLine(Offset(40, tier.y), Offset(size.width - 40, tier.y), linePaint);
 
-    for (final floor in floors) {
-      // Glow ambient
-      glowPaint.color = floor.accentColor.withValues(alpha: isDark ? 0.08 : 0.05);
-      canvas.drawCircle(center, floor.radius, glowPaint);
-
-      // Dash / Thin floor orbit line
-      ringPaint.color = floor.accentColor.withValues(alpha: isDark ? 0.25 : 0.20);
-      canvas.drawCircle(center, floor.radius, ringPaint);
-
-      // Floor Title Badge at Top Center (-90 degrees)
-      final badgeCenter = Offset(center.dx, center.dy - floor.radius);
+      // Section Badge
       final tp = TextPainter(
         text: TextSpan(
-          text: floor.title,
+          text: tier.title,
           style: TextStyle(
-            fontSize: 10.0,
+            fontSize: 9.5,
             fontWeight: FontWeight.w800,
-            color: floor.accentColor,
-            letterSpacing: -0.2,
+            color: tier.color,
           ),
         ),
         textDirection: TextDirection.rtl,
@@ -2950,34 +2868,33 @@ class _N8nStaticFloorGridPainter extends CustomPainter {
 
       final badgeRRect = RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: badgeCenter,
+          center: Offset(center.dx, tier.y),
           width: tp.width + 16,
-          height: tp.height + 8,
+          height: tp.height + 6,
         ),
-        const Radius.circular(6),
+        const Radius.circular(5),
       );
 
       final bgPaint = Paint()
-        ..color = isDark ? const Color(0xFF141722) : Colors.white
+        ..color = isDark ? const Color(0xFF0F1118) : Colors.white
         ..style = PaintingStyle.fill;
       final borderPaint = Paint()
-        ..color = floor.accentColor.withValues(alpha: 0.4)
+        ..color = tier.color.withValues(alpha: 0.35)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.0;
 
       canvas.drawRRect(badgeRRect, bgPaint);
       canvas.drawRRect(badgeRRect, borderPaint);
-      tp.paint(canvas, Offset(badgeCenter.dx - (tp.width / 2), badgeCenter.dy - (tp.height / 2)));
+      tp.paint(canvas, Offset(center.dx - (tp.width / 2), tier.y - (tp.height / 2)));
     }
   }
 
   @override
   bool shouldRepaint(covariant _N8nStaticFloorGridPainter oldDelegate) {
-    return oldDelegate.isDark != isDark || oldDelegate.floors.length != floors.length;
+    return oldDelegate.isDark != isDark;
   }
 }
 
-/// Radial Bézier connection wires flowing cleanly along concentric spokes.
 class _N8nRadialWiresPainter extends CustomPainter {
   const _N8nRadialWiresPainter({
     required this.nodes,
