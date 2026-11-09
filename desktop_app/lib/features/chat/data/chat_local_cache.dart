@@ -66,6 +66,25 @@ class ChatLocalCache {
         .toList();
   }
 
+  Future<void> saveUsers(List<ChatDirectoryUser> users) async {
+    await saveRawJson('users_directory', {
+      'users': users.map((user) => user.toJson()).toList(),
+    });
+  }
+
+  Future<List<ChatDirectoryUser>?> loadUsers() async {
+    final cached = await loadRawJson('users_directory');
+    final raw = cached?['users'];
+    if (raw is! List) return null;
+    return raw
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              ChatDirectoryUser.fromJson(Map<String, dynamic>.from(entry)),
+        )
+        .toList();
+  }
+
   Future<void> saveMessages(
     String conversationId,
     ChatMessagesPage page,

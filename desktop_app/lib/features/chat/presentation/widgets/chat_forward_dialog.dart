@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
+import '../../utils/chat_search_utils.dart';
 import '../../../../shared/providers/providers.dart';
 
 enum ForwardTargetKind {
@@ -178,43 +179,51 @@ class _ChatForwardDialogState extends ConsumerState<ChatForwardDialog>
       list.sort((a, b) => a.displayName.compareTo(b.displayName));
     }
 
-    final query = _searchQuery.trim().toLowerCase();
+    final rawQuery = _searchQuery.trim();
 
     // 1. Recent chats (excluding current chat)
     final recentConversations = overview.conversations
         .where((conv) => conv.id != widget.currentConversationId)
-        .where((conv) {
-          if (query.isEmpty) return true;
-          final title = conv.displayTitle(widget.currentUserId).toLowerCase();
-          return title.contains(query);
-        })
+        .where((conv) => ChatSearchUtils.matchesConversation(
+              conversation: conv,
+              query: rawQuery,
+              currentUserId: widget.currentUserId,
+            ))
         .toList();
 
     // 2. All Directory Users
     final filteredUsers = allOtherUsers.where((user) {
-      if (query.isEmpty) return true;
-      final name = user.displayName.toLowerCase();
-      final username = user.username.toLowerCase();
-      final branch = user.branchCode.toLowerCase();
-      final deptName = user.formatDepartmentNames(departmentsById).toLowerCase();
-      return name.contains(query) ||
-          username.contains(query) ||
-          branch.contains(query) ||
-          deptName.contains(query);
+      if (rawQuery.isEmpty) return true;
+      final userDepartments = user.allDepartmentIds
+          .map((id) => departmentsById[id])
+          .whereType<DepartmentSummary>()
+          .toList();
+      final primaryDepartment = userDepartments.isNotEmpty
+          ? userDepartments.first
+          : departmentsById[user.departmentId];
+      final branch = overview.branches
+          .where((b) => b.id == user.branchId || (b.code.isNotEmpty && b.code == user.branchCode))
+          .firstOrNull;
+      return ChatSearchUtils.matchesUser(
+        user: user,
+        primaryDepartment: primaryDepartment,
+        userDepartments: userDepartments,
+        branch: branch,
+        query: rawQuery,
+      );
     }).toList();
 
     // 3. Departments
     final filteredDepartments = overview.departments.where((dept) {
-      if (query.isEmpty) return true;
-      final deptMatches = dept.name.toLowerCase().contains(query) ||
-          dept.code.toLowerCase().contains(query) ||
-          dept.description.toLowerCase().contains(query);
+      if (rawQuery.isEmpty) return true;
+      final deptMatches = ChatSearchUtils.matches('${dept.name} ${dept.code} ${dept.description}', rawQuery);
       if (deptMatches) return true;
       final deptMembers = usersByDept[dept.id] ?? const [];
-      return deptMembers.any((u) =>
-          u.displayName.toLowerCase().contains(query) ||
-          u.username.toLowerCase().contains(query) ||
-          u.branchCode.toLowerCase().contains(query));
+      return deptMembers.any((u) => ChatSearchUtils.matchesUser(
+            user: u,
+            primaryDepartment: dept,
+            query: rawQuery,
+          ));
     }).toList();
 
     // 4. Groups & Broadcasts
@@ -233,12 +242,11 @@ class _ChatForwardDialogState extends ConsumerState<ChatForwardDialog>
           }
           return false;
         })
-        .where((conv) {
-          if (query.isEmpty) return true;
-          final name = conv.name.toLowerCase();
-          final desc = conv.description.toLowerCase();
-          return name.contains(query) || desc.contains(query);
-        })
+        .where((conv) => ChatSearchUtils.matchesConversation(
+              conversation: conv,
+              query: rawQuery,
+              currentUserId: widget.currentUserId,
+            ))
         .toList();
 
     final cardBgColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
@@ -639,18 +647,18 @@ class _ChatForwardDialogState extends ConsumerState<ChatForwardDialog>
         final targetId = 'dept_${dept.id}';
         final isDeptSelected = _isTargetSelected(targetId);
 
-        final query = _searchQuery.trim().toLowerCase();
+        final query = _searchQuery.trim();
         final deptDirectMatch = query.isEmpty ||
-            dept.name.toLowerCase().contains(query) ||
-            dept.code.toLowerCase().contains(query) ||
-            dept.description.toLowerCase().contains(query);
+            ChatSearchUtils.matches('${dept.name} ${dept.code} ${dept.description}', query);
 
         final visibleDeptUsers = deptDirectMatch
             ? deptUsers
             : deptUsers.where((u) {
-                return u.displayName.toLowerCase().contains(query) ||
-                    u.username.toLowerCase().contains(query) ||
-                    u.branchCode.toLowerCase().contains(query);
+                return ChatSearchUtils.matchesUser(
+                  user: u,
+                  primaryDepartment: dept,
+                  query: query,
+                );
               }).toList();
 
         final isExpanded = _expandedDepartmentIds.contains(dept.id);

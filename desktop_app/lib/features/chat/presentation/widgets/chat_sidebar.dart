@@ -11,6 +11,7 @@ import '../../providers/chat_folders_provider.dart';
 import '../chat_appearance.dart';
 import 'chat_folder_inline_item.dart';
 import 'create_chat_folder_dialog.dart';
+import '../../utils/chat_search_utils.dart';
 import 'chat_list_item.dart';
 import 'chat_ui_helpers.dart';
 import 'instant_clipboard_sync_dialog.dart';
@@ -82,7 +83,7 @@ class ChatSidebar extends ConsumerWidget {
     final baseTheme = Theme.of(context);
     final colorScheme = baseTheme.colorScheme;
     final isDark = baseTheme.brightness == Brightness.dark;
-    final query = searchController.text.trim().toLowerCase();
+    final query = searchController.text.trim();
     final chatPreferences =
         currentUser?.chatPreferences ?? ChatPreferences.defaults;
     final appearance = ChatAppearanceCatalog.resolveAppearance(
@@ -145,6 +146,11 @@ class ChatSidebar extends ConsumerWidget {
                                 .toList()
                             : conversations.where((c) => !c.isArchived).toList())
         .where((c) => !folderConversationIds.contains(c.id))
+        .where((c) => ChatSearchUtils.matchesConversation(
+              conversation: c,
+              query: query,
+              currentUserId: currentUserId,
+            ))
         .toList();
     final groupedSpaces = switch (currentFilter) {
       ChatSidebarFilter.all => const <ChatConversation>[],
@@ -165,12 +171,24 @@ class ChatSidebar extends ConsumerWidget {
       ChatSidebarFilter.archived => const <ChatConversation>[],
     }.toList();
 
+    // Pool all known users from both directory and conversation memberships
+    // so no contact is ever omitted if network pagination is still pending.
+    final allKnownUsers = <String, ChatDirectoryUser>{
+      for (final user in overview.users) user.id: user,
+    };
+    for (final conv in conversations) {
+      for (final member in conv.members) {
+        allKnownUsers.putIfAbsent(member.id, () => member);
+      }
+    }
+
+    final matchingUsers = <ChatDirectoryUser>[];
     final usersByDepartment = <DepartmentSummary?, List<ChatDirectoryUser>>{};
     final usersByBranch = <BranchSummary?, List<ChatDirectoryUser>>{};
     if (currentFilter != ChatSidebarFilter.rooms &&
         currentFilter != ChatSidebarFilter.favorites &&
         currentFilter != ChatSidebarFilter.archived) {
-      for (final user in overview.users) {
+      for (final user in allKnownUsers.values) {
         if (user.id == currentUserId) {
           continue;
         }
@@ -183,22 +201,23 @@ class ChatSidebar extends ConsumerWidget {
             ? userDepartments.first
             : departmentById[user.departmentId];
         final branch = branchById[user.branchId];
-        if (!_matchesUserQuery(user, primaryDepartment, query) &&
-            !userDepartments.any(
-              (department) => _matchesUserQuery(user, department, query),
-            )) {
-          final displayName = user.displayName.toLowerCase();
-          final username = user.username.toLowerCase();
-          final branchName = branch?.name.toLowerCase() ?? '';
-          final matchesBranch =
-              query.isEmpty ||
-              displayName.contains(query) ||
-              username.contains(query) ||
-              branchName.contains(query);
-          if (!matchesBranch) {
-            continue;
-          }
+
+        final isMatch = ChatSearchUtils.matchesUser(
+          user: user,
+          primaryDepartment: primaryDepartment,
+          userDepartments: userDepartments,
+          branch: branch,
+          query: query,
+        );
+
+        if (!isMatch) {
+          continue;
         }
+
+        if (query.isNotEmpty) {
+          matchingUsers.add(user);
+        }
+
         if (userDepartments.isEmpty) {
           usersByDepartment
               .putIfAbsent(primaryDepartment, () => <ChatDirectoryUser>[])
@@ -213,6 +232,9 @@ class ChatSidebar extends ConsumerWidget {
         usersByBranch
             .putIfAbsent(branch, () => <ChatDirectoryUser>[])
             .add(user);
+      }
+      if (matchingUsers.isNotEmpty) {
+        matchingUsers.sort((a, b) => a.displayName.compareTo(b.displayName));
       }
     }
     final orderedDepartmentEntries = [
@@ -316,7 +338,7 @@ class ChatSidebar extends ConsumerWidget {
                       color: isDark ? Colors.white : const Color(0xFF1C2B3A),
                     ),
                     decoration: InputDecoration(
-                      hintText: 'بحث',
+                      hintText: 'بحث في المحادثات وجهات الاتصال...',
                       hintStyle: TextStyle(
                         color: isDark
                             ? Colors.white38
@@ -328,6 +350,21 @@ class ChatSidebar extends ConsumerWidget {
                         size: 20,
                         color: appearance.accent,
                       ),
+                      suffixIcon: searchController.text.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'مسح البحث',
+                              icon: Icon(
+                                Icons.close_rounded,
+                                size: 18,
+                                color: isDark
+                                    ? Colors.white54
+                                    : const Color(0xFF708499),
+                              ),
+                              onPressed: () {
+                                searchController.clear();
+                              },
+                            )
+                          : null,
                       filled: true,
                       fillColor: searchFill,
                       contentPadding: const EdgeInsets.symmetric(
@@ -507,16 +544,43 @@ class ChatSidebar extends ConsumerWidget {
                                 ),
                               )),
                         const ChatFolderDropZone(),
+                        if (query.isNotEmpty && matchingUsers.isNotEmpty) ...[
+                          _SidebarSectionHeader(
+                            title: 'الأشخاص وجهات الاتصال (${matchingUsers.length})',
+                            subtitle: 'جهات الاتصال المطابقة لبحثك - انقر للمحادثة المباشرة.',
+                            appearance: appearance,
+                            isDark: isDark,
+                          ),
+                          const SizedBox(height: 8),
+                          ...matchingUsers.map(
+                            (user) => Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: _SidebarUserTile(
+                                user: user,
+                                accent: _departmentAccent(departmentById[user.departmentId]),
+                                appearance: appearance,
+                                isDark: isDark,
+                                existingConversation: _conversationForUser(user),
+                                onTap: () => onOpenOrStartDirectConversation(user),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         if (recentConversations.isNotEmpty) ...[
                           _SidebarSectionHeader(
-                            title: currentFilter == ChatSidebarFilter.direct
-                                ? 'المحادثات المباشرة'
-                                : currentFilter == ChatSidebarFilter.all
-                                    ? 'كل المحادثات'
-                                    : 'أحدث المحادثات',
-                            subtitle: currentFilter == ChatSidebarFilter.direct
-                                ? 'كل الشاتات المباشرة المتاحة لك.'
-                                : 'أسرع طريق للمحادثات المفتوحة مؤخرًا.',
+                            title: query.isNotEmpty
+                                ? 'المحادثات المطابقة (${recentConversations.length})'
+                                : currentFilter == ChatSidebarFilter.direct
+                                    ? 'المحادثات المباشرة'
+                                    : currentFilter == ChatSidebarFilter.all
+                                        ? 'كل المحادثات'
+                                        : 'أحدث المحادثات',
+                            subtitle: query.isNotEmpty
+                                ? 'نتائج البحث في المحادثات المفتوحة.'
+                                : currentFilter == ChatSidebarFilter.direct
+                                    ? 'كل الشاتات المباشرة المتاحة لك.'
+                                    : 'أسرع طريق للمحادثات المفتوحة مؤخرًا.',
                             appearance: appearance,
                             isDark: isDark,
                           ),
@@ -654,6 +718,7 @@ class ChatSidebar extends ConsumerWidget {
                                     membersCount:
                                         department?.membersCount ??
                                         users.length,
+                                    initiallyExpanded: query.isNotEmpty,
                                     conversationForUser: _conversationForUser,
                                     onUserTap: onOpenOrStartDirectConversation,
                                   ),
@@ -701,6 +766,7 @@ class ChatSidebar extends ConsumerWidget {
                                     users: users,
                                     membersCount:
                                         branch?.membersCount ?? users.length,
+                                    initiallyExpanded: query.isNotEmpty,
                                     conversationForUser: _conversationForUser,
                                     onUserTap: onOpenOrStartDirectConversation,
                                   ),
@@ -708,7 +774,18 @@ class ChatSidebar extends ConsumerWidget {
                               }),
                           ],
                         ],
-                        if (recentConversations.isEmpty &&
+                        if (query.isNotEmpty &&
+                            recentConversations.isEmpty &&
+                            matchingUsers.isEmpty &&
+                            orderedDepartmentEntries.isEmpty &&
+                            orderedBranchEntries.isEmpty)
+                          _SidebarInlineNotice(
+                            label: 'لم يتم العثور على أي نتائج مطابقة لـ "$query".',
+                            appearance: appearance,
+                            isDark: isDark,
+                          )
+                        else if (query.isEmpty &&
+                            recentConversations.isEmpty &&
                             groupedSpaces.isEmpty &&
                             orderedDepartmentEntries.isEmpty &&
                             orderedBranchEntries.isEmpty)
@@ -1589,6 +1666,7 @@ class _SidebarDepartmentBlock extends StatelessWidget {
     required this.membersCount,
     required this.conversationForUser,
     required this.onUserTap,
+    this.initiallyExpanded = false,
   });
 
   final String title;
@@ -1600,6 +1678,7 @@ class _SidebarDepartmentBlock extends StatelessWidget {
   final int membersCount;
   final ChatConversation? Function(ChatDirectoryUser user) conversationForUser;
   final ValueChanged<ChatDirectoryUser> onUserTap;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -1617,9 +1696,10 @@ class _SidebarDepartmentBlock extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          key: PageStorageKey<String>('dept_${title}_$initiallyExpanded'),
           tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          initiallyExpanded: false,
+          initiallyExpanded: initiallyExpanded,
           leading: CircleAvatar(
             radius: 18,
             backgroundColor: accent.withValues(alpha: 0.14),
@@ -1814,21 +1894,6 @@ String _firstCharacter(String value) {
   return trimmed.substring(0, 1);
 }
 
-bool _matchesUserQuery(
-  ChatDirectoryUser user,
-  DepartmentSummary? department,
-  String query,
-) {
-  if (query.isEmpty) {
-    return true;
-  }
-  final displayName = user.displayName.toLowerCase();
-  final username = user.username.toLowerCase();
-  final departmentName = department?.name.toLowerCase() ?? '';
-  return displayName.contains(query) ||
-      username.contains(query) ||
-      departmentName.contains(query);
-}
 
 Color _departmentAccent(DepartmentSummary? department) {
   const palette = <Color>[

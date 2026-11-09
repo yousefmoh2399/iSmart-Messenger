@@ -150,15 +150,18 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }).catchError((_) {}));
 
+    final cachedUsersFuture = repository.cache.loadUsers();
+
     // Load users lazily — do NOT block initial render on the full user directory.
-    // Conversations, departments, branches, and roles are loaded in parallel;
-    // users are fetched in the background and merged in once ready.
+    // Conversations, departments, branches, roles, and cached users are loaded in parallel;
+    // fresh users are fetched in the background and merged in once ready.
     final results = await Future.wait([
       conversationsFuture,
       safeList(repository.fetchDepartments),
       safeList(repository.fetchBranches),
       safeList(repository.fetchManageableConversations),
       safeList(repository.fetchRoles),
+      cachedUsersFuture,
     ]);
 
     // Kick off user directory load in background — UI renders without waiting
@@ -166,13 +169,30 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       if (_disposed) return;
       final current = state.valueOrNull;
       if (current != null && users.isNotEmpty) {
-        _setStateAndCache(_copyOverview(source: current, users: users));
+        final mergedUsersMap = <String, ChatDirectoryUser>{
+          for (final u in current.users) u.id: u,
+          for (final u in users) u.id: u,
+        };
+        _setStateAndCache(
+          _copyOverview(
+            source: current,
+            users: mergedUsersMap.values.toList(),
+          ),
+        );
       }
     }).catchError((_) {}));
 
     final conversations = _sortConversations(results[0] as List<ChatConversation>);
-    // users start empty; populated asynchronously above
-    final users = <ChatDirectoryUser>[];
+    final cachedUsers = (results[5] as List<ChatDirectoryUser>?) ?? const <ChatDirectoryUser>[];
+    final userMap = <String, ChatDirectoryUser>{
+      for (final u in cachedUsers) u.id: u,
+    };
+    for (final conv in conversations) {
+      for (final member in conv.members) {
+        userMap.putIfAbsent(member.id, () => member);
+      }
+    }
+    final users = userMap.values.toList();
     final departments = results[1] as List<DepartmentSummary>;
     final branches = results[2] as List<BranchSummary>;
     final rawManageableConversations = results[3] as List<ChatConversation>;
@@ -1555,6 +1575,9 @@ Future<ChatConversation> uploadConversationAvatar({
       await _repository().cache.saveRawJson('conversations', {
         'conversations': jsonList,
       });
+      if (data.users.isNotEmpty) {
+        await _repository().cache.saveUsers(data.users);
+      }
     } catch (_) {}
   }
 

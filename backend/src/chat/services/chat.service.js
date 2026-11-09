@@ -213,6 +213,18 @@ function escapeRegExp(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function buildArabicSearchRegex(str) {
+  let pattern = escapeRegExp(str.trim());
+  pattern = pattern
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
+    .replace(/[اأإآٱ]/g, "[اأإآٱ]")
+    .replace(/[يى]/g, "[يى]")
+    .replace(/[ةه]/g, "[ةه]")
+    .replace(/[وؤ]/g, "[وؤ]")
+    .replace(/[ئ]/g, "[يىئ]");
+  return new RegExp(pattern, "i");
+}
+
 function normalizeDepartmentCodeList(rawDepartmentCodes) {
   return Array.from(
     new Set(
@@ -868,7 +880,7 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
   const andConditions = [];
 
   if (search) {
-    const regex = new RegExp(escapeRegExp(search), "i");
+    const regex = buildArabicSearchRegex(search);
     andConditions.push({
       $or: [
         { username: regex },

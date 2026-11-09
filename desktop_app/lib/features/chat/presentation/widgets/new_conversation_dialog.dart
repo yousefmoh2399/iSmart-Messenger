@@ -10,6 +10,7 @@ import '../../../../shared/models/app_user.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
+import '../../utils/chat_search_utils.dart';
 
 class NewConversationDialog extends ConsumerStatefulWidget {
   const NewConversationDialog({
@@ -365,27 +366,24 @@ class _NewConversationDialogState
 
     final filteredUsers = departmentUsers.where((u) {
       if (_searchQuery.isEmpty) return true;
-      final q = _searchQuery.toLowerCase();
-      final branchName = currentOverview.branches
+      final branch = currentOverview.branches
           .where((b) =>
               b.id == u.branchId ||
               (b.code.isNotEmpty &&
                   b.code.toUpperCase() == u.branchCode.toUpperCase()))
-          .firstOrNull
-          ?.name ??
-          '';
-      final deptName = currentOverview.departments
+          .firstOrNull;
+      final userDepts = currentOverview.departments
           .where((d) =>
               d.id == u.departmentId ||
               u.departmentIds.contains(d.id))
-          .map((d) => d.name)
-          .join(' ');
-      return u.displayName.toLowerCase().contains(q) ||
-          u.username.toLowerCase().contains(q) ||
-          u.jobTitle.toLowerCase().contains(q) ||
-          u.branchCode.toLowerCase().contains(q) ||
-          branchName.toLowerCase().contains(q) ||
-          deptName.toLowerCase().contains(q);
+          .toList();
+      return ChatSearchUtils.matchesUser(
+        user: u,
+        primaryDepartment: userDepts.isNotEmpty ? userDepts.first : null,
+        userDepartments: userDepts,
+        branch: branch,
+        query: _searchQuery,
+      );
     }).toList();
 
     final dialogBg = isDark ? const Color(0xFF161C24) : Colors.white;

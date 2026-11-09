@@ -30,6 +30,7 @@ import '../../data/chat_draft_store.dart';
 import '../../data/chat_socket_service.dart';
 import '../../models/chat_models.dart';
 import '../../utils/chat_attachment_policy.dart';
+import '../../utils/chat_search_utils.dart';
 import '../chat_appearance.dart';
 import '../chat_transfer_manager.dart';
 import 'attachment_send_dialogs.dart';
@@ -381,11 +382,12 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _updateMentionQuery(String query) {
-    final lowerQuery = query.toLowerCase();
     final allMembers = widget.conversation.members;
     final filtered = allMembers.where((m) {
-      return m.displayName.toLowerCase().contains(lowerQuery) ||
-          m.username.toLowerCase().contains(lowerQuery);
+      return ChatSearchUtils.matchesUser(
+        user: m,
+        query: query,
+      );
     }).toList();
 
     setState(() {
