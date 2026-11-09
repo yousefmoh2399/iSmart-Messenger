@@ -60,9 +60,10 @@ const router = express.Router();
 
 const messageLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 180,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
   message: {
     message: "تم تجاوز عدد الرسائل المسموح في الدقيقة. حاول مرة أخرى بعد قليل.",
   },

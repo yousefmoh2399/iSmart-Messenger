@@ -445,6 +445,7 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(userPreferencesControllerProvider).valueOrNull ??
         UserPreferences.defaults(),
     ref.watch(chatLocalCacheProvider),
+    socketService: ref.watch(chatSocketServiceProvider),
   );
 });
 

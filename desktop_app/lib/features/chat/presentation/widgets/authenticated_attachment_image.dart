@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,6 +53,15 @@ class _AuthenticatedAttachmentImageState
   }
 
   Future<Uint8List> _loadBytes() {
+    final localPath = widget.message.metadata?['localFilePath']?.toString();
+    if (localPath != null && localPath.isNotEmpty && !kIsWeb) {
+      try {
+        final f = File(localPath);
+        if (f.existsSync()) {
+          return f.readAsBytes();
+        }
+      } catch (_) {}
+    }
     return ref
         .read(chatRepositoryProvider)
         .fetchAttachmentPreviewBytes(widget.message);

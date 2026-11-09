@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:path/path.dart' as p;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -2250,35 +2252,6 @@ class ConversationMessagesController
     }
   }
 
-  Future<void> retryMessage(ChatMessage message) async {
-    final current = state.valueOrNull;
-    if (current != null) {
-      // Instantly remove failed message from state and cache so it doesn't linger
-      _setStateAndCache(
-        current.copyWith(
-          messages: current.messages.where((m) => m.id != message.id).toList(),
-        ),
-        immediate: true,
-      );
-    }
-
-    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
-        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
-
-    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
-    cleanMetadata.remove('status');
-    cleanMetadata.remove('error');
-
-    await sendMessage(
-      content: message.content,
-      replyToMessageId: message.replyToMessageId,
-      messageType: message.messageType,
-      fileUrl: message.fileUrl,
-      metadata: cleanMetadata,
-      clientMessageId: clientMessageId,
-    );
-  }
-
   Future<void> sendFile(
     String filePath, {
     Uint8List? fileBytes,
@@ -2297,40 +2270,261 @@ class ConversationMessagesController
           await future;
         } catch (_) {}
       }
-      final result = await _guardAuth(
-        () => _repository().sendFileMessage(
-          conversationId: arg,
-          filePath: filePath,
-          fileBytes: fileBytes,
-          sourceFileName: sourceFileName,
-          content: content,
-          replyToMessageId: replyToMessageId,
-          customFileName: customFileName,
-          metadata: metadata,
-          onProgress: onProgress,
-        ),
+
+      final resolvedFileName = customFileName?.trim().isNotEmpty == true
+          ? customFileName!.trim()
+          : (sourceFileName?.trim().isNotEmpty == true
+              ? sourceFileName!.trim()
+              : (filePath.isNotEmpty ? p.basename(filePath) : 'ملف مرفق'));
+
+      final ext = resolvedFileName.contains('.')
+          ? resolvedFileName.split('.').last.toLowerCase()
+          : '';
+      final isImage = ext == 'png' ||
+          ext == 'jpg' ||
+          ext == 'jpeg' ||
+          ext == 'gif' ||
+          ext == 'webp' ||
+          ext == 'bmp';
+      final isPdf = ext == 'pdf';
+      final isAudio = ext == 'mp3' ||
+          ext == 'wav' ||
+          ext == 'm4a' ||
+          ext == 'aac' ||
+          ext == 'ogg';
+      final effectiveMessageType = isImage
+          ? 'image'
+          : (isPdf ? 'pdf' : (isAudio ? 'audio' : 'file'));
+
+      int? fileSize = fileBytes?.length;
+      if ((fileSize == null || fileSize <= 0) && filePath.isNotEmpty && !kIsWeb) {
+        try {
+          final f = File(filePath);
+          if (f.existsSync()) {
+            fileSize = f.lengthSync();
+          }
+        } catch (_) {}
+      }
+
+      final stableClientMessageId =
+          'file_${DateTime.now().microsecondsSinceEpoch}_${(1000 + (DateTime.now().millisecond * 7)) % 9999}';
+      final currentUser = ref.read(currentUserProvider);
+      final currentUserId =
+          ref.read(authControllerProvider).valueOrNull?.id ?? '';
+      final tempCreatedAt = DateTime.now();
+
+      final effectiveMetadata = <String, dynamic>{
+        ...?metadata,
+        'clientMessageId': stableClientMessageId,
+        'status': 'uploading',
+        'progress': 0.0,
+        if (filePath.isNotEmpty) 'localFilePath': filePath,
+      };
+
+      final tempMessage = ChatMessage(
+        id: 'temp_$stableClientMessageId',
+        conversationId: arg,
+        senderId: currentUserId,
+        sender: currentUser != null
+            ? ChatDirectoryUser(
+                id: currentUser.id,
+                username: currentUser.username,
+                fullName: currentUser.fullName,
+                jobTitle: currentUser.jobTitle,
+                role: currentUser.role,
+                departmentId: currentUser.departmentId,
+                departmentIds: currentUser.allDepartmentIds,
+                branchId: currentUser.branchId,
+                branchCode: currentUser.branchCode,
+                isOnline: currentUser.isOnline,
+                presenceStatus: currentUser.presenceStatus,
+                isActive: currentUser.isActive,
+                avatarUrl: currentUser.avatarUrl,
+                lastSeen: currentUser.lastSeen,
+                lastActiveAt: currentUser.lastActiveAt,
+              )
+            : null,
+        content: content ?? '',
+        messageType: effectiveMessageType,
+        fileUrl: null,
+        fileName: resolvedFileName,
+        fileSize: fileSize != null && fileSize > 0 ? fileSize : null,
+        mimeType: null,
+        replyToMessageId: replyToMessageId,
+        isDeleted: false,
+        metadata: effectiveMetadata,
+        createdAt: tempCreatedAt,
+        updatedAt: tempCreatedAt,
+        seenBy: const [],
+        deliveredTo: const [],
       );
-      final current =
-          state.valueOrNull ??
+
+      final current = state.valueOrNull ??
           const ConversationMessagesState(
             messages: [],
             nextCursor: null,
             hasMore: false,
             isLoadingMore: false,
           );
+
+      // Optimistic insert: appears in the chat bubbles immediately
       _setStateAndCache(
         current.copyWith(
-          messages: _upsertMessage(current.messages, result.message),
+          messages: _upsertMessage(current.messages, tempMessage),
         ),
+        immediate: true,
       );
+
       try {
         ref
             .read(chatOverviewControllerProvider.notifier)
-            .applyConfirmedOutboxMessage(arg, result.message.id, result.message);
+            .updateLastMessageOptimistically(arg, tempMessage);
       } catch (_) {}
+
+      // Cache preview bytes for instant offline image thumbnail
+      if (fileBytes != null && fileBytes.isNotEmpty) {
+        unawaited(_repository().cacheAttachmentPreviewBytes(tempMessage, fileBytes));
+      } else if (!kIsWeb && filePath.isNotEmpty && isImage) {
+        try {
+          final f = File(filePath);
+          if (f.existsSync()) {
+            unawaited(_repository().cacheAttachmentPreviewBytes(tempMessage, f.readAsBytesSync()));
+          }
+        } catch (_) {}
+      }
+
+      int lastProgressUpdate = 0;
+      void handleProgress(int sent, int total) {
+        onProgress?.call(sent, total);
+        final fraction =
+            total <= 0 ? 0.0 : (sent / total).clamp(0.0, 1.0).toDouble();
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - lastProgressUpdate > 120 || fraction >= 1.0) {
+          lastProgressUpdate = now;
+          final cur = state.valueOrNull;
+          if (cur != null) {
+            final idx = cur.messages.indexWhere((m) => m.id == tempMessage.id);
+            if (idx != -1) {
+              final existing = cur.messages[idx];
+              final nextMeta = Map<String, dynamic>.from(existing.metadata ?? {});
+              nextMeta['progress'] = fraction;
+              final updated = existing.copyWith(metadata: nextMeta);
+              final nextList = List<ChatMessage>.from(cur.messages);
+              nextList[idx] = updated;
+              _setStateAndCache(cur.copyWith(messages: nextList));
+            }
+          }
+        }
+      }
+
+      try {
+        final result = await _guardAuth(
+          () => _repository().sendFileMessage(
+            conversationId: arg,
+            filePath: filePath,
+            fileBytes: fileBytes,
+            sourceFileName: sourceFileName,
+            content: content,
+            replyToMessageId: replyToMessageId,
+            customFileName: customFileName,
+            metadata: metadata,
+            onProgress: handleProgress,
+          ),
+        );
+
+        final confirmedMetadata = Map<String, dynamic>.from(
+          result.message.metadata ?? const {},
+        );
+        confirmedMetadata['clientMessageId'] = stableClientMessageId;
+        confirmedMetadata.remove('status');
+        confirmedMetadata.remove('progress');
+        confirmedMetadata.remove('error');
+        if (filePath.isNotEmpty) confirmedMetadata['localFilePath'] = filePath;
+
+        final confirmedMessage = result.message.copyWith(
+          metadata: confirmedMetadata.isEmpty ? null : confirmedMetadata,
+        );
+
+        final latest = state.valueOrNull ?? current;
+        final updatedList = latest.messages
+            .where((m) => m.id != tempMessage.id && m.id != confirmedMessage.id)
+            .toList();
+        updatedList.insert(0, confirmedMessage);
+
+        _setStateAndCache(
+          latest.copyWith(messages: updatedList),
+          immediate: true,
+        );
+        try {
+          ref
+              .read(chatOverviewControllerProvider.notifier)
+              .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
+        } catch (_) {}
+      } catch (error) {
+        final failedMetadata = Map<String, dynamic>.from(effectiveMetadata);
+        failedMetadata['status'] = 'failed';
+        failedMetadata['error'] = error.toString();
+        final failedMessage = tempMessage.copyWith(metadata: failedMetadata);
+        final latest = state.valueOrNull ?? current;
+        _setStateAndCache(
+          latest.copyWith(
+            messages: _upsertMessage(latest.messages, failedMessage),
+          ),
+          immediate: true,
+        );
+        try {
+          ref
+              .read(chatOverviewControllerProvider.notifier)
+              .applyFailedOutboxMessage(arg, tempMessage.id, error.toString());
+        } catch (_) {}
+        rethrow;
+      }
     } finally {
       keepAliveLink.close();
     }
+  }
+
+  Future<void> retryMessage(ChatMessage message) async {
+    final current = state.valueOrNull;
+    if (current != null) {
+      // Instantly remove failed message from state and cache so it doesn't linger
+      _setStateAndCache(
+        current.copyWith(
+          messages: current.messages.where((m) => m.id != message.id).toList(),
+        ),
+        immediate: true,
+      );
+    }
+
+    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
+        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
+
+    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
+    cleanMetadata.remove('status');
+    cleanMetadata.remove('error');
+    cleanMetadata.remove('progress');
+
+    final localPath = message.metadata?['localFilePath']?.toString();
+    if (message.hasAttachment && localPath != null && localPath.isNotEmpty) {
+      await sendFile(
+        localPath,
+        sourceFileName: message.fileName,
+        customFileName: message.fileName,
+        content: message.content.isNotEmpty ? message.content : null,
+        replyToMessageId: message.replyToMessageId,
+        metadata: cleanMetadata,
+      );
+      return;
+    }
+
+    await sendMessage(
+      content: message.content,
+      replyToMessageId: message.replyToMessageId,
+      messageType: message.messageType,
+      fileUrl: message.fileUrl,
+      metadata: cleanMetadata,
+      clientMessageId: clientMessageId,
+    );
   }
 
   Future<void> editMessage({

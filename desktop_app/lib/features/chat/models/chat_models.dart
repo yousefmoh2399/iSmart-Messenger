@@ -854,7 +854,11 @@ class ChatMessage {
   final List<ChatReceipt> deliveredTo;
 
   bool get isFailed => id.startsWith('temp_') && metadata?['status'] == 'failed';
-  bool get isPending => id.startsWith('temp_') && metadata?['status'] == 'pending';
+  bool get isPending =>
+      id.startsWith('temp_') &&
+      (metadata?['status'] == 'pending' || metadata?['status'] == 'uploading');
+  bool get isUploading =>
+      id.startsWith('temp_') && metadata?['status'] == 'uploading';
 
   bool get isAudioMessage =>
       messageType == 'audio' ||
@@ -879,7 +883,13 @@ class ChatMessage {
   }
   bool get isPdfMessage =>
       messageType == 'pdf' || mimeType?.toLowerCase() == 'application/pdf';
-  bool get hasAttachment => fileUrl != null && fileUrl!.isNotEmpty;
+  bool get hasAttachment =>
+      (fileUrl != null && fileUrl!.isNotEmpty) ||
+      (fileName != null &&
+          fileName!.isNotEmpty &&
+          messageType != 'text' &&
+          messageType != 'poll' &&
+          messageType != 'checklist');
   bool get isPrintableAttachment {
     if (!hasAttachment) {
       return false;

@@ -17,6 +17,7 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../auth/data/auth_repository.dart';
 import '../models/chat_models.dart';
 import 'chat_local_cache.dart';
+import 'chat_socket_service.dart';
 
 // Top-level function required by compute() — must not be a closure or instance method.
 // Computes SHA-256 of raw bytes in a background isolate to avoid blocking the UI thread.
@@ -28,8 +29,9 @@ class ChatRepository {
     this._authRepository,
     this._localStorage,
     this._preferences,
-    this._cache,
-  );
+    this._cache, {
+    ChatSocketService? socketService,
+  }) : _socketService = socketService;
 
   final Set<String> _missingAttachmentPreviewUrls = <String>{};
   final Map<String, Future<Uint8List>> _attachmentPreviewLoads =
@@ -40,6 +42,7 @@ class ChatRepository {
   final LocalMediaStorageService _localStorage;
   final UserPreferences _preferences;
   final ChatLocalCache _cache;
+  final ChatSocketService? _socketService;
 
   ChatLocalCache get cache => _cache;
 
@@ -407,30 +410,83 @@ class ChatRepository {
     bool isScheduled = false,
     DateTime? scheduledFor,
   }) async {
-    final response = await _apiClient.dio.post<Map<String, dynamic>>(
-      '/api/chat/messages',
-      data: {
-        'conversationId': conversationId,
-        'content': content,
-        if (clientMessageId != null) 'clientMessageId': clientMessageId,
-        if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
-        if (metadata != null) 'metadata': metadata,
-        if (messageType != null) 'messageType': messageType,
-        if (fileUrl != null) 'fileUrl': fileUrl,
-        if (isSilent) 'isSilent': isSilent,
-        if (isScheduled) 'isScheduled': isScheduled,
-        if (scheduledFor != null)
-          'scheduledFor': scheduledFor.toIso8601String(),
-      },
-    );
-    return ChatPostResult(
-      conversation: ChatConversation.fromJson(
-        response.data?['conversation'] as Map<String, dynamic>,
-      ),
-      message: ChatMessage.fromJson(
-        response.data?['message'] as Map<String, dynamic>,
-      ),
-    );
+    final payload = <String, dynamic>{
+      'conversationId': conversationId,
+      'content': content,
+      if (clientMessageId != null) 'clientMessageId': clientMessageId,
+      if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
+      if (metadata != null) 'metadata': metadata,
+      if (messageType != null) 'messageType': messageType,
+      if (fileUrl != null) 'fileUrl': fileUrl,
+      if (isSilent) 'isSilent': isSilent,
+      if (isScheduled) 'isScheduled': isScheduled,
+      if (scheduledFor != null)
+        'scheduledFor': scheduledFor.toIso8601String(),
+    };
+
+    // Fast-path: send via active Socket.io channel if connected (instant single-hop, no HTTP handshake)
+    final socketService = _socketService;
+    if (!isScheduled && socketService != null && socketService.isConnected) {
+      try {
+        final ack = await socketService.emitWithAck(
+          'send_message',
+          payload,
+          timeout: const Duration(seconds: 4),
+        );
+        if (ack['ok'] == true && ack['data'] is Map) {
+          final data = Map<String, dynamic>.from(ack['data'] as Map);
+          if (data['message'] is Map && data['conversation'] is Map) {
+            return ChatPostResult(
+              conversation: ChatConversation.fromJson(
+                Map<String, dynamic>.from(data['conversation'] as Map),
+              ),
+              message: ChatMessage.fromJson(
+                Map<String, dynamic>.from(data['message'] as Map),
+              ),
+            );
+          }
+        }
+      } catch (_) {
+        // Socket failed or timed out; seamlessly fall back to HTTP POST
+      }
+    }
+
+    // Resilient HTTP sending with automatic retry on weak/VPN connections
+    Object? lastError;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final response = await _apiClient.dio.post<Map<String, dynamic>>(
+          '/api/chat/messages',
+          data: payload,
+          options: Options(
+            connectTimeout: const Duration(seconds: 15),
+            sendTimeout: const Duration(seconds: 25),
+            receiveTimeout: const Duration(seconds: 25),
+          ),
+        );
+        return ChatPostResult(
+          conversation: ChatConversation.fromJson(
+            response.data?['conversation'] as Map<String, dynamic>,
+          ),
+          message: ChatMessage.fromJson(
+            response.data?['message'] as Map<String, dynamic>,
+          ),
+        );
+      } catch (err) {
+        lastError = err;
+        if (err is DioException) {
+          final status = err.response?.statusCode ?? 0;
+          // Re-throw immediately on client 4xx validation or permission errors (not retryable)
+          if (status >= 400 && status < 500 && status != 408) {
+            rethrow;
+          }
+        }
+        if (attempt < 3) {
+          await Future.delayed(Duration(milliseconds: 600 * attempt));
+        }
+      }
+    }
+    throw lastError!;
   }
 
   Future<ChatPostResult> sendFileMessage({
@@ -1191,6 +1247,9 @@ class ChatRepository {
     if (localBytes != null) {
       return localBytes;
     }
+    if (message.fileUrl == null || message.fileUrl!.isEmpty) {
+      throw StateError('Attachment preview is pending upload.');
+    }
     final previewUrl = _inlineUrlFor(message.fileUrl!);
     if (_missingAttachmentPreviewUrls.contains(previewUrl)) {
       throw StateError('Attachment preview is unavailable.');
@@ -1335,6 +1394,17 @@ class ChatRepository {
   }
 
   Future<Uint8List?> _readLocalAttachmentBytes(ChatMessage message) async {
+    final localPath = message.metadata?['localFilePath']?.toString();
+    if (localPath != null && localPath.isNotEmpty) {
+      try {
+        if (!kIsWeb) {
+          final f = File(localPath);
+          if (await f.exists()) {
+            return await f.readAsBytes();
+          }
+        }
+      } catch (_) {}
+    }
     final archive = _attachmentArchiveMetadata(message);
     final sha256Hex = archive?['sha256']?.toString().trim().toLowerCase();
     if (kIsWeb && web_bridge.isElectron()) {
@@ -1385,6 +1455,8 @@ class ChatRepository {
     }
     return null;
   }
+
+  Future<void> cacheAttachmentPreviewBytes(ChatMessage message, Uint8List bytes) => _cacheAttachmentPreviewBytes(message, bytes);
 
   Future<void> _cacheAttachmentPreviewBytes(
     ChatMessage message,

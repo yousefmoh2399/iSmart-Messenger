@@ -730,6 +730,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     onSaveSticker: widget.onSaveSticker,
                                     token: widget.token,
                                     isMine: widget.isMine,
+                                    onRetry: widget.onRetry,
                                   ),
                                 ),
                             ],
@@ -1008,8 +1009,10 @@ class _AttachmentPreview extends StatelessWidget {
     this.onSaveAttachment,
     this.onPrint,
     this.onSaveSticker,
+    this.onRetry,
   });
 
+  final VoidCallback? onRetry;
   final ChatMessage message;
   final Color textColor;
   final VoidCallback onOpen;
@@ -1023,7 +1026,15 @@ class _AttachmentPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (message.fileUrl == null || message.fileUrl!.isEmpty) {
+    final isUploading = message.metadata?['status'] == 'uploading' ||
+        (message.id.startsWith('temp_') && message.hasAttachment);
+    final isFailed = message.metadata?['status'] == 'failed';
+    final progressVal = (message.metadata?['progress'] as num?)?.toDouble() ?? 0.0;
+    final progressPct = (progressVal * 100).toInt().clamp(0, 100);
+
+    if ((message.fileUrl == null || message.fileUrl!.isEmpty) &&
+        !isUploading &&
+        !isFailed) {
       return const SizedBox.shrink();
     }
 
@@ -1110,25 +1121,105 @@ class _AttachmentPreview extends StatelessWidget {
     }
 
     if (message.isImageMessage) {
+      final isUploading = message.metadata?['status'] == 'uploading' ||
+          (message.id.startsWith('temp_') && message.hasAttachment);
+      final isFailed = message.metadata?['status'] == 'failed';
+      final progressVal = (message.metadata?['progress'] as num?)?.toDouble() ?? 0.0;
+      final progressPct = (progressVal * 100).toInt().clamp(0, 100);
+
       return InkWell(
-        onTap: onOpen,
+        onTap: isUploading ? null : onOpen,
         borderRadius: BorderRadius.circular(12),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Hero(
-            tag: 'image_${message.id}',
-            child: AuthenticatedAttachmentImage(
-              message: message,
-              fit: BoxFit.cover,
-              height: 190,
-              width: 260,
-              errorFallback: Container(
-                height: 120,
-                alignment: Alignment.center,
-                color: const Color(0xFFF0F4F9),
-                child: const Icon(Icons.broken_image_outlined),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Hero(
+                tag: 'image_${message.id}',
+                child: AuthenticatedAttachmentImage(
+                  message: message,
+                  fit: BoxFit.cover,
+                  height: 190,
+                  width: 260,
+                  errorFallback: Container(
+                    height: 120,
+                    alignment: Alignment.center,
+                    color: const Color(0xFFF0F4F9),
+                    child: const Icon(Icons.broken_image_outlined),
+                  ),
+                ),
               ),
-            ),
+              if (isUploading)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black38,
+                    alignment: Alignment.center,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              value: progressVal > 0 ? progressVal : null,
+                              strokeWidth: 2,
+                              valueColor: const AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '$progressPct%',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              else if (isFailed)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black45,
+                    alignment: Alignment.center,
+                    child: InkWell(
+                      onTap: onRetry,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.replay_rounded, size: 14, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text(
+                              'إعادة المحاولة',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       );
@@ -1267,12 +1358,99 @@ class _AttachmentPreview extends StatelessWidget {
               ),
             ),
           ),
-          Divider(
-            height: 1,
-            thickness: 0.8,
-            color: borderColor.withValues(alpha: 0.7),
-          ),
-          if (!message.attachmentDownloadAllowed)
+          if (isUploading) ...[
+            Divider(
+              height: 1,
+              thickness: 0.8,
+              color: borderColor.withValues(alpha: 0.7),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              value: progressVal > 0 ? progressVal : null,
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(fileStyle.primaryColor),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'جاري الرفع...',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: fileStyle.primaryColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        '$progressPct%',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: textColor.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: progressVal > 0 ? progressVal : null,
+                      minHeight: 4,
+                      backgroundColor: fileStyle.primaryColor.withValues(alpha: 0.15),
+                      valueColor: AlwaysStoppedAnimation(fileStyle.primaryColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else if (isFailed) ...[
+            Divider(
+              height: 1,
+              thickness: 0.8,
+              color: borderColor.withValues(alpha: 0.7),
+            ),
+            InkWell(
+              onTap: onRetry,
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(13)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Icon(Icons.replay_rounded, size: 15, color: Color(0xFFEF4444)),
+                    SizedBox(width: 6),
+                    Text(
+                      'فشل الرفع - انقر لإعادة المحاولة',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFEF4444),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ] else if (!message.attachmentDownloadAllowed) ...[
+            Divider(
+              height: 1,
+              thickness: 0.8,
+              color: borderColor.withValues(alpha: 0.7),
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               child: Row(
@@ -1294,8 +1472,13 @@ class _AttachmentPreview extends StatelessWidget {
                   ),
                 ],
               ),
-            )
-          else
+            ),
+          ] else ...[
+            Divider(
+              height: 1,
+              thickness: 0.8,
+              color: borderColor.withValues(alpha: 0.7),
+            ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: Row(
@@ -1332,6 +1515,7 @@ class _AttachmentPreview extends StatelessWidget {
                 ],
               ),
             ),
+          ]
         ],
       ),
     );

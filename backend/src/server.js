@@ -68,11 +68,12 @@ async function startServer() {
   const server = http.createServer(app);
   serverRef = server;
 
-  // Allow large file downloads to complete without connection being closed.
-  // Node's default keepAliveTimeout is 5s which causes "Connection closed while
-  // receiving data" errors on slow or large downloads behind reverse proxies.
-  server.keepAliveTimeout = 120_000; // 2 minutes
-  server.headersTimeout   = 125_000; // must be > keepAliveTimeout
+  // Allow large file uploads/downloads over slow branch VPNs to complete without being closed.
+  // Set keepAliveTimeout and requestTimeout generously so slow uploads never hang up.
+  server.keepAliveTimeout = 300_000; // 5 minutes
+  server.headersTimeout   = 305_000; // must be > keepAliveTimeout
+  server.requestTimeout   = 1800_000; // 30 minutes for slow network uploads
+  server.timeout          = 1800_000;
 
   const io = initializeChatSocketServer(server);
   app.set("io", io);

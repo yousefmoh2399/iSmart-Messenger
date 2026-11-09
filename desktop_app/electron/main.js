@@ -3444,118 +3444,167 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
     return { success: false, error: "Missing upload parameters or file does not exist." };
   }
 
-  try {
-    const stat = await fs.promises.stat(filePath);
-    const boundary = "----iSmartUploadBoundary" + Date.now().toString(16) + Math.random().toString(16);
-    const resolvedFileName = fileName || path.basename(filePath);
+  const maxAttempts = 3;
+  let lastError = "Upload failed.";
 
-    // Build multipart preamble
-    const fields = {
-      conversationId: String(conversationId || ""),
-    };
-    if (content) fields.content = String(content);
-    if (replyToMessageId) fields.replyToMessageId = String(replyToMessageId);
-    if (fileName) fields.fileName = String(fileName);
-    if (metadata) fields.metadata = typeof metadata === "string" ? metadata : JSON.stringify(metadata);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      const boundary = "----iSmartUploadBoundary" + Date.now().toString(16) + Math.random().toString(16);
+      const resolvedFileName = fileName || path.basename(filePath);
 
-    let head = "";
-    for (const [k, v] of Object.entries(fields)) {
-      head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
-    }
-    head += `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${resolvedFileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+      // Build multipart preamble
+      const fields = {
+        conversationId: String(conversationId || ""),
+      };
+      if (content) fields.content = String(content);
+      if (replyToMessageId) fields.replyToMessageId = String(replyToMessageId);
+      if (fileName) fields.fileName = String(fileName);
+      if (metadata) fields.metadata = typeof metadata === "string" ? metadata : JSON.stringify(metadata);
 
-    const headBuf = Buffer.from(head, "utf8");
-    const tailBuf = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
-    const totalLength = headBuf.length + stat.size + tailBuf.length;
+      let head = "";
+      for (const [k, v] of Object.entries(fields)) {
+        head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+      }
+      head += `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${resolvedFileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
 
-    const parsedUrl = new URL(url);
-    const protocol = parsedUrl.protocol === "https:" ? https : http;
+      const headBuf = Buffer.from(head, "utf8");
+      const tailBuf = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+      const totalLength = headBuf.length + stat.size + tailBuf.length;
 
-    return await new Promise((resolve) => {
-      const req = protocol.request(
-        parsedUrl,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": `multipart/form-data; boundary=${boundary}`,
-            "Content-Length": totalLength,
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      const parsedUrl = new URL(url);
+      const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+      const result = await new Promise((resolve) => {
+        let isSettled = false;
+        const safeResolve = (val) => {
+          if (!isSettled) {
+            isSettled = true;
+            resolve(val);
+          }
+        };
+
+        const req = protocol.request(
+          parsedUrl,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": `multipart/form-data; boundary=${boundary}`,
+              "Content-Length": totalLength,
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
           },
-        },
-        (res) => {
-          let responseBody = "";
-          res.on("data", (chunk) => {
-            responseBody += chunk;
-          });
-          res.on("end", () => {
-            const statusCode = res.statusCode || 0;
-            if (statusCode >= 200 && statusCode < 300) {
-              let parsedData = null;
-              try {
-                parsedData = JSON.parse(responseBody);
-              } catch (_) {}
-              resolve({
-                success: true,
-                statusCode,
-                responseJson: responseBody,
-                data: parsedData,
-              });
-            } else {
-              try {
-                const errJson = JSON.parse(responseBody);
-                resolve({
-                  success: false,
+          (res) => {
+            let responseBody = "";
+            res.on("data", (chunk) => {
+              responseBody += chunk;
+            });
+            res.on("end", () => {
+              const statusCode = res.statusCode || 0;
+              if (statusCode >= 200 && statusCode < 300) {
+                let parsedData = null;
+                try {
+                  parsedData = JSON.parse(responseBody);
+                } catch (_) {}
+                safeResolve({
+                  success: true,
                   statusCode,
-                  error: errJson.message || `Upload failed with status ${statusCode}`,
+                  responseJson: responseBody,
+                  data: parsedData,
                 });
-              } catch (_) {
-                resolve({
-                  success: false,
-                  statusCode,
-                  error: responseBody || `Upload failed with status ${statusCode}`,
-                });
+              } else {
+                try {
+                  const errJson = JSON.parse(responseBody);
+                  safeResolve({
+                    success: false,
+                    statusCode,
+                    error: errJson.message || `Upload failed with status ${statusCode}`,
+                  });
+                } catch (_) {
+                  safeResolve({
+                    success: false,
+                    statusCode,
+                    error: responseBody || `Upload failed with status ${statusCode}`,
+                  });
+                }
               }
-            }
+            });
+          }
+        );
+
+        req.on("socket", (socket) => {
+          socket.setKeepAlive(true, 5000);
+          socket.setNoDelay(true);
+          socket.setTimeout(600000);
+          socket.on("timeout", () => {
+            console.warn("[Upload] Socket idle timeout reached");
           });
-        }
-      );
+        });
 
-      req.on("error", (err) => {
-        resolve({ success: false, error: err.message || String(err) });
+        req.on("error", (err) => {
+          safeResolve({ success: false, error: err.message || String(err), isNetworkError: true });
+        });
+
+        // Write preamble
+        req.write(headBuf);
+
+        // Stream file with backpressure handling (crucial for slow branch VPN networks)
+        const fileStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
+        let sentBytes = headBuf.length;
+
+        fileStream.on("data", (chunk) => {
+          sentBytes += chunk.length;
+          const ok = req.write(chunk);
+          if (!ok) {
+            fileStream.pause();
+          }
+          if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+            mainWindow.webContents.send("upload-progress", {
+              transferId,
+              sent: sentBytes,
+              total: totalLength,
+            });
+          }
+        });
+
+        req.on("drain", () => {
+          fileStream.resume();
+        });
+
+        fileStream.on("end", () => {
+          req.write(tailBuf);
+          req.end();
+        });
+
+        fileStream.on("error", (err) => {
+          req.destroy();
+          safeResolve({ success: false, error: err.message || String(err) });
+        });
       });
 
-      // Write preamble
-      req.write(headBuf);
+      if (result.success) {
+        return result;
+      }
 
-      // Stream file from disk
-      const fileStream = fs.createReadStream(filePath);
-      let sentBytes = headBuf.length;
+      lastError = result.error || "Upload failed.";
+      // Don't retry if client error (4xx) like file too large or unauthorized
+      if (result.statusCode && result.statusCode >= 400 && result.statusCode < 500) {
+        return result;
+      }
 
-      fileStream.on("data", (chunk) => {
-        sentBytes += chunk.length;
-        req.write(chunk);
-        if (mainWindow && !mainWindow.isDestroyed() && transferId) {
-          mainWindow.webContents.send("upload-progress", {
-            transferId,
-            sent: sentBytes,
-            total: totalLength,
-          });
-        }
-      });
-
-      fileStream.on("end", () => {
-        req.write(tailBuf);
-        req.end();
-      });
-
-      fileStream.on("error", (err) => {
-        req.destroy();
-        resolve({ success: false, error: err.message || String(err) });
-      });
-    });
-  } catch (err) {
-    return { success: false, error: err.message || String(err) };
+      if (attempt < maxAttempts) {
+        console.warn(`[Upload] Attempt ${attempt} failed: ${lastError}. Retrying in ${attempt * 1.5}s...`);
+        await sleep(attempt * 1500);
+      }
+    } catch (err) {
+      lastError = err.message || String(err);
+      if (attempt < maxAttempts) {
+        await sleep(attempt * 1500);
+      }
+    }
   }
+
+  return { success: false, error: lastError };
 });
 
 ipcMain.handle("files:download-chat-attachment", async (_event, payload = {}) => {
