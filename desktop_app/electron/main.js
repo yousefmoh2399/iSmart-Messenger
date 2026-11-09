@@ -2843,6 +2843,67 @@ ipcMain.handle("window:set-theme", async (_event, payload = {}) => {
 });
 
 
+function parseWindowsHdrop(buf) {
+  if (!buf || buf.length < 20) return [];
+  try {
+    const pFiles = buf.readUInt32LE(0);
+    const fWide = buf.readUInt32LE(16);
+    if (pFiles >= buf.length) return [];
+    if (fWide) {
+      const text = buf.subarray(pFiles).toString("utf16le");
+      return text.split("\0").map((s) => s.trim()).filter((p) => p.length > 0 && fs.existsSync(p));
+    } else {
+      const text = buf.subarray(pFiles).toString("utf8");
+      return text.split("\0").map((s) => s.trim()).filter((p) => p.length > 0 && fs.existsSync(p));
+    }
+  } catch (_) {
+    return [];
+  }
+}
+
+async function getWindowsClipboardFilePaths() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+  try {
+    const { clipboard } = require("electron");
+    const formats = clipboard.availableFormats();
+    const hasFileFormats = formats.some((f) => {
+      const lower = f.toLowerCase();
+      return lower.includes("hdrop") || lower.includes("filename") || lower === "text/uri-list";
+    });
+    if (!hasFileFormats) {
+      // Fast path: No file formats in clipboard at all — return immediately (0ms).
+      // Prevents running PowerShell when user pastes plain text or empty clipboard.
+      return [];
+    }
+    // Fast path 1: Parse CF_HDROP natively (< 1ms)
+    for (const fmt of formats) {
+      if (fmt.toUpperCase() === "CF_HDROP") {
+        const hdropBuf = clipboard.readBuffer(fmt);
+        const fastPaths = parseWindowsHdrop(hdropBuf);
+        if (fastPaths.length > 0) {
+          return fastPaths;
+        }
+      }
+    }
+    // Fast path 2: Parse FileNameW natively (< 1ms)
+    for (const fmt of formats) {
+      if (fmt.toLowerCase() === "filenamew") {
+        const fnBuf = clipboard.readBuffer(fmt);
+        if (fnBuf && fnBuf.length > 2) {
+          const raw = fnBuf.toString("utf16le").replace(/\0.*$/, "").trim();
+          if (raw && fs.existsSync(raw)) {
+            return [raw];
+          }
+        }
+      }
+    }
+  } catch (_) {}
+  // Fallback: PowerShell if native format parsing didn't find paths
+  return getWindowsClipboardFilePathsPS();
+}
+
 function getWindowsClipboardFilePathsPS() {
   return new Promise((resolve) => {
     if (process.platform !== "win32") {
@@ -2897,31 +2958,33 @@ ipcMain.handle("clipboard:read-files", async () => {
     const files = [];
 
     // 1. Check for copied files from Windows Explorer (CF_HDROP / FileDropList)
-    const droppedPaths = await getWindowsClipboardFilePathsPS();
+    // Fast path: getWindowsClipboardFilePaths() parses CF_HDROP / FileNameW natively (< 1ms).
+    // File content is read asynchronously with fs.promises.readFile to avoid blocking the main thread.
+    const droppedPaths = await getWindowsClipboardFilePaths();
     if (droppedPaths.length > 0) {
       for (const filePath of droppedPaths) {
         try {
-          if (!fs.existsSync(filePath)) continue;
-          const stat = fs.statSync(filePath);
-          if (!stat.isFile()) continue;
+          const stat = await fs.promises.stat(filePath).catch(() => null);
+          if (!stat || !stat.isFile()) continue;
           const fileName = path.basename(filePath);
-          if (stat.size > MAX_ELECTRON_FETCH_BYTES) {
+          if (stat.size > 200 * 1024 * 1024) {
             return {
               success: false,
               hasFiles: true,
-              error: `حجم الملف (${fileName}) كبير جدًا للنسخ المباشر.`,
+              error: `حجم الملف (${fileName}) كبير جدًا للنسخ المباشر عبر الحافظة. يرجى استخدام زر إرفاق ملف.`,
             };
           }
-          const buffer = fs.readFileSync(filePath);
+          // Read asynchronously in libuv worker thread — main thread stays 100% responsive
+          const buffer = await fs.promises.readFile(filePath);
           files.push({
             name: fileName,
             path: filePath,
             size: stat.size,
-            base64: buffer.toString("base64"),
+            base64: buffer.toString('base64'),
             isImage: STORAGE_IMAGE_EXTS.has(path.extname(fileName).toLowerCase()),
           });
         } catch (fileErr) {
-          console.warn("[electron] clipboard file read error:", fileErr);
+          console.warn('[electron] clipboard file read error:', fileErr);
         }
       }
       if (files.length > 0) {
@@ -2930,8 +2993,6 @@ ipcMain.handle("clipboard:read-files", async () => {
     }
 
     // 2. Check for copied bitmap/screenshot image in clipboard
-    // Only treat as image paste if clipboard does not simply have plain text without image,
-    // or if clipboard.readImage() is non-empty.
     const clipImage = clipboard.readImage();
     if (clipImage && !clipImage.isEmpty()) {
       const pngBuffer = clipImage.toPNG();
@@ -2941,13 +3002,12 @@ ipcMain.handle("clipboard:read-files", async () => {
           name: fileName,
           path: fileName,
           size: pngBuffer.length,
-          base64: pngBuffer.toString("base64"),
+          base64: pngBuffer.toString('base64'),
           isImage: true,
         });
         return { success: true, hasFiles: true, files };
       }
     }
-
     return { success: true, hasFiles: false, files: [] };
   } catch (error) {
     console.error("[electron] clipboard:read-files error", error);
@@ -3171,7 +3231,7 @@ ipcMain.handle("files:save-base64", async (event, payload = {}) => {
   let outputPath;
 
   if (requestedDirectory) {
-    fs.mkdirSync(requestedDirectory, { recursive: true });
+    await fs.promises.mkdir(requestedDirectory, { recursive: true });
     outputPath = uniqueOutputPath(
       requestedDirectory,
       payload.fileName || "file",
@@ -3195,16 +3255,14 @@ ipcMain.handle("files:save-base64", async (event, payload = {}) => {
   if (buffer.length > MAX_ELECTRON_FETCH_BYTES) {
     return { success: false, message: "File is too large to save from memory." };
   }
-  fs.writeFileSync(
-    outputPath,
-    buffer,
-  );
+  await fs.promises.writeFile(outputPath, buffer);
   return { success: true, savedPath: outputPath };
 });
 
 ipcMain.handle("files:exists", async (_event, payload = {}) => {
   const filePath = String(payload.path || "").trim();
-  return { success: true, exists: !!filePath && fs.existsSync(filePath) };
+  const exists = !!filePath && (await fs.promises.access(filePath).then(() => true).catch(() => false));
+  return { success: true, exists };
 });
 
 ipcMain.handle("files:open-local", async (_event, payload = {}) => {
@@ -3249,8 +3307,9 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  if (!fs.existsSync(outputPath)) {
-    fs.writeFileSync(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+  const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
+  if (!exists) {
+    await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
   }
   return { success: true, path: outputPath };
 });
@@ -3411,8 +3470,9 @@ ipcMain.handle("files:cache-chat-attachment", async (_event, payload = {}) => {
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  if (!fs.existsSync(outputPath)) {
-    fs.writeFileSync(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+  const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
+  if (!exists) {
+    await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
   }
   return { success: true, path: outputPath };
 });
@@ -3423,13 +3483,15 @@ ipcMain.handle("files:read-chat-attachment-cache", async (_event, payload = {}) 
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  if (!fs.existsSync(filePath)) {
+  const exists = await fs.promises.access(filePath).then(() => true).catch(() => false);
+  if (!exists) {
     return { success: false, message: "Cached attachment not found." };
   }
+  const buffer = await fs.promises.readFile(filePath);
   return {
     success: true,
     fileName: path.basename(filePath),
-    base64: fs.readFileSync(filePath).toString("base64"),
+    base64: buffer.toString("base64"),
   };
 });
 
@@ -3437,17 +3499,19 @@ ipcMain.handle("files:read-chat-archive", async (_event, payload = {}) => {
   const directory = localStorageChildPath(path.join("Chat", "sent"), payload.directoryPath);
   const safeMessageId = String(payload.messageId || "").replace(/[^\w.-]+/g, "_").toLowerCase();
   const safeHash = String(payload.sha256Hex || "").toLowerCase().replace(/[^a-f0-9]/g, "");
-  if (!safeMessageId || !safeHash || !fs.existsSync(directory)) {
+  if (!safeMessageId || !safeHash) {
     return { success: false, message: "Archive not found." };
   }
-  for (const name of fs.readdirSync(directory)) {
+  const entries = await fs.promises.readdir(directory).catch(() => []);
+  for (const name of entries) {
     const lower = name.toLowerCase();
     if (lower.startsWith(`${safeMessageId}_`) && lower.includes(safeHash)) {
       const filePath = path.join(directory, name);
+      const buffer = await fs.promises.readFile(filePath);
       return {
         success: true,
         fileName: name,
-        base64: fs.readFileSync(filePath).toString("base64"),
+        base64: buffer.toString("base64"),
       };
     }
   }

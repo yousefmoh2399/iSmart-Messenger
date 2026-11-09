@@ -3218,8 +3218,9 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
       return false;
     }
 
-    final fileSize =
-        knownFileSize ?? fileBytes?.length ?? await File(sendPath).length();
+    final fileSize = knownFileSize ??
+        fileBytes?.length ??
+        (kIsWeb ? 0 : await File(sendPath).length());
     if (fileSize > _maxChatAttachmentBytes()) {
       if (showFailureSnackbar && mounted) {
         _showChatAttachmentSizeExceededSnackbar();
@@ -3508,14 +3509,21 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
             _downloadingFileName = message.fileName ?? 'مرفق';
           });
         }
+        var lastProgressMs = 0;
         localPath = await repo.downloadAttachment(
           message,
           onProgress: (received, total) {
             if (!mounted) return;
+            final now = DateTime.now().millisecondsSinceEpoch;
+            final fraction = total <= 0
+                ? 0.0
+                : (received / total).clamp(0.0, 1.0).toDouble();
+            if (fraction < 1.0 && (now - lastProgressMs < 120)) {
+              return;
+            }
+            lastProgressMs = now;
             setState(() {
-              _downloadProgress = total <= 0
-                  ? 0
-                  : (received / total).clamp(0, 1).toDouble();
+              _downloadProgress = fraction;
             });
           },
         );

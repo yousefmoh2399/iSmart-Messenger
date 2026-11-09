@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -16,6 +17,10 @@ import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../../auth/data/auth_repository.dart';
 import '../models/chat_models.dart';
 import 'chat_local_cache.dart';
+
+// Top-level function required by compute() — must not be a closure or instance method.
+// Computes SHA-256 of raw bytes in a background isolate to avoid blocking the UI thread.
+String _computeSha256Bytes(Uint8List bytes) => sha256.convert(bytes).toString();
 
 class ChatRepository {
   ChatRepository(
@@ -443,9 +448,11 @@ class ChatRepository {
     final resolvedFileName = sourceFileName?.trim().isNotEmpty == true
         ? sourceFileName!.trim()
         : p.basename(filePath);
-    final fileLength = fileBytes?.length ?? await File(filePath).length();
+    final fileLength = fileBytes?.length ?? (kIsWeb ? 0 : await File(filePath).length());
+    // PERF FIX: When fileBytes is in memory (clipboard paste), computing SHA256 on the
+    // Dart UI isolate blocks the event loop. Offload to a background isolate via compute().
     final fileSha256 = fileBytes != null
-        ? sha256.convert(fileBytes).toString()
+        ? await compute(_computeSha256Bytes, fileBytes)
         : await _localStorage.calculateFileSha256(filePath);
     final nextMetadata = <String, dynamic>{
       ...?metadata,
@@ -972,13 +979,18 @@ class ChatRepository {
         final targetDirPath = await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
         final existingPath = targetDirPath.isNotEmpty ? p.join(targetDirPath, safeFileName) : safeFileName;
 
-        final bytes = await _readLocalAttachmentBytes(message) ??
-            await _downloadAttachmentBytesWithRestore(
-              message,
-              _downloadUrlFor(message.fileUrl!),
-              onProgress: onProgress,
-            );
-        await _cacheAttachmentPreviewBytes(message, bytes);
+        final localBytes = await _readLocalAttachmentBytes(message);
+        final Uint8List bytes;
+        if (localBytes != null && localBytes.isNotEmpty) {
+          bytes = localBytes;
+        } else {
+          bytes = await _downloadAttachmentBytesWithRestore(
+            message,
+            _downloadUrlFor(message.fileUrl!),
+            onProgress: onProgress,
+          );
+          unawaited(_cacheAttachmentPreviewBytes(message, bytes).catchError((_) {}));
+        }
         final saved = await web_bridge.downloadBytes(
           bytes: bytes,
           fileName: safeFileName,

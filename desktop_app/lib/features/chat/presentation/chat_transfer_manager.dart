@@ -112,6 +112,7 @@ class ChatTransferManagerState {
 
 class ChatTransferManager extends Notifier<ChatTransferManagerState> {
   int _taskCounter = 0;
+  int _lastProgressUpdateTimestamp = 0;
   final Map<String, Timer> _cleanupTimers = <String, Timer>{};
 
   @override
@@ -148,9 +149,15 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
     if (idx == -1) return;
     final existing = current[idx];
     final clamped = progress.clamp(0.0, 1.0).toDouble();
-    if ((existing.progress - clamped).abs() < 0.005 && clamped < 1.0) {
-      return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // Throttle progress updates to at most ~8 FPS (120ms) or at least 2% change, unless complete (1.0).
+    // Prevents hundreds of Riverpod rebuilds per second during fast background transfers.
+    if (clamped < 1.0) {
+      if ((existing.progress - clamped).abs() < 0.02 || (now - _lastProgressUpdateTimestamp < 120)) {
+        return;
+      }
     }
+    _lastProgressUpdateTimestamp = now;
     final next = List<ChatTransferTask>.from(current);
     next[idx] = existing.copyWith(progress: clamped);
     state = state.copyWith(tasks: next);
