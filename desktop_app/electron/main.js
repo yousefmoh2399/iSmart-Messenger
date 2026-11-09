@@ -1688,7 +1688,7 @@ function _doFetchOnce(targetUrl, headers, redirectCount) {
         Accept: "image/*,*/*;q=0.8",
         ...headers,
       },
-      timeout: 30000,
+      timeout: 12000, // reduced from 30s to 12s to avoid blocking main thread on slow VPN
     };
     if (isHttps) {
       requestOptions.agent = _httpsAgentNoVerify;
@@ -1746,8 +1746,36 @@ function _doFetchOnce(targetUrl, headers, redirectCount) {
   });
 }
 
+// Concurrency semaphore: limit simultaneous image fetches to 4 to avoid
+// saturating the Electron main-thread on slow VPN connections.
+let _fetchUrlBufferActive = 0;
+const _fetchUrlBufferQueue = [];
+const _FETCH_URL_BUFFER_CONCURRENCY = 4;
+
+function _runNextFetch() {
+  while (_fetchUrlBufferActive < _FETCH_URL_BUFFER_CONCURRENCY && _fetchUrlBufferQueue.length > 0) {
+    const { task, resolve, reject } = _fetchUrlBufferQueue.shift();
+    _fetchUrlBufferActive++;
+    task().then(resolve, reject).finally(() => {
+      _fetchUrlBufferActive--;
+      _runNextFetch();
+    });
+  }
+}
+
 async function fetchUrlBuffer(targetUrl, headers = {}) {
-  const MAX_ATTEMPTS = 3;
+  return new Promise((resolve, reject) => {
+    _fetchUrlBufferQueue.push({
+      task: () => _fetchUrlBufferCore(targetUrl, headers),
+      resolve,
+      reject,
+    });
+    _runNextFetch();
+  });
+}
+
+async function _fetchUrlBufferCore(targetUrl, headers = {}) {
+  const MAX_ATTEMPTS = 2; // reduced from 3 to 2 retries on slow VPN
   let lastError;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
@@ -1760,7 +1788,7 @@ async function fetchUrlBuffer(targetUrl, headers = {}) {
         break;
       }
       if (attempt < MAX_ATTEMPTS - 1) {
-        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 150)); // fixed 150ms delay, was 200*(attempt+1)
       }
     }
   }

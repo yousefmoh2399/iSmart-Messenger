@@ -151,6 +151,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   int _serverFailureStreak = 0;
   bool _lastKnownWindowVisible = true;
   bool _lastKnownWindowMinimized = false;
+  // Throttle: last time we fired a health-ping from updates_updated event
+  DateTime? _lastUpdatesRefreshAt;
 
   // Event-driven connection flag.
   // True while the app is still establishing/re-establishing its connection.
@@ -873,7 +875,13 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.type == 'updates_updated') {
-        unawaited(_refreshServerConnectionState());
+        // Debounce: skip health-ping if we refreshed within the last 8 seconds
+        final now = DateTime.now();
+        if (_lastUpdatesRefreshAt == null ||
+            now.difference(_lastUpdatesRefreshAt!).inSeconds >= 8) {
+          _lastUpdatesRefreshAt = now;
+          unawaited(_refreshServerConnectionState());
+        }
         if (!kIsWeb || web_bridge.isElectron()) {
           unawaited(ref.read(desktopUpdateAgentProvider).checkNow());
         }

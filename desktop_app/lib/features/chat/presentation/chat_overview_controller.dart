@@ -20,6 +20,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   bool _hasMoreUsers = false;
   bool _loadingMoreUsers = false;
   final _processedIncomingMessageIds = <String>{};
+  // Throttle: last time socket_connected triggered a full refresh
+  DateTime? _lastSocketRefreshAt;
 
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
@@ -148,21 +150,33 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       }
     }).catchError((_) {}));
 
+    // Load users lazily — do NOT block initial render on the full user directory.
+    // Conversations, departments, branches, and roles are loaded in parallel;
+    // users are fetched in the background and merged in once ready.
     final results = await Future.wait([
       conversationsFuture,
-      loadAllUsers(),
       safeList(repository.fetchDepartments),
       safeList(repository.fetchBranches),
       safeList(repository.fetchManageableConversations),
       safeList(repository.fetchRoles),
     ]);
 
+    // Kick off user directory load in background — UI renders without waiting
+    unawaited(loadAllUsers().then((users) {
+      if (_disposed) return;
+      final current = state.valueOrNull;
+      if (current != null && users.isNotEmpty) {
+        _setStateAndCache(_copyOverview(source: current, users: users));
+      }
+    }).catchError((_) {}));
+
     final conversations = _sortConversations(results[0] as List<ChatConversation>);
-    final users = results[1] as List<ChatDirectoryUser>;
-    final departments = results[2] as List<DepartmentSummary>;
-    final branches = results[3] as List<BranchSummary>;
-    final rawManageableConversations = results[4] as List<ChatConversation>;
-    final roles = results[5] as List<ChatRole>;
+    // users start empty; populated asynchronously above
+    final users = <ChatDirectoryUser>[];
+    final departments = results[1] as List<DepartmentSummary>;
+    final branches = results[2] as List<BranchSummary>;
+    final rawManageableConversations = results[3] as List<ChatConversation>;
+    final roles = results[4] as List<ChatRole>;
 
     final manageableMap = <String, ChatConversation>{
       for (final conv in conversations)
@@ -238,6 +252,14 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         if (state.isLoading && state.valueOrNull == null) {
           return;
         }
+        // Debounce: skip full refresh if one happened within the last 10 seconds
+        // to avoid reconnect storms on flapping VPN connections.
+        final now = DateTime.now();
+        if (_lastSocketRefreshAt != null &&
+            now.difference(_lastSocketRefreshAt!).inSeconds < 10) {
+          return;
+        }
+        _lastSocketRefreshAt = now;
         Future<void>.microtask(() async {
           if (_disposed) {
             return;
@@ -1701,15 +1723,9 @@ class ConversationMessagesController
       }
 
       if (event.type == 'socket_connected') {
-        if (state.isLoading && state.valueOrNull == null) {
-          return;
+        if (!_isRefreshing && state.valueOrNull != null && !_disposed) {
+          unawaited(refresh());
         }
-        Future<void>.microtask(() async {
-          if (_disposed) {
-            return;
-          }
-          await refresh();
-        });
         return;
       }
 

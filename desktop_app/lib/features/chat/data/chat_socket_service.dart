@@ -103,8 +103,8 @@ class ChatSocketService implements PrintStatusEmitter {
               .enableForceNew()
               .disableAutoConnect()
               .enableReconnection()
-              .setReconnectionDelay(1200)
-              .setReconnectionDelayMax(4000)
+              .setReconnectionDelay(2500) // increased from 1200ms to reduce reconnect storms on weak VPN
+              .setReconnectionDelayMax(12000) // increased from 4000ms to cap exponential back-off
               .setAuth({
                 'token': token, 
                 'clientType': clientType,

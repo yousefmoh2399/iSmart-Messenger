@@ -108,9 +108,11 @@ class ApiClient {
               options.sendTimeout = const Duration(seconds: 15);
             }
           } else if (!isTransferEndpoint) {
-            options.receiveTimeout = const Duration(seconds: 90);
+            // Reduced from 90s to 20s so slow VPN connections fail fast
+            // and fall back to cache instead of freezing the UI for 90 seconds.
+            options.receiveTimeout = const Duration(seconds: 20);
             if (!kIsWeb) {
-              options.sendTimeout = const Duration(seconds: 90);
+              options.sendTimeout = const Duration(seconds: 20);
             }
           }
 
