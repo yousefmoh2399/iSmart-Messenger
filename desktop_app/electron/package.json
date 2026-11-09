@@ -16,9 +16,6 @@
     "appId": "com.ismart.messenger.webwrapper",
     "productName": "iSmart Messenger",
     "asar": true,
-    "asarUnpack": [
-      "clip_helper.exe"
-    ],
     "compression": "maximum",
     "afterPack": "./afterPack.js",
     "directories": {
@@ -29,7 +26,6 @@
       "main.js",
       "preload.js",
       "receive-preload.js",
-      "clip_helper.exe",
       "printing/**/*",
       "package.json",
       {
@@ -37,6 +33,7 @@
         "to": "web",
         "filter": [
           "**/*",
+          "!.*",
           "!**/*.symbols",
           "!canvaskit/skwasm*",
           "!canvaskit/wimp*",
@@ -48,6 +45,10 @@
       {
         "from": "build/icon.ico",
         "to": "build/icon.ico"
+      },
+      {
+        "from": "clip_helper.exe",
+        "to": "clip_helper.exe"
       }
     ],
     "win": {
