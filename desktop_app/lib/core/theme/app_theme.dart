@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const String _fontFamily = 'NotoSans';
+  static const String _fontFamily = 'NotoSansArabic';
   static const List<String> _fontFallbacks = [
-    'NotoSansArabic',
+    'NotoSans',
     'Segoe UI Emoji',
     'Apple Color Emoji',
     'Noto Color Emoji',

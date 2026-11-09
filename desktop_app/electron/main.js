@@ -626,7 +626,19 @@ function startWebAppServer() {
   });
 
   return new Promise((resolve, reject) => {
-    webAppServer.once("error", reject);
+    webAppServer.once("error", (err) => {
+      if (err && err.code === "EADDRINUSE") {
+        console.warn(`[WebServer] Port ${WEB_APP_PORT} in use, retrying on dynamic port 0...`);
+        webAppServer.once("error", reject);
+        webAppServer.listen(0, "127.0.0.1", () => {
+          const address = webAppServer.address();
+          console.log(`[WebServer] Web app listening on dynamic port http://127.0.0.1:${address.port}/`);
+          resolve(`http://127.0.0.1:${address.port}/`);
+        });
+        return;
+      }
+      reject(err);
+    });
     webAppServer.listen(WEB_APP_PORT, "127.0.0.1", () => {
       const address = webAppServer.address();
       resolve(`http://127.0.0.1:${address.port}/`);
@@ -1075,6 +1087,27 @@ function createWindow(startUrl) {
   mainWindow.webContents.on("console-message", (_event, level, message) => {
     if (level >= 2 || message.includes("Electron image fetch failed")) {
       console.warn(`[renderer:${level}] ${message}`);
+    }
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[renderer] Render process gone: ${details.reason}`);
+    if (details.reason !== "clean-exit") {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log("[renderer] Reloading after unexpected exit...");
+          mainWindow.loadURL(startUrl || lastStartUrl);
+        }
+      }, 1000);
+    }
+  });
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+    console.warn(`[renderer] Load failed (${errorCode}): ${errorDescription}`);
+    if (errorCode === -102 || errorCode === -105 || errorCode === -106) {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(startUrl || lastStartUrl);
+        }
+      }, 1500);
     }
   });
 

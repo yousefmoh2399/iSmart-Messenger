@@ -23,6 +23,8 @@
 
     <title>desktop_app</title>
     <link rel="manifest" href="manifest.json" />
+    <link rel="preload" href="assets/assets/fonts/NotoSansArabic-Regular.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="assets/assets/fonts/NotoSansArabic-Bold.ttf" as="font" type="font/ttf" crossorigin />
     <style>
       @font-face {
         font-family: "NotoSansArabic";
@@ -31,7 +33,7 @@
           url("assets/fonts/NotoSansArabic-Regular.ttf") format("truetype");
         font-weight: 400;
         font-style: normal;
-        font-display: block;
+        font-display: swap;
       }
 
       @font-face {
@@ -41,7 +43,7 @@
           url("assets/fonts/NotoSansArabic-Bold.ttf") format("truetype");
         font-weight: 700;
         font-style: normal;
-        font-display: block;
+        font-display: swap;
       }
 
       @font-face {
@@ -51,7 +53,7 @@
           url("assets/fonts/NotoSans-Regular.ttf") format("truetype");
         font-weight: 400;
         font-style: normal;
-        font-display: block;
+        font-display: swap;
       }
 
       @font-face {
@@ -61,7 +63,7 @@
           url("assets/fonts/NotoSans-Bold.ttf") format("truetype");
         font-weight: 700;
         font-style: normal;
-        font-display: block;
+        font-display: swap;
       }
 
       @font-face {
