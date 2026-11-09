@@ -28,17 +28,25 @@ if (process.platform === 'win32') {
   const major = parseInt(release.split('.')[0], 10);
   const minor = parseInt(release.split('.')[1], 10);
   const isWin7OrOlder = major < 6 || (major === 6 && minor < 2);
-  if (isWin7OrOlder) {
+  const forceSoftwareGpu = process.argv.includes('--disable-gpu') || process.env.ISMART_DISABLE_GPU === '1';
+  if (forceSoftwareGpu) {
+    app.disableHardwareAcceleration();
+  } else if (isWin7OrOlder) {
     // Disable GPU sandbox — Windows 7 sandbox layer is incompatible with Chromium 108+
     app.commandLine.appendSwitch('disable-gpu-sandbox');
-    // Fall back to software rendering if D3D11 is unavailable on Win7
-    app.commandLine.appendSwitch('disable-software-rasterizer');
+
+
     // Disable Direct2D font rendering (uses GDI fallback on Win7)
     app.commandLine.appendSwitch('disable-directwrite-for-ui');
-    // Force disable GPU compositing — prevents blank/white screens on Win7 GPU drivers
-    app.commandLine.appendSwitch('disable-gpu-compositing');
+    // Force hardware rasterization with D3D9 ANGLE backend (fast 60fps on Win7 legacy drivers)
+    app.commandLine.appendSwitch('enable-gpu-rasterization');
+    app.commandLine.appendSwitch('enable-zero-copy');
+    app.commandLine.appendSwitch('ignore-gpu-blocklist');
     // Disable DX12 (not available on Win7)
-    app.commandLine.appendSwitch('use-angle', 'gl');
+    app.commandLine.appendSwitch('use-angle', 'd3d9');
+  } else {
+    app.commandLine.appendSwitch('enable-gpu-rasterization');
+    app.commandLine.appendSwitch('enable-zero-copy');
   }
 }
 
@@ -479,8 +487,8 @@ app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("ignore-certificate-errors");
 app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>,127.0.0.1,localhost");
-app.commandLine.appendSwitch("disable-background-timer-throttling");
-app.commandLine.appendSwitch("disable-renderer-backgrounding");
+
+
 app.commandLine.appendSwitch("renderer-process-limit", "3");
 
 // V8 32-bit Memory Optimization: constrain heap to 512MB to trigger fast, non-blocking GC pauses
@@ -496,6 +504,7 @@ app.commandLine.appendSwitch("font-render-hinting", "medium");
 // which pegs dual-core CPUs at 100% and freezes the app when scrolling or typing.
 // Instead, we force the mature DirectX 9 ANGLE backend with GPU rasterization,
 // which runs at 60fps on virtually all legacy Intel/AMD/Nvidia drivers on Windows 7.
+/* Graphics tuning configured in early init
 if (os.release().startsWith("6.1")) {
   const forceSoftware = process.argv.includes("--disable-gpu") || process.env.ISMART_DISABLE_GPU === "1";
   if (forceSoftware) {
@@ -510,6 +519,8 @@ if (os.release().startsWith("6.1")) {
   app.commandLine.appendSwitch("enable-gpu-rasterization");
   app.commandLine.appendSwitch("enable-zero-copy");
 }
+
+*/
 
 app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
   event.preventDefault();
@@ -1014,7 +1025,7 @@ function createWindow(startUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       webSecurity: false,
       allowRunningInsecureContent: true,
       defaultFontFamily: {
@@ -1088,11 +1099,11 @@ function createWindow(startUrl) {
   const load = () => mainWindow.loadURL(startUrl || lastStartUrl);
   session
     .clearStorageData({
-      storages: ["serviceworkers", "cachestorage"],
+      storages: ["serviceworkers"],
     })
-    .then(() => session.clearCache())
+    .then(() => { /* preserve disk cache */ })
     .catch((error) => {
-      console.warn(`Failed to clear Electron web cache: ${error.message}`);
+      console.warn(`Failed to clear Electron serviceworkers: ${error.message}`);
     })
     .finally(load);
 }
