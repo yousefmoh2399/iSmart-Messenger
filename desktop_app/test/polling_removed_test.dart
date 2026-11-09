@@ -43,6 +43,12 @@ void main() {
             source.contains('_countdownTimer = Timer.periodic')) {
           continue;
         }
+        // Admin topology monitoring screens refresh live graph while open
+        if (path.contains('features/admin/presentation/') &&
+            (path.endsWith('live_operations_topology_screen.dart') ||
+             path.endsWith('update_distribution_topology_screen.dart'))) {
+          continue;
+        }
         offenders.add(path);
       }
     }

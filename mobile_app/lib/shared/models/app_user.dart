@@ -163,6 +163,7 @@ class ChatPreferences {
     wallpaperId: 'default',
     doodles: true,
     customTheme: ChatCustomTheme.defaults,
+    unreadBadgeColorHex: '#E53935',
   );
 
   const ChatPreferences({
@@ -170,14 +171,21 @@ class ChatPreferences {
     required this.wallpaperId,
     this.doodles = true,
     required this.customTheme,
+    this.unreadBadgeColorHex = '#E53935',
   });
 
   final String themeId;
   final String wallpaperId;
   final bool doodles;
   final ChatCustomTheme customTheme;
+  final String unreadBadgeColorHex;
 
   factory ChatPreferences.fromJson(Map<String, dynamic>? json) {
+    final customThemeJson = json?['customTheme'] as Map<String, dynamic>?;
+    final fallbackUnread = _normalizeColorHex(
+      customThemeJson?['unreadBadgeColorHex'],
+      fallback: '#E53935',
+    );
     return ChatPreferences(
       themeId: (json?['themeId'] as String?)?.trim().isNotEmpty == true
           ? (json!['themeId'] as String).trim()
@@ -187,7 +195,11 @@ class ChatPreferences {
           : 'default',
       doodles: json?['doodles'] is bool ? json!['doodles'] as bool : true,
       customTheme: ChatCustomTheme.fromJson(
-        json?['customTheme'] as Map<String, dynamic>?,
+        customThemeJson,
+      ),
+      unreadBadgeColorHex: _normalizeColorHex(
+        json?['unreadBadgeColorHex'],
+        fallback: fallbackUnread,
       ),
     );
   }
@@ -197,12 +209,17 @@ class ChatPreferences {
     String? wallpaperId,
     bool? doodles,
     ChatCustomTheme? customTheme,
+    String? unreadBadgeColorHex,
   }) {
     return ChatPreferences(
       themeId: themeId ?? this.themeId,
       wallpaperId: wallpaperId ?? this.wallpaperId,
       doodles: doodles ?? this.doodles,
       customTheme: customTheme ?? this.customTheme,
+      unreadBadgeColorHex: _normalizeColorHex(
+        unreadBadgeColorHex,
+        fallback: this.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -211,6 +228,7 @@ class ChatPreferences {
     'wallpaperId': wallpaperId,
     'doodles': doodles,
     'customTheme': customTheme.toJson(),
+    'unreadBadgeColorHex': unreadBadgeColorHex,
   };
 }
 
@@ -220,6 +238,7 @@ class ChatCustomTheme {
     outgoingBubbleColorHexes: <String>['#5BA9FF', '#2F8CFF'],
     incomingBubbleColorHex: '#182533',
     wallpaperColorHexes: <String>['#0E1621', '#111B26', '#17212B'],
+    unreadBadgeColorHex: '#E53935',
   );
 
   const ChatCustomTheme({
@@ -227,12 +246,14 @@ class ChatCustomTheme {
     required this.outgoingBubbleColorHexes,
     required this.incomingBubbleColorHex,
     required this.wallpaperColorHexes,
+    this.unreadBadgeColorHex = '#E53935',
   });
 
   final String accentColorHex;
   final List<String> outgoingBubbleColorHexes;
   final String incomingBubbleColorHex;
   final List<String> wallpaperColorHexes;
+  final String unreadBadgeColorHex;
 
   factory ChatCustomTheme.fromJson(Map<String, dynamic>? json) {
     final outgoing = _normalizeColorHexList(
@@ -257,6 +278,10 @@ class ChatCustomTheme {
         fallback: defaults.incomingBubbleColorHex,
       ),
       wallpaperColorHexes: wallpaper,
+      unreadBadgeColorHex: _normalizeColorHex(
+        json?['unreadBadgeColorHex'],
+        fallback: defaults.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -265,6 +290,7 @@ class ChatCustomTheme {
     List<String>? outgoingBubbleColorHexes,
     String? incomingBubbleColorHex,
     List<String>? wallpaperColorHexes,
+    String? unreadBadgeColorHex,
   }) {
     return ChatCustomTheme(
       accentColorHex: _normalizeColorHex(
@@ -286,6 +312,10 @@ class ChatCustomTheme {
         minLength: 2,
         maxLength: 4,
       ),
+      unreadBadgeColorHex: _normalizeColorHex(
+        unreadBadgeColorHex,
+        fallback: this.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -294,6 +324,7 @@ class ChatCustomTheme {
     'outgoingBubbleColorHexes': outgoingBubbleColorHexes,
     'incomingBubbleColorHex': incomingBubbleColorHex,
     'wallpaperColorHexes': wallpaperColorHexes,
+    'unreadBadgeColorHex': unreadBadgeColorHex,
   };
 }
 

@@ -67,6 +67,7 @@ class ChatResolvedAppearance {
     required this.isDarkVariant,
     this.showDoodles = true,
     this.hasSnowCaps = false,
+    this.unreadBadgeColor = const Color(0xFFE53935),
   });
 
   final Color accent;
@@ -85,9 +86,49 @@ class ChatResolvedAppearance {
   final bool showDoodles;
   final bool hasSnowCaps;
 
+  final Color unreadBadgeColor;
+
   bool get hasOutgoingGradient =>
       outgoingBubbleColors.length > 1 &&
       outgoingBubbleColors.any((entry) => entry != outgoingBubbleColors.first);
+
+  ChatResolvedAppearance copyWith({
+    Color? accent,
+    List<Color>? outgoingBubbleColors,
+    Color? incomingBubbleColor,
+    Color? outgoingTextColor,
+    Color? incomingTextColor,
+    Color? outgoingBorderColor,
+    Color? incomingBorderColor,
+    Color? outgoingReplyColor,
+    Color? incomingReplyColor,
+    List<Color>? wallpaperColors,
+    Color? patternColor,
+    Color? sparkleColor,
+    bool? isDarkVariant,
+    bool? showDoodles,
+    bool? hasSnowCaps,
+    Color? unreadBadgeColor,
+  }) {
+    return ChatResolvedAppearance(
+      accent: accent ?? this.accent,
+      outgoingBubbleColors: outgoingBubbleColors ?? this.outgoingBubbleColors,
+      incomingBubbleColor: incomingBubbleColor ?? this.incomingBubbleColor,
+      outgoingTextColor: outgoingTextColor ?? this.outgoingTextColor,
+      incomingTextColor: incomingTextColor ?? this.incomingTextColor,
+      outgoingBorderColor: outgoingBorderColor ?? this.outgoingBorderColor,
+      incomingBorderColor: incomingBorderColor ?? this.incomingBorderColor,
+      outgoingReplyColor: outgoingReplyColor ?? this.outgoingReplyColor,
+      incomingReplyColor: incomingReplyColor ?? this.incomingReplyColor,
+      wallpaperColors: wallpaperColors ?? this.wallpaperColors,
+      patternColor: patternColor ?? this.patternColor,
+      sparkleColor: sparkleColor ?? this.sparkleColor,
+      isDarkVariant: isDarkVariant ?? this.isDarkVariant,
+      showDoodles: showDoodles ?? this.showDoodles,
+      hasSnowCaps: hasSnowCaps ?? this.hasSnowCaps,
+      unreadBadgeColor: unreadBadgeColor ?? this.unreadBadgeColor,
+    );
+  }
 }
 
 class ChatAppearanceCatalog {
@@ -523,6 +564,32 @@ class ChatAppearanceCatalog {
     ),
   ];
 
+  static const customUnreadBadgeSwatches = <Color>[
+    Color(0xFFE53935), // Material Red 600 (افتراضي قياسي)
+    Color(0xFFE11D48), // Rose Red (أحمر وردي)
+    Color(0xFFDC2626), // Crimson (قرمزي)
+    Color(0xFFFF5722), // Deep Orange / Coral (برتقالي ناري)
+    Color(0xFFEA580C), // Orange Amber
+    Color(0xFFD97706), // Desert Amber (كهرماني)
+    Color(0xFF00A884), // WhatsApp Emerald Green (أخضر واتساب)
+    Color(0xFF007AFF), // Apple Blue (أزرق أبل الكلاسيكي)
+    Color(0xFF8B5CF6), // Royal Purple (أرجواني ملكي)
+    Color(0xFFEC4899), // Hot Pink (وردي فاقع)
+    Color(0xFF475569), // Slate (رمادي معدني)
+  ];
+
+  static Color _resolveUnreadBadgeColor(ChatPreferences preferences) {
+    final hex = preferences.unreadBadgeColorHex.trim().isNotEmpty
+        ? preferences.unreadBadgeColorHex
+        : preferences.customTheme.unreadBadgeColorHex;
+    if (hex.trim().isNotEmpty) {
+      try {
+        return colorFromHex(hex);
+      } catch (_) {}
+    }
+    return const Color(0xFFE53935);
+  }
+
   static const customAccentSwatches = <Color>[
     Color(0xFF00A884), // WhatsApp Green
     Color(0xFF2AABEE), // Telegram Sky
@@ -590,23 +657,26 @@ class ChatAppearanceCatalog {
     required bool isDark,
     required ColorScheme colorScheme,
   }) {
+    final ChatResolvedAppearance base;
     if (usesCustomTheme(preferences.themeId)) {
-      return _resolveCustomAppearance(
+      base = _resolveCustomAppearance(
         preferences: preferences,
         isDark: isDark,
       );
-    }
-    if (usesSystemMode(preferences.themeId)) {
-      return _resolveSystemAppearance(
+    } else if (usesSystemMode(preferences.themeId)) {
+      base = _resolveSystemAppearance(
         preferences: preferences,
         isDark: isDark,
         colorScheme: colorScheme,
       );
+    } else {
+      base = _resolvePresetAppearance(
+        preferences: preferences,
+        isDark: isDark,
+      );
     }
-    return _resolvePresetAppearance(
-      preferences: preferences,
-      isDark: isDark,
-    );
+    final unreadColor = _resolveUnreadBadgeColor(preferences);
+    return base.copyWith(unreadBadgeColor: unreadColor);
   }
 
   static ChatResolvedAppearance _resolveSystemAppearance({

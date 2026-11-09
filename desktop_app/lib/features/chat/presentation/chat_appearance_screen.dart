@@ -6,6 +6,7 @@ import '../../../shared/providers/providers.dart';
 import '../../../shared/widgets/desktop_workspace_sidebar.dart';
 import '../../updates/presentation/update_center_screen.dart';
 import 'chat_appearance.dart';
+import 'widgets/chat_unread_badge_card.dart';
 
 class ChatAppearanceScreen extends ConsumerStatefulWidget {
   const ChatAppearanceScreen({super.key});
@@ -193,6 +194,23 @@ class _ChatAppearanceScreenState extends ConsumerState<ChatAppearanceScreen> {
                                 borderColor: borderColor,
                                 onChanged: (val) =>
                                     _save(prefs.copyWith(doodles: val)),
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              // Unread Badge & Preview Highlight Color Card
+                              ChatUnreadBadgeCard(
+                                selectedColorHex: prefs.unreadBadgeColorHex,
+                                cardBg: cardBg,
+                                borderColor: borderColor,
+                                onSelected: (hex) => _save(
+                                  prefs.copyWith(
+                                    unreadBadgeColorHex: hex,
+                                    customTheme: prefs.customTheme.copyWith(
+                                      unreadBadgeColorHex: hex,
+                                    ),
+                                  ),
+                                ),
                               ),
 
                               const SizedBox(height: 20),
@@ -1343,6 +1361,25 @@ class _DesktopCustomizerView extends StatelessWidget {
 
         const SizedBox(height: 14),
 
+        // Unread Badge & Alert Color Swatch
+        _ColorPickerTile(
+          title: 'لون عداد وتنبيه الرسائل غير المقروءة',
+          subtitle: 'لون فقاعة عدد الرسائل ومحتوى آخر رسالة في قائمة المحادثات',
+          selectedColor: ChatAppearanceCatalog.colorFromHex(
+            custom.unreadBadgeColorHex.isNotEmpty ? custom.unreadBadgeColorHex : '#E53935',
+          ),
+          colors: ChatAppearanceCatalog.customUnreadBadgeSwatches,
+          cardBg: cardBg,
+          borderColor: borderColor,
+          onSelected: (color) {
+            final hex = ChatAppearanceCatalog.colorToHex(color);
+            onSaveCustom(custom.copyWith(unreadBadgeColorHex: hex));
+            onSavePrefs(preferences.copyWith(unreadBadgeColorHex: hex));
+          },
+        ),
+
+        const SizedBox(height: 14),
+
         // Custom Wallpaper Palette
         _CustomPaletteTile(
           title: 'تدرج خلفية الثيم المخصص',
@@ -1760,6 +1797,32 @@ class _DesktopLiveChatMockup extends StatelessWidget {
                         ],
                       ),
                     ),
+                    // Mock Live Unread Counter Badge
+                    Container(
+                      margin: const EdgeInsets.only(left: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: resolved.unreadBadgeColor,
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: [
+                          BoxShadow(
+                            color: resolved.unreadBadgeColor.withValues(alpha: 0.35),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: const Text(
+                        '2 جديدة',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+
                     // Action Icons
                     Icon(
                       Icons.search_rounded,

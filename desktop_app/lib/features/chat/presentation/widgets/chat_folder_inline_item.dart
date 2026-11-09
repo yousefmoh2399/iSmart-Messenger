@@ -10,6 +10,7 @@ class ChatFolderInlineItem extends ConsumerWidget {
   final List<ChatConversation> conversations;
   final String currentUserId;
   final Widget Function(ChatConversation) buildConversation;
+  final Color? unreadBadgeColor;
 
   const ChatFolderInlineItem({
     super.key,
@@ -17,6 +18,7 @@ class ChatFolderInlineItem extends ConsumerWidget {
     required this.conversations,
     required this.currentUserId,
     required this.buildConversation,
+    this.unreadBadgeColor,
   });
 
   @override
@@ -75,7 +77,7 @@ class ChatFolderInlineItem extends ConsumerWidget {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: color,
+                    color: unreadBadgeColor ?? const Color(0xFFE53935),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(

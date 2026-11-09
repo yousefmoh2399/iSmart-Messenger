@@ -60,6 +60,7 @@ function normalizeColorHexList(value, fallback, { min = 1, max = 4 } = {}) {
 function defaultCustomTheme() {
   return {
     accentColorHex: "#3390EC",
+    unreadBadgeColorHex: "#E53935",
     outgoingBubbleColorHexes: ["#5BA9FF", "#2F8CFF"],
     incomingBubbleColorHex: "#182533",
     wallpaperColorHexes: ["#0E1621", "#111B26", "#17212B"],
@@ -97,7 +98,17 @@ function serializeUser(user, permissions = null) {
       themeId: user.chatPreferences?.themeId || "system",
       wallpaperId: user.chatPreferences?.wallpaperId || "default",
       doodles: user.chatPreferences?.doodles !== false,
-      customTheme,
+      unreadBadgeColorHex:
+        user.chatPreferences?.unreadBadgeColorHex ||
+        customTheme.unreadBadgeColorHex ||
+        "#E53935",
+      customTheme: {
+        ...customTheme,
+        unreadBadgeColorHex:
+          customTheme.unreadBadgeColorHex ||
+          user.chatPreferences?.unreadBadgeColorHex ||
+          "#E53935",
+      },
     },
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -715,7 +726,20 @@ async function updateProfile(actor, payload) {
       typeof payload.chatPreferences.customTheme === "object"
         ? payload.chatPreferences.customTheme
         : null;
+    const rawUnreadBadgeColor =
+      payload.chatPreferences.unreadBadgeColorHex ||
+      incomingCustomTheme?.unreadBadgeColorHex;
+    const currentUnreadBadgeColor =
+      user.chatPreferences?.unreadBadgeColorHex ||
+      currentCustomTheme.unreadBadgeColorHex ||
+      "#E53935";
+    const resolvedUnreadBadgeColor = normalizeColorHex(
+      rawUnreadBadgeColor,
+      currentUnreadBadgeColor,
+    );
+
     user.chatPreferences = {
+      unreadBadgeColorHex: resolvedUnreadBadgeColor,
       themeId:
         rawThemeId != null
           ? String(rawThemeId).trim().slice(0, 60)
@@ -733,6 +757,7 @@ async function updateProfile(actor, payload) {
           incomingCustomTheme?.accentColorHex,
           currentCustomTheme.accentColorHex,
         ),
+        unreadBadgeColorHex: resolvedUnreadBadgeColor,
         outgoingBubbleColorHexes: normalizeColorHexList(
           incomingCustomTheme?.outgoingBubbleColorHexes,
           currentCustomTheme.outgoingBubbleColorHexes,

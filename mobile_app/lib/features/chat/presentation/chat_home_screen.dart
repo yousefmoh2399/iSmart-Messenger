@@ -2854,7 +2854,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                                 ).format(widget.conversation.updatedAt.toLocal()),
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                             color: hasUnread
-                                ? widget.appearance.accent
+                                ? widget.appearance.unreadBadgeColor
                                 : colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
                             fontWeight: hasUnread
                                 ? FontWeight.w700
@@ -2880,7 +2880,9 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: isTypingPreview
                                   ? widget.appearance.accent
-                                  : colorScheme.onSurfaceVariant,
+                                  : hasUnread
+                                      ? widget.appearance.unreadBadgeColor
+                                      : colorScheme.onSurfaceVariant,
                               fontWeight: hasUnread || isTypingPreview
                                   ? FontWeight.w600
                                   : FontWeight.w400,
@@ -2901,7 +2903,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
                               minHeight: 20,
                             ),
                             decoration: BoxDecoration(
-                              color: widget.appearance.accent,
+                              color: widget.appearance.unreadBadgeColor,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             alignment: Alignment.center,

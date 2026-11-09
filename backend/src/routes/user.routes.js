@@ -77,8 +77,10 @@ router.put(
     body("chatPreferences.themeId").optional().isString(),
     body("chatPreferences.wallpaperId").optional().isString(),
     body("chatPreferences.doodles").optional().isBoolean(),
+    body("chatPreferences.unreadBadgeColorHex").optional().isString(),
     body("chatPreferences.customTheme").optional().isObject(),
     body("chatPreferences.customTheme.accentColorHex").optional().isString(),
+    body("chatPreferences.customTheme.unreadBadgeColorHex").optional().isString(),
     body("chatPreferences.customTheme.incomingBubbleColorHex")
       .optional()
       .isString(),

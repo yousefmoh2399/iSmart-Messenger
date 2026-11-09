@@ -5,14 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/providers/providers.dart';
 import '../../../../shared/widgets/safe_network_avatar.dart';
 import '../../models/chat_models.dart';
+import '../chat_appearance.dart';
 import 'chat_ui_helpers.dart';
 
-class ChatListItem extends StatefulWidget {
+class ChatListItem extends ConsumerStatefulWidget {
   const ChatListItem({
     super.key,
     required this.conversation,
     required this.currentUserId,
     this.typingPreviewText,
+    this.unreadBadgeColor,
     required this.selected,
     required this.onTap,
     required this.onTogglePin,
@@ -25,6 +27,7 @@ class ChatListItem extends StatefulWidget {
   final ChatConversation conversation;
   final String currentUserId;
   final String? typingPreviewText;
+  final Color? unreadBadgeColor;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onTogglePin;
@@ -34,15 +37,29 @@ class ChatListItem extends StatefulWidget {
   final VoidCallback onDeleteConversation;
 
   @override
-  State<ChatListItem> createState() => _ChatListItemState();
+  ConsumerState<ChatListItem> createState() => _ChatListItemState();
 }
 
-class _ChatListItemState extends State<ChatListItem> {
+class _ChatListItemState extends ConsumerState<ChatListItem> {
   bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final unreadColor = widget.unreadBadgeColor ?? () {
+      final prefs = ref.watch(authControllerProvider).valueOrNull?.chatPreferences;
+      final hex = prefs?.unreadBadgeColorHex.trim().isNotEmpty == true
+          ? prefs!.unreadBadgeColorHex
+          : prefs?.customTheme.unreadBadgeColorHex;
+      if (hex != null && hex.trim().isNotEmpty) {
+        try {
+          return ChatAppearanceCatalog.colorFromHex(hex);
+        } catch (_) {}
+      }
+      return const Color(0xFFE53935);
+    }();
     final peer = widget.conversation.type == 'direct'
         ? widget.conversation.members
               .where((entry) => entry.id != widget.currentUserId)
@@ -347,8 +364,14 @@ class _ChatListItemState extends State<ChatListItem> {
                                         .textTheme
                                         .labelSmall
                                         ?.copyWith(
-                                          color: onSurfaceVariant,
-                                          fontWeight: FontWeight.w600,
+                                          color: widget.conversation.unreadCount > 0
+                                              ? (isDark
+                                                  ? unreadColor.withValues(alpha: 0.95)
+                                                  : unreadColor)
+                                              : onSurfaceVariant,
+                                          fontWeight: widget.conversation.unreadCount > 0
+                                              ? FontWeight.w700
+                                              : FontWeight.w600,
                                         ),
                                   ),
                                 ],
@@ -370,12 +393,16 @@ class _ChatListItemState extends State<ChatListItem> {
                                         ?.copyWith(
                                           color: isTypingPreview
                                               ? colorScheme.primary
+                                              : widget.conversation.unreadCount > 0
+                                              ? (isDark
+                                                  ? unreadColor.withValues(alpha: 0.95)
+                                                  : unreadColor)
                                               : widget.conversation.isActive
                                               ? onSurfaceVariant
                                               : onSurfaceVariant.withValues(
                                                   alpha: 0.68,
                                                 ),
-                                          fontWeight: isTypingPreview
+                                          fontWeight: (isTypingPreview || widget.conversation.unreadCount > 0)
                                               ? FontWeight.w700
                                               : FontWeight.w500,
                                         ),
@@ -389,8 +416,15 @@ class _ChatListItemState extends State<ChatListItem> {
                                       vertical: 3,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: colorScheme.primary,
+                                      color: unreadColor,
                                       borderRadius: BorderRadius.circular(999),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: unreadColor.withValues(alpha: 0.35),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
                                     ),
                                     child: Text(
                                       '${widget.conversation.unreadCount}',

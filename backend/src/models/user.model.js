@@ -139,10 +139,12 @@ const userSchema = new mongoose.Schema(
           themeId: { type: String, default: "system" },
           wallpaperId: { type: String, default: "default" },
           doodles: { type: Boolean, default: true },
+          unreadBadgeColorHex: { type: String, default: "#E53935" },
           customTheme: {
             type: new mongoose.Schema(
               {
                 accentColorHex: { type: String, default: "#3390EC" },
+                unreadBadgeColorHex: { type: String, default: "#E53935" },
                 outgoingBubbleColorHexes: {
                   type: [String],
                   default: () => ["#5BA9FF", "#2F8CFF"],
@@ -160,6 +162,7 @@ const userSchema = new mongoose.Schema(
             ),
             default: () => ({
               accentColorHex: "#3390EC",
+              unreadBadgeColorHex: "#E53935",
               outgoingBubbleColorHexes: ["#5BA9FF", "#2F8CFF"],
               incomingBubbleColorHex: "#182533",
               wallpaperColorHexes: ["#0E1621", "#111B26", "#17212B"],
@@ -171,8 +174,10 @@ const userSchema = new mongoose.Schema(
       default: () => ({
         themeId: "system",
         wallpaperId: "default",
+        unreadBadgeColorHex: "#E53935",
         customTheme: {
           accentColorHex: "#3390EC",
+          unreadBadgeColorHex: "#E53935",
           outgoingBubbleColorHexes: ["#5BA9FF", "#2F8CFF"],
           incomingBubbleColorHex: "#182533",
           wallpaperColorHexes: ["#0E1621", "#111B26", "#17212B"],

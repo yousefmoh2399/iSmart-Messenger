@@ -459,6 +459,7 @@ class ChatSidebar extends ConsumerWidget {
                                 padding: const EdgeInsets.only(bottom: 2),
                                 child: ChatFolderInlineItem(
                                   folder: folder,
+                                  unreadBadgeColor: appearance.unreadBadgeColor,
                                   currentUserId: currentUserId,
                                   conversations: folder.conversationIds
                                       .map((id) => conversations.firstWhere(
@@ -490,6 +491,7 @@ class ChatSidebar extends ConsumerWidget {
                                       .toList(),
                                   buildConversation: (c) => ChatListItem(
                                     conversation: c,
+                                    unreadBadgeColor: appearance.unreadBadgeColor,
                                     currentUserId: currentUserId,
                                     typingPreviewText:
                                         typingPreviewByConversationId[c.id],
@@ -524,6 +526,7 @@ class ChatSidebar extends ConsumerWidget {
                               padding: const EdgeInsets.only(bottom: 2),
                               child: ChatListItem(
                                 conversation: conversation,
+                                unreadBadgeColor: appearance.unreadBadgeColor,
                                 currentUserId: currentUserId,
                                 typingPreviewText:
                                     typingPreviewByConversationId[conversation
@@ -581,6 +584,7 @@ class ChatSidebar extends ConsumerWidget {
                                 padding: const EdgeInsets.only(bottom: 2),
                                 child: ChatListItem(
                                   conversation: conversation,
+                                  unreadBadgeColor: appearance.unreadBadgeColor,
                                   currentUserId: currentUserId,
                                   typingPreviewText:
                                       typingPreviewByConversationId[conversation
@@ -946,6 +950,7 @@ class _CompactChatSidebar extends StatelessWidget {
                     currentUserId: currentUserId,
                     selected: selectedConversationId == conversation.id,
                     accent: appearance.accent,
+                    unreadBadgeColor: appearance.unreadBadgeColor,
                     onTap: () => onConversationSelected(conversation),
                   );
                 },
@@ -993,6 +998,7 @@ class _CompactConversationAvatar extends StatelessWidget {
     required this.currentUserId,
     required this.selected,
     required this.accent,
+    this.unreadBadgeColor,
     required this.onTap,
   });
 
@@ -1000,6 +1006,7 @@ class _CompactConversationAvatar extends StatelessWidget {
   final String currentUserId;
   final bool selected;
   final Color accent;
+  final Color? unreadBadgeColor;
   final VoidCallback onTap;
 
   @override
@@ -1061,7 +1068,7 @@ class _CompactConversationAvatar extends StatelessWidget {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: accent,
+                    color: unreadBadgeColor ?? const Color(0xFFE53935),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
                       color: Theme.of(context).colorScheme.surface,

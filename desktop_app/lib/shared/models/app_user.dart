@@ -191,6 +191,7 @@ class ChatPreferences {
     doodles: true,
     customTheme: ChatCustomTheme.defaults,
     disableAnimatedEmojis: false,
+    unreadBadgeColorHex: '#E53935',
   );
 
   const ChatPreferences({
@@ -199,6 +200,7 @@ class ChatPreferences {
     this.doodles = true,
     required this.customTheme,
     this.disableAnimatedEmojis = false,
+    this.unreadBadgeColorHex = '#E53935',
   });
 
   final String themeId;
@@ -206,8 +208,14 @@ class ChatPreferences {
   final bool doodles;
   final ChatCustomTheme customTheme;
   final bool disableAnimatedEmojis;
+  final String unreadBadgeColorHex;
 
   factory ChatPreferences.fromJson(Map<String, dynamic>? json) {
+    final customThemeJson = json?['customTheme'] as Map<String, dynamic>?;
+    final fallbackUnread = _normalizeColorHex(
+      customThemeJson?['unreadBadgeColorHex'],
+      fallback: '#E53935',
+    );
     return ChatPreferences(
       themeId: (json?['themeId'] as String?)?.trim().isNotEmpty == true
           ? (json!['themeId'] as String).trim()
@@ -220,6 +228,10 @@ class ChatPreferences {
         json?['customTheme'] as Map<String, dynamic>?,
       ),
       disableAnimatedEmojis: json?['disableAnimatedEmojis'] == true,
+      unreadBadgeColorHex: _normalizeColorHex(
+        json?['unreadBadgeColorHex'],
+        fallback: fallbackUnread,
+      ),
     );
   }
 
@@ -229,6 +241,7 @@ class ChatPreferences {
     bool? doodles,
     ChatCustomTheme? customTheme,
     bool? disableAnimatedEmojis,
+    String? unreadBadgeColorHex,
   }) {
     return ChatPreferences(
       themeId: themeId ?? this.themeId,
@@ -236,6 +249,10 @@ class ChatPreferences {
       doodles: doodles ?? this.doodles,
       customTheme: customTheme ?? this.customTheme,
       disableAnimatedEmojis: disableAnimatedEmojis ?? this.disableAnimatedEmojis,
+      unreadBadgeColorHex: _normalizeColorHex(
+        unreadBadgeColorHex,
+        fallback: this.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -245,6 +262,7 @@ class ChatPreferences {
     'doodles': doodles,
     'customTheme': customTheme.toJson(),
     'disableAnimatedEmojis': disableAnimatedEmojis,
+    'unreadBadgeColorHex': unreadBadgeColorHex,
   };
 }
 
@@ -254,6 +272,7 @@ class ChatCustomTheme {
     outgoingBubbleColorHexes: <String>['#5BA9FF', '#2F8CFF'],
     incomingBubbleColorHex: '#182533',
     wallpaperColorHexes: <String>['#0E1621', '#111B26', '#17212B'],
+    unreadBadgeColorHex: '#E53935',
   );
 
   const ChatCustomTheme({
@@ -261,12 +280,14 @@ class ChatCustomTheme {
     required this.outgoingBubbleColorHexes,
     required this.incomingBubbleColorHex,
     required this.wallpaperColorHexes,
+    this.unreadBadgeColorHex = '#E53935',
   });
 
   final String accentColorHex;
   final List<String> outgoingBubbleColorHexes;
   final String incomingBubbleColorHex;
   final List<String> wallpaperColorHexes;
+  final String unreadBadgeColorHex;
 
   factory ChatCustomTheme.fromJson(Map<String, dynamic>? json) {
     final outgoing = _normalizeColorHexList(
@@ -291,6 +312,10 @@ class ChatCustomTheme {
         fallback: defaults.incomingBubbleColorHex,
       ),
       wallpaperColorHexes: wallpaper,
+      unreadBadgeColorHex: _normalizeColorHex(
+        json?['unreadBadgeColorHex'],
+        fallback: defaults.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -299,6 +324,7 @@ class ChatCustomTheme {
     List<String>? outgoingBubbleColorHexes,
     String? incomingBubbleColorHex,
     List<String>? wallpaperColorHexes,
+    String? unreadBadgeColorHex,
   }) {
     return ChatCustomTheme(
       accentColorHex: _normalizeColorHex(
@@ -320,6 +346,10 @@ class ChatCustomTheme {
         minLength: 2,
         maxLength: 4,
       ),
+      unreadBadgeColorHex: _normalizeColorHex(
+        unreadBadgeColorHex,
+        fallback: this.unreadBadgeColorHex,
+      ),
     );
   }
 
@@ -328,6 +358,7 @@ class ChatCustomTheme {
     'outgoingBubbleColorHexes': outgoingBubbleColorHexes,
     'incomingBubbleColorHex': incomingBubbleColorHex,
     'wallpaperColorHexes': wallpaperColorHexes,
+    'unreadBadgeColorHex': unreadBadgeColorHex,
   };
 }
 
