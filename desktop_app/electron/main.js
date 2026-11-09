@@ -3364,15 +3364,23 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
     payload.fileName || "attachment",
     payload.directoryPath,
   );
-  const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
-  if (!exists) {
-    if (payload.sourcePath && fs.existsSync(payload.sourcePath)) {
-      await fs.promises.copyFile(payload.sourcePath, outputPath);
-    } else {
-      await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+  try {
+    const dir = path.dirname(outputPath);
+    if (!fs.existsSync(dir)) {
+      await fs.promises.mkdir(dir, { recursive: true });
     }
+    const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
+    if (!exists) {
+      if (payload.sourcePath && fs.existsSync(payload.sourcePath)) {
+        await fs.promises.copyFile(payload.sourcePath, outputPath);
+      } else if (payload.base64) {
+        await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+      }
+    }
+    return { success: true, path: outputPath };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
   }
-  return { success: true, path: outputPath };
 });
 
 ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
@@ -3438,12 +3446,16 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
           res.on("end", () => {
             const statusCode = res.statusCode || 0;
             if (statusCode >= 200 && statusCode < 300) {
+              let parsedData = null;
               try {
-                const parsed = JSON.parse(responseBody);
-                resolve({ success: true, data: parsed });
-              } catch (_) {
-                resolve({ success: true, data: responseBody });
-              }
+                parsedData = JSON.parse(responseBody);
+              } catch (_) {}
+              resolve({
+                success: true,
+                statusCode,
+                responseJson: responseBody,
+                data: parsedData,
+              });
             } else {
               try {
                 const errJson = JSON.parse(responseBody);

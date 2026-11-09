@@ -476,18 +476,39 @@ class ChatRepository {
         onProgress: onProgress,
       );
 
-      if (res['success'] != true || res['data'] == null) {
+      if (res['success'] != true) {
         final errMsg = res['error']?.toString() ?? 'فشل رفع الملف عبر التطبيق.';
         throw Exception(errMsg);
       }
 
-      final data = res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : <String, dynamic>{};
+      final responseJson = res['responseJson']?.toString();
+      final Map<String, dynamic> payloadMap;
+      if (responseJson != null && responseJson.isNotEmpty) {
+        final decoded = jsonDecode(responseJson);
+        payloadMap = decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+      } else if (res['data'] is Map) {
+        payloadMap = Map<String, dynamic>.from(res['data'] as Map);
+      } else {
+        payloadMap = <String, dynamic>{};
+      }
+
+      final dataMap = payloadMap['data'] is Map
+          ? Map<String, dynamic>.from(payloadMap['data'] as Map)
+          : payloadMap;
+
+      final rawConv = dataMap['conversation'] ?? payloadMap['conversation'];
+      final rawMsg = dataMap['message'] ?? payloadMap['message'];
+
+      if (rawConv is! Map || rawMsg is! Map) {
+        throw Exception('استجابة غير صالحة من السيرفر بعد رفع الملف.');
+      }
+
       final result = ChatPostResult(
         conversation: ChatConversation.fromJson(
-          data['conversation'] as Map<String, dynamic>,
+          Map<String, dynamic>.from(rawConv),
         ),
         message: ChatMessage.fromJson(
-          data['message'] as Map<String, dynamic>,
+          Map<String, dynamic>.from(rawMsg),
         ),
       );
 

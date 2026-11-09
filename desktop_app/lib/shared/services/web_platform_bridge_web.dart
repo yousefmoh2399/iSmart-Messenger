@@ -177,6 +177,22 @@ Map<String, dynamic> _asStringMap(Object? value) {
   }
   if (value is JsObject) {
     final result = <String, dynamic>{};
+    try {
+      final jsKeys = context['Object']['keys'].apply([value]);
+      if (jsKeys is Iterable) {
+        for (final k in jsKeys) {
+          final key = k.toString();
+          final val = value[key];
+          if (val is JsObject) {
+            result[key] = _asStringMap(val);
+          } else {
+            result[key] = val;
+          }
+        }
+        return result;
+      }
+    } catch (_) {}
+
     for (final key in const [
       'success',
       'accepted',
@@ -213,9 +229,16 @@ Map<String, dynamic> _asStringMap(Object? value) {
       'hasFiles',
       'files',
       'error',
+      'responseJson',
+      'data',
     ]) {
       if (value.hasProperty(key)) {
-        result[key] = value[key];
+        final val = value[key];
+        if (val is JsObject) {
+          result[key] = _asStringMap(val);
+        } else {
+          result[key] = val;
+        }
       }
     }
     return result;
