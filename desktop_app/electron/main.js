@@ -2843,6 +2843,10 @@ ipcMain.handle("window:set-theme", async (_event, payload = {}) => {
 });
 
 
+const STORAGE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".ico"]);
+const STORAGE_AUDIO_EXTS = new Set([".m4a", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".flac"]);
+const STORAGE_DOC_EXTS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".zip", ".rar"]);
+
 function parseWindowsHdrop(buf) {
   if (!buf || buf.length < 20) return [];
   try {
@@ -2861,46 +2865,96 @@ function parseWindowsHdrop(buf) {
   }
 }
 
+function getClipHelperPath() {
+  const devPath = path.join(__dirname, "clip_helper.exe");
+  if (fs.existsSync(devPath)) return devPath;
+  const unpackedPath = path.join(process.resourcesPath, "app.asar.unpacked", "clip_helper.exe");
+  if (fs.existsSync(unpackedPath)) return unpackedPath;
+  const resPath = path.join(process.resourcesPath, "clip_helper.exe");
+  if (fs.existsSync(resPath)) return resPath;
+  return null;
+}
+
+function getWindowsClipboardFilePathsHelper() {
+  const helperPath = getClipHelperPath();
+  if (!helperPath) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    execFile(
+      helperPath,
+      [],
+      { windowsHide: true, timeout: 2000, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        const raw = String(stdout || "").trim();
+        if (!raw || raw === "null") return resolve(null);
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            resolve(parsed.map((p) => String(p || "").trim()).filter(Boolean));
+          } else {
+            resolve(null);
+          }
+        } catch (_) {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
 async function getWindowsClipboardFilePaths() {
   if (process.platform !== "win32") {
     return [];
   }
   try {
     const { clipboard } = require("electron");
+
+    // Fast check 1: Can we read FileNameW buffer directly? (< 0.1ms)
+    // When files are copied in Windows Explorer, FileNameW buffer contains the first file path.
+    const fnBuf = clipboard.readBuffer("FileNameW");
+    let hasFileName = false;
+    let singleFile = "";
+    if (fnBuf && fnBuf.length > 2) {
+      const raw = fnBuf.toString("utf16le").replace(/\0.*$/, "").trim();
+      if (raw && fs.existsSync(raw)) {
+        hasFileName = true;
+        singleFile = raw;
+      }
+    }
+
+    // Fast check 2: Check CF_HDROP buffer (< 0.1ms)
+    const hdropBuf = clipboard.readBuffer("CF_HDROP");
+    const hdropPaths = parseWindowsHdrop(hdropBuf);
+    if (hdropPaths && hdropPaths.length > 0) {
+      return hdropPaths;
+    }
+
+    // Fast check 3: availableFormats
     const formats = clipboard.availableFormats();
     const hasFileFormats = formats.some((f) => {
       const lower = f.toLowerCase();
       return lower.includes("hdrop") || lower.includes("filename") || lower === "text/uri-list";
     });
-    if (!hasFileFormats) {
+
+    if (!hasFileName && !hasFileFormats) {
       // Fast path: No file formats in clipboard at all — return immediately (0ms).
-      // Prevents running PowerShell when user pastes plain text or empty clipboard.
+      // Prevents running helper or PowerShell when user pastes plain text or empty clipboard.
       return [];
     }
-    // Fast path 1: Parse CF_HDROP natively (< 1ms)
-    for (const fmt of formats) {
-      if (fmt.toUpperCase() === "CF_HDROP") {
-        const hdropBuf = clipboard.readBuffer(fmt);
-        const fastPaths = parseWindowsHdrop(hdropBuf);
-        if (fastPaths.length > 0) {
-          return fastPaths;
-        }
-      }
+
+    // If files are present, call our instant 4KB C# helper (40-70ms) to get ALL files if multiple were copied
+    const helperPaths = await getWindowsClipboardFilePathsHelper();
+    if (helperPaths && helperPaths.length > 0) {
+      return helperPaths;
     }
-    // Fast path 2: Parse FileNameW natively (< 1ms)
-    for (const fmt of formats) {
-      if (fmt.toLowerCase() === "filenamew") {
-        const fnBuf = clipboard.readBuffer(fmt);
-        if (fnBuf && fnBuf.length > 2) {
-          const raw = fnBuf.toString("utf16le").replace(/\0.*$/, "").trim();
-          if (raw && fs.existsSync(raw)) {
-            return [raw];
-          }
-        }
-      }
+
+    // If helper didn't return but we had singleFile from FileNameW:
+    if (singleFile) {
+      return [singleFile];
     }
   } catch (_) {}
-  // Fallback: PowerShell if native format parsing didn't find paths
+
+  // Last resort fallback: PowerShell if helper not available and native format didn't return
   return getWindowsClipboardFilePathsPS();
 }
 
@@ -2958,8 +3012,6 @@ ipcMain.handle("clipboard:read-files", async () => {
     const files = [];
 
     // 1. Check for copied files from Windows Explorer (CF_HDROP / FileDropList)
-    // Fast path: getWindowsClipboardFilePaths() parses CF_HDROP / FileNameW natively (< 1ms).
-    // File content is read asynchronously with fs.promises.readFile to avoid blocking the main thread.
     const droppedPaths = await getWindowsClipboardFilePaths();
     if (droppedPaths.length > 0) {
       for (const filePath of droppedPaths) {
@@ -2967,24 +3019,29 @@ ipcMain.handle("clipboard:read-files", async () => {
           const stat = await fs.promises.stat(filePath).catch(() => null);
           if (!stat || !stat.isFile()) continue;
           const fileName = path.basename(filePath);
-          if (stat.size > 200 * 1024 * 1024) {
-            return {
-              success: false,
-              hasFiles: true,
-              error: `حجم الملف (${fileName}) كبير جدًا للنسخ المباشر عبر الحافظة. يرجى استخدام زر إرفاق ملف.`,
-            };
+          const ext = path.extname(fileName).toLowerCase();
+          const isImage = STORAGE_IMAGE_EXTS.has(ext);
+
+          // PERFORMANCE FIX:
+          // Do NOT read gigantic Base64 strings for large files or documents!
+          // Only read Base64 for small images (<= 4MB) for instant thumbnail rendering.
+          // For all documents, archives, videos, or images > 4MB:
+          // Returning base64: "" completely eliminates Dart/V8 UI thread freezing.
+          let base64 = "";
+          if (isImage && stat.size <= 4 * 1024 * 1024) {
+            const buffer = await fs.promises.readFile(filePath);
+            base64 = buffer.toString("base64");
           }
-          // Read asynchronously in libuv worker thread — main thread stays 100% responsive
-          const buffer = await fs.promises.readFile(filePath);
+
           files.push({
             name: fileName,
             path: filePath,
             size: stat.size,
-            base64: buffer.toString('base64'),
-            isImage: STORAGE_IMAGE_EXTS.has(path.extname(fileName).toLowerCase()),
+            base64,
+            isImage,
           });
         } catch (fileErr) {
-          console.warn('[electron] clipboard file read error:', fileErr);
+          console.warn("[electron] clipboard file read error:", fileErr);
         }
       }
       if (files.length > 0) {
@@ -3002,7 +3059,7 @@ ipcMain.handle("clipboard:read-files", async () => {
           name: fileName,
           path: fileName,
           size: pngBuffer.length,
-          base64: pngBuffer.toString('base64'),
+          base64: pngBuffer.toString("base64"),
           isImage: true,
         });
         return { success: true, hasFiles: true, files };
@@ -3309,15 +3366,180 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
   );
   const exists = await fs.promises.access(outputPath).then(() => true).catch(() => false);
   if (!exists) {
-    await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+    if (payload.sourcePath && fs.existsSync(payload.sourcePath)) {
+      await fs.promises.copyFile(payload.sourcePath, outputPath);
+    } else {
+      await fs.promises.writeFile(outputPath, Buffer.from(String(payload.base64 || ""), "base64"));
+    }
   }
   return { success: true, path: outputPath };
 });
 
+ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
+  const {
+    url,
+    filePath,
+    token,
+    conversationId,
+    content,
+    replyToMessageId,
+    fileName,
+    metadata,
+    transferId,
+  } = payload;
 
-const STORAGE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".ico"]);
-const STORAGE_AUDIO_EXTS = new Set([".m4a", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".flac"]);
-const STORAGE_DOC_EXTS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv", ".zip", ".rar"]);
+  if (!url || !filePath || !fs.existsSync(filePath)) {
+    return { success: false, error: "Missing upload parameters or file does not exist." };
+  }
+
+  try {
+    const stat = await fs.promises.stat(filePath);
+    const boundary = "----iSmartUploadBoundary" + Date.now().toString(16) + Math.random().toString(16);
+    const resolvedFileName = fileName || path.basename(filePath);
+
+    // Build multipart preamble
+    const fields = {
+      conversationId: String(conversationId || ""),
+    };
+    if (content) fields.content = String(content);
+    if (replyToMessageId) fields.replyToMessageId = String(replyToMessageId);
+    if (fileName) fields.fileName = String(fileName);
+    if (metadata) fields.metadata = typeof metadata === "string" ? metadata : JSON.stringify(metadata);
+
+    let head = "";
+    for (const [k, v] of Object.entries(fields)) {
+      head += `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+    }
+    head += `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${resolvedFileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+
+    const headBuf = Buffer.from(head, "utf8");
+    const tailBuf = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+    const totalLength = headBuf.length + stat.size + tailBuf.length;
+
+    const parsedUrl = new URL(url);
+    const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+    return await new Promise((resolve) => {
+      const req = protocol.request(
+        parsedUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            "Content-Length": totalLength,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        },
+        (res) => {
+          let responseBody = "";
+          res.on("data", (chunk) => {
+            responseBody += chunk;
+          });
+          res.on("end", () => {
+            const statusCode = res.statusCode || 0;
+            if (statusCode >= 200 && statusCode < 300) {
+              try {
+                const parsed = JSON.parse(responseBody);
+                resolve({ success: true, data: parsed });
+              } catch (_) {
+                resolve({ success: true, data: responseBody });
+              }
+            } else {
+              try {
+                const errJson = JSON.parse(responseBody);
+                resolve({
+                  success: false,
+                  statusCode,
+                  error: errJson.message || `Upload failed with status ${statusCode}`,
+                });
+              } catch (_) {
+                resolve({
+                  success: false,
+                  statusCode,
+                  error: responseBody || `Upload failed with status ${statusCode}`,
+                });
+              }
+            }
+          });
+        }
+      );
+
+      req.on("error", (err) => {
+        resolve({ success: false, error: err.message || String(err) });
+      });
+
+      // Write preamble
+      req.write(headBuf);
+
+      // Stream file from disk
+      const fileStream = fs.createReadStream(filePath);
+      let sentBytes = headBuf.length;
+
+      fileStream.on("data", (chunk) => {
+        sentBytes += chunk.length;
+        req.write(chunk);
+        if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+          mainWindow.webContents.send("upload-progress", {
+            transferId,
+            sent: sentBytes,
+            total: totalLength,
+          });
+        }
+      });
+
+      fileStream.on("end", () => {
+        req.write(tailBuf);
+        req.end();
+      });
+
+      fileStream.on("error", (err) => {
+        req.destroy();
+        resolve({ success: false, error: err.message || String(err) });
+      });
+    });
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  }
+});
+
+ipcMain.handle("files:download-chat-attachment", async (_event, payload = {}) => {
+  const { url, destinationPath, token, transferId } = payload;
+  if (!url || !destinationPath) {
+    return { success: false, error: "Missing url or destinationPath" };
+  }
+  try {
+    const dir = path.dirname(destinationPath);
+    if (!fs.existsSync(dir)) {
+      await fs.promises.mkdir(dir, { recursive: true });
+    }
+    await downloadFile(url, destinationPath, token, (received, total) => {
+      if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+        mainWindow.webContents.send("download-progress", {
+          transferId,
+          received,
+          total,
+        });
+      }
+    });
+    return { success: true, path: destinationPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
+ipcMain.handle("files:calculate-sha256", async (_event, payload = {}) => {
+  const filePath = payload.filePath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { success: false, sha256: "" };
+  }
+  return new Promise((resolve) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve({ success: true, sha256: hash.digest("hex") }));
+    stream.on("error", (err) => resolve({ success: false, error: err.message, sha256: "" }));
+  });
+});
 
 function scanDirectoryStorage(dirPath) {
   let appCache = 0;

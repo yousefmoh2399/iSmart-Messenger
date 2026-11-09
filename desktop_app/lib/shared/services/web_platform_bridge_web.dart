@@ -465,7 +465,8 @@ Future<void> archiveElectronChatAttachment({
   required String messageId,
   required String sha256Hex,
   required String fileName,
-  required Uint8List bytes,
+  Uint8List? bytes,
+  String? sourcePath,
   String? preferredDirectoryPath,
 }) async {
   if (!isElectron()) return;
@@ -473,7 +474,8 @@ Future<void> archiveElectronChatAttachment({
     'messageId': messageId,
     'sha256Hex': sha256Hex,
     'fileName': fileName,
-    'base64': base64Encode(bytes),
+    if (sourcePath != null && sourcePath.isNotEmpty) 'sourcePath': sourcePath,
+    if (bytes != null && bytes.isNotEmpty) 'base64': base64Encode(bytes),
     if (preferredDirectoryPath != null &&
         preferredDirectoryPath.trim().isNotEmpty)
       'directoryPath': preferredDirectoryPath.trim(),
@@ -1257,4 +1259,116 @@ Future<Map<String, dynamic>> electronReadClipboardFiles() async {
       'error': e.toString(),
     };
   }
+}
+StreamSubscription? listenToElectronUploadProgress(void Function(Map<String, dynamic> data) handler) {
+  if (!isElectron()) return null;
+  return html.window.on['electron-upload-progress'].listen((event) {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(detail);
+        if (decoded is Map<String, dynamic>) {
+          handler(decoded);
+        }
+      } catch (_) {}
+    }
+  });
+}
+
+StreamSubscription? listenToElectronDownloadProgress(void Function(Map<String, dynamic> data) handler) {
+  if (!isElectron()) return null;
+  return html.window.on['electron-download-progress'].listen((event) {
+    final detail = (event as dynamic).detail;
+    if (detail is String && detail.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(detail);
+        if (decoded is Map<String, dynamic>) {
+          handler(decoded);
+        }
+      } catch (_) {}
+    }
+  });
+}
+
+Future<Map<String, dynamic>> uploadElectronChatAttachment({
+  required String url,
+  required String filePath,
+  String? token,
+  required String conversationId,
+  String? content,
+  String? replyToMessageId,
+  String? fileName,
+  Map<String, dynamic>? metadata,
+  void Function(int sent, int total)? onProgress,
+}) async {
+  if (!isElectron()) {
+    return const {'success': false, 'error': 'Electron not available'};
+  }
+  final transferId = 'upl_${DateTime.now().microsecondsSinceEpoch}';
+  StreamSubscription? sub;
+  if (onProgress != null) {
+    sub = listenToElectronUploadProgress((data) {
+      if (data['transferId'] == transferId) {
+        final sent = (data['sent'] as num?)?.toInt() ?? 0;
+        final total = (data['total'] as num?)?.toInt() ?? 0;
+        onProgress(sent, total);
+      }
+    });
+  }
+  try {
+    final res = await _callElectron('uploadChatAttachment', {
+      'url': url,
+      'filePath': filePath,
+      if (token != null && token.isNotEmpty) 'token': token,
+      'conversationId': conversationId,
+      if (content != null && content.isNotEmpty) 'content': content,
+      if (replyToMessageId != null && replyToMessageId.isNotEmpty) 'replyToMessageId': replyToMessageId,
+      if (fileName != null && fileName.isNotEmpty) 'fileName': fileName,
+      if (metadata != null) 'metadata': jsonEncode(metadata),
+      'transferId': transferId,
+    });
+    return _asStringMap(res);
+  } finally {
+    await sub?.cancel();
+  }
+}
+
+Future<Map<String, dynamic>> downloadElectronChatAttachment({
+  required String url,
+  required String destinationPath,
+  String? token,
+  void Function(int received, int total)? onProgress,
+}) async {
+  if (!isElectron()) {
+    return const {'success': false, 'error': 'Electron not available'};
+  }
+  final transferId = 'dwn_${DateTime.now().microsecondsSinceEpoch}';
+  StreamSubscription? sub;
+  if (onProgress != null) {
+    sub = listenToElectronDownloadProgress((data) {
+      if (data['transferId'] == transferId) {
+        final received = (data['received'] as num?)?.toInt() ?? 0;
+        final total = (data['total'] as num?)?.toInt() ?? 0;
+        onProgress(received, total);
+      }
+    });
+  }
+  try {
+    final res = await _callElectron('downloadChatAttachment', {
+      'url': url,
+      'destinationPath': destinationPath,
+      if (token != null && token.isNotEmpty) 'token': token,
+      'transferId': transferId,
+    });
+    return _asStringMap(res);
+  } finally {
+    await sub?.cancel();
+  }
+}
+
+Future<String> calculateElectronFileSha256(String filePath) async {
+  if (!isElectron()) return '';
+  final res = await _callElectron('calculateFileSha256', {'filePath': filePath});
+  final map = _asStringMap(res);
+  return map['sha256']?.toString() ?? '';
 }

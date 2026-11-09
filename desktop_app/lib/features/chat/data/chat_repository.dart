@@ -448,6 +448,62 @@ class ChatRepository {
     final resolvedFileName = sourceFileName?.trim().isNotEmpty == true
         ? sourceFileName!.trim()
         : p.basename(filePath);
+
+    // Fast-path for Electron Desktop: Direct native streaming upload via Node.js
+    // Zero Base64, zero Dart memory allocation, and zero UI thread freezing.
+    if (kIsWeb && web_bridge.isElectron() && filePath.isNotEmpty && (fileBytes == null || fileBytes.isEmpty)) {
+      final token = _authRepository.currentToken ?? await _authRepository.getToken();
+      final uploadUrl = resolveApiUrl('/api/chat/messages');
+
+      // Calculate SHA256 natively in Node.js worker thread (< 50ms)
+      final fileSha256 = await web_bridge.calculateElectronFileSha256(filePath);
+
+      final nextMetadata = <String, dynamic>{
+        ...?metadata,
+        if (fileSha256.isNotEmpty)
+          'attachmentArchive': {'sha256': fileSha256},
+      };
+
+      final res = await web_bridge.uploadElectronChatAttachment(
+        url: uploadUrl,
+        filePath: filePath,
+        token: token,
+        conversationId: conversationId,
+        content: content,
+        replyToMessageId: replyToMessageId,
+        fileName: safeCustomName ?? resolvedFileName,
+        metadata: nextMetadata,
+        onProgress: onProgress,
+      );
+
+      if (res['success'] != true || res['data'] == null) {
+        final errMsg = res['error']?.toString() ?? 'فشل رفع الملف عبر التطبيق.';
+        throw Exception(errMsg);
+      }
+
+      final data = res['data'] is Map ? Map<String, dynamic>.from(res['data'] as Map) : <String, dynamic>{};
+      final result = ChatPostResult(
+        conversation: ChatConversation.fromJson(
+          data['conversation'] as Map<String, dynamic>,
+        ),
+        message: ChatMessage.fromJson(
+          data['message'] as Map<String, dynamic>,
+        ),
+      );
+
+      // Fast archive in Electron (direct 1ms file copy on disk)
+      unawaited(
+        _archiveSentAttachment(
+          message: result.message,
+          sha256Hex: fileSha256,
+          filePath: filePath,
+          fileName: resolvedFileName,
+        ),
+      );
+
+      return result;
+    }
+
     final fileLength = fileBytes?.length ?? (kIsWeb ? 0 : await File(filePath).length());
     // PERF FIX: When fileBytes is in memory (clipboard paste), computing SHA256 on the
     // Dart UI isolate blocks the event loop. Offload to a background isolate via compute().
@@ -979,6 +1035,31 @@ class ChatRepository {
         final targetDirPath = await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
         final existingPath = targetDirPath.isNotEmpty ? p.join(targetDirPath, safeFileName) : safeFileName;
 
+        // Check if message is already archived/cached locally in Electron
+        final cachedPath = await web_bridge.getElectronCachedAttachmentPath(
+          messageId: message.id,
+          fileName: safeFileName,
+          preferredDirectoryPath: targetDirPath.isNotEmpty ? targetDirPath : null,
+        );
+        if (cachedPath != null && cachedPath.isNotEmpty) {
+          return cachedPath;
+        }
+
+        // Direct streaming download via Electron (zero Dart memory, zero UI thread lag)
+        if (message.fileUrl != null && message.fileUrl!.isNotEmpty) {
+          final downloadUrl = _downloadUrlFor(message.fileUrl!);
+          final token = _authRepository.currentToken ?? await _authRepository.getToken();
+          final res = await web_bridge.downloadElectronChatAttachment(
+            url: downloadUrl,
+            destinationPath: existingPath,
+            token: token,
+            onProgress: onProgress,
+          );
+          if (res['success'] == true && res['path'] != null) {
+            return res['path'].toString();
+          }
+        }
+
         final localBytes = await _readLocalAttachmentBytes(message);
         final Uint8List bytes;
         if (localBytes != null && localBytes.isNotEmpty) {
@@ -1210,12 +1291,13 @@ class ChatRepository {
     Uint8List? fileBytes,
   }) async {
     try {
-      if (kIsWeb && web_bridge.isElectron() && fileBytes != null) {
+      if (kIsWeb && web_bridge.isElectron()) {
         await web_bridge.archiveElectronChatAttachment(
           messageId: message.id,
           sha256Hex: sha256Hex,
           fileName: fileName,
           bytes: fileBytes,
+          sourcePath: filePath,
           preferredDirectoryPath: _preferences.localStorageDirectoryPath,
         );
         return;

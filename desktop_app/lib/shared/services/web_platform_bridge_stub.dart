@@ -42,7 +42,8 @@ Future<void> archiveElectronChatAttachment({
   required String messageId,
   required String sha256Hex,
   required String fileName,
-  required Uint8List bytes,
+  Uint8List? bytes,
+  String? sourcePath,
   String? preferredDirectoryPath,
 }) async {}
 
@@ -348,3 +349,23 @@ Future<Map<String, dynamic>> electronReadClipboardFiles() async =>
       'hasFiles': false,
       'files': <Map<String, dynamic>>[],
     };
+Future<Map<String, dynamic>> uploadElectronChatAttachment({
+  required String url,
+  required String filePath,
+  String? token,
+  required String conversationId,
+  String? content,
+  String? replyToMessageId,
+  String? fileName,
+  Map<String, dynamic>? metadata,
+  void Function(int sent, int total)? onProgress,
+}) async => const <String, dynamic>{'success': false, 'error': 'Not supported'};
+
+Future<Map<String, dynamic>> downloadElectronChatAttachment({
+  required String url,
+  required String destinationPath,
+  String? token,
+  void Function(int received, int total)? onProgress,
+}) async => const <String, dynamic>{'success': false, 'error': 'Not supported'};
+
+Future<String> calculateElectronFileSha256(String filePath) async => '';

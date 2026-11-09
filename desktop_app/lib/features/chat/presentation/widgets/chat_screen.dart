@@ -2098,19 +2098,38 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
         if (item is! Map) continue;
         final name = item['name']?.toString().trim() ?? 'clipboard_file';
         final b64 = item['base64']?.toString() ?? '';
-        if (b64.isEmpty) continue;
-        try {
-          final bytes = base64Decode(b64);
-          if (bytes.isNotEmpty) {
-            platformFiles.add(
-              PlatformFile(
-                name: name,
-                size: bytes.length,
-                bytes: bytes,
-              ),
-            );
-          }
-        } catch (_) {}
+        final filePath = item['path']?.toString() ?? '';
+        final rawSize = item['size'];
+        final size = rawSize is int ? rawSize : (int.tryParse(rawSize?.toString() ?? '') ?? 0);
+
+        if (b64.isNotEmpty) {
+          try {
+            final bytes = base64Decode(b64);
+            if (bytes.isNotEmpty) {
+              platformFiles.add(
+                PlatformFile(
+                  name: name,
+                  path: filePath.isNotEmpty ? filePath : null,
+                  size: size > 0 ? size : bytes.length,
+                  bytes: bytes,
+                ),
+              );
+              continue;
+            }
+          } catch (_) {}
+        }
+
+        // Fast path for large files / documents: no base64 bytes loaded into memory!
+        if (filePath.isNotEmpty) {
+          platformFiles.add(
+            PlatformFile(
+              name: name,
+              path: filePath,
+              size: size,
+              bytes: null,
+            ),
+          );
+        }
       }
 
       if (platformFiles.isEmpty) {
@@ -2122,7 +2141,7 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
         if (!mounted) return true;
         final sendDraft = await showAttachmentSendDialog(
           context,
-          single.name,
+          single.path ?? single.name,
           initialBytes: single.bytes,
           knownFileSize: single.size,
         );
@@ -3113,7 +3132,9 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
     required bool isImageBatch,
   }) async {
     final usableFiles = files
-        .where((entry) => entry.bytes != null && entry.bytes!.isNotEmpty)
+        .where((entry) =>
+            (entry.bytes != null && entry.bytes!.isNotEmpty) ||
+            (entry.path != null && entry.path!.isNotEmpty))
         .toList();
     if (usableFiles.isEmpty) {
       if (mounted) {
@@ -3128,7 +3149,7 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
       final file = usableFiles.single;
       await _sendPreparedFile(
         conversation: conversation,
-        sendPath: file.name,
+        sendPath: file.path ?? file.name,
         displayName: file.name,
         restrictForwardAndDownload: false,
         fileBytes: file.bytes,
@@ -3159,7 +3180,7 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
       usableFiles.map(
         (file) => _sendPreparedFile(
           conversation: conversation,
-          sendPath: file.name,
+          sendPath: file.path ?? file.name,
           displayName: file.name,
           restrictForwardAndDownload: restrictForwardAndDownload,
           fileBytes: file.bytes,

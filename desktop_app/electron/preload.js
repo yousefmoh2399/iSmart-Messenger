@@ -108,6 +108,18 @@ ipcRenderer.on("lan-receive-pending", (_event, payload) => {
   );
 });
 
+ipcRenderer.on("upload-progress", (_event, payload) => {
+  window.dispatchEvent(
+    new CustomEvent("electron-upload-progress", { detail: JSON.stringify(payload || {}) }),
+  );
+});
+
+ipcRenderer.on("download-progress", (_event, payload) => {
+  window.dispatchEvent(
+    new CustomEvent("electron-download-progress", { detail: JSON.stringify(payload || {}) }),
+  );
+});
+
 contextBridge.exposeInMainWorld("electronBridge", {
   isElectron: true,
   getDeviceInfo: () => ipcRenderer.invoke("app:get-device-info"),
@@ -183,5 +195,8 @@ contextBridge.exposeInMainWorld("electronBridge", {
   getStorageBreakdown: (payload) => ipcRenderer.invoke("storage:get-breakdown", payload),
   clearStorageCache: (payload) => ipcRenderer.invoke("storage:clear-cache", payload),
   probePeerStatus: (payload) => ipcRenderer.invoke("net:probe-peer-status", payload),
+  uploadChatAttachment: (payload) => ipcRenderer.invoke("chat:upload-attachment", payload),
+  downloadChatAttachment: (payload) => ipcRenderer.invoke("files:download-chat-attachment", payload),
+  calculateFileSha256: (payload) => ipcRenderer.invoke("files:calculate-sha256", payload),
 });
 console.log("[preload] electronBridge exposed");
