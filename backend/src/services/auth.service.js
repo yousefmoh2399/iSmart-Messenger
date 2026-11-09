@@ -130,7 +130,7 @@ function buildToken(user, deviceUid = null) {
   }
   return jwt.sign(payload, jwtSecret, {
     // Keep long enough for sockets / attachment fetches; refresh still rotates per-device.
-    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "1h",
+    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "365d",
   });
 }
 
@@ -142,6 +142,7 @@ function buildRefreshToken(user, refreshNonce, deviceUid = null) {
     sub: user._id.toString(),
     type: "refresh",
     rn: refreshNonce,
+    tokenVersion: resolveTokenVersion(user.tokenVersion),
   };
   if (normalizedDid && normalizedDid !== "unknown") {
     payload.did = normalizedDid;
@@ -262,10 +263,18 @@ async function refreshAccessToken(
     }
 
     const user = await User.findById(decoded.sub)
-      .select("+refreshTokenNonce +refreshSessions")
+      .select("+refreshTokenNonce +refreshSessions +tokenVersion")
       .exec();
     if (!user || user.isActive === false) {
       throw new ApiError(401, "User not found or inactive");
+    }
+
+    if (
+      decoded.tokenVersion &&
+      resolveTokenVersion(user.tokenVersion) !==
+        resolveTokenVersion(decoded.tokenVersion)
+    ) {
+      throw new ApiError(401, "Session expired due to password change or invalidation");
     }
 
     const decodedDeviceUid = normalizeDeviceUid(decoded.did);
@@ -280,7 +289,16 @@ async function refreshAccessToken(
     const sessions = Array.isArray(user.refreshSessions)
       ? user.refreshSessions
       : [];
-    const currentSession = sessions.find((s) => s?.deviceUid === effectiveDeviceUid);
+
+    // Find session by nonce match first (most accurate for rotated/retried sessions), fallback to deviceUid
+    let currentSession = sessions.find(
+      (s) => s && (s.nonce === incomingRn || s.previousNonce === incomingRn),
+    );
+    if (!currentSession && effectiveDeviceUid && effectiveDeviceUid !== "unknown") {
+      currentSession = sessions.find((s) => s && s.deviceUid === effectiveDeviceUid);
+    }
+
+    const resolvedDeviceUid = currentSession?.deviceUid || effectiveDeviceUid;
     const storedSessionRn = currentSession?.nonce ? String(currentSession.nonce) : null;
     const storedPreviousRn = currentSession?.previousNonce ? String(currentSession.previousNonce) : null;
     const previousExpiresAt = currentSession?.previousNonceExpiresAt ? new Date(currentSession.previousNonceExpiresAt) : null;
@@ -295,12 +313,11 @@ async function refreshAccessToken(
     // Prefer multi-device session nonce when available.
     if (storedSessionRn) {
       if (incomingRn !== storedSessionRn) {
-        // Allow a 60-second grace period for retried requests on mobile network drops
+        // Resilient grace period for retried requests on mobile network drops / tunnel switches
         if (
           storedPreviousRn &&
           incomingRn === storedPreviousRn &&
-          previousExpiresAt &&
-          previousExpiresAt > now
+          (!previousExpiresAt || previousExpiresAt > now)
         ) {
           isGracePeriodMatch = true;
         } else {
@@ -319,13 +336,14 @@ async function refreshAccessToken(
     if (isGracePeriodMatch) {
       // Return fresh access token and existing active refresh token without re-rotating
       return {
-        token: buildToken(user, effectiveDeviceUid),
+        token: buildToken(user, resolvedDeviceUid),
         refreshToken: jwt.sign(
           {
             sub: user._id.toString(),
             type: "refresh",
             rn: storedSessionRn,
-            did: effectiveDeviceUid,
+            did: resolvedDeviceUid,
+            tokenVersion: resolveTokenVersion(user.tokenVersion),
           },
           jwtSecret,
           { expiresIn: defaultRefreshExpiresIn },
@@ -334,7 +352,7 @@ async function refreshAccessToken(
     }
 
     const meta = normalizeSessionMetadata({
-      deviceUid: effectiveDeviceUid,
+      deviceUid: resolvedDeviceUid,
       deviceName: deviceName || currentSession?.deviceName,
       platform: platform || currentSession?.platform,
       appVersion: appVersion || currentSession?.appVersion,
@@ -343,7 +361,8 @@ async function refreshAccessToken(
     });
 
     const newNonce = crypto.randomBytes(16).toString("hex");
-    const graceExpiresAt = new Date(now.getTime() + 60000); // 60s grace period for previous nonce
+    // 30 days grace period for previous nonce to ensure weak/offline mobile devices never get locked out
+    const graceExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const createdAt = currentSession?.createdAt || now;
     await User.updateOne(
       { _id: user._id },
@@ -357,12 +376,12 @@ async function refreshAccessToken(
                   $filter: {
                     input: { $ifNull: ["$refreshSessions", []] },
                     as: "s",
-                    cond: { $ne: ["$$s.deviceUid", effectiveDeviceUid] },
+                    cond: { $ne: ["$$s.deviceUid", resolvedDeviceUid] },
                   },
                 },
                 [
                   {
-                    deviceUid: effectiveDeviceUid,
+                    deviceUid: resolvedDeviceUid,
                     nonce: newNonce,
                     previousNonce: storedSessionRn,
                     previousNonceExpiresAt: graceExpiresAt,
@@ -383,13 +402,14 @@ async function refreshAccessToken(
     ).exec();
 
     return {
-      token: buildToken(user, effectiveDeviceUid),
+      token: buildToken(user, resolvedDeviceUid),
       refreshToken: jwt.sign(
         {
           sub: user._id.toString(),
           type: "refresh",
           rn: newNonce,
-          did: effectiveDeviceUid,
+          did: resolvedDeviceUid,
+          tokenVersion: resolveTokenVersion(user.tokenVersion),
         },
         jwtSecret,
         { expiresIn: defaultRefreshExpiresIn },

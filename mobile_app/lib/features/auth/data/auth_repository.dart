@@ -231,6 +231,23 @@ class AuthRepository {
     onSessionCleared?.call();
   }
 
+  bool _isConfirmedRevocation(Object error) {
+    if (error is DioException) {
+      final response = error.response;
+      if (response == null) {
+        // Network drop, connection reset, or timeout - definitely NOT a revocation!
+        return false;
+      }
+      final statusCode = response.statusCode;
+      return statusCode == 401 || statusCode == 403;
+    }
+    if (error is ApiException) {
+      final code = error.statusCode;
+      return code == 401 || code == 403;
+    }
+    return false;
+  }
+
   Future<AppUser?> restoreSession() async {
     final token = await getToken();
     if (token == null || token.isEmpty) {
@@ -260,7 +277,7 @@ class AuthRepository {
               }
             } catch (refreshError) {
               final refreshMapped = _apiClient.mapError(refreshError);
-              if (refreshMapped.isUnauthorized) {
+              if (refreshMapped.isUnauthorized && _isConfirmedRevocation(refreshError)) {
                 await _clearSession();
               }
             }
@@ -290,7 +307,7 @@ class AuthRepository {
           }
         } catch (refreshError) {
           final refreshMapped = _apiClient.mapError(refreshError);
-          if (refreshMapped.isUnauthorized) {
+          if (refreshMapped.isUnauthorized && _isConfirmedRevocation(refreshError)) {
             await _clearSession();
             return null;
           }
@@ -469,7 +486,10 @@ class AuthRepository {
   Future<Map<String, String>> _refreshTokenInternal() async {
     final rToken = await getRefreshToken();
     if (rToken == null || rToken.trim().isEmpty) {
-      await _clearSession();
+      final aToken = await getToken();
+      if (aToken == null || aToken.isEmpty) {
+        await _clearSession();
+      }
       throw const ApiException(
         'لا يوجد رمز تجديد الجلسة. سجّل الدخول مرة أخرى.',
         statusCode: 401,
@@ -517,7 +537,7 @@ class AuthRepository {
       return {'token': newToken, 'refreshToken': newRefreshToken};
     } catch (error) {
       final mapped = _apiClient.mapError(error);
-      if (mapped.isUnauthorized) {
+      if (mapped.isUnauthorized && _isConfirmedRevocation(error)) {
         await _clearSession();
       }
       throw mapped;
