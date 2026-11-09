@@ -226,7 +226,6 @@ class _LiveOperationsTopologyScreenState
   double _lastCanvasWidth = 1220.0;
   double _lastCanvasHeight = 740.0;
   bool _isSocketConnected = false;
-  int _testPulseCounter = 0;
 
   // Card layout constants (sized generously so text NEVER overflows outside cards)
   static const Size _gatewayCardSize = Size(290, 126);
@@ -603,6 +602,91 @@ class _LiveOperationsTopologyScreenState
             'شبكة n8n في وضع المراقبة اللحظية: كل طلب يدخل للسيرفر ثم يُوزع للخدمة المختصة ويرد على الجهاز بأنيميشن مباشر.',
       });
     }
+    _populateInitialCanvasFromRecent();
+  }
+
+  void _populateInitialCanvasFromRecent() {
+    if (_activeDevices.isNotEmpty) return;
+    final recent = widget.state.requestTelemetry?.recentRequests ?? [];
+    if (recent.isEmpty) return;
+
+    final targetVer = widget.state.deploymentData?.summary.targetAppVersion ?? '1.1.22';
+    // Display up to 3 most recent real requests initially in completed state
+    for (final req in recent.take(3)) {
+      final userOrHost = (req.fullName != null && req.fullName!.isNotEmpty)
+          ? req.fullName!
+          : ((req.username != null && req.username!.isNotEmpty && !req.username!.startsWith('host:'))
+              ? req.username!
+              : (req.hostName != null && req.hostName!.isNotEmpty
+                  ? req.hostName!
+                  : (req.clientIp != '-' ? 'جهاز ${req.clientIp}' : 'محطة فرع')));
+
+      final bCode = req.branchCode ?? '00';
+      final engId = _mapEndpointToEngine(req.path);
+      final engName = _coreNodesMap[engId]?.name ?? 'قاعدة البيانات';
+      final visuals = _mapEndpointVisuals(req.method, req.path, customLabel: req.actionLabel);
+
+      _FleetDeviceModel? matched;
+      for (final d in _allFleetDevices) {
+        if (req.username != null &&
+            req.username!.isNotEmpty &&
+            d.username.toLowerCase() == req.username!.toLowerCase()) {
+          matched = d;
+          break;
+        }
+        if (req.hostName != null &&
+            req.hostName!.isNotEmpty &&
+            d.hostname.toLowerCase() == req.hostName!.toLowerCase()) {
+          matched = d;
+          break;
+        }
+      }
+
+      matched ??= _FleetDeviceModel(
+        id: 'rec_${req.id}',
+        hostname: userOrHost,
+        fullName: userOrHost,
+        username: req.username ?? userOrHost,
+        branchName: bCode != '00' && bCode != 'MAIN' ? 'فرع $bCode' : 'المقر الرئيسي',
+        branchCode: bCode,
+        ipAddress: req.clientIp,
+        appVersion: targetVer,
+        isOutdated: false,
+        isOnline: true,
+        clientType: 'desktop',
+        os: 'Windows',
+        lastSeenAt: req.timestamp,
+      );
+
+      final freeSlot = _allocateFreeSlotIndex();
+      final slotPos = _computeDeviceSlotPosition(freeSlot, _lastCanvasWidth, _lastCanvasHeight);
+
+      final activeDev = _ActiveCanvasDevice(
+        id: 'act_init_${req.id}',
+        deviceId: matched.id,
+        username: matched.username,
+        hostname: matched.hostname,
+        cashierName: matched.fullName,
+        branchName: matched.branchName,
+        branchCode: matched.branchCode,
+        ipAddress: matched.ipAddress,
+        actionLabel: visuals.label,
+        targetEngineId: engId,
+        targetEngineName: engName,
+        slotIndex: freeSlot,
+        position: slotPos,
+        color: visuals.color,
+        icon: visuals.icon,
+        requestStartedAt: req.timestamp.subtract(const Duration(seconds: 4)),
+        method: req.method,
+        endpoint: req.path,
+        latencyMs: req.durationMs,
+        statusCode: req.statusCode,
+      );
+      activeDev.isCompleted = true;
+      activeDev.remainingSeconds = 12;
+      _activeDevices.add(activeDev);
+    }
   }
 
   void _listenToLiveSocket() {
@@ -657,54 +741,90 @@ class _LiveOperationsTopologyScreenState
     final userMap = data['user'] as Map<String, dynamic>?;
     final username = (userMap?['username'] ?? '').toString();
     final fullName = (userMap?['fullName'] ?? '').toString();
-    final branchCode = (userMap?['branchCode'] ?? '').toString();
+    final branchCode = (userMap?['branchCode'] ?? data['branchCode'] ?? '').toString();
+    final hostName = (data['hostName'] ?? userMap?['hostName'] ?? '').toString();
+    final deviceUid = (data['deviceUid'] ?? userMap?['deviceUid'] ?? '').toString();
+    final customLabel = (data['actionLabel'] ?? '').toString();
 
-    // Match device from fleet or create dynamic entry representing the real caller
+    // Match device from real fleet by deviceUid, hostName, username, branchCode or IP
     _FleetDeviceModel? matchedDev;
     for (final d in _allFleetDevices) {
+      if (deviceUid.isNotEmpty && d.id.contains(deviceUid)) {
+        matchedDev = d;
+        break;
+      }
+      if (hostName.isNotEmpty &&
+          d.hostname.toLowerCase() == hostName.toLowerCase()) {
+        matchedDev = d;
+        break;
+      }
       if (username.isNotEmpty &&
+          username != '-' &&
+          !username.startsWith('host:') &&
           d.username.toLowerCase() == username.toLowerCase()) {
+        matchedDev = d;
+        break;
+      }
+      if (branchCode.isNotEmpty &&
+          branchCode != 'MAIN' &&
+          branchCode != '00' &&
+          d.branchCode.toUpperCase() == branchCode.toUpperCase()) {
         matchedDev = d;
         break;
       }
       if (clientIp.isNotEmpty &&
           clientIp != '-' &&
           clientIp != '127.0.0.1' &&
+          clientIp != 'localhost' &&
           d.ipAddress == clientIp) {
         matchedDev = d;
         break;
       }
     }
 
-    final resolvedId = username.isNotEmpty
-        ? 'user_${username.toLowerCase()}'
-        : (clientIp.isNotEmpty && clientIp != '-'
-            ? 'ip_$clientIp'
-            : 'dyn_${DateTime.now().microsecondsSinceEpoch}');
+    final resolvedId = deviceUid.isNotEmpty
+        ? 'dev_$deviceUid'
+        : (hostName.isNotEmpty
+            ? 'host_${hostName.toLowerCase()}'
+            : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
+                ? 'user_${username.toLowerCase()}'
+                : 'ip_$clientIp'));
+
+    final displayName = hostName.isNotEmpty
+        ? hostName
+        : (fullName.isNotEmpty && fullName != 'جهاز بالشبكة'
+            ? fullName
+            : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
+                ? username
+                : (branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
+                    ? 'كاشير فرع $branchCode'
+                    : (clientIp != '-' ? 'جهاز $clientIp' : 'محطة فرع'))));
+
+    final displayBranch = branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
+        ? 'فرع $branchCode'
+        : 'المقر الرئيسي';
 
     matchedDev ??= _FleetDeviceModel(
       id: resolvedId,
-      hostname: fullName.isNotEmpty
-          ? fullName
-          : (username.isNotEmpty ? username : 'جهاز $clientIp'),
-      fullName: fullName.isNotEmpty
-          ? fullName
-          : (username.isNotEmpty ? username : 'متصل بالشبكة'),
-      username: username.isNotEmpty ? username : clientIp,
-      branchName: branchCode.isNotEmpty ? 'فرع $branchCode' : 'شبكة الفروع',
-      branchCode: branchCode.isNotEmpty ? branchCode : 'MAIN',
+      hostname: displayName,
+      fullName: fullName.isNotEmpty ? fullName : displayName,
+      username: username.isNotEmpty ? username : displayName,
+      branchName: displayBranch,
+      branchCode: branchCode.isNotEmpty ? branchCode : '00',
       ipAddress: clientIp,
       appVersion:
           widget.state.deploymentData?.summary.targetAppVersion ?? '1.1.22',
       isOutdated: false,
       isOnline: true,
-      clientType: 'desktop',
+      clientType: data['platform']?.toString().contains('mobile') == true
+          ? 'mobile'
+          : 'desktop',
       os: 'Windows',
       lastSeenAt: DateTime.now(),
     );
 
     final engId = _mapEndpointToEngine(path);
-    final visuals = _mapEndpointVisuals(method, path);
+    final visuals = _mapEndpointVisuals(method, path, customLabel: customLabel.isNotEmpty ? customLabel : null);
 
     _spawnRealActionOnCanvas(
       dev: matchedDev,
@@ -842,8 +962,48 @@ class _LiveOperationsTopologyScreenState
   }
 
   ({String label, Color color, IconData icon}) _mapEndpointVisuals(
-      String method, String path) {
+      String method, String path, {String? customLabel}) {
+    if (customLabel != null && customLabel.trim().isNotEmpty) {
+      final p = path.toLowerCase();
+      Color c = const Color(0xFF06B6D4);
+      IconData ic = Icons.bolt_rounded;
+      if (p.contains('chat') || p.contains('message')) {
+        c = const Color(0xFF6366F1);
+        ic = Icons.chat_bubble_outline_rounded;
+      } else if (p.contains('print')) {
+        c = const Color(0xFFEC4899);
+        ic = Icons.print_rounded;
+      } else if (p.contains('clip')) {
+        c = const Color(0xFF8B5CF6);
+        ic = Icons.content_paste_rounded;
+      } else if (p.contains('presence') || p.contains('heartbeat')) {
+        c = const Color(0xFF10B981);
+        ic = Icons.sensors_rounded;
+      }
+      return (label: customLabel.trim(), color: c, icon: ic);
+    }
     final p = path.toLowerCase();
+    if (p.contains('/heartbeat')) {
+      return (
+        label: '💓 نبضة اتصال ومزامنة الفرع',
+        color: const Color(0xFF10B981),
+        icon: Icons.sensors_rounded,
+      );
+    }
+    if (p.contains('/clipboard')) {
+      return (
+        label: '📋 مزامنة الحافظة الفورية',
+        color: const Color(0xFF8B5CF6),
+        icon: Icons.content_paste_rounded,
+      );
+    }
+    if (p.contains('/presence')) {
+      return (
+        label: '🟢 نشاط وتواجد مباشر',
+        color: const Color(0xFF10B981),
+        icon: Icons.wifi_tethering_rounded,
+      );
+    }
     if (p.contains('/chat') ||
         p.contains('/messages') ||
         p.contains('/conversations')) {
@@ -1035,76 +1195,74 @@ class _LiveOperationsTopologyScreenState
 
   void _triggerDeviceActionOnCanvas(_FleetDeviceModel dev,
       {String? customAction, String? customEngine}) {
-    final engines = [
-      (
-        id: 'node_chat_engine',
-        label: '💬 إرسال رسالة شات',
-        color: const Color(0xFF6366F1),
-        icon: Icons.chat_bubble_outline_rounded,
-        path: '/api/chat/messages'
-      ),
-      (
-        id: 'node_doc_engine',
-        label: '📄 مزامنة مستندات الفرع',
-        color: const Color(0xFF8B5CF6),
-        icon: Icons.inventory_2_outlined,
-        path: '/api/documents/sync'
-      ),
-      (
-        id: 'node_printer_engine',
-        label: '🖨️ فحص طابعة الفواتير',
-        color: const Color(0xFFEC4899),
-        icon: Icons.print_rounded,
-        path: '/api/printers/status'
-      ),
-      (
-        id: 'node_release_engine',
-        label: '📦 التحقق من إصدار التحديث',
-        color: const Color(0xFFF59E0B),
-        icon: Icons.system_update_alt_rounded,
-        path: '/api/updates/check'
-      ),
-      (
-        id: 'node_database',
-        label: '📊 استعلام بيانات الفرع',
-        color: const Color(0xFF10B981),
-        icon: Icons.storage_rounded,
-        path: '/api/branches/telemetry'
-      ),
-    ];
-    final chosen = engines[_testPulseCounter % engines.length];
-    _testPulseCounter++;
+    // Show the actual device's real status on the canvas instead of a fabricated action
+    final isOutdated = dev.isOutdated;
+    final isOnline = dev.isOnline;
+
+    final String label;
+    final String engineId;
+    final Color color;
+    final IconData icon;
+    final String path;
+
+    if (customAction != null && customEngine != null) {
+      label = customAction;
+      engineId = customEngine;
+      color = const Color(0xFF06B6D4);
+      icon = Icons.bolt_rounded;
+      path = '/api/devices/${dev.branchCode}/telemetry';
+    } else if (isOutdated) {
+      label = '⚠️ فحص حزمة التحديث (v${dev.appVersion})';
+      engineId = 'node_release_engine';
+      color = const Color(0xFFF59E0B);
+      icon = Icons.system_update_alt_rounded;
+      path = '/api/updates/check';
+    } else if (isOnline) {
+      label = '🟢 اتصال نشط ومستقر (v${dev.appVersion})';
+      engineId = 'node_database';
+      color = const Color(0xFF10B981);
+      icon = Icons.sensors_rounded;
+      path = '/api/branches/${dev.branchCode}/status';
+    } else {
+      label = '⚪ استعلام حالة وتواجد المحطة';
+      engineId = 'node_database';
+      color = const Color(0xFF6B7280);
+      icon = Icons.access_time_rounded;
+      path = '/api/branches/${dev.branchCode}/last_seen';
+    }
 
     _spawnRealActionOnCanvas(
       dev: dev,
-      actionLabel: customAction ?? chosen.label,
-      engineId: customEngine ?? chosen.id,
-      color: chosen.color,
-      icon: chosen.icon,
-      latencyMs: 9,
+      actionLabel: label,
+      engineId: engineId,
+      color: color,
+      icon: icon,
+      latencyMs: 11,
       statusCode: 200,
-      method: 'POST',
-      endpoint: chosen.path,
+      method: 'GET',
+      endpoint: path,
     );
   }
 
-  void _triggerDiagnosticTestPulse() {
-    // Also trigger a real refresh on the system monitor controller so real API traffic flows!
-    unawaited(widget.notifier.refreshAll());
+  Future<void> _triggerDiagnosticTestPulse() async {
+    final sw = Stopwatch()..start();
+    // Real refresh of stats and telemetry to measure ACTUAL backend roundtrip latency!
+    await widget.notifier.refreshAll();
+    sw.stop();
+    final realLatency = sw.elapsedMilliseconds.clamp(4, 999);
 
-    final onlineList = _allFleetDevices.where((d) => d.isOnline).toList();
     final authUser = ref.read(authControllerProvider).user;
-    final fallbackDev = _FleetDeviceModel(
+    final adminDev = _FleetDeviceModel(
       id: 'admin_session_${authUser?.id ?? "main"}',
       hostname: authUser?.fullName.isNotEmpty == true
-          ? authUser!.fullName
-          : 'جهاز الإدارة الرئيسي',
+          ? 'محطة الإدارة (${authUser!.fullName})'
+          : 'محطة إدارة المنظومة',
       fullName: authUser?.fullName ?? 'مدير النظام',
       username: authUser?.username ?? 'admin',
-      branchName: 'المقر الرئيسي',
+      branchName: 'المقر الرئيسي (HQ)',
       branchCode: authUser?.branchCode ?? '00',
       ipAddress: '127.0.0.1',
-      appVersion: '1.1.22',
+      appVersion: widget.state.deploymentData?.summary.targetAppVersion ?? '1.1.22',
       isOutdated: false,
       isOnline: true,
       clientType: 'desktop',
@@ -1112,13 +1270,17 @@ class _LiveOperationsTopologyScreenState
       lastSeenAt: DateTime.now(),
     );
 
-    final dev = onlineList.isNotEmpty
-        ? onlineList[_testPulseCounter % onlineList.length]
-        : (_allFleetDevices.isNotEmpty
-            ? _allFleetDevices[_testPulseCounter % _allFleetDevices.length]
-            : fallbackDev);
-
-    _triggerDeviceActionOnCanvas(dev);
+    _spawnRealActionOnCanvas(
+      dev: adminDev,
+      actionLabel: '⚡ فحص حي لاستجابة السيرفر',
+      engineId: 'node_database',
+      color: const Color(0xFF06B6D4),
+      icon: Icons.bolt_rounded,
+      latencyMs: realLatency,
+      statusCode: 200,
+      method: 'GET',
+      endpoint: '/api/admin/system-monitor/stats',
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════════

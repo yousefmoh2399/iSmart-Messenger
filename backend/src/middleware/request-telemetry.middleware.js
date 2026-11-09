@@ -2,7 +2,7 @@ let totalRequests = 0;
 let activeRequests = 0;
 const statusCounts = { "2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0 };
 const recentRequests = [];
-const MAX_RECENT_REQUESTS = 50;
+const MAX_RECENT_REQUESTS = 60;
 
 // Rolling 10-second window for requests per second (RPS) calculation
 const rpsBuckets = [];
@@ -16,9 +16,81 @@ function pruneOldBuckets(nowSec) {
   }
 }
 
+function recordTelemetryEntry(io, entry) {
+  if (!entry) return;
+
+  recentRequests.unshift(entry);
+  if (recentRequests.length > MAX_RECENT_REQUESTS) {
+    recentRequests.pop();
+  }
+
+  // Real-time Socket.IO emission to connected admin monitors
+  try {
+    if (io && typeof io.emit === "function") {
+      io.emit("api_request_telemetry", entry);
+    }
+  } catch (_) {}
+}
+
+function recordSocketTelemetry(io, socket, eventName, durationMs = 8, details = {}) {
+  const user = socket?.user || {};
+  const handshake = socket?.handshake || {};
+
+  let rawHost =
+    handshake.headers?.["x-device-name"] ||
+    user.deviceInfo?.hostName ||
+    user.deviceInfo?.deviceName ||
+    null;
+  if (rawHost && typeof rawHost === "string") {
+    try {
+      rawHost = decodeURIComponent(rawHost);
+    } catch (_) {}
+  }
+
+  const branchCode = String(
+    user.branchCode ||
+    handshake.headers?.["x-branch-code"] ||
+    "MAIN"
+  ).toUpperCase();
+
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    timestamp: new Date().toISOString(),
+    method: "SOCKET",
+    path: details.path || `/socket/${eventName}`,
+    statusCode: details.statusCode || 200,
+    durationMs: Math.max(1, durationMs),
+    clientIp: user.ipAddress || handshake.headers?.["x-forwarded-for"] || handshake.address || "-",
+    hostName: rawHost,
+    deviceUid: user.deviceUid || handshake.headers?.["x-device-uid"] || null,
+    platform: user.clientType || "desktop",
+    branchCode: branchCode,
+    actionLabel: details.label || null,
+    user: {
+      username: user.username || (rawHost ? `host:${rawHost}` : "-"),
+      fullName: user.fullName || rawHost || (user.username ? user.username : "جهاز بالفرع"),
+      role: user.role || "branch",
+      branchCode: branchCode,
+      hostName: rawHost,
+      deviceUid: user.deviceUid || null,
+    },
+  };
+
+  recordTelemetryEntry(io, entry);
+}
+
 function requestTelemetryMiddleware(req, res, next) {
-  // Ignore static assets / health checks to keep telemetry focused on actual API usage
-  if (req.path.startsWith("/assets") || req.path.startsWith("/uploads") || req.path === "/favicon.ico") {
+  // Ignore static assets, health checks, and system-monitor polls to prevent telemetry self-loop
+  const p = req.path || "";
+  if (
+    p.startsWith("/assets") ||
+    p.startsWith("/uploads") ||
+    p === "/favicon.ico" ||
+    p.includes("/system-monitor/") ||
+    p.includes("/request-telemetry") ||
+    p === "/health" ||
+    p === "/api/health"
+  ) {
     return next();
   }
 
@@ -52,40 +124,58 @@ function requestTelemetryMiddleware(req, res, next) {
     else if (sc >= 400 && sc < 500) statusCounts["4xx"]++;
     else if (sc >= 500) statusCounts["5xx"]++;
 
-    // Only record non-telemetry requests in recent list to prevent telemetry self-loop
-    if (!req.path.includes("/system-monitor/request-telemetry") && !req.path.includes("/system-monitor/stats")) {
-      const entry = {
-        id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        timestamp: new Date().toISOString(),
-        method: req.method,
-        path: req.originalUrl || req.url,
-        statusCode: sc,
-        durationMs: duration,
-        clientIp: req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "-",
-        user: req.user
-          ? {
-              username: req.user.username,
-              fullName: req.user.fullName,
-              role: req.user.role,
-              branchCode: req.user.branchCode || "MAIN",
-              deviceUid: req.user.deviceUid || null,
-            }
-          : null,
-      };
-
-      recentRequests.unshift(entry);
-      if (recentRequests.length > MAX_RECENT_REQUESTS) {
-        recentRequests.pop();
-      }
-
-      // Real-time Socket.IO emission to connected admin monitors
+    let rawHost =
+      req.headers["x-device-name"] ||
+      req.body?.hostName ||
+      req.body?.deviceName ||
+      null;
+    if (rawHost && typeof rawHost === "string") {
       try {
-        const io = req.app?.get?.("io");
-        if (io) {
-          io.emit("api_request_telemetry", entry);
-        }
+        rawHost = decodeURIComponent(rawHost);
       } catch (_) {}
     }
+
+    const deviceUid =
+      req.headers["x-device-uid"] ||
+      req.body?.deviceUid ||
+      req.user?.deviceUid ||
+      null;
+    const platform =
+      req.headers["x-device-platform"] ||
+      req.body?.platform ||
+      (req.headers["user-agent"]?.includes("Android") ? "mobile_android" : "desktop_windows");
+    const branchCode =
+      req.user?.branchCode ||
+      req.body?.branchCode ||
+      req.headers["x-branch-code"] ||
+      "MAIN";
+
+    const username = req.user?.username || req.body?.username || null;
+    const fullName = req.user?.fullName || req.body?.fullName || null;
+
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: req.originalUrl || req.url,
+      statusCode: sc,
+      durationMs: duration,
+      clientIp: req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "-",
+      hostName: rawHost,
+      deviceUid: deviceUid,
+      platform: platform,
+      branchCode: String(branchCode).toUpperCase(),
+      user: {
+        username: username || (rawHost ? `host:${rawHost}` : "-"),
+        fullName: fullName || rawHost || (username ? username : "جهاز بالشبكة"),
+        role: req.user?.role || "branch",
+        branchCode: String(branchCode).toUpperCase(),
+        hostName: rawHost,
+        deviceUid: deviceUid,
+      },
+    };
+
+    recordTelemetryEntry(req.app?.get?.("io"), entry);
   });
 
   next();
@@ -113,5 +203,7 @@ function getTelemetrySnapshot() {
 
 module.exports = {
   requestTelemetryMiddleware,
+  recordTelemetryEntry,
+  recordSocketTelemetry,
   getTelemetrySnapshot,
 };

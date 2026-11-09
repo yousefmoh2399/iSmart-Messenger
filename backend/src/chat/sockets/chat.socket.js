@@ -28,6 +28,7 @@ const {
   touchUserActivity,
 } = require("../../services/user.service");
 const { getChatTransferForUser } = require("../services/chat-transfer.service");
+const { recordSocketTelemetry } = require("../../middleware/request-telemetry.middleware");
 const {
   sendChatPushNotifications,
   sendTicketPushNotifications,
@@ -360,6 +361,8 @@ async function resolveSocketUser(socket) {
     fullName: user.fullName,
     role: user.role,
     departmentId: user.departmentId ? user.departmentId.toString() : null,
+    branchCode: user.branchCode || null,
+    branchId: user.branchId ? user.branchId.toString() : null,
     permissions: await getEffectivePermissionsForUser(user),
     clientType: normalizeClientType(clientType),
     deviceUid: deviceUid ? String(deviceUid).trim() : null,
@@ -1026,6 +1029,12 @@ function initializeChatSocketServer(httpServer) {
           success: true,
           data: { message: result.message, conversation: result.conversation },
         });
+        recordSocketTelemetry(io, socket, "send_message", 12, {
+          path: "/socket/chat/send_message",
+          label: "💬 إرسال رسالة شات",
+          statusCode: 200,
+        });
+        return;
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
       }
@@ -1174,6 +1183,11 @@ function initializeChatSocketServer(httpServer) {
           });
         }
 
+        recordSocketTelemetry(io, socket, "presence", 5, {
+          path: "/socket/presence/activity",
+          label: "🟢 نبضة تواجد وتفاعل مباشر",
+          statusCode: 200,
+        });
         socketAck(ack, {
           ok: true,
           success: true,
@@ -1324,6 +1338,11 @@ function initializeChatSocketServer(httpServer) {
       clipboardHistoryByUser.set(currentUser.id, updatedHistory);
 
       // Emit to all OTHER sockets of the same user so they copy it immediately
+      recordSocketTelemetry(io, socket, "clipboard_sync", 8, {
+        path: "/socket/clipboard/sync",
+        label: "📋 مزامنة الحافظة الفورية",
+        statusCode: 200,
+      });
       socket.to(`user:${currentUser.id}`).emit("clipboard_synced", clipItem);
       // Emit updated history to all sockets of the user
       io.to(`user:${currentUser.id}`).emit("clipboard_history_updated", {
@@ -1683,6 +1702,11 @@ function initializeChatSocketServer(httpServer) {
         availableDesktopSocketCount: allDesktopSocketIds.length,
       });
 
+      recordSocketTelemetry(io, socket, "print_request", 15, {
+        path: "/socket/printers/print_request",
+        label: "🖨️ أمر طباعة مستند",
+        statusCode: 200,
+      });
       printJobOwnerById.set(jobId, currentUser.id);
       io.to(targetDesktopSocketId).emit("print_job_requested", printJob);
 

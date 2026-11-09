@@ -551,6 +551,9 @@ class LiveRequestItem {
     required this.clientIp,
     this.username,
     this.fullName,
+    this.hostName,
+    this.branchCode,
+    this.actionLabel,
   });
 
   final String id;
@@ -562,6 +565,9 @@ class LiveRequestItem {
   final String clientIp;
   final String? username;
   final String? fullName;
+  final String? hostName;
+  final String? branchCode;
+  final String? actionLabel;
 
   factory LiveRequestItem.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>?;
@@ -577,6 +583,9 @@ class LiveRequestItem {
       clientIp: json['clientIp'] as String? ?? '-',
       username: user?['username'] as String?,
       fullName: user?['fullName'] as String?,
+      hostName: (json['hostName'] ?? user?['hostName']) as String?,
+      branchCode: (json['branchCode'] ?? user?['branchCode']) as String?,
+      actionLabel: json['actionLabel'] as String?,
     );
   }
 }
