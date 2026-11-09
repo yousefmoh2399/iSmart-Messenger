@@ -76,6 +76,47 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     widget.notifier.refreshDeployment(targetVersion: ver);
   }
 
+  Future<void> _handleExport(String format, {String? scope}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final isOutdated = scope == 'outdated';
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(isOutdated
+            ? 'جاري إعداد وتصدير كشف أجهزة الكمبيوتر القديمة Excel...'
+            : 'جاري إعداد وتصدير تقرير ${format == "pdf" ? "PDF" : "Excel"}...'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    try {
+      await widget.notifier.exportReport(
+        format,
+        targetVersion: _appliedTargetVersion,
+        scope: scope,
+      );
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(isOutdated
+                ? '✅ تم تصدير كشف الأجهزة القديمة بنجاح وحفظه في مجلد التنزيلات!'
+                : '✅ تم تصدير تقرير ${format == "pdf" ? "PDF" : "Excel"} بنجاح وحفظه!'),
+            backgroundColor: const Color(0xFF10B981),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('❌ تعذر تصدير الملف: $e'),
+            backgroundColor: const Color(0xFFEF4444),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
   void _openLiveTopologyScreen(BuildContext context) {
     HapticFeedback.selectionClick();
     Navigator.of(context).push(
@@ -293,12 +334,10 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
             targetVer: targetVer,
             isDark: isDark,
             onFilterOlder: () {
-              setState(() {
-                _filterType = 'older';
-              });
+              _showAllOutdatedDevicesModal(context, allBranches, targetVer, isDark);
             },
             onExportExcel: () {
-              notifier.exportReport('xlsx', targetVersion: targetVer);
+              _handleExport('xlsx', scope: 'outdated');
             },
           ),
           const SizedBox(height: 16),
@@ -629,9 +668,9 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
                 ),
-                icon: const Icon(Icons.filter_list_rounded, size: 16),
+                icon: const Icon(Icons.list_alt_rounded, size: 16),
                 label: Text(
-                  'عرض الأجهزة القديمة فقط ($totalOlderDevs)',
+                  'عرض كشف الأجهزة القديمة ($totalOlderDevs)',
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),
@@ -799,7 +838,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               FilledButton.icon(
                 onPressed: isExporting
                     ? null
-                    : () => notifier.exportReport('xlsx', targetVersion: targetVersion),
+                    : () => _handleExport('xlsx'),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF10B981),
                   foregroundColor: Colors.white,
@@ -823,7 +862,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               FilledButton.icon(
                 onPressed: isExporting
                     ? null
-                    : () => notifier.exportReport('pdf', targetVersion: targetVersion),
+                    : () => _handleExport('pdf'),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFFEF4444),
                   foregroundColor: Colors.white,
@@ -1407,6 +1446,406 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           ),
         ],
       ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5.5 ALL OUTDATED WORKSTATIONS MODAL
+  // ---------------------------------------------------------------------------
+  void _showAllOutdatedDevicesModal(
+    BuildContext context,
+    List<BranchDeploymentItem> allBranches,
+    String targetVersion,
+    bool isDark,
+  ) {
+    // Collect all outdated computer workstations
+    final List<Map<String, dynamic>> allOutdated = [];
+    for (final b in allBranches) {
+      for (final d in b.devices) {
+        if (compareAppVersions(d.appVersion, targetVersion) < 0) {
+          allOutdated.add({
+            'branch': b,
+            'device': d,
+          });
+        }
+      }
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        String searchQuery = '';
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filtered = allOutdated.where((item) {
+              if (searchQuery.isEmpty) return true;
+              final BranchDeploymentItem b = item['branch'] as BranchDeploymentItem;
+              final BranchDeviceItem d = item['device'] as BranchDeviceItem;
+              final q = searchQuery.toLowerCase();
+              return b.branchName.toLowerCase().contains(q) ||
+                  b.branchCode.toLowerCase().contains(q) ||
+                  d.fullName.toLowerCase().contains(q) ||
+                  d.username.toLowerCase().contains(q) ||
+                  d.hostname.toLowerCase().contains(q) ||
+                  d.appVersion.toLowerCase().contains(q);
+            }).toList();
+
+            return DraggableScrollableSheet(
+              initialChildSize: 0.85,
+              minChildSize: 0.5,
+              maxChildSize: 0.95,
+              builder: (_, scrollController) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF131926) : Colors.white,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  child: Column(
+                    children: [
+                      // Handle
+                      Container(
+                        margin: const EdgeInsets.only(top: 12),
+                        width: 44,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      // Header
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 16, 24, 14),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.warning_amber_rounded,
+                                color: Color(0xFFEF4444),
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'كشف حصر أجهزة الكمبيوتر ذات الإصدارات القديمة (${allOutdated.length} جهاز)',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'أجهزة كمبيوتر ومحطات عمل تتطلب التحديث للنسخة المعتمدة (v$targetVersion) • بدون تكرار',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Quick Export Button inside the modal
+                            FilledButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _handleExport('xlsx', scope: 'outdated');
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFDC2626),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.table_chart_rounded, size: 16),
+                              label: const Text(
+                                'تصدير هذا الكشف Excel',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(Icons.close_rounded, size: 22),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Search bar inside modal
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+                        child: TextField(
+                          decoration: InputDecoration(
+                            hintText: 'بحث سريع بالموظف، الفرع، أو اسم الكمبيوتر...',
+                            prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                            isDense: true,
+                            filled: true,
+                            fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                          ),
+                          onChanged: (val) {
+                            setModalState(() {
+                              searchQuery = val.trim();
+                            });
+                          },
+                        ),
+                      ),
+                      const Divider(height: 16),
+                      // Table content
+                      Expanded(
+                        child: filtered.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.check_circle_outline_rounded,
+                                      size: 48,
+                                      color: Color(0xFF10B981),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      allOutdated.isEmpty
+                                          ? 'ممتاز! جميع أجهزة الكمبيوتر محدثة للنسخة المعتمدة v$targetVersion'
+                                          : 'لا توجد أجهزة مطابقة للبحث داخل الكشف',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ListView.separated(
+                                controller: scrollController,
+                                padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                                itemCount: filtered.length,
+                                separatorBuilder: (_, __) => Divider(
+                                  height: 1,
+                                  color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9),
+                                ),
+                                itemBuilder: (context, idx) {
+                                  final item = filtered[idx];
+                                  final BranchDeploymentItem b = item['branch'] as BranchDeploymentItem;
+                                  final BranchDeviceItem d = item['device'] as BranchDeviceItem;
+
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    child: Row(
+                                      children: [
+                                        // Index
+                                        Container(
+                                          width: 32,
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            '${idx + 1}',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // Branch
+                                        Expanded(
+                                          flex: 2,
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      b.branchCode.isNotEmpty ? b.branchCode : 'BR',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        fontFamily: 'monospace',
+                                                        fontWeight: FontWeight.w800,
+                                                        color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Expanded(
+                                                    child: Text(
+                                                      b.branchName,
+                                                      style: TextStyle(
+                                                        fontSize: 13.5,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // User
+                                        Expanded(
+                                          flex: 2,
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                d.fullName.isNotEmpty ? d.fullName : (d.username.isNotEmpty ? d.username : 'غير محدد'),
+                                                style: TextStyle(
+                                                  fontSize: 13.5,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              if (d.username.isNotEmpty)
+                                                Text(
+                                                  '@${d.username}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                        // Workstation / Hostname
+                                        Expanded(
+                                          flex: 2,
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.computer_rounded,
+                                                size: 16,
+                                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Text(
+                                                  d.hostname.isNotEmpty ? d.hostname : 'PC-Workstation',
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontFamily: 'monospace',
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        // App Version
+                                        Expanded(
+                                          flex: 2,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: const Color(0xFFEF4444).withValues(alpha: 0.35),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                  Icons.warning_amber_rounded,
+                                                  size: 13,
+                                                  color: Color(0xFFEF4444),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  'v${d.appVersion}',
+                                                  style: const TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontFamily: 'monospace',
+                                                    fontWeight: FontWeight.w800,
+                                                    color: Color(0xFFEF4444),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                const Text(
+                                                  'قديم',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Color(0xFFEF4444),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        // Status
+                                        Container(
+                                          width: 90,
+                                          alignment: Alignment.centerLeft,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Container(
+                                                width: 7,
+                                                height: 7,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: d.isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                d.isOnline ? 'متصل الآن' : 'غير متصل',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: d.isOnline
+                                                      ? const Color(0xFF10B981)
+                                                      : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 

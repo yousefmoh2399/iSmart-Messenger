@@ -75,6 +75,21 @@ function formatDate(value) {
 
 // Purge any legacy mock seeded sessions once at startup / execution
 let hasPurgedLegacyMocks = false;
+function isDesktopWorkstation(devOrSession) {
+  if (!devOrSession) return false;
+  const platform = String(devOrSession.platform || devOrSession.deviceInfo?.platform || "").toLowerCase();
+  const clientType = String(devOrSession.clientType || devOrSession.deviceInfo?.clientType || "").toLowerCase();
+  const os = String(devOrSession.osName || devOrSession.os || devOrSession.deviceInfo?.os || "").toLowerCase();
+  const host = String(devOrSession.hostName || devOrSession.deviceName || devOrSession.hostname || devOrSession.deviceInfo?.hostname || "").toLowerCase();
+
+  // Strictly exclude mobile devices (phones, tablets, android, ios)
+  if (platform.includes("mobile") || platform.includes("android") || platform.includes("ios")) return false;
+  if (clientType.includes("mobile") || clientType.includes("android") || clientType.includes("ios")) return false;
+  if (os.includes("android") || os.includes("ios") || os.includes("iphone") || os.includes("ipad")) return false;
+  if (host.includes("android") || host.includes("iphone") || host.includes("ipad") || host.includes("mobile")) return false;
+
+  return true;
+}
 async function purgeLegacyMockSessions() {
   if (hasPurgedLegacyMocks) return;
   try {
@@ -185,6 +200,9 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
   const versionCounts = {};
   const platformCounts = {};
   const globalSeenWorkstationKeys = new Set();
+  const globalSeenDeviceUids = new Set();
+  const globalSeenHostnames = new Set();
+  const globalSeenUserBranches = new Set();
 
   for (const b of branches) {
     const bId = String(b._id);
@@ -192,6 +210,8 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
     const branchUsers = usersByBranchId.get(bId) || usersByBranchCode.get(bCode) || [];
 
     const devicesMap = new Map();
+    const branchUserToDeviceKey = new Map(); // userId -> deviceKey
+    const branchHostToDeviceKey = new Map(); // cleanHost -> deviceKey
     const branchVersions = new Set();
     let branchLastSeen = null;
     let onlineUsersCount = 0;
@@ -205,26 +225,76 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
       }
     }
 
-    // 1. Process physical devices registered in UpdateDevice for this branch
+    // 1. Process physical desktop workstations registered in UpdateDevice for this branch
     const bUpdateDevices = devicesByBranchCode.get(bCode) || [];
     for (const dev of bUpdateDevices) {
-      const canonicalKey = dev.deviceUid
-        ? `uid_${String(dev.deviceUid).trim().toLowerCase()}`
-        : (dev.hostName
-            ? `host_${bCode}_${String(dev.hostName).trim().toLowerCase()}`
-            : `dev_${dev._id}`);
+      // Must be desktop computer only
+      if (!isDesktopWorkstation(dev)) continue;
+
+      const rawUid = dev.deviceUid ? String(dev.deviceUid).trim().toLowerCase() : "";
+      const cleanHost = String(dev.hostName || dev.deviceName || "").trim().toLowerCase();
+      const rawUserId = dev.lastKnownUserId ? String(dev.lastKnownUserId).trim() : "";
+
+      // Intra-branch deduplication check:
+      let existingKey = null;
+      if (rawUid && devicesMap.has(`uid_${rawUid}`)) {
+        existingKey = `uid_${rawUid}`;
+      } else if (cleanHost && cleanHost !== "unknown" && branchHostToDeviceKey.has(cleanHost)) {
+        existingKey = branchHostToDeviceKey.get(cleanHost);
+      } else if (rawUserId && branchUserToDeviceKey.has(rawUserId)) {
+        existingKey = branchUserToDeviceKey.get(rawUserId);
+      }
+
+      const devLastSeen = dev.lastSeenAt || dev.lastHeartbeatAt || dev.updatedAt;
+      if (existingKey) {
+        const existing = devicesMap.get(existingKey);
+        if (devLastSeen && (!existing.lastSeenAt || new Date(devLastSeen) > new Date(existing.lastSeenAt))) {
+          existing.lastSeenAt = devLastSeen;
+          if (dev.appVersion && dev.appVersion !== "unknown") {
+            const appVersion = String(dev.appVersion).trim();
+            existing.appVersion = appVersion;
+            const cmp = compareAppVersions(appVersion, effectiveTargetVersion);
+            const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
+            existing.isOutdated = isKnown && cmp < 0;
+            existing.isUpToDate = isKnown && cmp >= 0;
+            existing.isCritical = existing.isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.20"));
+            existing.versionStatus = !isKnown ? "pending" : (existing.isOutdated ? (existing.isCritical ? "critical" : "previous") : "latest");
+            existing.versionStatusLabel = !isKnown ? "إصدار غير محدد" : (cmp === 0 ? `مطابق للمعتمد (v${effectiveTargetVersion}) ✅` : (existing.isOutdated ? (existing.isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`) : `إصدار أحدث (v${appVersion}) 🚀`));
+          }
+        }
+        if (dev.connectionStatus === "online") existing.isOnline = true;
+        continue;
+      }
+
+      const canonicalKey = rawUid
+        ? `uid_${rawUid}`
+        : (cleanHost && cleanHost !== "unknown"
+            ? `host_${bCode}_${cleanHost}`
+            : (rawUserId ? `user_${bCode}_${rawUserId}` : `dev_${dev._id}`));
 
       if (globalSeenWorkstationKeys.has(canonicalKey)) {
         continue;
       }
+      if (rawUid && globalSeenDeviceUids.has(rawUid)) {
+        continue;
+      }
+      if (cleanHost && cleanHost !== "unknown" && globalSeenHostnames.has(`${bCode}_${cleanHost}`)) {
+        continue;
+      }
+      if (rawUserId && globalSeenUserBranches.has(`${bCode}_${rawUserId}`)) {
+        continue;
+      }
+
       globalSeenWorkstationKeys.add(canonicalKey);
+      if (rawUid) globalSeenDeviceUids.add(rawUid);
+      if (cleanHost && cleanHost !== "unknown") globalSeenHostnames.add(`${bCode}_${cleanHost}`);
+      if (rawUserId) globalSeenUserBranches.add(`${bCode}_${rawUserId}`);
 
       const appVersion = String(dev.appVersion || "unknown").trim();
       if (appVersion && appVersion !== "unknown" && appVersion !== "غير محدد") {
         branchVersions.add(appVersion);
       }
 
-      const devLastSeen = dev.lastSeenAt || dev.lastHeartbeatAt || dev.updatedAt;
       if (!branchLastSeen || (devLastSeen && new Date(devLastSeen) > new Date(branchLastSeen))) {
         branchLastSeen = devLastSeen;
       }
@@ -249,15 +319,12 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
               : `نسخة سابقة (v${appVersion}) ⚠️`)
             : `إصدار أحدث (v${appVersion}) 🚀`));
 
-      const hostName = (dev.hostName || dev.deviceName || (dev.platform?.includes("mobile") ? "Mobile Device" : "Desktop-PC")).trim();
+      const hostName = (dev.hostName || dev.deviceName || "Desktop-PC").trim();
       const uNameLower = (dev.lastKnownUsername || "").toLowerCase();
-      const workstationType = dev.platform?.includes("mobile")
-        ? "جهاز ذكي (موبايل)"
-        : (uNameLower.startsWith("cash")
-          ? "نقطة بيع كاشير"
-          : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : (uNameLower.startsWith("cs") ? "خدمة العملاء" : "محطة عمل"))));
+      const workstationType = uNameLower.startsWith("cash")
+        ? "نقطة بيع كاشير"
+        : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : (uNameLower.startsWith("cs") ? "خدمة العملاء" : "محطة عمل")));
 
-      // Live online status verification
       const isOnline = dev.connectionStatus === "online" ||
         (devLastSeen && (Date.now() - new Date(devLastSeen).getTime()) < 5 * 60 * 1000);
 
@@ -289,51 +356,48 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
         };
       }
 
-      if (!devicesMap.has(canonicalKey) || (devLastSeen && new Date(devLastSeen) > new Date(devicesMap.get(canonicalKey).lastSeenAt))) {
-        devicesMap.set(canonicalKey, {
-          deviceUid: dev.deviceUid || null,
-          hostname: hostName,
-          os: dev.osName || (dev.platform?.includes("mobile") ? "Android/iOS" : "Windows"),
-          osVersion: dev.osVersion || "",
-          ipAddress: dev.localIp || "-",
-          clientType: dev.platform?.includes("mobile") ? "mobile" : "desktop",
-          appVersion,
-          targetVersion: effectiveTargetVersion,
-          isUpToDate: isExactMatch || cmp > 0,
-          isOutdated,
-          isCritical,
-          versionStatus,
-          versionStatusLabel,
-          workstationType,
-          isOnline: !!isOnline,
-          startedAt: dev.createdAt || new Date(),
-          lastSeenAt: devLastSeen,
-          user: userObj,
-        });
-      }
+      const workstationObj = {
+        deviceUid: dev.deviceUid || null,
+        hostname: hostName,
+        os: dev.osName || "Windows",
+        osVersion: dev.osVersion || "",
+        ipAddress: dev.localIp || "-",
+        clientType: "desktop",
+        appVersion,
+        targetVersion: effectiveTargetVersion,
+        isUpToDate: isExactMatch || cmp > 0,
+        isOutdated,
+        isCritical,
+        versionStatus,
+        versionStatusLabel,
+        workstationType,
+        isOnline: !!isOnline,
+        startedAt: dev.createdAt || new Date(),
+        lastSeenAt: devLastSeen,
+        user: userObj,
+      };
+
+      devicesMap.set(canonicalKey, workstationObj);
+      if (rawUserId) branchUserToDeviceKey.set(rawUserId, canonicalKey);
+      if (cleanHost && cleanHost !== "unknown") branchHostToDeviceKey.set(cleanHost, canonicalKey);
     }
 
-    // 2. Also process any real active socket sessions for branch users not in UpdateDevice
+    // 2. Also process active desktop socket sessions for branch users
     for (const u of branchUsers) {
       const uId = String(u._id);
       const uSessions = sessionsByUser.get(uId) || [];
-      for (const s of uSessions) {
-        const rawHost = (s.deviceInfo?.hostname || "").trim();
-        const clientType = s.clientType || (s.deviceInfo?.platform?.includes("mobile") ? "mobile" : "desktop");
-        const hostName = rawHost || (clientType === "mobile" ? `Mobile-${u.username}` : `PC-${u.username}`);
+      const desktopSessions = uSessions.filter(s => isDesktopWorkstation(s));
+      if (desktopSessions.length === 0) continue;
 
-        let sCanonicalKey = null;
-        if (s.deviceInfo?.deviceUid) {
-          sCanonicalKey = `uid_${String(s.deviceInfo.deviceUid).trim().toLowerCase()}`;
-        } else if (rawHost) {
-          sCanonicalKey = `host_${bCode}_${rawHost.toLowerCase()}`;
-        } else {
-          sCanonicalKey = `sess_${bCode}_${uId}_${clientType}`;
-        }
+      // Sort by lastSeenAt descending to pick the single most recent desktop session
+      desktopSessions.sort((a, b) => new Date(b.lastSeenAt || 0) - new Date(a.lastSeenAt || 0));
 
-        // If device already registered in devicesMap, merge live presence without creating duplicate!
-        if (devicesMap.has(sCanonicalKey)) {
-          const existing = devicesMap.get(sCanonicalKey);
+      // If user ALREADY has a workstation registered for this branch (from UpdateDevice), MERGE and DO NOT DUPLICATE!
+      if (branchUserToDeviceKey.has(uId)) {
+        const existingKey = branchUserToDeviceKey.get(uId);
+        const existing = devicesMap.get(existingKey);
+        if (existing) {
+          const s = desktopSessions[0];
           if (s.isOnline) existing.isOnline = true;
           if (s.lastSeenAt && (!existing.lastSeenAt || new Date(s.lastSeenAt) > new Date(existing.lastSeenAt))) {
             existing.lastSeenAt = s.lastSeenAt;
@@ -341,87 +405,124 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
           if ((!existing.ipAddress || existing.ipAddress === "-") && s.ipAddress) {
             existing.ipAddress = s.ipAddress;
           }
-          continue;
-        }
-
-        if (globalSeenWorkstationKeys.has(sCanonicalKey)) {
-          continue;
-        }
-        globalSeenWorkstationKeys.add(sCanonicalKey);
-
-        let appVersion = String(s.deviceInfo?.appVersion || "").trim();
-        if (!appVersion || appVersion === "unknown") {
-          const userDevs = devicesByUserId.get(uId) || [];
-          if (userDevs.length > 0 && userDevs[0].appVersion) {
-            appVersion = String(userDevs[0].appVersion).trim();
+          if ((!existing.appVersion || existing.appVersion === "unknown" || existing.appVersion === "غير محدد") && s.deviceInfo?.appVersion) {
+            const appVersion = String(s.deviceInfo.appVersion).trim();
+            existing.appVersion = appVersion;
+            const cmp = compareAppVersions(appVersion, effectiveTargetVersion);
+            const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
+            existing.isOutdated = isKnown && cmp < 0;
+            existing.isUpToDate = isKnown && cmp >= 0;
+            existing.isCritical = existing.isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.20"));
+            existing.versionStatus = !isKnown ? "pending" : (existing.isOutdated ? (existing.isCritical ? "critical" : "previous") : "latest");
+            existing.versionStatusLabel = !isKnown ? "إصدار غير محدد" : (cmp === 0 ? `مطابق للمعتمد (v${effectiveTargetVersion}) ✅` : (existing.isOutdated ? (existing.isCritical ? `نسخة قديمة حرجة (v${appVersion}) 🚨` : `نسخة سابقة (v${appVersion}) ⚠️`) : `إصدار أحدث (v${appVersion}) 🚀`));
           }
         }
-        if (!appVersion) {
-          appVersion = "غير محدد";
-        }
-
-        if (appVersion !== "غير محدد") {
-          branchVersions.add(appVersion);
-        }
-
-        if (!branchLastSeen || (s.lastSeenAt && new Date(s.lastSeenAt) > new Date(branchLastSeen))) {
-          branchLastSeen = s.lastSeenAt;
-        }
-
-        const cmp = compareAppVersions(appVersion, effectiveTargetVersion);
-        const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
-        const isOutdated = isKnown && cmp < 0;
-        const isExactMatch = isKnown && cmp === 0;
-        const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.20"));
-        const versionStatus = !isKnown
-          ? "pending"
-          : (isOutdated
-            ? (isCritical ? "critical" : "previous")
-            : "latest");
-        const versionStatusLabel = !isKnown
-          ? "إصدار غير محدد"
-          : (isExactMatch
-            ? `مطابق للمعتمد (v${effectiveTargetVersion}) ✅`
-            : (isOutdated
-              ? (isCritical
-                ? `نسخة قديمة حرجة (v${appVersion}) 🚨`
-                : `نسخة سابقة (v${appVersion}) ⚠️`)
-              : `إصدار أحدث (v${appVersion}) 🚀`));
-
-        const uNameLower = (u.username || "").toLowerCase();
-        const workstationType = clientType === "mobile"
-          ? "جهاز ذكي (موبايل)"
-          : (uNameLower.startsWith("cash")
-            ? "نقطة بيع كاشير"
-            : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : "محطة عمل")));
-
-        devicesMap.set(sCanonicalKey, {
-          deviceUid: s.deviceInfo?.deviceUid || null,
-          hostname: hostName,
-          os: s.deviceInfo?.os || (clientType === "mobile" ? "Android/iOS" : "Windows"),
-          osVersion: s.deviceInfo?.osVersion || "",
-          ipAddress: s.ipAddress || "-",
-          clientType,
-          appVersion,
-          targetVersion: effectiveTargetVersion,
-          isUpToDate: isExactMatch || cmp > 0,
-          isOutdated,
-          isCritical,
-          versionStatus,
-          versionStatusLabel,
-          workstationType,
-          isOnline: !!s.isOnline,
-          startedAt: s.startedAt || s.createdAt || new Date(),
-          lastSeenAt: s.lastSeenAt,
-          user: {
-            id: u._id,
-            username: u.username,
-            fullName: u.fullName,
-            role: u.role,
-            jobTitle: u.jobTitle || "-",
-          },
-        });
+        continue;
       }
+
+      // User does NOT have an UpdateDevice workstation. Take AT MOST ONE desktop workstation from their latest session!
+      const s = desktopSessions[0];
+      const rawHost = String(s.deviceInfo?.hostname || "").trim();
+      const cleanHost = rawHost.toLowerCase();
+      const rawUid = s.deviceInfo?.deviceUid ? String(s.deviceInfo.deviceUid).trim().toLowerCase() : "";
+
+      if (rawUid && (devicesMap.has(`uid_${rawUid}`) || globalSeenDeviceUids.has(rawUid))) {
+        continue;
+      }
+      if (cleanHost && cleanHost !== "unknown" && (branchHostToDeviceKey.has(cleanHost) || globalSeenHostnames.has(`${bCode}_${cleanHost}`))) {
+        continue;
+      }
+      if (globalSeenUserBranches.has(`${bCode}_${uId}`)) {
+        continue;
+      }
+
+      const sCanonicalKey = rawUid
+        ? `uid_${rawUid}`
+        : (cleanHost && cleanHost !== "unknown" ? `host_${bCode}_${cleanHost}` : `user_${bCode}_${uId}`);
+
+      if (globalSeenWorkstationKeys.has(sCanonicalKey)) {
+        continue;
+      }
+      globalSeenWorkstationKeys.add(sCanonicalKey);
+      if (rawUid) globalSeenDeviceUids.add(rawUid);
+      if (cleanHost && cleanHost !== "unknown") globalSeenHostnames.add(`${bCode}_${cleanHost}`);
+      globalSeenUserBranches.add(`${bCode}_${uId}`);
+
+      let appVersion = String(s.deviceInfo?.appVersion || "").trim();
+      if (!appVersion || appVersion === "unknown") {
+        const userDevs = devicesByUserId.get(uId) || [];
+        if (userDevs.length > 0 && userDevs[0].appVersion) {
+          appVersion = String(userDevs[0].appVersion).trim();
+        }
+      }
+      if (!appVersion) {
+        appVersion = "غير محدد";
+      }
+
+      if (appVersion !== "غير محدد") {
+        branchVersions.add(appVersion);
+      }
+
+      if (!branchLastSeen || (s.lastSeenAt && new Date(s.lastSeenAt) > new Date(branchLastSeen))) {
+        branchLastSeen = s.lastSeenAt;
+      }
+
+      const cmp = compareAppVersions(appVersion, effectiveTargetVersion);
+      const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
+      const isOutdated = isKnown && cmp < 0;
+      const isExactMatch = isKnown && cmp === 0;
+      const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.20"));
+      const versionStatus = !isKnown
+        ? "pending"
+        : (isOutdated
+          ? (isCritical ? "critical" : "previous")
+          : "latest");
+      const versionStatusLabel = !isKnown
+        ? "إصدار غير محدد"
+        : (isExactMatch
+          ? `مطابق للمعتمد (v${effectiveTargetVersion}) ✅`
+          : (isOutdated
+            ? (isCritical
+              ? `نسخة قديمة حرجة (v${appVersion}) 🚨`
+              : `نسخة سابقة (v${appVersion}) ⚠️`)
+            : `إصدار أحدث (v${appVersion}) 🚀`));
+
+      const hostName = rawHost || `PC-${u.username}`;
+      const uNameLower = (u.username || "").toLowerCase();
+      const workstationType = uNameLower.startsWith("cash")
+        ? "نقطة بيع كاشير"
+        : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : "محطة عمل"));
+
+      const workstationObj = {
+        deviceUid: s.deviceInfo?.deviceUid || null,
+        hostname: hostName,
+        os: s.deviceInfo?.os || "Windows",
+        osVersion: s.deviceInfo?.osVersion || "",
+        ipAddress: s.ipAddress || "-",
+        clientType: "desktop",
+        appVersion,
+        targetVersion: effectiveTargetVersion,
+        isUpToDate: isExactMatch || cmp > 0,
+        isOutdated,
+        isCritical,
+        versionStatus,
+        versionStatusLabel,
+        workstationType,
+        isOnline: !!s.isOnline,
+        startedAt: s.startedAt || s.createdAt || new Date(),
+        lastSeenAt: s.lastSeenAt,
+        user: {
+          id: u._id,
+          username: u.username,
+          fullName: u.fullName,
+          role: u.role,
+          jobTitle: u.jobTitle || "-",
+        },
+      };
+
+      devicesMap.set(sCanonicalKey, workstationObj);
+      branchUserToDeviceKey.set(uId, sCanonicalKey);
+      if (cleanHost && cleanHost !== "unknown") branchHostToDeviceKey.set(cleanHost, sCanonicalKey);
     }
 
     const branchDevices = Array.from(devicesMap.values());
@@ -523,7 +624,9 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
   };
 }
 
-async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = null) {
+async function buildDeploymentExcelReport(data, actor, options = {}) {
+  const requestedTargetVersion = typeof options === "string" ? options : options?.targetVersion;
+  const isOutdatedScope = options?.scope === "outdated";
   if (!data) {
     data = await getBranchesDeploymentData(requestedTargetVersion);
   }
@@ -560,23 +663,31 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
     };
   }
 
-  // Flatten and strictly deduplicate all devices across all branches
+  // Flatten and strictly deduplicate all desktop computer devices across all branches
   const seenWorkstationKeys = new Set();
+  const seenUserKeys = new Set();
   const allFleetDevices = [];
 
   branches.forEach((b) => {
     (b.devices || []).forEach((d) => {
-      const canonicalKey = d.deviceUid
-        ? `uid_${String(d.deviceUid).trim().toLowerCase()}`
-        : `${b.branchCode}_${d.hostname || ""}_${d.user?.username || d.username || ""}`.toLowerCase();
+      if (!isDesktopWorkstation(d)) return;
 
-      if (!seenWorkstationKeys.has(canonicalKey)) {
-        seenWorkstationKeys.add(canonicalKey);
-        allFleetDevices.push({
-          branch: b,
-          device: d,
-        });
-      }
+      const rawUid = d.deviceUid ? String(d.deviceUid).trim().toLowerCase() : "";
+      const rawHost = d.hostname && d.hostname !== "-" ? String(d.hostname).trim().toLowerCase() : "";
+      const rawUserId = d.user?.id ? String(d.user.id).trim() : (d.user?.username || d.username || "");
+
+      if (rawUid && seenWorkstationKeys.has(`uid_${rawUid}`)) return;
+      if (rawHost && rawHost !== "unknown" && seenWorkstationKeys.has(`host_${b.branchCode}_${rawHost}`)) return;
+      if (rawUserId && seenUserKeys.has(`${b.branchCode}_${rawUserId}`)) return;
+
+      if (rawUid) seenWorkstationKeys.add(`uid_${rawUid}`);
+      if (rawHost && rawHost !== "unknown") seenWorkstationKeys.add(`host_${b.branchCode}_${rawHost}`);
+      if (rawUserId) seenUserKeys.add(`${b.branchCode}_${rawUserId}`);
+
+      allFleetDevices.push({
+        branch: b,
+        device: d,
+      });
     });
   });
 
@@ -1023,11 +1134,14 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const fileName = `ismart-branches-deployment-report-${Date.now()}.xlsx`;
+  const fileName = isOutdatedScope
+    ? `ismart-outdated-devices-v${targetVersion}-${Date.now()}.xlsx`
+    : `ismart-branches-deployment-report-v${targetVersion}-${Date.now()}.xlsx`;
   return { buffer: Buffer.from(buffer), fileName };
 }
 
-async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = null) {
+async function buildDeploymentPdfReport(data, actor, options = {}) {
+  const requestedTargetVersion = typeof options === "string" ? options : options?.targetVersion;
   if (!data) {
     data = await getBranchesDeploymentData(requestedTargetVersion);
   }
@@ -1043,23 +1157,31 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
   const targetVersion = summary.targetAppVersion || summary.currentAppVersion || CURRENT_APP_VERSION;
   const reportDate = formatDate(new Date());
 
-  // Flatten and strictly deduplicate all fleet devices
+  // Flatten and strictly deduplicate all desktop computer devices across all branches
   const seenWorkstationKeysPdf = new Set();
+  const seenUserKeysPdf = new Set();
   const allFleetDevicesPdf = [];
 
   branches.forEach((b) => {
     (b.devices || []).forEach((d) => {
-      const canonicalKey = d.deviceUid
-        ? `uid_${String(d.deviceUid).trim().toLowerCase()}`
-        : `${b.branchCode}_${d.hostname || ""}_${d.user?.username || d.username || ""}`.toLowerCase();
+      if (!isDesktopWorkstation(d)) return;
 
-      if (!seenWorkstationKeysPdf.has(canonicalKey)) {
-        seenWorkstationKeysPdf.add(canonicalKey);
-        allFleetDevicesPdf.push({
-          branch: b,
-          device: d,
-        });
-      }
+      const rawUid = d.deviceUid ? String(d.deviceUid).trim().toLowerCase() : "";
+      const rawHost = d.hostname && d.hostname !== "-" ? String(d.hostname).trim().toLowerCase() : "";
+      const rawUserId = d.user?.id ? String(d.user.id).trim() : (d.user?.username || d.username || "");
+
+      if (rawUid && seenWorkstationKeysPdf.has(`uid_${rawUid}`)) return;
+      if (rawHost && rawHost !== "unknown" && seenWorkstationKeysPdf.has(`host_${b.branchCode}_${rawHost}`)) return;
+      if (rawUserId && seenUserKeysPdf.has(`${b.branchCode}_${rawUserId}`)) return;
+
+      if (rawUid) seenWorkstationKeysPdf.add(`uid_${rawUid}`);
+      if (rawHost && rawHost !== "unknown") seenWorkstationKeysPdf.add(`host_${b.branchCode}_${rawHost}`);
+      if (rawUserId) seenUserKeysPdf.add(`${b.branchCode}_${rawUserId}`);
+
+      allFleetDevicesPdf.push({
+        branch: b,
+        device: d,
+      });
     });
   });
 

@@ -172,3 +172,64 @@ test("system-monitor: PDF export generates landscape multi-page document with ou
   const header = result.buffer.subarray(0, 5).toString("ascii");
   assert.equal(header, "%PDF-");
 });
+
+test("system-monitor: Excel export with scope 'outdated' produces dedicated outdated file name", async () => {
+  const result = await buildDeploymentExcelReport(testData, actor, { scope: "outdated" });
+  assert.ok(result.buffer && result.buffer.length > 3000);
+  assert.ok(result.fileName.startsWith("ismart-outdated-devices-"));
+  assert.ok(result.fileName.endsWith(".xlsx"));
+});
+
+test("system-monitor: reports strictly exclude mobile devices and duplicate user entries", async () => {
+  const testDataWithMobileAndDuplicates = {
+    summary: { ...testData.summary },
+    branches: [
+      {
+        branchCode: "105",
+        branchName: "فرع الاختبار",
+        isInstalled: true,
+        devices: [
+          // Valid Desktop PC
+          {
+            deviceUid: "pc-105-01",
+            hostname: "PC-DESK-01",
+            os: "Windows 10",
+            clientType: "desktop",
+            appVersion: "1.0.9",
+            isOutdated: true,
+            user: { id: "user-1", username: "user1", fullName: "مستخدم أول" },
+          },
+          // Duplicate session for same user on same PC
+          {
+            deviceUid: "pc-105-01",
+            hostname: "PC-DESK-01",
+            os: "Windows 10",
+            clientType: "desktop",
+            appVersion: "1.0.9",
+            isOutdated: true,
+            user: { id: "user-1", username: "user1", fullName: "مستخدم أول" },
+          },
+          // Mobile smartphone device (MUST BE EXCLUDED)
+          {
+            deviceUid: "mobile-phone-01",
+            hostname: "Galaxy S22",
+            os: "Android 13",
+            clientType: "mobile",
+            appVersion: "1.0.9",
+            isOutdated: true,
+            user: { id: "user-mobile", username: "usermobile", fullName: "مستخدم موبايل" },
+          },
+        ],
+      },
+    ],
+  };
+
+  const ExcelJS = require("exceljs");
+  const result = await buildDeploymentExcelReport(testDataWithMobileAndDuplicates, actor);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(result.buffer);
+
+  // Sheet 5 (all fleet devices) should contain ONLY the 1 unique PC, mobile and duplicates excluded!
+  const sheet5 = workbook.worksheets[4];
+  assert.equal(sheet5.rowCount, 2, "Expected exactly 1 PC row + 1 header, mobile and duplicate excluded");
+});
