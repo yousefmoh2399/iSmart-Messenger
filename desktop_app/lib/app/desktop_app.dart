@@ -147,6 +147,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   String? _lastConnectionErrorMessage;
   bool _serverRefreshInFlight = false;
   bool _hasConfirmedServerDisconnect = false;
+  bool _isServerRecoveryBarDismissed = false;
+  bool _isServerTopBannerDismissed = false;
   bool _serverRestoreRefreshInFlight = false;
   int _serverFailureStreak = 0;
   bool _lastKnownWindowVisible = true;
@@ -364,10 +366,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (_serverFailureStreak >= 2) {
         _hasConfirmedServerDisconnect = true;
         setState(() {});
-        _showConnectionSnackBar(
-          _buildServerUnavailableMessage(result.message),
-          isError: true,
-        );
       }
       return;
     }
@@ -376,6 +374,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
     if (_hasConfirmedServerDisconnect) {
       if (quiet || !recoverVisibleDisconnect) {
         _hasConfirmedServerDisconnect = false;
+        _isServerRecoveryBarDismissed = false;
+        _isServerTopBannerDismissed = false;
         _lastConnectionErrorMessage = null;
       } else {
         unawaited(_refreshDataAfterServerRestored());
@@ -386,6 +386,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _lastConnectionErrorMessage = null;
     }
     _hasConfirmedServerDisconnect = false;
+    _isServerRecoveryBarDismissed = false;
+    _isServerTopBannerDismissed = false;
     _lastConnectionErrorMessage = null;
     _serverFailureStreak = 0;
     setState(() {});
@@ -643,7 +645,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           children: [
             const DesktopWorkspaceShell(),
             const GlobalAnnouncementOverlay(),
-            if (showServerBanner)
+            if (showServerBanner && !_isServerTopBannerDismissed)
               Positioned(
                 top: 12,
                 left: 12,
@@ -654,16 +656,59 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                     message: _buildServerUnavailableMessage(
                       serverConnection.message,
                     ),
+                    onDismiss: () {
+                      setState(() => _isServerTopBannerDismissed = true);
+                    },
                   ),
                 ),
               ),
-            if (showServerBanner)
+            if (showServerBanner && !_isServerRecoveryBarDismissed)
               _ServerRecoveryBar(
                 message: _buildServerUnavailableMessage(
                   serverConnection.message,
                 ),
                 onRetry: _retryServerConnection,
                 onChangeServer: _changeServerBaseUrl,
+                onDismiss: () {
+                  setState(() => _isServerRecoveryBarDismissed = true);
+                },
+              ),
+            if (showServerBanner && _isServerRecoveryBarDismissed)
+              PositionedDirectional(
+                start: 16,
+                bottom: 12,
+                child: SafeArea(
+                  top: false,
+                  child: Material(
+                    elevation: 6,
+                    color: const Color(0xFF7F1D1D),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () {
+                        setState(() => _isServerRecoveryBarDismissed = false);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.cloud_off_rounded, size: 14, color: Colors.white),
+                            SizedBox(width: 6),
+                            Text(
+                              'السيرفر غير متصل (انقر للخيارات)',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             if (_isUpdateInProgress && !_isUpdateDialogMinimized)
               _UpdateProgressOverlay(
@@ -854,6 +899,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           _lastConnectionErrorMessage = null;
         }
         _hasConfirmedServerDisconnect = false;
+        _isServerRecoveryBarDismissed = false;
+        _isServerTopBannerDismissed = false;
         _lastConnectionErrorMessage = null;
         _serverFailureStreak = 0;
         setState(() {});
@@ -1451,9 +1498,13 @@ class _UpdateProgressOverlay extends StatelessWidget {
 }
 
 class _ServerStatusBanner extends StatelessWidget {
-  const _ServerStatusBanner({required this.message});
+  const _ServerStatusBanner({
+    required this.message,
+    this.onDismiss,
+  });
 
   final String message;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -1462,10 +1513,10 @@ class _ServerStatusBanner extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       color: const Color(0xFFB42318),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: [
-            const Icon(Iconsax.cloud, color: Colors.white),
+            const Icon(Iconsax.cloud, color: Colors.white, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -1473,9 +1524,19 @@ class _ServerStatusBanner extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
+                  fontSize: 13,
                 ),
               ),
             ),
+            if (onDismiss != null)
+              IconButton(
+                tooltip: 'إخفاء التنبيه',
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                onPressed: onDismiss,
+              ),
           ],
         ),
       ),
@@ -1488,11 +1549,13 @@ class _ServerRecoveryBar extends StatelessWidget {
     required this.message,
     required this.onRetry,
     required this.onChangeServer,
+    this.onDismiss,
   });
 
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onChangeServer;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -1505,12 +1568,12 @@ class _ServerRecoveryBar extends StatelessWidget {
         child: Material(
           elevation: 14,
           color: const Color(0xFF7F1D1D),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                const Icon(Iconsax.cloud_cross, color: Colors.white),
+                const Icon(Iconsax.cloud_cross, color: Colors.white, size: 22),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -1520,6 +1583,7 @@ class _ServerRecoveryBar extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
+                      fontSize: 13,
                     ),
                   ),
                 ),
@@ -1529,8 +1593,9 @@ class _ServerRecoveryBar extends StatelessWidget {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
                     side: const BorderSide(color: Colors.white54),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
-                  icon: const Icon(Icons.settings_ethernet, size: 18),
+                  icon: const Icon(Icons.settings_ethernet, size: 16),
                   label: const Text('تغيير الرابط'),
                 ),
                 const SizedBox(width: 8),
@@ -1539,10 +1604,24 @@ class _ServerRecoveryBar extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: const Color(0xFF7F1D1D),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
                   label: const Text('إعادة الاتصال'),
                 ),
+                if (onDismiss != null) ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: onDismiss,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('إخفاء'),
+                  ),
+                ],
               ],
             ),
           ),
