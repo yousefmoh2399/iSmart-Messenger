@@ -23,6 +23,7 @@ import '../../features/auth/data/auth_session_manager.dart';
 import '../../features/auth/data/session_store.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/chat/data/chat_local_cache.dart';
+import '../../features/chat/data/chat_outbox_service.dart';
 import '../../features/chat/data/chat_repository.dart';
 import '../../features/chat/data/chat_socket_service.dart';
 import '../../features/chat/models/chat_models.dart';
@@ -447,6 +448,16 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
     ref.watch(chatLocalCacheProvider),
     socketService: ref.watch(chatSocketServiceProvider),
   );
+});
+
+final chatOutboxServiceProvider = Provider<ChatOutboxService>((ref) {
+  final service = ChatOutboxService(
+    repository: ref.watch(chatRepositoryProvider),
+    cache: ref.watch(chatLocalCacheProvider),
+    socketService: ref.watch(chatSocketServiceProvider),
+  );
+  ref.onDispose(service.dispose);
+  return service;
 });
 
 final ticketRepositoryProvider = Provider<TicketRepository>((ref) {

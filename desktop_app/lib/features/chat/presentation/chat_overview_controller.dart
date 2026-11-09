@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
+import '../data/chat_outbox_service.dart';
 import '../data/chat_repository.dart';
 import '../data/chat_socket_service.dart';
 import '../models/chat_models.dart';
@@ -14,8 +15,10 @@ import '../utils/chat_reaction_emoji_stats.dart';
 
 class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
+  StreamSubscription<ChatOutboxEvent>? _outboxSubscription;
   ChatRepository? _chatRepository;
   ChatSocketService? _chatSocketService;
+  ChatOutboxService? _chatOutboxService;
   String _currentUserId = '';
   bool _disposed = false;
   int _usersPage = 1;
@@ -27,6 +30,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
+
+  ChatOutboxService _outbox() =>
+      _chatOutboxService ?? ref.read<ChatOutboxService>(chatOutboxServiceProvider);
 
   bool _isUnauthorized(Object error) {
     return error is ApiException && error.isUnauthorized;
@@ -79,13 +85,16 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     unawaited(ref.read(chatSocketConnectionProvider.future));
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatSocketService = ref.read(chatSocketServiceProvider);
+    _chatOutboxService = ref.read(chatOutboxServiceProvider);
     _currentUserId = ref.read(authControllerProvider).valueOrNull?.id ?? '';
     _disposed = false;
     _listenToSocket();
+    _listenToOutbox();
     ref.onDispose(() {
       _disposed = true;
       _overviewCacheDebounceTimer?.cancel();
       _eventsSubscription?.cancel();
+      _outboxSubscription?.cancel();
     });
     return _loadOverview();
   }
@@ -255,6 +264,20 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       await loadMoreUsers();
       if (_usersPage == beforePage) break;
     }
+  }
+
+  void _listenToOutbox() {
+    _outboxSubscription?.cancel();
+    final outboxService = _outbox();
+    _outboxSubscription = outboxService.events.listen((event) {
+      if (event is ChatOutboxConfirmedEvent) {
+        applyConfirmedOutboxMessage(
+          event.conversationId,
+          'temp_${event.clientMessageId}',
+          event.message,
+        );
+      }
+    });
   }
 
   void _listenToSocket() {
@@ -1599,13 +1622,18 @@ Future<ChatConversation> uploadConversationAvatar({
 class ConversationMessagesController
     extends AutoDisposeFamilyAsyncNotifier<ConversationMessagesState, String> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
+  StreamSubscription<ChatOutboxEvent>? _outboxSubscription;
   ChatSocketService? _socketService;
   ChatRepository? _chatRepository;
+  ChatOutboxService? _chatOutboxService;
   bool _isRefreshing = false;
   bool _disposed = false;
   bool _isInitialBuildFetchingNetwork = false;
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
+
+  ChatOutboxService _outbox() =>
+      _chatOutboxService ?? ref.read<ChatOutboxService>(chatOutboxServiceProvider);
 
   bool _isUnauthorized(Object error) {
     return error is ApiException && error.isUnauthorized;
@@ -1657,9 +1685,11 @@ class ConversationMessagesController
     unawaited(ref.read(chatSocketConnectionProvider.future));
     _socketService = ref.read(chatSocketServiceProvider);
     _chatRepository = ref.read(chatRepositoryProvider);
+    _chatOutboxService = ref.read(chatOutboxServiceProvider);
     _disposed = false;
     _socketService?.joinConversation(arg);
     _listenToSocket(arg);
+    _listenToOutbox(arg);
     ref.onDispose(() {
       _disposed = true;
       if (_messagesCacheDebounceTimer?.isActive ?? false) {
@@ -1670,6 +1700,7 @@ class ConversationMessagesController
         }
       }
       _eventsSubscription?.cancel();
+      _outboxSubscription?.cancel();
       _socketService?.leaveConversation(arg);
     });
 
@@ -1688,6 +1719,59 @@ class ConversationMessagesController
     } finally {
       _isInitialBuildFetchingNetwork = false;
     }
+  }
+
+  void _listenToOutbox(String conversationId) {
+    _outboxSubscription?.cancel();
+    final outboxService = _outbox();
+    _outboxSubscription = outboxService.events.listen((event) {
+      if (event.conversationId != conversationId) return;
+      final cur = state.valueOrNull;
+      if (cur == null) return;
+
+      final tempId = 'temp_${event.clientMessageId}';
+      if (event is ChatOutboxProgressEvent) {
+        final idx = cur.messages.indexWhere((m) =>
+            m.id == tempId ||
+            m.metadata?['clientMessageId'] == event.clientMessageId);
+        if (idx != -1) {
+          final existing = cur.messages[idx];
+          final nextMeta = Map<String, dynamic>.from(existing.metadata ?? {});
+          nextMeta['progress'] = event.progress;
+          nextMeta['status'] = 'uploading';
+          final updated = existing.copyWith(metadata: nextMeta);
+          final nextList = List<ChatMessage>.from(cur.messages);
+          nextList[idx] = updated;
+          _setStateAndCache(cur.copyWith(messages: nextList));
+        }
+      } else if (event is ChatOutboxConfirmedEvent) {
+        final nextList = cur.messages
+            .where((m) =>
+                m.id != tempId &&
+                m.id != event.message.id &&
+                m.metadata?['clientMessageId'] != event.clientMessageId)
+            .toList();
+        nextList.insert(0, event.message);
+        _setStateAndCache(
+          cur.copyWith(messages: _sortAndDedupeMessages(nextList)),
+          immediate: true,
+        );
+      } else if (event is ChatOutboxFailedEvent) {
+        final idx = cur.messages.indexWhere((m) =>
+            m.id == tempId ||
+            m.metadata?['clientMessageId'] == event.clientMessageId);
+        if (idx != -1) {
+          final existing = cur.messages[idx];
+          final nextMeta = Map<String, dynamic>.from(existing.metadata ?? {});
+          nextMeta['status'] = 'failed';
+          nextMeta['error'] = event.error;
+          final updated = existing.copyWith(metadata: nextMeta);
+          final nextList = List<ChatMessage>.from(cur.messages);
+          nextList[idx] = updated;
+          _setStateAndCache(cur.copyWith(messages: nextList));
+        }
+      }
+    });
   }
 
   void _listenToSocket(String conversationId) {
@@ -1853,6 +1937,7 @@ class ConversationMessagesController
   /// A pending message in cache means the app was killed before the server
   /// acknowledged it — it will never auto-confirm, so treat it as failed.
   ChatMessagesPage _markPendingAsFailed(ChatMessagesPage page) {
+    final outboxService = _outbox();
     final fixed = page.messages.map((m) {
       if (!m.id.startsWith('temp_')) {
         if (m.metadata != null &&
@@ -1865,8 +1950,11 @@ class ConversationMessagesController
         }
         return m;
       }
+      final clientMsgId = m.metadata?['clientMessageId']?.toString() ??
+          (m.id.startsWith('temp_') ? m.id.substring(5) : null);
+      final isInOutbox = clientMsgId != null && outboxService.hasItem(clientMsgId);
       final msgStatus = m.metadata?['status']?.toString();
-      if (msgStatus == 'pending') {
+      if (msgStatus == 'pending' && !isInOutbox) {
         final updated = Map<String, dynamic>.from(m.metadata ?? {});
         updated['status'] = 'failed';
         return m.copyWith(metadata: updated);
@@ -2186,6 +2274,18 @@ class ConversationMessagesController
             .updateLastMessageOptimistically(arg, tempMessage);
       } catch (_) {}
 
+      final outbox = _outbox();
+      final outboxItem = ChatOutboxItem(
+        clientMessageId: stableClientMessageId,
+        conversationId: arg,
+        content: content,
+        replyToMessageId: replyToMessageId,
+        metadata: effectiveMetadata,
+        messageType: messageType,
+        fileUrl: fileUrl,
+        isSilent: isSilent,
+      );
+
       try {
         final result = await _guardAuth(
           () => _repository().sendTextMessage(
@@ -2226,7 +2326,18 @@ class ConversationMessagesController
               .read(chatOverviewControllerProvider.notifier)
               .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
         } catch (_) {}
+        await outbox.remove(stableClientMessageId);
       } catch (error) {
+        final isNetErr = isNetworkOrOfflineError(error) ||
+            (_socketService != null && !_socketService!.isConnected);
+        if (isNetErr) {
+          // Network offline / connection lost: enqueue in persistent outbox!
+          // Stays in 'pending' status (clock icon). Automatically sends on reconnect.
+          await outbox.enqueue(outboxItem);
+          debugPrint('[Chat] Message $stableClientMessageId queued in outbox for auto-send on reconnection.');
+          return;
+        }
+
         final failedMessage = tempMessage.copyWith(
           metadata: {
             ...effectiveMetadata,
@@ -2417,6 +2528,7 @@ class ConversationMessagesController
         }
       }
 
+      final outbox = _outbox();
       try {
         final result = await _guardAuth(
           () => _repository().sendFileMessage(
@@ -2460,7 +2572,31 @@ class ConversationMessagesController
               .read(chatOverviewControllerProvider.notifier)
               .applyConfirmedOutboxMessage(arg, tempMessage.id, confirmedMessage);
         } catch (_) {}
+        await outbox.remove(stableClientMessageId);
       } catch (error) {
+        final isNetErr = isNetworkOrOfflineError(error) ||
+            (_socketService != null && !_socketService!.isConnected);
+
+        if (isNetErr && filePath.isNotEmpty) {
+          // File upload failed due to network / VPN drop or offline state!
+          // Add to persistent Outbox queue so it will auto-upload when network is restored!
+          final outboxItem = ChatOutboxItem(
+            clientMessageId: stableClientMessageId,
+            conversationId: arg,
+            content: content ?? '',
+            messageType: effectiveMessageType,
+            localFilePath: filePath,
+            fileName: resolvedFileName,
+            sourceFileName: sourceFileName,
+            customFileName: customFileName,
+            replyToMessageId: replyToMessageId,
+            metadata: effectiveMetadata,
+          );
+          await outbox.enqueue(outboxItem);
+          debugPrint('[Chat] File $resolvedFileName queued in outbox for auto-upload upon reconnection.');
+          return;
+        }
+
         final failedMetadata = Map<String, dynamic>.from(effectiveMetadata);
         failedMetadata['status'] = 'failed';
         failedMetadata['error'] = error.toString();

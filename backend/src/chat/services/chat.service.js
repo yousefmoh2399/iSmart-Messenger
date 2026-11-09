@@ -1851,9 +1851,18 @@ async function listMessagesForConversation(
 async function createMessage(currentUser, payload, file) {
   const conversation = await getConversationById(payload.conversationId);
   await assertConversationAccess(currentUser, conversation);
-  const clientMessageId = String(payload.clientMessageId || "")
+  let clientMessageId = String(payload.clientMessageId || "")
     .trim()
     .slice(0, 100);
+  if (!clientMessageId && payload.metadata) {
+    let parsedMeta = payload.metadata;
+    if (typeof parsedMeta === "string") {
+      try { parsedMeta = JSON.parse(parsedMeta); } catch (_) {}
+    }
+    if (parsedMeta && typeof parsedMeta === "object" && parsedMeta.clientMessageId) {
+      clientMessageId = String(parsedMeta.clientMessageId).trim().slice(0, 100);
+    }
+  }
   if (clientMessageId) {
     const existing = await Message.findOne({
       senderId: currentUser.id,

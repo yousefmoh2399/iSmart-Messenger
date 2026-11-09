@@ -3436,6 +3436,7 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
     content,
     replyToMessageId,
     fileName,
+    clientMessageId,
     metadata,
     transferId,
   } = payload;
@@ -3460,7 +3461,20 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
       if (content) fields.content = String(content);
       if (replyToMessageId) fields.replyToMessageId = String(replyToMessageId);
       if (fileName) fields.fileName = String(fileName);
-      if (metadata) fields.metadata = typeof metadata === "string" ? metadata : JSON.stringify(metadata);
+
+      let parsedMeta = null;
+      if (metadata) {
+        if (typeof metadata === "string") {
+          try { parsedMeta = JSON.parse(metadata); } catch (_) {}
+          fields.metadata = metadata;
+        } else {
+          parsedMeta = metadata;
+          fields.metadata = JSON.stringify(metadata);
+        }
+      }
+
+      const cId = clientMessageId || parsedMeta?.clientMessageId;
+      if (cId) fields.clientMessageId = String(cId);
 
       let head = "";
       for (const [k, v] of Object.entries(fields)) {

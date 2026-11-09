@@ -1175,7 +1175,7 @@ class _AttachmentPreview extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '$progressPct%',
+                            progressVal > 0 ? '$progressPct%' : 'بانتظار الاتصال...',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 12,
@@ -1385,7 +1385,7 @@ class _AttachmentPreview extends StatelessWidget {
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            'جاري الرفع...',
+                            progressVal > 0 ? 'جاري الرفع...' : 'بانتظار الاتصال...',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -1394,14 +1394,21 @@ class _AttachmentPreview extends StatelessWidget {
                           ),
                         ],
                       ),
-                      Text(
-                        '$progressPct%',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: textColor.withValues(alpha: 0.7),
+                      if (progressVal > 0)
+                        Text(
+                          '$progressPct%',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: textColor.withValues(alpha: 0.7),
+                          ),
+                        )
+                      else
+                        Icon(
+                          Icons.access_time_rounded,
+                          size: 13,
+                          color: textColor.withValues(alpha: 0.6),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 6),

@@ -132,4 +132,18 @@ class ChatLocalCache {
       await saveConversations(updated);
     }
   }
+
+  Future<void> saveOutboxItems(List<Map<String, dynamic>> items) async {
+    await saveRawJson('outbox_queue', {'items': items});
+  }
+
+  Future<List<Map<String, dynamic>>?> loadOutboxItems() async {
+    final cached = await loadRawJson('outbox_queue');
+    final raw = cached?['items'];
+    if (raw is! List) return null;
+    return raw
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
 }
