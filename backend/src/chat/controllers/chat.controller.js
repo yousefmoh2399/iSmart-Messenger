@@ -70,6 +70,7 @@ const {
 const {
   sendChatPushNotifications,
   sendChatReactionPushNotifications,
+  sendDismissPushNotification,
 } = require("../../services/push-notification.service");
 
 const ADMIN_CHAT_ATTACHMENT_MAX_BYTES = 200 * 1024 * 1024;
@@ -775,6 +776,10 @@ const postChatMessage = asyncHandler(async (req, res) => {
         errorMessage: error?.message,
       });
     });
+    sendDismissPushNotification({
+      userId: req.user.id,
+      conversationId: result.message.conversationId,
+    }).catch(() => {});
   }
   sendChatResponse(res, {
     status: 201,
@@ -876,6 +881,10 @@ const markSeen = asyncHandler(async (req, res) => {
       unreadCount: 0,
     });
   }
+  sendDismissPushNotification({
+    userId: req.user.id,
+    conversationId: req.params.id,
+  }).catch(() => {});
   sendChatResponse(res, {
     data: { messageIds },
     legacy: { messageIds },

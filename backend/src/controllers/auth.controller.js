@@ -7,6 +7,7 @@ const {
   revokeOtherUserDeviceSessions,
 } = require("../services/auth.service");
 const { getProfile } = require("../services/user.service");
+const PushDevice = require("../models/push-device.model");
 const asyncHandler = require("../utils/async-handler");
 
 function resolveRequestIp(req) {
@@ -65,11 +66,22 @@ const refresh = asyncHandler(async (req, res) => {
 // Revoke refresh session for current device only.
 const logout = asyncHandler(async (req, res) => {
   if (req.user?.id) {
+    const deviceUid = req.body?.deviceUid || req.user.deviceUid;
     try {
-      await revokeDeviceRefreshSession(
-        req.user.id,
-        req.body?.deviceUid || req.user.deviceUid,
-      );
+      await revokeDeviceRefreshSession(req.user.id, deviceUid);
+    } catch (_) {}
+
+    try {
+      const pushToken = req.body?.pushToken;
+      const query = { userId: req.user.id };
+      if (pushToken) {
+        query.token = String(pushToken).trim();
+      } else if (deviceUid) {
+        query.deviceId = String(deviceUid).trim();
+      }
+      await PushDevice.updateMany(query, {
+        $set: { isActive: false, isLoggedOut: true, unreadSinceLogout: 0 },
+      });
     } catch (_) {}
   }
   res.status(200).json({ success: true, message: "Logged out." });

@@ -722,7 +722,7 @@ class AuthRepository {
     return user;
   }
 
-  Future<void> logout() async {
+  Future<void> logout({String? pushToken}) async {
     final token = await getToken();
     String? deviceUid;
     try {
@@ -733,7 +733,10 @@ class AuthRepository {
       if (token != null && token.trim().isNotEmpty) {
         await _apiClient.dio.post<Map<String, dynamic>>(
           '/api/auth/logout',
-          data: {'deviceUid': deviceUid},
+          data: {
+            'deviceUid': deviceUid,
+            if (pushToken != null && pushToken.isNotEmpty) 'pushToken': pushToken,
+          },
           options: Options(
             headers: {'Authorization': 'Bearer $token'},
             validateStatus: (code) => code != null && code < 500,

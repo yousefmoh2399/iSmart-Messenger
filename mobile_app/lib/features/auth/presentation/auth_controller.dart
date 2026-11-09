@@ -183,6 +183,16 @@ class AuthController extends Notifier<AuthState> {
         ref.read(chatSocketServiceProvider).disconnect();
       } catch (_) {}
 
+      // Cancel all active notifications immediately on logout
+      try {
+        await ref.read(localNotificationServiceProvider).cancelAllNotifications();
+      } catch (_) {}
+
+      String? pushToken;
+      try {
+        pushToken = await ref.read(pushNotificationServiceProvider).getCurrentToken();
+      } catch (_) {}
+
       // Unregister push device (fast timeout to prevent blocking logout)
       try {
         await ref
@@ -197,7 +207,7 @@ class AuthController extends Notifier<AuthState> {
       try {
         await ref
             .read(authRepositoryProvider)
-            .logout()
+            .logout(pushToken: pushToken)
             .timeout(const Duration(seconds: 3));
       } catch (e) {
         debugPrint('[AuthController] Logout repository error: $e');

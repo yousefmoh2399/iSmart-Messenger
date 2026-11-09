@@ -31,6 +31,7 @@ const { getChatTransferForUser } = require("../services/chat-transfer.service");
 const { recordSocketTelemetry } = require("../../middleware/request-telemetry.middleware");
 const {
   sendChatPushNotifications,
+  sendDismissPushNotification,
   sendTicketPushNotifications,
   sendReminderPushNotifications,
 } = require("../../services/push-notification.service");
@@ -1024,6 +1025,11 @@ function initializeChatSocketServer(httpServer) {
           });
         });
 
+        sendDismissPushNotification({
+          userId: currentUser.id,
+          conversationId: result.message.conversationId,
+        }).catch(() => {});
+
         socketAck(ack, {
           ok: true,
           success: true,
@@ -1139,6 +1145,10 @@ function initializeChatSocketServer(httpServer) {
           messageIds,
         });
         await emitUnreadCount(io, currentUser.id, payload.conversationId);
+        sendDismissPushNotification({
+          userId: currentUser.id,
+          conversationId: payload.conversationId,
+        }).catch(() => {});
         socketAck(ack, {
           ok: true,
           success: true,

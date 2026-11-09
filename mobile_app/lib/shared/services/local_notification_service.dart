@@ -193,7 +193,7 @@ class LocalNotificationService {
   }
 
   /// Cancels all notifications (child messages and summary) for a specific conversation.
-  /// Called when a conversation is opened or cleared.
+  /// Called when a conversation is opened, cleared, or marked as read.
   Future<void> cancelConversationNotifications(String conversationId) async {
     final convId = conversationId.trim();
     if (convId.isEmpty) return;
@@ -206,6 +206,12 @@ class LocalNotificationService {
       await _plugin.cancel(summaryId);
     } catch (_) {}
 
+    try {
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.cancel(summaryId, tag: 'chat_$convId');
+    } catch (_) {}
+
     if (childIds != null) {
       for (final id in childIds) {
         try {
@@ -213,6 +219,16 @@ class LocalNotificationService {
         } catch (_) {}
       }
     }
+  }
+
+  /// Cancels all active notifications across all chats and categories.
+  /// Called on logout or when all messages are read.
+  Future<void> cancelAllNotifications() async {
+    _conversationNotificationIds.clear();
+    _conversationSnippets.clear();
+    try {
+      await _plugin.cancelAll();
+    } catch (_) {}
   }
 
   Future<void> initialize() async {

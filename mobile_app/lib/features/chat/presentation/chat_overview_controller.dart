@@ -265,6 +265,15 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     if (effectiveConversations.isNotEmpty) {
       _repository().cache.saveOverviewData(overview);
       _persistConversations(effectiveConversations);
+
+      // Dismiss stale notifications for chats that were already read on desktop/web
+      for (final conv in effectiveConversations) {
+        if (conv.unreadCount == 0) {
+          ref
+              .read(localNotificationServiceProvider)
+              .cancelConversationNotifications(conv.id);
+        }
+      }
     }
     return overview;
   }
@@ -1029,6 +1038,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final myId = _effectiveCurrentUserId;
     final isMe = myId.isNotEmpty && userId.trim() == myId;
 
+    if (isMe) {
+      ref
+          .read(localNotificationServiceProvider)
+          .cancelConversationNotifications(conversationId);
+    }
+
     final updated = current.conversations.map((conversation) {
       if (conversation.id != conversationId) {
         return conversation;
@@ -1146,6 +1161,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     final current = state.valueOrNull;
     if (current == null || conversationId == null) {
       return;
+    }
+
+    if (unreadCount <= 0) {
+      ref
+          .read(localNotificationServiceProvider)
+          .cancelConversationNotifications(conversationId);
     }
 
     final updated = current.conversations
