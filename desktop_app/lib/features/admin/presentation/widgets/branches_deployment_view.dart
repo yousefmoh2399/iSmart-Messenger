@@ -30,6 +30,8 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
   String _filterType = 'all'; // 'all', 'exact', 'older', 'not_installed'
   String _appliedTargetVersion = '1.1.21';
   bool _initializedTarget = false;
+  bool _showTopologyMap = false;
+  bool _showRequestsStream = false;
 
   @override
   void initState() {
@@ -91,6 +93,99 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
+  void _showChangeTargetVersionDialog(BuildContext context, List<String> detectedVersions) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.tune_rounded, color: Color(0xFF0284C7), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'تحديد الإصدار المعتمد للفحص',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'أدخل رقم الإصدار الرسمي المطلوب مقارعته وفرز الأجهزة المطابقة أو القديمة بناءً عليه:',
+                style: TextStyle(fontSize: 13.5, height: 1.4),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _targetVersionCtrl,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0284C7),
+                ),
+                decoration: InputDecoration(
+                  hintText: '1.1.21',
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              if (detectedVersions.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                const Text(
+                  'نسخ مكتشفة على الشبكة:',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: detectedVersions.map((v) {
+                    return ActionChip(
+                      label: Text('v$v', style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                      onPressed: () {
+                        _targetVersionCtrl.text = v;
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء', style: TextStyle(fontSize: 13.5)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _applyTargetVersion();
+                Navigator.pop(ctx);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0284C7),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('تطبيق التغيير', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   String _formatTimeAgo(DateTime? dt) {
     if (dt == null) return 'غير متوفر';
     final now = DateTime.now();
@@ -116,7 +211,6 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
 
     final allBranches = deployment?.branches ?? [];
     final query = _searchCtrl.text.trim().toLowerCase();
-
     final targetVer = _appliedTargetVersion;
 
     final detectedVersions = (summary?.versionBreakdown.keys ?? [])
@@ -169,7 +263,11 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
       if (query.isNotEmpty) {
         final matchesName = b.branchName.toLowerCase().contains(query);
         final matchesCode = b.branchCode.toLowerCase().contains(query);
-        return matchesName || matchesCode;
+        final matchesUser = b.devices.any((d) =>
+            d.fullName.toLowerCase().contains(query) ||
+            d.username.toLowerCase().contains(query) ||
+            d.hostname.toLowerCase().contains(query));
+        return matchesName || matchesCode || matchesUser;
       }
       return true;
     }).toList();
@@ -177,32 +275,37 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 1. n8n Animated Topology Canvas
-        N8nWorkflowDiagramWidget(
+        // 1. Executive Apple Hero Metric Cards
+        _buildHeroKpiRow(
           summary: summary,
-          telemetry: telemetry,
-          stats: stats,
-          isDark: isDark,
-          onOpenFullscreen: () => _openLiveTopologyScreen(context),
-        ),
-        const SizedBox(height: 18),
-
-        // 2. Executive Bento KPI Cards
-        _buildBentoKpiRow(summary, telemetry, isDark, cs, targetVer),
-        const SizedBox(height: 18),
-
-        // 3. Target Version Inspector Bar
-        _buildTargetVersionInspectorBar(
           isDark: isDark,
           cs: cs,
-          isLoading: state.isLoadingDeployment,
-          detectedVersions: detectedVersions,
-          targetVersion: targetVer,
+          targetVer: targetVer,
+          totalExactDevs: totalExactDevs,
+          totalOlderDevs: totalOlderDevs,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
 
-        // 4. Action and Filter Bar
-        _buildActionFilterBar(
+        // 2. Outdated Version Action Alert (Only shown when outdated machines exist)
+        if (totalOlderDevs > 0) ...[
+          _buildOutdatedAlertBanner(
+            totalOlderDevs: totalOlderDevs,
+            targetVer: targetVer,
+            isDark: isDark,
+            onFilterOlder: () {
+              setState(() {
+                _filterType = 'older';
+              });
+            },
+            onExportExcel: () {
+              notifier.exportReport('xlsx', targetVersion: targetVer);
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // 3. Unified Clean Apple Toolbar (Search, Filter Pills, Target Version, Export Buttons)
+        _buildUnifiedToolbar(
           state: state,
           notifier: notifier,
           allCount: allBranches.length,
@@ -212,383 +315,123 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           olderDevsCount: totalOlderDevs,
           pendingCount: pendingCount,
           targetVersion: targetVer,
+          detectedVersions: detectedVersions,
           isDark: isDark,
           cs: cs,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
 
-        // 5. Fleet Data Table / Cards
+        // 4. Interactive Network Topology Toggle Card
+        _buildTopologyToggleCard(
+          isDark: isDark,
+          cs: cs,
+          summary: summary,
+          telemetry: telemetry,
+          stats: stats,
+        ),
+        const SizedBox(height: 16),
+
+        // 5. Fleet Table / Cards
         if (state.isLoadingDeployment && allBranches.isEmpty)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 40),
+            padding: EdgeInsets.symmetric(vertical: 48),
             child: Center(child: CircularProgressIndicator()),
           )
         else if (filteredBranches.isEmpty)
           _buildEmptyBranchesCard(isDark)
         else
-          _buildFleetView(filteredBranches, isDark, cs, targetVer),
+          _buildEnterpriseFleetTable(filteredBranches, isDark, cs, targetVer),
 
-        const SizedBox(height: 22),
+        const SizedBox(height: 20),
 
-        // 6. Live Server Requests Stream (Cloudflare-style Log Stream)
+        // 6. Optional Live Server Request Stream (Collapsible)
         _buildLiveRequestsStreamCard(telemetry, isDark, cs),
       ],
     );
   }
 
-  Widget _buildTargetVersionInspectorBar({
+  // ---------------------------------------------------------------------------
+  // 1. HERO METRIC KPI CARDS
+  // ---------------------------------------------------------------------------
+  Widget _buildHeroKpiRow({
+    required BranchDeploymentSummary? summary,
     required bool isDark,
     required ColorScheme cs,
-    required bool isLoading,
-    required List<String> detectedVersions,
-    required String targetVersion,
+    required String targetVer,
+    required int totalExactDevs,
+    required int totalOlderDevs,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF131926) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
-          width: 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.02),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isCompact = constraints.maxWidth < 920;
-
-          final inputAndApplyWidget = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 130,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: const Color(0xFF38BDF8).withValues(alpha: 0.5),
-                    width: 1.2,
-                  ),
-                ),
-                child: TextField(
-                  controller: _targetVersionCtrl,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF38BDF8),
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: '1.1.21',
-                    hintStyle: TextStyle(fontSize: 12, color: Colors.grey),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    border: InputBorder.none,
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => _applyTargetVersion(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
-                onPressed: isLoading ? null : () => _applyTargetVersion(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  elevation: 0,
-                ),
-                icon: isLoading
-                    ? const SizedBox(
-                        width: 13,
-                        height: 13,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.check_circle_rounded, size: 15),
-                label: const Text(
-                  'تطبيق ومطابقة',
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ],
-          );
-
-          final titleWidget = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.rule_folder_rounded,
-                  color: Color(0xFF38BDF8),
-                  size: 17,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'الإصدار المرجعي المعتمد للفحص:',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF38BDF8).withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'v$targetVersion',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF0284C7),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Text(
-                    'أدخل نسخة البرنامج للمقارنة الفورية وفرز الأجهزة المطابقة أو الأقدم',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          );
-
-          final chipsWidget = detectedVersions.isNotEmpty
-              ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'نسخ مكتشفة بالشبكة:',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 5,
-                      children: detectedVersions.map((v) {
-                        final isCurrent = v == targetVersion;
-                        return InkWell(
-                          onTap: () => _applyTargetVersion(v),
-                          borderRadius: BorderRadius.circular(5),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-                            decoration: BoxDecoration(
-                              color: isCurrent
-                                  ? const Color(0xFF0284C7).withValues(alpha: 0.2)
-                                  : (isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9)),
-                              borderRadius: BorderRadius.circular(5),
-                              border: Border.all(
-                                color: isCurrent
-                                    ? const Color(0xFF0284C7)
-                                    : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-                              ),
-                            ),
-                            child: Text(
-                              'v$v',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontFamily: 'monospace',
-                                fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
-                                color: isCurrent
-                                    ? const Color(0xFF38BDF8)
-                                    : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                )
-              : const SizedBox.shrink();
-
-          if (isCompact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                titleWidget,
-                const SizedBox(height: 10),
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    inputAndApplyWidget,
-                    chipsWidget,
-                  ],
-                ),
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              titleWidget,
-              const SizedBox(width: 16),
-              inputAndApplyWidget,
-              const Spacer(),
-              chipsWidget,
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildBentoKpiRow(
-    BranchDeploymentSummary? summary,
-    RequestTelemetryData? telemetry,
-    bool isDark,
-    ColorScheme cs,
-    String targetVer,
-  ) {
     final adoptionPercent = summary?.adoptionPercentage ?? 0;
     final installedBranches = summary?.installedBranchesCount ?? 0;
     final totalBranches = summary?.totalBranches ?? 0;
-    final notInstalled = summary?.notInstalledBranchesCount ?? 0;
-
     final totalDevs = summary?.totalInstalledDevices ?? 0;
     final onlineDevs = summary?.totalOnlineDevices ?? 0;
-    final latestDevs = summary?.latestVersionDevicesCount ?? 0;
-    final outdatedDevs = summary?.outdatedDevicesCount ?? 0;
-
-    final rps = telemetry?.rps ?? 0.0;
-    final latency = telemetry?.avgLatencyMs ?? 14;
-    final totalReqs = telemetry?.totalRequests ?? 0;
-
-    final appVer = summary?.currentAppVersion ?? '1.1.21';
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isCompact = constraints.maxWidth < 840;
-        final cardCount = isCompact ? 2 : 4;
-        final spacing = 12.0;
-        final cardWidth =
-            (constraints.maxWidth - (spacing * (cardCount - 1))) / cardCount;
+        final isCompact = constraints.maxWidth < 920;
+        final cardSpacing = 12.0;
+        final cardWidth = isCompact
+            ? (constraints.maxWidth - cardSpacing) / 2
+            : (constraints.maxWidth - (cardSpacing * 3)) / 4;
 
         final cards = [
-          // Card 1: Branch Coverage
-          _buildKpiCard(
+          // Card 1: Adoption
+          _buildMetricCard(
             isDark: isDark,
             width: cardWidth,
-            icon: Icons.apartment_rounded,
-            accentColor: const Color(0xFF10B981),
-            title: 'تغطية أسطول الفروع',
+            icon: Icons.hub_rounded,
+            accentColor: const Color(0xFF2563EB),
+            title: 'نسبة التغطية بالفروع',
             value: '$adoptionPercent%',
-            subtitle: '$installedBranches مثبت  •  $notInstalled بانتظار النشر',
-            extraWidget: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(3),
-                child: LinearProgressIndicator(
-                  value: totalBranches > 0
-                      ? (installedBranches / totalBranches).clamp(0.0, 1.0)
-                      : 0.0,
-                  minHeight: 5,
-                  backgroundColor: isDark
-                      ? const Color(0xFF1F2937)
-                      : const Color(0xFFE2E8F0),
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                    Color(0xFF10B981),
-                  ),
-                ),
-              ),
-            ),
+            subtitle: '$installedBranches فرع مثبت من أصل $totalBranches',
+            badge: '$installedBranches نشط',
+            badgeColor: const Color(0xFF2563EB),
           ),
-          // Card 2: Workstation Fleet
-          _buildKpiCard(
+          // Card 2: Workstations
+          _buildMetricCard(
             isDark: isDark,
             width: cardWidth,
             icon: Icons.computer_rounded,
             accentColor: const Color(0xFF0284C7),
-            title: 'محطات وأجهزة العمل',
+            title: 'محطات العمل الفعلية',
             value: '$totalDevs محطة',
             subtitle: '$onlineDevs متصل الآن بالشبكة',
-            badge: '$onlineDevs نشط',
-            badgeColor: const Color(0xFF0284C7),
+            badge: '🟢 $onlineDevs متصل',
+            badgeColor: const Color(0xFF10B981),
           ),
-          // Card 3: Version Integrity & Outdated Tracking
-          _buildKpiCard(
+          // Card 3: Target Version Match
+          _buildMetricCard(
             isDark: isDark,
             width: cardWidth,
             icon: Icons.verified_user_rounded,
-            accentColor: outdatedDevs > 0
-                ? const Color(0xFFF59E0B)
-                : const Color(0xFF10B981),
+            accentColor: const Color(0xFF10B981),
             title: 'مطابقة الإصدار المعتمد',
-            value: '$latestDevs مطابق',
-            subtitle: outdatedDevs > 0
-                ? '$outdatedDevs جهاز بنسخ أقدم من v$targetVer'
-                : 'كافة الأجهزة مطابقة على v$targetVer',
-            badge: outdatedDevs > 0 ? '$outdatedDevs قديم ⚠️' : 'مطابق 100% ✅',
-            badgeColor: outdatedDevs > 0
-                ? const Color(0xFFF59E0B)
-                : const Color(0xFF10B981),
+            value: '$totalExactDevs مطابق',
+            subtitle: 'مطابق لـ v$targetVer المعتمد',
+            badge: totalDevs > 0 ? '${((totalExactDevs / totalDevs) * 100).round()}% معتمد' : '0%',
+            badgeColor: const Color(0xFF10B981),
           ),
-          // Card 4: Server Throughput & API
-          _buildKpiCard(
+          // Card 4: Outdated Machines
+          _buildMetricCard(
             isDark: isDark,
             width: cardWidth,
-            icon: Icons.speed_rounded,
-            accentColor: const Color(0xFF6366F1),
-            title: 'أداء الخادم والـ API',
-            value: '$rps req/s',
-            subtitle: 'متوسط الاستجابة: $latency ms  •  v$appVer',
-            badge: '$totalReqs طلب',
-            badgeColor: const Color(0xFF6366F1),
+            icon: Icons.warning_amber_rounded,
+            accentColor: totalOlderDevs > 0 ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+            title: 'أجهزة بنسخ قديمة',
+            value: '$totalOlderDevs قديم',
+            subtitle: totalOlderDevs > 0 ? 'تتطلب التحديث العاجل لـ v$targetVer' : 'كافة الأجهزة محدثة بالكامل',
+            badge: totalOlderDevs > 0 ? '⚠️ $totalOlderDevs جهاز' : '✅ 100% متوافق',
+            badgeColor: totalOlderDevs > 0 ? const Color(0xFFEF4444) : const Color(0xFF10B981),
           ),
         ];
 
         if (isCompact) {
           return Column(
             children: [
-              Row(children: [cards[0], SizedBox(width: spacing), cards[1]]),
+              Row(children: [cards[0], SizedBox(width: cardSpacing), cards[1]]),
               const SizedBox(height: 12),
-              Row(children: [cards[2], SizedBox(width: spacing), cards[3]]),
+              Row(children: [cards[2], SizedBox(width: cardSpacing), cards[3]]),
             ],
           );
         }
@@ -596,7 +439,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
         return Row(
           children: [
             for (int i = 0; i < cards.length; i++) ...[
-              if (i > 0) SizedBox(width: spacing),
+              if (i > 0) SizedBox(width: cardSpacing),
               cards[i],
             ],
           ],
@@ -605,7 +448,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
-  Widget _buildKpiCard({
+  Widget _buildMetricCard({
     required bool isDark,
     required double width,
     required IconData icon,
@@ -615,24 +458,21 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     required String subtitle,
     String? badge,
     Color? badgeColor,
-    Widget? extraWidget,
   }) {
     return Container(
       width: width,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF131926) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.02),
-            blurRadius: 6,
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+            blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
@@ -644,24 +484,22 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           Row(
             children: [
               Container(
-                width: 30,
-                height: 30,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   color: accentColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: accentColor, size: 16),
+                child: Icon(icon, color: accentColor, size: 20),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 11.5,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -669,16 +507,15 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               ),
               if (badge != null)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: (badgeColor ?? accentColor).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(5),
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     badge,
                     style: TextStyle(
-                      fontSize: 9.5,
+                      fontSize: 12,
                       fontWeight: FontWeight.w700,
                       color: badgeColor ?? accentColor,
                     ),
@@ -686,36 +523,162 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                 ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
             value,
             style: TextStyle(
-              fontSize: 19,
+              fontSize: 26,
               fontWeight: FontWeight.w800,
               color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
-              letterSpacing: -0.3,
+              letterSpacing: -0.4,
             ),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Text(
             subtitle,
             style: TextStyle(
-              fontSize: 10.5,
+              fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: isDark
-                  ? const Color(0xFF94A3B8)
-                  : const Color(0xFF64748B),
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          if (extraWidget != null) extraWidget,
         ],
       ),
     );
   }
 
-  Widget _buildActionFilterBar({
+  // ---------------------------------------------------------------------------
+  // 2. OUTDATED ALERT BANNER
+  // ---------------------------------------------------------------------------
+  Widget _buildOutdatedAlertBanner({
+    required int totalOlderDevs,
+    required String targetVer,
+    required bool isDark,
+    required VoidCallback onFilterOlder,
+    required VoidCallback onExportExcel,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF241416) : const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFEF4444).withValues(alpha: 0.4),
+          width: 1.2,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 800;
+
+          final infoCol = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Color(0xFFEF4444),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'تنبيه متابعة الأجهزة: تم رصد $totalOlderDevs محطة عمل تعمل بنسخ قديمة',
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFFDC2626),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'يجب تحديث هذه المحطات إلى النسخة المعتمدة (v$targetVer) لضمان استقرار الرسائل وسرعة الاتصال.',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+
+          final buttons = Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                onPressed: onFilterOlder,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC2626),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
+                ),
+                icon: const Icon(Icons.filter_list_rounded, size: 16),
+                label: Text(
+                  'عرض الأجهزة القديمة فقط ($totalOlderDevs)',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: onExportExcel,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFDC2626),
+                  side: BorderSide(color: const Color(0xFFDC2626).withValues(alpha: 0.5)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.table_chart_rounded, size: 16),
+                label: const Text(
+                  'تصدير كشف القديمة Excel',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          );
+
+          if (isCompact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                infoCol,
+                const SizedBox(height: 12),
+                buttons,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(child: infoCol),
+              const SizedBox(width: 16),
+              buttons,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. UNIFIED ACTION BAR (Search, Filters, Target Ver, Exports)
+  // ---------------------------------------------------------------------------
+  Widget _buildUnifiedToolbar({
     required SystemMonitorState state,
     required SystemMonitorController notifier,
     required int allCount,
@@ -725,164 +688,158 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     required int olderDevsCount,
     required int pendingCount,
     required String targetVersion,
+    required List<String> detectedVersions,
     required bool isDark,
     required ColorScheme cs,
   }) {
     final isExporting = state.isExportingReport;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF131926) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isCompact = constraints.maxWidth < 820;
+          final isCompact = constraints.maxWidth < 960;
 
+          // Search Field
           final searchWidget = SizedBox(
-            width: isCompact ? constraints.maxWidth : 280,
-            height: 36,
+            width: isCompact ? constraints.maxWidth : 300,
+            height: 42,
             child: TextField(
               controller: _searchCtrl,
               onChanged: (_) => setState(() {}),
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: 14,
                 color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
               decoration: InputDecoration(
-                hintText: 'بحث باسم الفرع أو الكود...',
+                hintText: 'بحث باسم الفرع، الكود، أو الموظف...',
                 hintStyle: TextStyle(
-                  fontSize: 12,
-                  color: isDark
-                      ? const Color(0xFF64748B)
-                      : const Color(0xFF94A3B8),
+                  fontSize: 13.5,
+                  color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
                 ),
-                prefixIcon: const Icon(Icons.search_rounded, size: 17),
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
                 suffixIcon: _searchCtrl.text.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 16),
+                        icon: const Icon(Icons.close_rounded, size: 18),
                         onPressed: () {
                           _searchCtrl.clear();
                           setState(() {});
                         },
                       )
                     : null,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                 filled: true,
-                fillColor: isDark
-                    ? const Color(0xFF090D16)
-                    : const Color(0xFFF8FAFC),
+                fillColor: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(
-                    color: isDark
-                        ? const Color(0xFF1F2937)
-                        : const Color(0xFFE2E8F0),
+                    color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
                   ),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(
-                    color: isDark
-                        ? const Color(0xFF1F2937)
-                        : const Color(0xFFE2E8F0),
+                    color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
                   ),
                 ),
               ),
             ),
           );
 
-          final filterPills = Row(
-            mainAxisSize: MainAxisSize.min,
+          // Filter Pills
+          final filterPills = Wrap(
+            spacing: 8,
+            runSpacing: 6,
             children: [
               _buildFilterChoice('all', 'جميع الفروع ($allCount)'),
-              const SizedBox(width: 6),
-              _buildFilterChoice(
-                'exact',
-                'نفس الإصدار v$targetVersion ($exactBranchesCount فرع / $exactDevsCount محطة)',
-              ),
-              const SizedBox(width: 6),
               _buildFilterChoice(
                 'older',
-                'إصدارات أقدم ($olderBranchesCount فرع / $olderDevsCount محطة)',
+                'نسخ قديمة ($olderDevsCount جهاز) ⚠️',
                 isWarning: olderDevsCount > 0,
               ),
-              const SizedBox(width: 6),
+              _buildFilterChoice(
+                'exact',
+                'محدثة بالكامل ($exactDevsCount جهاز) ✅',
+              ),
               _buildFilterChoice('not_installed', 'بانتظار التثبيت ($pendingCount)'),
             ],
           );
 
-          final exportButtons = Row(
-            mainAxisSize: MainAxisSize.min,
+          // Version & Export actions
+          final actionButtons = Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              // Excel Export
+              // Target version button
               OutlinedButton.icon(
+                onPressed: () => _showChangeTargetVersionDialog(context, detectedVersions),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF0284C7),
+                  side: BorderSide(color: const Color(0xFF0284C7).withValues(alpha: 0.4)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.rule_folder_rounded, size: 16),
+                label: Text(
+                  'المعتمد: v$targetVersion',
+                  style: const TextStyle(fontSize: 13, fontFamily: 'monospace', fontWeight: FontWeight.w700),
+                ),
+              ),
+
+              // Excel Export
+              FilledButton.icon(
                 onPressed: isExporting
                     ? null
                     : () => notifier.exportReport('xlsx', targetVersion: targetVersion),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF10B981),
-                  side: BorderSide(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.4),
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 icon: isExporting
                     ? const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Color(0xFF10B981),
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Icon(Icons.table_chart_rounded, size: 15),
+                    : const Icon(Icons.table_chart_rounded, size: 16),
                 label: const Text(
                   'تصدير إكسيل',
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),
-              const SizedBox(width: 8),
+
               // PDF Export
-              OutlinedButton.icon(
+              FilledButton.icon(
                 onPressed: isExporting
                     ? null
                     : () => notifier.exportReport('pdf', targetVersion: targetVersion),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFEF4444),
-                  side: BorderSide(
-                    color: const Color(0xFFEF4444).withValues(alpha: 0.4),
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFEF4444),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 icon: isExporting
                     ? const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Color(0xFFEF4444),
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Icon(Icons.picture_as_pdf_rounded, size: 15),
+                    : const Icon(Icons.picture_as_pdf_rounded, size: 16),
                 label: const Text(
                   'تصدير PDF',
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
@@ -893,13 +850,10 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 searchWidget,
-                const SizedBox(height: 8),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: filterPills,
-                ),
-                const SizedBox(height: 8),
-                Align(alignment: Alignment.centerRight, child: exportButtons),
+                const SizedBox(height: 12),
+                filterPills,
+                const SizedBox(height: 12),
+                actionButtons,
               ],
             );
           }
@@ -907,10 +861,10 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           return Row(
             children: [
               searchWidget,
-              const SizedBox(width: 12),
-              filterPills,
-              const Spacer(),
-              exportButtons,
+              const SizedBox(width: 14),
+              Expanded(child: filterPills),
+              const SizedBox(width: 14),
+              actionButtons,
             ],
           );
         },
@@ -932,86 +886,141 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
 
     if (isSelected) {
       if (isWarning) {
-        bg = const Color(0xFFF59E0B).withValues(alpha: 0.18);
-        border = const Color(0xFFF59E0B).withValues(alpha: 0.5);
-        textColor = const Color(0xFFF59E0B);
+        bg = const Color(0xFFEF4444).withValues(alpha: 0.15);
+        border = const Color(0xFFEF4444).withValues(alpha: 0.6);
+        textColor = const Color(0xFFEF4444);
       } else {
-        bg = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
-        border = isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1);
-        textColor = isDark ? Colors.white : const Color(0xFF0F172A);
+        bg = isDark ? const Color(0xFF2563EB).withValues(alpha: 0.2) : const Color(0xFF2563EB).withValues(alpha: 0.1);
+        border = const Color(0xFF2563EB);
+        textColor = const Color(0xFF2563EB);
       }
     } else {
       if (isWarning) {
-        bg = const Color(0xFFF59E0B).withValues(alpha: 0.08);
-        border = const Color(0xFFF59E0B).withValues(alpha: 0.25);
-        textColor = const Color(0xFFF59E0B);
+        bg = const Color(0xFFEF4444).withValues(alpha: 0.06);
+        border = const Color(0xFFEF4444).withValues(alpha: 0.25);
+        textColor = const Color(0xFFEF4444);
       } else {
-        bg = Colors.transparent;
-        border = Colors.transparent;
+        bg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
+        border = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
         textColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
       }
     }
 
     return InkWell(
       onTap: () => setState(() => _filterType = key),
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(10),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: bg,
-          borderRadius: BorderRadius.circular(7),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: border),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isWarning) ...[
-              const Icon(Icons.warning_amber_rounded,
-                  size: 13, color: Color(0xFFF59E0B)),
-              const SizedBox(width: 4),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                color: textColor,
-              ),
-            ),
-          ],
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: textColor,
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildFleetView(
-    List<BranchDeploymentItem> branches,
-    bool isDark,
-    ColorScheme cs,
-    String targetVersion,
-  ) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 840;
-
-        if (isWide) {
-          return _buildEnterpriseFleetTable(branches, isDark, cs, targetVersion);
-        }
-
-        // Compact list for smaller screens
-        return Column(
-          children: branches
-              .map((b) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildBranchCard(b, isDark, cs, targetVersion),
-                  ))
-              .toList(),
-        );
-      },
+  // ---------------------------------------------------------------------------
+  // 4. INTERACTIVE NETWORK TOPOLOGY TOGGLE CARD
+  // ---------------------------------------------------------------------------
+  Widget _buildTopologyToggleCard({
+    required bool isDark,
+    required ColorScheme cs,
+    required BranchDeploymentSummary? summary,
+    required RequestTelemetryData? telemetry,
+    required dynamic stats,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF131926) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6D5A).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.hub_rounded, color: Color(0xFFFF6D5A), size: 18),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'خريطة العمارة والشبكة التفاعلية (n8n Workflow Map)',
+                        style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        'مخطط تفاعلي حي لمسار تدفق الرسائل وسيرفرات الفروع وقواعد البيانات',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _showTopologyMap = !_showTopologyMap;
+                    });
+                  },
+                  icon: Icon(_showTopologyMap ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 16),
+                  label: Text(
+                    _showTopologyMap ? 'إخفاء الخريطة' : 'إظهار الخريطة',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  tooltip: 'فتح بكامل الشاشة',
+                  onPressed: () => _openLiveTopologyScreen(context),
+                  icon: const Icon(Icons.fullscreen_rounded, size: 20),
+                ),
+              ],
+            ),
+          ),
+          if (_showTopologyMap) ...[
+            const Divider(height: 1),
+            N8nWorkflowDiagramWidget(
+              summary: summary,
+              telemetry: telemetry,
+              stats: stats,
+              isDark: isDark,
+              onOpenFullscreen: () => _openLiveTopologyScreen(context),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // 5. ENTERPRISE FLEET TABLE
+  // ---------------------------------------------------------------------------
   Widget _buildEnterpriseFleetTable(
     List<BranchDeploymentItem> branches,
     bool isDark,
@@ -1021,22 +1030,27 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF131926) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
           width: 1.0,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Table Header Row
+            // Table Header
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
               child: Row(
                 children: [
@@ -1045,11 +1059,9 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                     child: Text(
                       'الفرع والكود',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                       ),
                     ),
                   ),
@@ -1058,11 +1070,9 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                     child: Text(
                       'موقف التثبيت',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                       ),
                     ),
                   ),
@@ -1071,37 +1081,20 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                     child: Text(
                       'محطات العمل',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      'المستخدمين',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                       ),
                     ),
                   ),
                   Expanded(
                     flex: 3,
                     child: Text(
-                      'إصدار المنظومة والتوافق',
+                      'موقف التحديث والإصدارات',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                       ),
                     ),
                   ),
@@ -1110,25 +1103,20 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                     child: Text(
                       'آخر نشاط',
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
                       ),
                     ),
                   ),
-                  SizedBox(
-                    width: 120,
+                  const SizedBox(
+                    width: 140,
                     child: Text(
                       'الإجراءات',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
                       ),
                     ),
                   ),
@@ -1149,16 +1137,12 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
               itemBuilder: (context, index) {
                 final b = branches[index];
                 final isInstalled = b.isInstalled;
-                final branchExactDevs = b.devices
-                    .where((d) => compareAppVersions(d.appVersion, targetVersion) == 0)
-                    .length;
                 final branchOlderDevs = b.devices
                     .where((d) => compareAppVersions(d.appVersion, targetVersion) < 0)
                     .length;
 
                 return Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
                       // Branch name & code
@@ -1167,36 +1151,29 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                         child: Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: isDark
-                                    ? const Color(0xFF1F2937)
-                                    : const Color(0xFFE2E8F0),
-                                borderRadius: BorderRadius.circular(4),
+                                color: isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 b.branchCode.isNotEmpty ? b.branchCode : 'BR',
                                 style: TextStyle(
-                                  fontSize: 10,
+                                  fontSize: 12.5,
                                   fontFamily: 'monospace',
-                                  fontWeight: FontWeight.w700,
-                                  color: isDark
-                                      ? const Color(0xFFCBD5E1)
-                                      : const Color(0xFF334155),
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 b.branchName,
                                 style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: isDark
-                                      ? Colors.white
-                                      : const Color(0xFF0F172A),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -1212,51 +1189,38 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                         child: Align(
                           alignment: Alignment.centerRight,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: isInstalled
-                                  ? const Color(0xFF10B981)
-                                      .withValues(alpha: 0.1)
-                                  : (isDark
-                                      ? const Color(0xFF1F2937)
-                                      : const Color(0xFFF1F5F9)),
-                              borderRadius: BorderRadius.circular(6),
+                                  ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                                  : (isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9)),
+                              borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                 color: isInstalled
-                                    ? const Color(0xFF10B981)
-                                        .withValues(alpha: 0.25)
-                                    : (isDark
-                                        ? const Color(0xFF334155)
-                                        : const Color(0xFFCBD5E1)),
+                                    ? const Color(0xFF10B981).withValues(alpha: 0.3)
+                                    : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Container(
-                                  width: 6,
-                                  height: 6,
+                                  width: 7,
+                                  height: 7,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: isInstalled
-                                        ? const Color(0xFF10B981)
-                                        : const Color(0xFF94A3B8),
+                                    color: isInstalled ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
                                   ),
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  isInstalled
-                                      ? 'تم التثبيت'
-                                      : 'بانتظار التثبيت',
+                                  isInstalled ? 'تم التثبيت' : 'بانتظار التثبيت',
                                   style: TextStyle(
-                                    fontSize: 10.5,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.w700,
                                     color: isInstalled
                                         ? const Color(0xFF10B981)
-                                        : (isDark
-                                            ? const Color(0xFF94A3B8)
-                                            : const Color(0xFF64748B)),
+                                        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                                   ),
                                 ),
                               ],
@@ -1273,48 +1237,30 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                             Text(
                               '${b.devicesCount} جهاز',
                               style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? const Color(0xFFF1F5F9)
-                                    : const Color(0xFF0F172A),
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
                               ),
                             ),
                             if (b.onlineDevicesCount > 0) ...[
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 8),
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 5, vertical: 1),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF0284C7)
-                                      .withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(4),
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  '${b.onlineDevicesCount} متصل',
+                                  '🟢 ${b.onlineDevicesCount} متصل',
                                   style: const TextStyle(
-                                    fontSize: 9.5,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w700,
-                                    color: Color(0xFF0284C7),
+                                    color: Color(0xFF10B981),
                                   ),
                                 ),
                               ),
                             ],
                           ],
-                        ),
-                      ),
-
-                      // Users
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          '${b.installedUsersCount} مفعل / ${b.totalRegisteredUsers}',
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: isDark
-                                ? const Color(0xFFCBD5E1)
-                                : const Color(0xFF475569),
-                          ),
                         ),
                       ),
 
@@ -1324,26 +1270,15 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                         child: Align(
                           alignment: Alignment.centerRight,
                           child: !isInstalled
-                              ? Text(
-                                  '-',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: isDark
-                                        ? const Color(0xFF64748B)
-                                        : const Color(0xFF94A3B8),
-                                  ),
-                                )
+                              ? const Text('-', style: TextStyle(fontSize: 13, color: Colors.grey))
                               : branchOlderDevs > 0
                                   ? Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 7, vertical: 3),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFF59E0B)
-                                            .withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(6),
+                                        color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
-                                          color: const Color(0xFFF59E0B)
-                                              .withValues(alpha: 0.35),
+                                          color: const Color(0xFFEF4444).withValues(alpha: 0.35),
                                         ),
                                       ),
                                       child: Row(
@@ -1351,18 +1286,17 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                                         children: [
                                           const Icon(
                                             Icons.warning_amber_rounded,
-                                            size: 13,
-                                            color: Color(0xFFF59E0B),
+                                            size: 15,
+                                            color: Color(0xFFEF4444),
                                           ),
-                                          const SizedBox(width: 4),
+                                          const SizedBox(width: 5),
                                           Flexible(
                                             child: Text(
-                                              'v${b.appVersions.join(", ")} ($branchOlderDevs جهاز أقدم ⚠️)',
+                                              'يوجد $branchOlderDevs أجهزة قديمة ⚠️',
                                               style: const TextStyle(
-                                                fontSize: 10,
-                                                fontFamily: 'monospace',
+                                                fontSize: 13,
                                                 fontWeight: FontWeight.w700,
-                                                color: Color(0xFFF59E0B),
+                                                color: Color(0xFFEF4444),
                                               ),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
@@ -1371,107 +1305,64 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                                         ],
                                       ),
                                     )
-                                  : branchExactDevs > 0
-                                      ? Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 7, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF10B981)
-                                                .withValues(alpha: 0.1),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(
-                                              color: const Color(0xFF10B981)
-                                                  .withValues(alpha: 0.25),
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              const Icon(
-                                                Icons.verified_rounded,
-                                                size: 13,
-                                                color: Color(0xFF10B981),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'v$targetVersion (مطابق 100% ✅)',
-                                                style: const TextStyle(
-                                                  fontSize: 10,
-                                                  fontFamily: 'monospace',
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Color(0xFF10B981),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                      : Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 7, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF6366F1)
-                                                .withValues(alpha: 0.1),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(
-                                              color: const Color(0xFF6366F1)
-                                                  .withValues(alpha: 0.25),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            b.appVersions.isNotEmpty
-                                                ? 'v${b.appVersions.join(", ")}'
-                                                : 'إصدار غير محدد',
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              fontFamily: 'monospace',
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFF6366F1),
-                                            ),
-                                          ),
+                                  : Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: const Color(0xFF10B981).withValues(alpha: 0.3),
                                         ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.verified_rounded,
+                                            size: 15,
+                                            color: Color(0xFF10B981),
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            'محدث بالكامل (v$targetVersion) ✅',
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF10B981),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                         ),
                       ),
 
-                      // Last seen
+                      // Last activity
                       Expanded(
                         flex: 2,
                         child: Text(
                           _formatTimeAgo(b.lastActivityAt),
                           style: TextStyle(
-                            fontSize: 11,
-                            color: isDark
-                                ? const Color(0xFF94A3B8)
-                                : const Color(0xFF64748B),
+                            fontSize: 13.5,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                           ),
                         ),
                       ),
 
                       // Actions
                       SizedBox(
-                        width: 120,
-                        child: OutlinedButton(
+                        width: 140,
+                        child: FilledButton.tonal(
                           onPressed: b.devices.isEmpty && b.installedUsers.isEmpty
                               ? null
                               : () => _showBranchDevicesModal(context, b, isDark, targetVersion),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            minimumSize: const Size(0, 30),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            side: BorderSide(
-                              color: isDark
-                                  ? const Color(0xFF334155)
-                                  : const Color(0xFFCBD5E1),
-                            ),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                           child: Text(
                             'تفاصيل الأجهزة (${b.devicesCount})',
-                            style: const TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -1486,249 +1377,31 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
-  Widget _buildBranchCard(
-    BranchDeploymentItem branch,
-    bool isDark,
-    ColorScheme cs,
-    String targetVersion,
-  ) {
-    final branchExactDevs = branch.devices
-        .where((d) => compareAppVersions(d.appVersion, targetVersion) == 0)
-        .length;
-    final branchOlderDevs = branch.devices
-        .where((d) => compareAppVersions(d.appVersion, targetVersion) < 0)
-        .length;
-    final isInstalled = branch.isInstalled;
-    final statusColor =
-        isInstalled ? const Color(0xFF10B981) : const Color(0xFF94A3B8);
-    final statusText = isInstalled ? 'تم التثبيت' : 'بانتظار التثبيت';
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF131926) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
-          width: 1.0,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header: Code, Name, Status
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF1F2937)
-                      : const Color(0xFFE2E8F0),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  branch.branchCode.isNotEmpty ? branch.branchCode : 'BR',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w700,
-                    color: isDark
-                        ? const Color(0xFFCBD5E1)
-                        : const Color(0xFF334155),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  branch.branchName,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: statusColor,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      statusText,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: statusColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Divider(
-            height: 1,
-            color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF1F5F9),
-          ),
-          const SizedBox(height: 10),
-          // Micro row
-          Row(
-            children: [
-              Expanded(
-                child: _buildBranchStatItem(
-                  isDark: isDark,
-                  label: 'الأجهزة المثبتة',
-                  value: '${branch.devicesCount} جهاز',
-                  sub: '${branch.onlineDevicesCount} متصل الآن',
-                  color: const Color(0xFF0284C7),
-                ),
-              ),
-              Expanded(
-                child: _buildBranchStatItem(
-                  isDark: isDark,
-                  label: 'المستخدمين',
-                  value: '${branch.installedUsersCount} مفعل',
-                  sub: '${branch.totalRegisteredUsers} مسجل',
-                  color: const Color(0xFF10B981),
-                ),
-              ),
-              Expanded(
-                child: _buildBranchStatItem(
-                  isDark: isDark,
-                  label: 'إصدار البرنامج',
-                  value: branch.appVersions.isNotEmpty
-                      ? 'v${branch.appVersions.join(", ")}'
-                      : (isInstalled ? 'إصدار غير محدد' : '-'),
-                  sub: branchOlderDevs > 0
-                      ? '⚠️ $branchOlderDevs جهاز أقدم من v$targetVersion'
-                      : (branchExactDevs > 0
-                          ? '✅ مطابق لـ v$targetVersion'
-                          : (isInstalled ? 'محدد' : '-')),
-                  color: branchOlderDevs > 0
-                      ? const Color(0xFFF59E0B)
-                      : (branchExactDevs > 0
-                          ? const Color(0xFF10B981)
-                          : const Color(0xFF8B5CF6)),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton(
-            onPressed: branch.devices.isEmpty && branch.installedUsers.isEmpty
-                ? null
-                : () => _showBranchDevicesModal(context, branch, isDark, targetVersion),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              minimumSize: const Size(0, 32),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(7),
-              ),
-              side: BorderSide(
-                color: isDark
-                    ? const Color(0xFF334155)
-                    : const Color(0xFFCBD5E1),
-              ),
-            ),
-            child: Text(
-              'عرض الأجهزة والمستخدمين (${branch.devicesCount})',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBranchStatItem({
-    required bool isDark,
-    required String label,
-    required String value,
-    required String sub,
-    required Color color,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: isDark ? Colors.white : const Color(0xFF0F172A),
-          ),
-        ),
-        const SizedBox(height: 1),
-        Text(
-          sub,
-          style: TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w500,
-            color: color,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-
   Widget _buildEmptyBranchesCard(bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF131926) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : const Color(0xFFE2E8F0),
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
         ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            Icons.domain_disabled_rounded,
-            size: 36,
+            Icons.search_off_rounded,
+            size: 44,
             color: isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
-            'لا توجد فروع تطابق معايير البحث الحالية',
+            'لا توجد فروع أو أجهزة تطابق معايير البحث الحالية',
             style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
               color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
             ),
           ),
@@ -1737,307 +1410,52 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
-  Widget _buildLiveRequestsStreamCard(
-    RequestTelemetryData? telemetry,
-    bool isDark,
-    ColorScheme cs,
-  ) {
-    final recent = telemetry?.recentRequests ?? [];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF090D16) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
-          width: 1.0,
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header bar
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0284C7).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                    child: const Icon(
-                      Icons.sync_alt_rounded,
-                      color: Color(0xFF38BDF8),
-                      size: 16,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'سجل حركة الطلبات والـ API المباشرة (Live Request Stream)',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: isDark
-                                ? const Color(0xFFF1F5F9)
-                                : const Color(0xFF0F172A),
-                          ),
-                        ),
-                        Text(
-                          'رصد لحظي فوري لحركة الـ API وزمن الاستجابة مع كل طلب وارد',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: isDark
-                                ? const Color(0xFF94A3B8)
-                                : const Color(0xFF64748B),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 5,
-                          height: 5,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Color(0xFF10B981),
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          '${recent.length} طلبات مسجلة',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF10B981),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-
-            if (recent.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Center(
-                  child: Text(
-                    'جاري استقبال طلبات الـ API من الخادم...',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: isDark
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFF64748B),
-                    ),
-                  ),
-                ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: recent.take(10).length,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  color: isDark
-                      ? const Color(0xFF1E293B)
-                      : const Color(0xFFF1F5F9),
-                ),
-                itemBuilder: (context, index) {
-                  return _buildLiveRequestRow(recent[index], isDark);
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLiveRequestRow(LiveRequestItem req, bool isDark) {
-    Color methodColor;
-    switch (req.method.toUpperCase()) {
-      case 'GET':
-        methodColor = const Color(0xFF0284C7);
-        break;
-      case 'POST':
-        methodColor = const Color(0xFF10B981);
-        break;
-      case 'PATCH':
-      case 'PUT':
-        methodColor = const Color(0xFFF59E0B);
-        break;
-      case 'DELETE':
-        methodColor = const Color(0xFFEF4444);
-        break;
-      default:
-        methodColor = const Color(0xFF8B5CF6);
-    }
-
-    final isOk = req.statusCode >= 200 && req.statusCode < 300;
-    final isWarn = req.statusCode >= 400 && req.statusCode < 500;
-    final statusColor = isOk
-        ? const Color(0xFF10B981)
-        : (isWarn ? const Color(0xFFF59E0B) : const Color(0xFFEF4444));
-
-    final timeStr =
-        '${req.timestamp.hour.toString().padLeft(2, '0')}:${req.timestamp.minute.toString().padLeft(2, '0')}:${req.timestamp.second.toString().padLeft(2, '0')}';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-      child: Row(
-        children: [
-          // Time
-          Text(
-            timeStr,
-            style: TextStyle(
-              fontSize: 10,
-              fontFamily: 'monospace',
-              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // Method tag
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-            decoration: BoxDecoration(
-              color: methodColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              req.method,
-              style: TextStyle(
-                fontSize: 10,
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.w800,
-                color: methodColor,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // Path
-          Expanded(
-            child: Text(
-              req.path,
-              style: TextStyle(
-                fontSize: 11,
-                fontFamily: 'monospace',
-                color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // Status code
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              '${req.statusCode}',
-              style: TextStyle(
-                fontSize: 10,
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.w700,
-                color: statusColor,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // Duration
-          Text(
-            '${req.durationMs}ms',
-            style: TextStyle(
-              fontSize: 10,
-              fontFamily: 'monospace',
-              fontWeight: FontWeight.w600,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-            ),
-          ),
-          const SizedBox(width: 10),
-
-          // User / IP
-          Text(
-            req.fullName ?? req.username ?? req.clientIp,
-            style: TextStyle(
-              fontSize: 10,
-              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // ---------------------------------------------------------------------------
+  // 6. BRANCH DEVICES DETAIL MODAL
+  // ---------------------------------------------------------------------------
   void _showBranchDevicesModal(
     BuildContext context,
     BranchDeploymentItem branch,
     bool isDark,
     String targetVersion,
   ) {
-    final branchOlderDevs = branch.devices
+    final outdatedDevices = branch.devices
         .where((d) => compareAppVersions(d.appVersion, targetVersion) < 0)
-        .length;
+        .toList();
+    final upToDateDevices = branch.devices
+        .where((d) => compareAppVersions(d.appVersion, targetVersion) >= 0)
+        .toList();
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.75,
-          minChildSize: 0.4,
+          initialChildSize: 0.8,
+          minChildSize: 0.45,
           maxChildSize: 0.95,
           builder: (_, scrollController) {
             return Container(
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF131926) : Colors.white,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(18)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: Column(
                 children: [
                   // Handle
                   Container(
-                    margin: const EdgeInsets.only(top: 10),
-                    width: 36,
+                    margin: const EdgeInsets.only(top: 12),
+                    width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF334155)
-                          : const Color(0xFFCBD5E1),
+                      color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                   // Title Bar
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
+                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 14),
                     child: Row(
                       children: [
                         Expanded(
@@ -2045,22 +1463,19 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'أجهزة ومستخدمي فرع: ${branch.branchName}',
+                                'محطات عمل ومستخدمي فرع: ${branch.branchName}',
                                 style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: isDark
-                                      ? Colors.white
-                                      : const Color(0xFF0F172A),
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
                                 ),
                               ),
+                              const SizedBox(height: 3),
                               Text(
-                                'كود الفرع: ${branch.branchCode}  •  الأجهزة: ${branch.devicesCount}  •  المستخدمين: ${branch.installedUsersCount}',
+                                'كود الفرع: ${branch.branchCode}  •  إجمالي الأجهزة: ${branch.devicesCount} محطة  •  المتصلين: ${branch.onlineDevicesCount}',
                                 style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? const Color(0xFF94A3B8)
-                                      : const Color(0xFF64748B),
+                                  fontSize: 13.5,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                                 ),
                               ),
                             ],
@@ -2068,86 +1483,71 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                         ),
                         IconButton(
                           onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close_rounded, size: 20),
+                          icon: const Icon(Icons.close_rounded, size: 22),
                         ),
                       ],
                     ),
                   ),
                   const Divider(height: 1),
 
-                  // Content list
+                  // Content List
                   Expanded(
                     child: ListView(
                       controller: scrollController,
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(20),
                       children: [
-                        if (branchOlderDevs > 0)
+                        // Outdated Devices Section First!
+                        if (outdatedDevices.isNotEmpty) ...[
                           Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 9),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF59E0B)
-                                  .withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: const Color(0xFFF59E0B)
-                                    .withValues(alpha: 0.35),
-                              ),
+                              color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
                             ),
                             child: Row(
                               children: [
-                                const Icon(
-                                  Icons.warning_amber_rounded,
-                                  color: Color(0xFFF59E0B),
-                                  size: 18,
-                                ),
+                                const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 20),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'تنبيه إصدارات: يوجد $branchOlderDevs جهاز بنسخة أقدم من الإصدار المطلوب (v$targetVersion) في هذا الفرع يتطلب التحديث لضمان استقرار المنظومة والربط.',
+                                    'أجهزة بنسخ قديمة تتطلب التحديث (${outdatedDevices.length} جهاز):',
                                     style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFFF59E0B),
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFFEF4444),
                                     ),
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                        if (branch.devices.isNotEmpty) ...[
-                          Text(
-                            'المحطات والأجهزة المسجلة (${branch.devices.length})',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? const Color(0xFF38BDF8)
-                                  : const Color(0xFF0284C7),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          ...branch.devices.map(
-                            (d) => _buildDeviceItemRow(d, isDark, targetVersion),
-                          ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 10),
+                          ...outdatedDevices.map((d) => _buildDeviceCard(d, isDark, targetVersion, true)),
+                          const SizedBox(height: 18),
                         ],
-                        if (branch.installedUsers.isNotEmpty) ...[
+
+                        // Up to date Devices
+                        if (upToDateDevices.isNotEmpty) ...[
                           Text(
-                            'المستخدمين الذين قاموا بتشغيل المنظومة (${branch.installedUsers.length})',
+                            'المحطات المحدثة بالكامل (${upToDateDevices.length} جهاز):',
                             style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? const Color(0xFF34D399)
-                                  : const Color(0xFF059669),
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          ...branch.installedUsers.map(
-                            (u) => _buildUserItemRow(u, isDark),
+                          const SizedBox(height: 10),
+                          ...upToDateDevices.map((d) => _buildDeviceCard(d, isDark, targetVersion, false)),
+                        ],
+
+                        if (branch.devices.isEmpty && branch.installedUsers.isNotEmpty) ...[
+                          Text(
+                            'المستخدمين المسجلين بالفرع (${branch.installedUsers.length}):',
+                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
                           ),
+                          const SizedBox(height: 10),
+                          ...branch.installedUsers.map((u) => _buildUserCard(u, isDark)),
                         ],
                       ],
                     ),
@@ -2161,91 +1561,44 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
-  Widget _buildDeviceItemRow(
+  Widget _buildDeviceCard(
     BranchDeviceItem d,
     bool isDark,
     String targetVersion,
+    bool isOutdated,
   ) {
-    final cmp = compareAppVersions(d.appVersion, targetVersion);
-    final isExact = cmp == 0;
-    final isOlder = cmp < 0;
-    final isNewer = cmp > 0;
-
-    Color versionBg;
-    Color versionBorder;
-    Color versionText;
-    IconData versionIcon;
-    String statusLabel;
-
-    if (isExact) {
-      versionBg = const Color(0xFF10B981).withValues(alpha: 0.1);
-      versionBorder = const Color(0xFF10B981).withValues(alpha: 0.35);
-      versionText = const Color(0xFF10B981);
-      versionIcon = Icons.check_circle_outline_rounded;
-      statusLabel = 'مطابق للمعتمد ✅';
-    } else if (isOlder) {
-      final isCritical = d.versionStatus == 'critical' || cmp < -1;
-      versionBg = isCritical
-          ? const Color(0xFFEF4444).withValues(alpha: 0.12)
-          : const Color(0xFFF59E0B).withValues(alpha: 0.12);
-      versionBorder = isCritical
-          ? const Color(0xFFEF4444).withValues(alpha: 0.4)
-          : const Color(0xFFF59E0B).withValues(alpha: 0.4);
-      versionText = isCritical ? const Color(0xFFEF4444) : const Color(0xFFF59E0B);
-      versionIcon = isCritical ? Icons.error_outline_rounded : Icons.warning_amber_rounded;
-      statusLabel = 'أقدم من المطلوب (المطلوب: v$targetVersion) ⚠️';
-    } else if (isNewer) {
-      versionBg = const Color(0xFF8B5CF6).withValues(alpha: 0.12);
-      versionBorder = const Color(0xFF8B5CF6).withValues(alpha: 0.35);
-      versionText = const Color(0xFF8B5CF6);
-      versionIcon = Icons.rocket_launch_rounded;
-      statusLabel = 'أحدث من المطلوب (v$targetVersion) 🚀';
-    } else {
-      versionBg = const Color(0xFF64748B).withValues(alpha: 0.1);
-      versionBorder = const Color(0xFF64748B).withValues(alpha: 0.3);
-      versionText = const Color(0xFF64748B);
-      versionIcon = Icons.help_outline_rounded;
-      statusLabel = 'إصدار غير محدد';
-    }
-
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: d.isOutdated
-              ? (d.versionStatus == 'critical'
-                  ? const Color(0xFFEF4444).withValues(alpha: 0.3)
-                  : const Color(0xFFF59E0B).withValues(alpha: 0.3))
+          color: isOutdated
+              ? const Color(0xFFEF4444).withValues(alpha: 0.4)
               : (isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+          width: isOutdated ? 1.4 : 1.0,
         ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 32,
-            height: 32,
-            margin: const EdgeInsets.only(top: 2),
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
               color: d.isOnline
-                  ? const Color(0xFF10B981).withValues(alpha: 0.12)
-                  : (isDark
-                      ? const Color(0xFF1F2937)
-                      : const Color(0xFFE2E8F0)),
-              borderRadius: BorderRadius.circular(8),
+                  ? const Color(0xFF10B981).withValues(alpha: 0.15)
+                  : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
-              Icons.laptop_chromebook_rounded,
-              color: d.isOnline
-                  ? const Color(0xFF10B981)
-                  : const Color(0xFF94A3B8),
-              size: 18,
+              Icons.computer_rounded,
+              color: d.isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+              size: 20,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2255,115 +1608,70 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                     Text(
                       d.hostname,
                       style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
                         fontFamily: 'monospace',
                         color: isDark ? Colors.white : const Color(0xFF0F172A),
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 1.5),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF6366F1).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(4),
+                        color: isOutdated
+                            ? const Color(0xFFEF4444).withValues(alpha: 0.15)
+                            : const Color(0xFF10B981).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        d.workstationType,
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF6366F1),
+                        isOutdated
+                            ? 'v${d.appVersion} (قديم يتطلب تحديث) ⚠️'
+                            : 'v${d.appVersion} (معتمد) ✅',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'monospace',
+                          color: isOutdated ? const Color(0xFFEF4444) : const Color(0xFF10B981),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        color: versionBg,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: versionBorder),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(versionIcon, size: 11, color: versionText),
-                          const SizedBox(width: 3),
-                          Text(
-                            'v${d.appVersion} ($statusLabel)',
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w700,
-                              fontFamily: 'monospace',
-                              color: versionText,
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
-                  'المستخدم: ${d.fullName.isNotEmpty ? d.fullName : d.username} (@${d.username})  •  IP: ${d.ipAddress}',
+                  'الموظف: ${d.fullName.isNotEmpty ? d.fullName : d.username}  •  المسمى: ${d.workstationType}',
                   style: TextStyle(
-                    fontSize: 10.5,
-                    color: isDark
-                        ? const Color(0xFFCBD5E1)
-                        : const Color(0xFF475569),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
-                  'نظام التشغيل: ${d.os} ${d.osVersion}  •  آخر نشاط: ${_formatTimeAgo(d.lastSeenAt)}',
+                  'عنوان IP: ${d.ipAddress}  •  النظام: ${d.os} ${d.osVersion}  •  آخر ظهور: ${_formatTimeAgo(d.lastSeenAt)}',
                   style: TextStyle(
-                    fontSize: 10,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
+                    fontSize: 12.5,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                   ),
                 ),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
               color: d.isOnline
                   ? const Color(0xFF10B981).withValues(alpha: 0.12)
-                  : (isDark
-                      ? const Color(0xFF1F2937)
-                      : const Color(0xFFE2E8F0)),
-              borderRadius: BorderRadius.circular(5),
+                  : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0)),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: d.isOnline
-                        ? const Color(0xFF10B981)
-                        : const Color(0xFF94A3B8),
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Text(
-                  d.isOnline ? 'متصل الآن' : 'غير متصل',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: d.isOnline
-                        ? const Color(0xFF10B981)
-                        : const Color(0xFF94A3B8),
-                  ),
-                ),
-              ],
+            child: Text(
+              d.isOnline ? '🟢 متصل الآن' : '⚪ غير متصل',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: d.isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+              ),
             ),
           ),
         ],
@@ -2371,10 +1679,10 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
-  Widget _buildUserItemRow(InstalledUserItem u, bool isDark) {
+  Widget _buildUserCard(InstalledUserItem u, bool isDark) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF090D16) : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(10),
@@ -2385,19 +1693,14 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
       child: Row(
         children: [
           CircleAvatar(
-            radius: 14,
-            backgroundColor:
-                const Color(0xFF6366F1).withValues(alpha: 0.15),
+            radius: 16,
+            backgroundColor: const Color(0xFF2563EB).withValues(alpha: 0.15),
             child: Text(
               u.fullName.isNotEmpty ? u.fullName.characters.first : 'U',
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF6366F1),
-              ),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF2563EB)),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2405,18 +1708,16 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                 Text(
                   u.fullName,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight: FontWeight.w700,
                     color: isDark ? Colors.white : const Color(0xFF0F172A),
                   ),
                 ),
                 Text(
-                  'الحساب: ${u.username}  •  المسمى: ${u.jobTitle}  •  الدور: ${u.role}',
+                  'الحساب: @${u.username}  •  المسمى: ${u.jobTitle}',
                   style: TextStyle(
-                    fontSize: 10,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
+                    fontSize: 12.5,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
                   ),
                 ),
               ],
@@ -2425,13 +1726,163 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
           Text(
             _formatTimeAgo(u.lastActiveAt),
             style: TextStyle(
-              fontSize: 10,
-              color: isDark
-                  ? const Color(0xFF64748B)
-                  : const Color(0xFF94A3B8),
+              fontSize: 12,
+              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 7. OPTIONAL LIVE SERVER REQUEST STREAM
+  // ---------------------------------------------------------------------------
+  Widget _buildLiveRequestsStreamCard(
+    RequestTelemetryData? telemetry,
+    bool isDark,
+    ColorScheme cs,
+  ) {
+    final recent = telemetry?.recentRequests ?? [];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF090D16) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+          width: 1.0,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.sync_alt_rounded, color: Color(0xFF38BDF8), size: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'سجل حركة واستجابة طلبات الخادم المباشرة (API Telemetry Stream)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        Text(
+                          'مراقبة فورية لأداء ومعدل طلبات الخادم (RPS: ${telemetry?.rps.toStringAsFixed(1) ?? "0"} req/s  •  Latency: ${telemetry?.avgLatencyMs ?? 14}ms)',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _showRequestsStream = !_showRequestsStream;
+                      });
+                    },
+                    icon: Icon(_showRequestsStream ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18),
+                    label: Text(
+                      _showRequestsStream ? 'طي السجل' : 'عرض السجل (${recent.length})',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_showRequestsStream) ...[
+              const Divider(height: 1),
+              if (recent.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Text('جاري استقبال طلبات الـ API من الخادم...', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                  ),
+                )
+              else
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: recent.take(8).length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  ),
+                  itemBuilder: (context, index) {
+                    final req = recent[index];
+                    final isOk = req.statusCode >= 200 && req.statusCode < 300;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Text(
+                            '${req.timestamp.hour.toString().padLeft(2, '0')}:${req.timestamp.minute.toString().padLeft(2, '0')}:${req.timestamp.second.toString().padLeft(2, '0')}',
+                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Colors.grey),
+                          ),
+                          const SizedBox(width: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              req.method,
+                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.w800, color: Color(0xFF0284C7)),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              req.path,
+                              style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '${req.statusCode}',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w700,
+                              color: isOk ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '${req.durationMs}ms',
+                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ],
+        ),
       ),
     );
   }

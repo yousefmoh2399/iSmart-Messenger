@@ -208,14 +208,14 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
             children: [
               // Live Telemetry Badges Strip
               Wrap(
-                spacing: 8,
-                runSpacing: 6,
+                spacing: 10,
+                runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   // Server status pill
                   Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: dbOnline
                           ? const Color(0xFF10B981).withValues(alpha: 0.12)
@@ -231,8 +231,8 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
-                          width: 7,
-                          height: 7,
+                          width: 8,
+                          height: 8,
                           decoration: BoxDecoration(
                             color: dbOnline
                                 ? const Color(0xFF10B981)
@@ -240,11 +240,11 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                             shape: BoxShape.circle,
                           ),
                         ),
-                        const SizedBox(width: 5),
+                        const SizedBox(width: 6),
                         Text(
                           dbOnline ? 'الخادم متصل وجاهز' : 'الخادم غير متصل',
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: dbOnline
                                 ? const Color(0xFF10B981)
@@ -258,7 +258,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                   // Latency badge
                   _buildHeaderPill(
                     icon: Icons.bolt_rounded,
-                    label: '$latency ms استجابة',
+                    label: '$latency ms زمن الاستجابة',
                     color: const Color(0xFF0284C7),
                     isDark: isDark,
                   ),
@@ -266,28 +266,28 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                   // Uptime badge
                   _buildHeaderPill(
                     icon: Icons.timer_outlined,
-                    label: 'تشغيل: $uptimeStr',
+                    label: 'مدة التشغيل: $uptimeStr',
                     color: const Color(0xFF8B5CF6),
                     isDark: isDark,
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
               // Title and Description
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
-                      borderRadius: BorderRadius.circular(13),
+                      borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
                           color:
@@ -300,7 +300,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                     child: const Icon(
                       Icons.analytics_rounded,
                       color: Colors.white,
-                      size: 24,
+                      size: 26,
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -311,18 +311,18 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                         Text(
                           'مراقبة وتشخيص النظام',
                           style: TextStyle(
-                            fontSize: isCompact ? 19 : 22,
+                            fontSize: isCompact ? 22 : 26,
                             fontWeight: FontWeight.w800,
                             color:
                                 isDark ? Colors.white : const Color(0xFF0F172A),
                             letterSpacing: -0.4,
                           ),
                         ),
-                        const SizedBox(height: 3),
+                        const SizedBox(height: 4),
                         Text(
                           'لوحة القيادة المركزية لمتابعة أسطول الفروع، استهلاك الموارد، الجلسات الحية، وسجلات الاستقرار',
                           style: TextStyle(
-                            fontSize: isCompact ? 11.5 : 12.5,
+                            fontSize: isCompact ? 13 : 14,
                             height: 1.35,
                             fontWeight: FontWeight.w500,
                             color: isDark
@@ -340,8 +340,8 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
 
           // Action Buttons
           final actionButtons = Wrap(
-            spacing: 10,
-            runSpacing: 8,
+            spacing: 12,
+            runSpacing: 10,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               // Refresh Button
@@ -349,22 +349,22 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                 onPressed: isLoading ? null : () => notifier.refreshAll(),
                 style: FilledButton.styleFrom(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 icon: isLoading
                     ? const SizedBox(
-                        width: 14,
-                        height: 14,
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.refresh_rounded, size: 18),
+                    : const Icon(Icons.refresh_rounded, size: 20),
                 label: Text(
                   isLoading ? 'جاري الفحص...' : 'تحديث البيانات',
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -384,17 +384,17 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                   foregroundColor: Colors.white,
                   elevation: 0,
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                   shadowColor: const Color(0xFFFF6D5A).withValues(alpha: 0.35),
                 ),
-                icon: const Icon(Icons.hub_rounded, size: 18),
+                icon: const Icon(Icons.hub_rounded, size: 20),
                 label: const Text(
                   'خريطة العمارة والشبكة (n8n)',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 13.5,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.2,
                   ),
@@ -434,7 +434,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
     required bool isDark,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
@@ -445,12 +445,12 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
-              fontSize: 10.5,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
               color: color,
             ),
@@ -930,22 +930,22 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
           children: [
             Icon(
               icon,
-              size: 16,
+              size: 18,
               color: isSelected
                   ? cs.primary
                   : (isDark
                       ? const Color(0xFF94A3B8)
                       : const Color(0xFF64748B)),
             ),
-            const SizedBox(width: 7),
+            const SizedBox(width: 8),
             Flexible(
               child: Text(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                   color: isSelected
                       ? (isDark ? Colors.white : const Color(0xFF0F172A))
                       : (isDark
@@ -955,9 +955,9 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
               ),
             ),
             if (badge != null) ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? (badgeColor ?? cs.primary).withValues(alpha: 0.15)
@@ -969,7 +969,7 @@ class _SystemMonitorScreenState extends ConsumerState<SystemMonitorScreen> {
                 child: Text(
                   badge,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w700,
                     fontFamily: 'monospace',
                     color: isSelected

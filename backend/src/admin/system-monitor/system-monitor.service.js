@@ -80,9 +80,9 @@ async function purgeLegacyMockSessions() {
   try {
     await DeviceSession.deleteMany({
       $or: [
-        { "deviceInfo.hostname": /^(PC|LAPTOP|POS)-(ACC|MGR|CS|LAW|\d+)/i },
-        { "deviceInfo.hostname": /^(PC|LAPTOP|POS)/i },
         { socketId: /^sock_live_/i },
+        { socketId: /^mock_/i },
+        { "deviceInfo.hostname": /^(PC|LAPTOP|POS)-(ACC|MGR|CS|LAW|MOCK)-\d+/i },
       ],
     });
     hasPurgedLegacyMocks = true;
@@ -113,7 +113,7 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
       .lean(),
     UpdateDevice.find({}).sort({ lastSeenAt: -1, updatedAt: -1 }).lean(),
     DeviceSession.find({
-      "deviceInfo.hostname": { $not: /^(PC|LAPTOP|POS)-/i },
+      socketId: { $not: /^sock_live_/i },
     })
       .populate("userId", "_id username fullName role branchId branchCode isOnline jobTitle")
       .sort({ lastSeenAt: -1 })
@@ -184,6 +184,7 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
 
   const versionCounts = {};
   const platformCounts = {};
+  const globalSeenWorkstationKeys = new Set();
 
   for (const b of branches) {
     const bId = String(b._id);
@@ -207,13 +208,21 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
     // 1. Process physical devices registered in UpdateDevice for this branch
     const bUpdateDevices = devicesByBranchCode.get(bCode) || [];
     for (const dev of bUpdateDevices) {
-      const devKey = dev.deviceUid
-        ? String(dev.deviceUid).trim().toLowerCase()
-        : ((dev.hostName || dev.deviceName)
-            ? String(dev.hostName || dev.deviceName).trim().toLowerCase()
-            : String(dev._id));
+      const canonicalKey = dev.deviceUid
+        ? `uid_${String(dev.deviceUid).trim().toLowerCase()}`
+        : (dev.hostName
+            ? `host_${bCode}_${String(dev.hostName).trim().toLowerCase()}`
+            : `dev_${dev._id}`);
+
+      if (globalSeenWorkstationKeys.has(canonicalKey)) {
+        continue;
+      }
+      globalSeenWorkstationKeys.add(canonicalKey);
+
       const appVersion = String(dev.appVersion || "unknown").trim();
-      branchVersions.add(appVersion);
+      if (appVersion && appVersion !== "unknown" && appVersion !== "غير محدد") {
+        branchVersions.add(appVersion);
+      }
 
       const devLastSeen = dev.lastSeenAt || dev.lastHeartbeatAt || dev.updatedAt;
       if (!branchLastSeen || (devLastSeen && new Date(devLastSeen) > new Date(branchLastSeen))) {
@@ -224,7 +233,7 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
       const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
       const isOutdated = isKnown && cmp < 0;
       const isExactMatch = isKnown && cmp === 0;
-      const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.0"));
+      const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.20"));
       const versionStatus = !isKnown
         ? "pending"
         : (isOutdated
@@ -280,16 +289,19 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
         };
       }
 
-      // Keep latest session if duplicates for the same host
-      if (!devicesMap.has(devKey) || (devLastSeen && new Date(devLastSeen) > new Date(devicesMap.get(devKey).lastSeenAt))) {
-        devicesMap.set(devKey, {
+      if (!devicesMap.has(canonicalKey) || (devLastSeen && new Date(devLastSeen) > new Date(devicesMap.get(canonicalKey).lastSeenAt))) {
+        devicesMap.set(canonicalKey, {
+          deviceUid: dev.deviceUid || null,
           hostname: hostName,
           os: dev.osName || (dev.platform?.includes("mobile") ? "Android/iOS" : "Windows"),
           osVersion: dev.osVersion || "",
           ipAddress: dev.localIp || "-",
           clientType: dev.platform?.includes("mobile") ? "mobile" : "desktop",
           appVersion,
+          targetVersion: effectiveTargetVersion,
+          isUpToDate: isExactMatch || cmp > 0,
           isOutdated,
+          isCritical,
           versionStatus,
           versionStatusLabel,
           workstationType,
@@ -309,10 +321,33 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
         const rawHost = (s.deviceInfo?.hostname || "").trim();
         const clientType = s.clientType || (s.deviceInfo?.platform?.includes("mobile") ? "mobile" : "desktop");
         const hostName = rawHost || (clientType === "mobile" ? `Mobile-${u.username}` : `PC-${u.username}`);
-        const devKey = s.deviceInfo?.deviceUid
-          ? String(s.deviceInfo.deviceUid).trim().toLowerCase()
-          : (rawHost ? `${rawHost.toLowerCase()}_${uId}` : `session_${s._id}`);
-        if (devicesMap.has(devKey)) continue; // Already covered by UpdateDevice
+
+        let sCanonicalKey = null;
+        if (s.deviceInfo?.deviceUid) {
+          sCanonicalKey = `uid_${String(s.deviceInfo.deviceUid).trim().toLowerCase()}`;
+        } else if (rawHost) {
+          sCanonicalKey = `host_${bCode}_${rawHost.toLowerCase()}`;
+        } else {
+          sCanonicalKey = `sess_${bCode}_${uId}_${clientType}`;
+        }
+
+        // If device already registered in devicesMap, merge live presence without creating duplicate!
+        if (devicesMap.has(sCanonicalKey)) {
+          const existing = devicesMap.get(sCanonicalKey);
+          if (s.isOnline) existing.isOnline = true;
+          if (s.lastSeenAt && (!existing.lastSeenAt || new Date(s.lastSeenAt) > new Date(existing.lastSeenAt))) {
+            existing.lastSeenAt = s.lastSeenAt;
+          }
+          if ((!existing.ipAddress || existing.ipAddress === "-") && s.ipAddress) {
+            existing.ipAddress = s.ipAddress;
+          }
+          continue;
+        }
+
+        if (globalSeenWorkstationKeys.has(sCanonicalKey)) {
+          continue;
+        }
+        globalSeenWorkstationKeys.add(sCanonicalKey);
 
         let appVersion = String(s.deviceInfo?.appVersion || "").trim();
         if (!appVersion || appVersion === "unknown") {
@@ -337,7 +372,7 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
         const isKnown = appVersion && appVersion !== "unknown" && appVersion !== "غير محدد";
         const isOutdated = isKnown && cmp < 0;
         const isExactMatch = isKnown && cmp === 0;
-        const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.0"));
+        const isCritical = isOutdated && (cmp < 0 && (appVersion === "1.0.9" || appVersion < "1.1.20"));
         const versionStatus = !isKnown
           ? "pending"
           : (isOutdated
@@ -360,14 +395,18 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
             ? "نقطة بيع كاشير"
             : (uNameLower.startsWith("man") ? "حاسب إدارة فرع" : (uNameLower.startsWith("acc") ? "حاسب الحسابات" : "محطة عمل")));
 
-        devicesMap.set(devKey, {
+        devicesMap.set(sCanonicalKey, {
+          deviceUid: s.deviceInfo?.deviceUid || null,
           hostname: hostName,
           os: s.deviceInfo?.os || (clientType === "mobile" ? "Android/iOS" : "Windows"),
           osVersion: s.deviceInfo?.osVersion || "",
           ipAddress: s.ipAddress || "-",
           clientType,
           appVersion,
+          targetVersion: effectiveTargetVersion,
+          isUpToDate: isExactMatch || cmp > 0,
           isOutdated,
+          isCritical,
           versionStatus,
           versionStatusLabel,
           workstationType,
@@ -386,12 +425,19 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
     }
 
     const branchDevices = Array.from(devicesMap.values());
+    // Sort devices within branch: Outdated first, then online, then by name
+    branchDevices.sort((a, b) => {
+      if (a.isOutdated !== b.isOutdated) return a.isOutdated ? -1 : 1;
+      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+      return (a.user?.fullName || a.hostname || "").localeCompare(b.user?.fullName || b.hostname || "");
+    });
+
     const isInstalled = branchDevices.length > 0;
     if (isInstalled) totalInstalledBranches++;
 
     const branchOnlineDevs = branchDevices.filter((d) => d.isOnline).length;
     const branchOutdatedDevs = branchDevices.filter((d) => d.isOutdated).length;
-    const branchLatestDevs = branchDevices.filter((d) => !d.isOutdated).length;
+    const branchLatestDevs = branchDevices.filter((d) => !d.isOutdated && d.appVersion !== "غير محدد").length;
 
     totalDevices += branchDevices.length;
     totalOnlineDevices += branchOnlineDevs;
@@ -445,10 +491,11 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
     });
   }
 
-  // Sort: installed branches first, then by branchCode
+  // Sort branches: branches with outdated devices first, then installed branches, then by code
   branchItems.sort((a, b) => {
+    if (a.hasOutdatedDevices !== b.hasOutdatedDevices) return a.hasOutdatedDevices ? -1 : 1;
     if (a.isInstalled !== b.isInstalled) return a.isInstalled ? -1 : 1;
-    return a.branchCode.localeCompare(b.branchCode);
+    return (a.branchCode || "").localeCompare(b.branchCode || "");
   });
 
   const totalBranchesCount = branches.length;
@@ -484,8 +531,9 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
   workbook.creator = "iSmart Messenger Enterprise Monitor";
   workbook.created = new Date();
 
-  const summary = data.summary;
-  const branches = data.branches;
+  const summary = data.summary || {};
+  const branches = data.branches || [];
+  const targetVersion = summary.targetAppVersion || summary.currentAppVersion || CURRENT_APP_VERSION;
 
   const PC = {
     darkBlue: "FF1E3A8A",
@@ -500,6 +548,7 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
     amberBg: "FFFEF3C7",
     redDark: "FFB91C1C",
     redBg: "FFFEE2E2",
+    slateText: "FF0F172A",
   };
 
   function pcBorder(cell) {
@@ -511,16 +560,39 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
     };
   }
 
+  // Flatten and strictly deduplicate all devices across all branches
+  const seenWorkstationKeys = new Set();
+  const allFleetDevices = [];
+
+  branches.forEach((b) => {
+    (b.devices || []).forEach((d) => {
+      const canonicalKey = d.deviceUid
+        ? `uid_${String(d.deviceUid).trim().toLowerCase()}`
+        : `${b.branchCode}_${d.hostname || ""}_${d.user?.username || d.username || ""}`.toLowerCase();
+
+      if (!seenWorkstationKeys.has(canonicalKey)) {
+        seenWorkstationKeys.add(canonicalKey);
+        allFleetDevices.push({
+          branch: b,
+          device: d,
+        });
+      }
+    });
+  });
+
+  const outdatedDevicesList = allFleetDevices.filter(r => r.device.isOutdated);
+  const upToDateDevicesList = allFleetDevices.filter(r => !r.device.isOutdated && r.device.appVersion !== "غير محدد");
+
   // ════════════════════════════════════════════════════════════════════════════
-  // SHEET 1: ملخص انتشار المنظومة وموقف الإصدارات
+  // SHEET 1: ملخص المنظومة والتحديثات (Executive Summary & KPIs)
   // ════════════════════════════════════════════════════════════════════════════
-  const sheet1 = workbook.addWorksheet("ملخص انتشار المنظومة");
+  const sheet1 = workbook.addWorksheet("ملخص المنظومة والتحديثات");
   sheet1.views = [{ rightToLeft: true, showGridLines: true }];
-  sheet1.columns = [{ width: 36 }, { width: 44 }];
+  sheet1.columns = [{ width: 40 }, { width: 44 }];
 
   sheet1.mergeCells("A1:B1");
   const t1 = sheet1.getCell("A1");
-  t1.value = "📊  تقرير انتشار وتثبيت منظومة iSmart Messenger وموقف الإصدارات بالفروع";
+  t1.value = "📊  تقرير انتشار منظومة iSmart Messenger وموقف تحديث إصدارات الأجهزة بالفروع";
   t1.font = { name: "Arial", size: 13.5, bold: true, color: { argb: PC.white } };
   t1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
   t1.alignment = { horizontal: "center", vertical: "middle" };
@@ -528,23 +600,27 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
 
   sheet1.mergeCells("A2:B2");
   const s1 = sheet1.getCell("A2");
-  s1.value = `تاريخ الاستخراج: ${formatDate(new Date())}  |  المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}  |  الإصدار المعتمد: ${summary.currentAppVersion}`;
+  s1.value = `تاريخ الاستخراج: ${formatDate(new Date())}  |  المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}  |  الإصدار المعتمد للفحص: v${targetVersion}`;
   s1.font = { name: "Arial", size: 9.5, italic: true, color: { argb: PC.white } };
   s1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.midBlue } };
   s1.alignment = { horizontal: "center", vertical: "middle" };
   sheet1.getRow(2).height = 24;
 
+  const totalRealDevices = allFleetDevices.length;
+  const outdatedCount = outdatedDevicesList.length;
+  const upToDateCount = upToDateDevicesList.length;
+
   const kpiData = [
-    ["إجمالي فروع المنظومة", `${summary.totalBranches} فرع`],
-    ["الفروع التي قامت بتثبيت البرنامج", `${summary.installedBranchesCount} فرع`],
-    ["الفروع التي لم تُثبت البرنامج بعد", `${summary.notInstalledBranchesCount} فرع`],
-    ["نسبة انتشار واعتماد البرنامج بالفروع", `${summary.adoptionPercentage}%`],
-    ["إجمالي الأجهزة المثبتة على الشبكة", `${summary.totalInstalledDevices} جهاز`],
-    ["الأجهزة المتصلة الآن", `${summary.totalOnlineDevices} جهاز`],
-    ["أحدث إصدار رسمي معتمد", `v${summary.currentAppVersion}`],
-    ["الأجهزة المحدثة لأحدث إصدار (v" + summary.currentAppVersion + ")", `${summary.latestVersionDevicesCount || 0} جهاز (${summary.totalInstalledDevices > 0 ? Math.round((summary.latestVersionDevicesCount / summary.totalInstalledDevices) * 100) : 0}%)`],
-    ["الأجهزة التي تستخدم إصدارات قديمة ⚠️", `${summary.outdatedDevicesCount || 0} جهاز`],
-    ["الأجهزة بنسخ قديمة حرجة (< v1.1.20) 🚨", `${summary.criticalOutdatedDevicesCount || 0} جهاز (تتطلب تحديثاً فورياً)`],
+    ["إجمالي فروع المنظومة", `${summary.totalBranches || branches.length} فرع`],
+    ["الفروع التي قامت بتثبيت المنظومة", `${summary.installedBranchesCount || 0} فرع`],
+    ["الفروع التي لم تُثبت بعد", `${summary.notInstalledBranchesCount || 0} فرع`],
+    ["نسبة انتشار المنظومة بالفروع", `${summary.adoptionPercentage || 0}%`],
+    ["إجمالي محطات العمل الفعلية (بدون تكرار)", `${totalRealDevices} محطة`],
+    ["المحطات المتصلة الآن بالشبكة", `${summary.totalOnlineDevices || 0} محطة`],
+    ["الإصدار الرسمي المعتمد المطلوب", `v${targetVersion}`],
+    ["الأجهزة المحدثة للإصدار المعتمد ✅", `${upToDateCount} جهاز (${totalRealDevices > 0 ? Math.round((upToDateCount / totalRealDevices) * 100) : 0}%)`],
+    ["الأجهزة التي تستخدم إصدارات قديمة ⚠️", `${outdatedCount} جهاز (تتطلب التحديث العاجل)`],
+    ["الأجهزة بنسخ قديمة حرجة (< v1.1.20) 🚨", `${summary.criticalOutdatedDevicesCount || 0} جهاز`],
     ["الفروع التي بها أجهزة بنسخ قديمة", `${summary.outdatedBranchesCount || 0} فرع`],
   ];
 
@@ -558,34 +634,258 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
     pcBorder(row.getCell(1));
 
     const isWarning = label.includes("قديمة");
-    row.getCell(2).font = { name: "Arial", size: 10.5, bold: true, color: { argb: isWarning ? PC.redDark : PC.darkBlue } };
-    row.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: isWarning ? PC.redBg : PC.white } };
+    const isSuccess = label.includes("المحدثة");
+    row.getCell(2).font = {
+      name: "Arial",
+      size: 10.5,
+      bold: true,
+      color: { argb: isWarning ? PC.redDark : (isSuccess ? PC.greenDark : PC.darkBlue) },
+    };
+    row.getCell(2).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: isWarning ? PC.redBg : (isSuccess ? PC.greenBg : PC.white) },
+    };
     row.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
     pcBorder(row.getCell(2));
   });
 
+  // Version Breakdown section
+  const verStartRow = 5 + kpiData.length;
+  sheet1.mergeCells(`A${verStartRow}:B${verStartRow}`);
+  const vTitle = sheet1.getCell(`A${verStartRow}`);
+  vTitle.value = "📈 توزيع إصدارات البرنامج المكتشفة على محطات العمل الفعلية";
+  vTitle.font = { name: "Arial", size: 10.5, bold: true, color: { argb: PC.white } };
+  vTitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
+  vTitle.alignment = { horizontal: "center", vertical: "middle" };
+  sheet1.getRow(verStartRow).height = 26;
+
+  const versionEntries = Object.entries(summary.versionBreakdown || {}).sort((a, b) => compareAppVersions(b[0], a[0]));
+  versionEntries.forEach(([ver, cnt], vIdx) => {
+    const rIdx = verStartRow + 1 + vIdx;
+    const vRow = sheet1.getRow(rIdx);
+    vRow.height = 22;
+    const isMatch = compareAppVersions(ver, targetVersion) >= 0;
+    const isCritical = compareAppVersions(ver, targetVersion) < 0 && (ver === "1.0.9" || ver < "1.1.20");
+    const statusNote = isMatch ? "إصدار معتمد ✅" : (isCritical ? "قديم حرج 🚨" : "نسخة سابقة ⚠️");
+    const pct = totalRealDevices > 0 ? Math.round((cnt / totalRealDevices) * 100) : 0;
+
+    vRow.values = [`نسخة v${ver}`, `${cnt} جهاز (${pct}%) — [ ${statusNote} ]`];
+    vRow.getCell(1).font = { name: "Arial", size: 9.5, bold: true, color: { argb: "FF334155" } };
+    vRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+    vRow.getCell(1).alignment = { horizontal: "right", vertical: "middle" };
+    pcBorder(vRow.getCell(1));
+
+    vRow.getCell(2).font = {
+      name: "Arial",
+      size: 9.5,
+      bold: true,
+      color: { argb: isMatch ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) },
+    };
+    vRow.getCell(2).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: isMatch ? PC.greenBg : (isCritical ? PC.redBg : PC.amberBg) },
+    };
+    vRow.getCell(2).alignment = { horizontal: "center", vertical: "middle" };
+    pcBorder(vRow.getCell(2));
+  });
+
   // ════════════════════════════════════════════════════════════════════════════
-  // SHEET 2: كشف الفروع وتفاصيل التثبيت
+  // SHEET 2: كشف الأجهزة بنسخ قديمة للمتابعة والتحديث العاجل
   // ════════════════════════════════════════════════════════════════════════════
-  const sheet2 = workbook.addWorksheet("موقف انتشار الفروع");
+  const sheet2 = workbook.addWorksheet("أجهزة بنسخ قديمة للمتابعة");
   sheet2.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 2 }];
 
   const cols2 = [
-    { header: "م", key: "idx", width: 6 },
-    { header: "كود الفرع", key: "code", width: 14 },
-    { header: "اسم الفرع", key: "name", width: 28 },
-    { header: "حالة التثبيت", key: "status", width: 18 },
-    { header: "عدد الأجهزة المثبتة", key: "devices", width: 20 },
-    { header: "الأجهزة المتصلة الآن", key: "onlineDevices", width: 20 },
-    { header: "إجمالي المستخدمين", key: "totalUsers", width: 18 },
-    { header: "إصدارات البرنامج", key: "versions", width: 22 },
-    { header: "موقف التحديث بالفروع", key: "versionStatus", width: 26 },
-    { header: "آخر نشاط مسجل", key: "lastSeen", width: 22 },
+    { header: "م", width: 6 },
+    { header: "كود الفرع", width: 14 },
+    { header: "اسم الفرع", width: 22 },
+    { header: "اسم الموظف المسؤول", width: 24 },
+    { header: "المسمى الوظيفي", width: 20 },
+    { header: "اسم المستخدم (Username)", width: 18 },
+    { header: "اسم الجهاز (Hostname)", width: 22 },
+    { header: "نظام التشغيل", width: 22 },
+    { header: "عنوان IP الداخلي", width: 18 },
+    { header: "نوع المحطة", width: 18 },
+    { header: "الإصدار القديم الحالي", width: 20 },
+    { header: "الإصدار المعتمد المطلوب", width: 22 },
+    { header: "حالة الخطورة", width: 16 },
+    { header: "الحالة الآن", width: 14 },
+    { header: "آخر ظهور ونشاط", width: 22 },
   ];
   sheet2.columns = cols2;
 
   sheet2.getRow(1).height = 32;
   sheet2.getRow(1).eachCell((cell) => {
+    cell.font = { name: "Arial", size: 10.5, bold: true, color: { argb: PC.white } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.redDark } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    pcBorder(cell);
+  });
+
+  outdatedDevicesList.forEach((item, oIdx) => {
+    const b = item.branch;
+    const d = item.device;
+    const row = sheet2.getRow(2 + oIdx);
+    row.height = 22;
+
+    const isCritical = d.appVersion === "1.0.9" || d.appVersion < "1.1.20";
+
+    row.values = [
+      oIdx + 1,
+      b.branchCode,
+      b.branchName,
+      d.user?.fullName || d.fullName || "-",
+      d.user?.jobTitle || d.workstationType || "-",
+      d.user?.username || d.username || "-",
+      d.hostname || "-",
+      `${d.os || "Windows"} ${d.osVersion || ""}`.trim(),
+      d.ipAddress || "-",
+      d.workstationType || "محطة عمل",
+      `v${d.appVersion}`,
+      `v${targetVersion} (المعتمد)`,
+      isCritical ? "قديم حرج 🚨" : "نسخة سابقة ⚠️",
+      d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
+      formatDate(d.lastSeenAt),
+    ];
+
+    const isEven = oIdx % 2 === 0;
+    row.eachCell((cell, ci) => {
+      cell.font = { name: "Arial", size: 9.5, color: { argb: PC.slateText } };
+      cell.alignment = { horizontal: [1, 2, 9, 10, 11, 12, 13, 14, 15].includes(ci) ? "center" : "right", vertical: "middle" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
+      pcBorder(cell);
+
+      // Old version column (ci: 11)
+      if (ci === 11) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isCritical ? PC.redDark : PC.amberDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isCritical ? PC.redBg : PC.amberBg } };
+      }
+
+      // Target version column (ci: 12)
+      if (ci === 12) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.greenDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenBg } };
+      }
+
+      // Severity column (ci: 13)
+      if (ci === 13) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isCritical ? PC.redDark : PC.amberDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isCritical ? PC.redBg : PC.amberBg } };
+      }
+
+      // Online status column (ci: 14)
+      if (ci === 14) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: d.isOnline ? PC.greenDark : "FF64748B" } };
+      }
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 3: كشف الأجهزة بالنسخة المعتمدة الحديثة
+  // ════════════════════════════════════════════════════════════════════════════
+  const sheet3 = workbook.addWorksheet("أجهزة بالنسخة المعتمدة");
+  sheet3.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 2 }];
+
+  const cols3 = [
+    { header: "م", width: 6 },
+    { header: "كود الفرع", width: 14 },
+    { header: "اسم الفرع", width: 22 },
+    { header: "اسم الموظف المسؤول", width: 24 },
+    { header: "المسمى الوظيفي", width: 20 },
+    { header: "اسم المستخدم (Username)", width: 18 },
+    { header: "اسم الجهاز (Hostname)", width: 22 },
+    { header: "نظام التشغيل", width: 22 },
+    { header: "عنوان IP الداخلي", width: 18 },
+    { header: "نوع المحطة", width: 18 },
+    { header: "الإصدار المعتمد", width: 18 },
+    { header: "حالة التحديث", width: 20 },
+    { header: "الحالة الآن", width: 14 },
+    { header: "آخر ظهور ونشاط", width: 22 },
+  ];
+  sheet3.columns = cols3;
+
+  sheet3.getRow(1).height = 32;
+  sheet3.getRow(1).eachCell((cell) => {
+    cell.font = { name: "Arial", size: 10.5, bold: true, color: { argb: PC.white } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenDark } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    pcBorder(cell);
+  });
+
+  upToDateDevicesList.forEach((item, uIdx) => {
+    const b = item.branch;
+    const d = item.device;
+    const row = sheet3.getRow(2 + uIdx);
+    row.height = 22;
+
+    row.values = [
+      uIdx + 1,
+      b.branchCode,
+      b.branchName,
+      d.user?.fullName || d.fullName || "-",
+      d.user?.jobTitle || d.workstationType || "-",
+      d.user?.username || d.username || "-",
+      d.hostname || "-",
+      `${d.os || "Windows"} ${d.osVersion || ""}`.trim(),
+      d.ipAddress || "-",
+      d.workstationType || "محطة عمل",
+      `v${d.appVersion}`,
+      "مطابق للمعتمد ✅",
+      d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
+      formatDate(d.lastSeenAt),
+    ];
+
+    const isEven = uIdx % 2 === 0;
+    row.eachCell((cell, ci) => {
+      cell.font = { name: "Arial", size: 9.5, color: { argb: PC.slateText } };
+      cell.alignment = { horizontal: [1, 2, 9, 10, 11, 12, 13, 14].includes(ci) ? "center" : "right", vertical: "middle" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
+      pcBorder(cell);
+
+      // Version column (ci: 11)
+      if (ci === 11) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.greenDark } };
+      }
+
+      // Status column (ci: 12)
+      if (ci === 12) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.greenDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenBg } };
+      }
+
+      // Online status column (ci: 13)
+      if (ci === 13) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: d.isOnline ? PC.greenDark : "FF64748B" } };
+      }
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 4: موقف انتشار الفروع الميدانية
+  // ════════════════════════════════════════════════════════════════════════════
+  const sheet4 = workbook.addWorksheet("موقف انتشار الفروع");
+  sheet4.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 2 }];
+
+  const cols4 = [
+    { header: "م", width: 6 },
+    { header: "كود الفرع", width: 14 },
+    { header: "اسم الفرع", width: 28 },
+    { header: "حالة التثبيت", width: 18 },
+    { header: "المحطات الفعلية", width: 18 },
+    { header: "المحطات المحدثة", width: 18 },
+    { header: "المحطات بنسخ قديمة ⚠️", width: 22 },
+    { header: "المحطات المتصلة الآن", width: 20 },
+    { header: "إجمالي الموظفين", width: 18 },
+    { header: "إصدارات البرنامج", width: 22 },
+    { header: "موقف التحديث بالفروع", width: 26 },
+    { header: "آخر نشاط مسجل", width: 22 },
+  ];
+  sheet4.columns = cols4;
+
+  sheet4.getRow(1).height = 32;
+  sheet4.getRow(1).eachCell((cell) => {
     cell.font = { name: "Arial", size: 10.5, bold: true, color: { argb: PC.white } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
@@ -593,7 +893,7 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
   });
 
   branches.forEach((b, idx) => {
-    const row = sheet2.getRow(2 + idx);
+    const row = sheet4.getRow(2 + idx);
     row.height = 22;
     const isInst = b.isInstalled;
     const vers = b.appVersions && b.appVersions.length > 0 ? b.appVersions.join(", ") : "-";
@@ -605,6 +905,8 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
       b.branchName,
       isInst ? "تم التثبيت ✅" : "لم يُثبت بعد ❌",
       b.devicesCount,
+      b.latestDevicesCount || 0,
+      b.outdatedDevicesCount || 0,
       b.onlineDevicesCount,
       b.installedUsersCount,
       vers,
@@ -614,19 +916,25 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
 
     const isEven = idx % 2 === 0;
     row.eachCell((cell, ci) => {
-      cell.font = { name: "Arial", size: 9.5, color: { argb: "FF0F172A" } };
-      cell.alignment = { horizontal: [1, 2, 4, 5, 6, 7, 8, 9, 10].includes(ci) ? "center" : "right", vertical: "middle" };
+      cell.font = { name: "Arial", size: 9.5, color: { argb: PC.slateText } };
+      cell.alignment = { horizontal: [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(ci) ? "center" : "right", vertical: "middle" };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
       pcBorder(cell);
 
-      // Status pill coloring
+      // Installation status pill (ci: 4)
       if (ci === 4) {
         cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isInst ? PC.greenDark : PC.redDark } };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isInst ? PC.greenBg : PC.redBg } };
       }
 
-      // Version status column (ci: 9)
-      if (ci === 9) {
+      // Outdated devices count (ci: 7)
+      if (ci === 7 && (b.outdatedDevicesCount || 0) > 0) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.redDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.redBg } };
+      }
+
+      // Version status column (ci: 11)
+      if (ci === 11) {
         cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: hasOld ? PC.amberDark : PC.greenDark } };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: hasOld ? PC.amberBg : PC.greenBg } };
       }
@@ -634,12 +942,12 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
   });
 
   // ════════════════════════════════════════════════════════════════════════════
-  // SHEET 3: تفاصيل جميع الأجهزة ومحطات العمل (بدون تكرار)
+  // SHEET 5: سجل كافة الأجهزة ومحطات العمل (شامل بدون تكرار)
   // ════════════════════════════════════════════════════════════════════════════
-  const sheet3 = workbook.addWorksheet("كشف الأجهزة ومحطات العمل");
-  sheet3.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 2 }];
+  const sheet5 = workbook.addWorksheet("كافة محطات العمل والأسطول");
+  sheet5.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 2 }];
 
-  const cols3 = [
+  const cols5 = [
     { header: "م", width: 6 },
     { header: "كود الفرع", width: 14 },
     { header: "اسم الفرع", width: 22 },
@@ -654,40 +962,23 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
     { header: "الحالة الآن", width: 14 },
     { header: "آخر ظهور ونشاط", width: 22 },
   ];
-  sheet3.columns = cols3;
+  sheet5.columns = cols5;
 
-  sheet3.getRow(1).height = 32;
-  sheet3.getRow(1).eachCell((cell) => {
+  sheet5.getRow(1).height = 32;
+  sheet5.getRow(1).eachCell((cell) => {
     cell.font = { name: "Arial", size: 10.5, bold: true, color: { argb: PC.white } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.midBlue } };
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     pcBorder(cell);
   });
 
-  // Deduplicate workstations completely
-  const seenWorkstationKeys = new Set();
-  const uniqueDeviceRows = [];
-
-  branches.forEach((b) => {
-    (b.devices || []).forEach((d) => {
-      const uKey = `${b.branchCode}_${d.user?.username || d.username}_${d.hostname}`.toLowerCase();
-      if (!seenWorkstationKeys.has(uKey)) {
-        seenWorkstationKeys.add(uKey);
-        uniqueDeviceRows.push({
-          branch: b,
-          device: d,
-        });
-      }
-    });
-  });
-
-  uniqueDeviceRows.forEach((item, devIdx) => {
+  allFleetDevices.forEach((item, devIdx) => {
     const b = item.branch;
     const d = item.device;
-    const row = sheet3.getRow(2 + devIdx);
+    const row = sheet5.getRow(2 + devIdx);
     row.height = 22;
 
-    const isLatest = d.appVersion === CURRENT_APP_VERSION;
+    const isMatch = compareAppVersions(d.appVersion, targetVersion) >= 0;
     const isCritical = d.appVersion === "1.0.9" || d.appVersion < "1.1.20";
 
     row.values = [
@@ -700,109 +991,33 @@ async function buildDeploymentExcelReport(data, actor, requestedTargetVersion = 
       d.workstationType || "محطة عمل",
       d.user?.fullName || d.fullName || "-",
       d.user?.username || d.username || "-",
-      `v${d.appVersion || CURRENT_APP_VERSION}`,
-      d.versionStatusLabel || (isLatest ? "محدث (v1.1.21) ✅" : "نسخة قديمة ⚠️"),
+      `v${d.appVersion || targetVersion}`,
+      d.versionStatusLabel || (isMatch ? `محدث (v${targetVersion}) ✅` : "نسخة قديمة ⚠️"),
       d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
       formatDate(d.lastSeenAt),
     ];
 
     const isEven = devIdx % 2 === 0;
     row.eachCell((cell, ci) => {
-      cell.font = { name: "Arial", size: 9.5, color: { argb: "FF0F172A" } };
+      cell.font = { name: "Arial", size: 9.5, color: { argb: PC.slateText } };
       cell.alignment = { horizontal: [1, 2, 6, 7, 9, 10, 11, 12, 13].includes(ci) ? "center" : "right", vertical: "middle" };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
       pcBorder(cell);
 
       // Version coloring in col 10
       if (ci === 10) {
-        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isLatest ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) } };
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isMatch ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) } };
       }
 
       // Update status coloring in col 11
       if (ci === 11) {
-        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isLatest ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isLatest ? PC.greenBg : (isCritical ? PC.redBg : PC.amberBg) } };
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isMatch ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isMatch ? PC.greenBg : (isCritical ? PC.redBg : PC.amberBg) } };
       }
 
       // Online status coloring in col 12
       if (ci === 12) {
         cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: d.isOnline ? PC.greenDark : "FF64748B" } };
-      }
-    });
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // SHEET 4: قائمة الأجهزة بنسخ قديمة (للمتابعة والتحديث العاجل)
-  // ════════════════════════════════════════════════════════════════════════════
-  const sheet4 = workbook.addWorksheet("الأجهزة بنسخ قديمة للمتابعة");
-  sheet4.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 2 }];
-
-  const cols4 = [
-    { header: "م", width: 6 },
-    { header: "كود الفرع", width: 14 },
-    { header: "اسم الفرع", width: 22 },
-    { header: "اسم الجهاز (Hostname)", width: 22 },
-    { header: "الموظف المسؤول", width: 24 },
-    { header: "المسمى الوظيفي", width: 18 },
-    { header: "اسم المستخدم", width: 18 },
-    { header: "عنوان IP", width: 18 },
-    { header: "الإصدار القديم الحالي", width: 20 },
-    { header: "الإصدار المطلوب المعتمد", width: 22 },
-    { header: "الحالة اللحظية", width: 14 },
-    { header: "آخر ظهور ونشاط", width: 22 },
-  ];
-  sheet4.columns = cols4;
-
-  sheet4.getRow(1).height = 32;
-  sheet4.getRow(1).eachCell((cell) => {
-    cell.font = { name: "Arial", size: 10.5, bold: true, color: { argb: PC.white } };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.redDark } };
-    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-    pcBorder(cell);
-  });
-
-  const outdatedRows = uniqueDeviceRows.filter(r => r.device.isOutdated);
-
-  outdatedRows.forEach((item, oIdx) => {
-    const b = item.branch;
-    const d = item.device;
-    const row = sheet4.getRow(2 + oIdx);
-    row.height = 22;
-
-    const isCritical = d.appVersion === "1.0.9" || d.appVersion < "1.1.20";
-
-    row.values = [
-      oIdx + 1,
-      b.branchCode,
-      b.branchName,
-      d.hostname || "-",
-      d.user?.fullName || d.fullName || "-",
-      d.user?.jobTitle || d.workstationType || "-",
-      d.user?.username || d.username || "-",
-      d.ipAddress || "-",
-      `v${d.appVersion} (${isCritical ? "قديم حرج 🚨" : "سابق ⚠️"})`,
-      `v${CURRENT_APP_VERSION} (أحدث إصدار)`,
-      d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
-      formatDate(d.lastSeenAt),
-    ];
-
-    const isEven = oIdx % 2 === 0;
-    row.eachCell((cell, ci) => {
-      cell.font = { name: "Arial", size: 9.5, color: { argb: "FF0F172A" } };
-      cell.alignment = { horizontal: [1, 2, 8, 9, 10, 11, 12].includes(ci) ? "center" : "right", vertical: "middle" };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
-      pcBorder(cell);
-
-      // Old version column (ci: 9)
-      if (ci === 9) {
-        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isCritical ? PC.redDark : PC.amberDark } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isCritical ? PC.redBg : PC.amberBg } };
-      }
-
-      // Required version column (ci: 10)
-      if (ci === 10) {
-        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.greenDark } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenBg } };
       }
     });
   });
@@ -823,9 +1038,33 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
   const done = new Promise((resolve) => doc.on("end", resolve));
 
   const usableWidth = doc.page.width - 56; // 841.89 - 56 = 785.89 pt
-  const summary = data.summary;
-  const branches = data.branches;
+  const summary = data.summary || {};
+  const branches = data.branches || [];
+  const targetVersion = summary.targetAppVersion || summary.currentAppVersion || CURRENT_APP_VERSION;
   const reportDate = formatDate(new Date());
+
+  // Flatten and strictly deduplicate all fleet devices
+  const seenWorkstationKeysPdf = new Set();
+  const allFleetDevicesPdf = [];
+
+  branches.forEach((b) => {
+    (b.devices || []).forEach((d) => {
+      const canonicalKey = d.deviceUid
+        ? `uid_${String(d.deviceUid).trim().toLowerCase()}`
+        : `${b.branchCode}_${d.hostname || ""}_${d.user?.username || d.username || ""}`.toLowerCase();
+
+      if (!seenWorkstationKeysPdf.has(canonicalKey)) {
+        seenWorkstationKeysPdf.add(canonicalKey);
+        allFleetDevicesPdf.push({
+          branch: b,
+          device: d,
+        });
+      }
+    });
+  });
+
+  const outdatedDevicesPdf = allFleetDevicesPdf.filter(r => r.device.isOutdated);
+  const upToDateDevicesPdf = allFleetDevicesPdf.filter(r => !r.device.isOutdated && r.device.appVersion !== "غير محدد");
 
   function drawPageHeader(title = "تقرير انتشار وتثبيت منظومة iSmart Messenger وموقف الإصدارات") {
     try {
@@ -841,7 +1080,7 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
     withArabicFont(doc, true).fontSize(12).fillColor("#FFFFFF");
     doc.text(processArabicText(title), 28, 44, { width: usableWidth, align: "center" });
     withArabicFont(doc, false).fontSize(8.5).fillColor("#DBEAFE");
-    const sub = `تاريخ التقرير: ${reportDate}   |   المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}   |   الإصدار المعتمد: v${summary.currentAppVersion}`;
+    const sub = `تاريخ التقرير: ${reportDate}   |   المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}   |   الإصدار المعتمد: v${targetVersion}`;
     doc.text(processArabicText(sub), 28, 60, { width: usableWidth, align: "center" });
   }
 
@@ -851,12 +1090,12 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
   // Summary KPI Cards (y: 82)
   const kpiY = 82;
   const kpis = [
-    { label: "إجمالي الفروع", val: `${summary.totalBranches} فرع`, col: "#1E3A8A" },
-    { label: "الفروع المثبتة", val: `${summary.installedBranchesCount} فرع`, col: "#15803D" },
-    { label: "نسبة الانتشار", val: `${summary.adoptionPercentage}%`, col: "#0284C7" },
-    { label: "الأجهزة المثبتة", val: `${summary.totalInstalledDevices} جهاز`, col: "#475569" },
-    { label: "المحدثة لأحدث إصدار", val: `${summary.latestVersionDevicesCount || 0} جهاز`, col: "#15803D" },
-    { label: "بنسخ قديمة (مطلوب تحديثها)", val: `${summary.outdatedDevicesCount || 0} جهاز`, col: "#B91C1C" },
+    { label: "إجمالي الفروع", val: `${summary.totalBranches || branches.length} فرع`, col: "#1E3A8A" },
+    { label: "الفروع المثبتة", val: `${summary.installedBranchesCount || 0} فرع`, col: "#15803D" },
+    { label: "نسبة الانتشار", val: `${summary.adoptionPercentage || 0}%`, col: "#0284C7" },
+    { label: "المحطات الفعلية (بدون تكرار)", val: `${allFleetDevicesPdf.length} جهاز`, col: "#475569" },
+    { label: "المحدثة بالكامل ✅", val: `${upToDateDevicesPdf.length} جهاز`, col: "#15803D" },
+    { label: "بنسخ قديمة (تتطلب تحديث) ⚠️", val: `${outdatedDevicesPdf.length} جهاز`, col: "#B91C1C" },
   ];
 
   const cardW = (usableWidth - (kpis.length - 1) * 6) / kpis.length;
@@ -874,15 +1113,16 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
   // Branches Table (y: 126)
   const columns = [
     { label: "م", w: 26 },
-    { label: "كود الفرع", w: 60 },
-    { label: "اسم الفرع", w: 140 },
-    { label: "حالة التثبيت", w: 80 },
-    { label: "الأجهزة", w: 65 },
-    { label: "المتصلة", w: 65 },
-    { label: "المستخدمين", w: 65 },
-    { label: "إصدارات البرنامج", w: 100 },
-    { label: "موقف التحديث", w: 100 },
-    { label: "آخر نشاط", w: 84 },
+    { label: "كود الفرع", w: 55 },
+    { label: "اسم الفرع", w: 135 },
+    { label: "حالة التثبيت", w: 75 },
+    { label: "المحطات الفعلية", w: 70 },
+    { label: "المحدثة", w: 60 },
+    { label: "نسخ قديمة", w: 60 },
+    { label: "المتصلة", w: 55 },
+    { label: "إصدارات البرنامج", w: 95 },
+    { label: "موقف التحديث بالفروع", w: 85 },
+    { label: "آخر نشاط", w: 70 },
   ];
 
   let currentY = 126;
@@ -924,8 +1164,9 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
       b.branchName,
       isInst ? "تم التثبيت ✅" : "لم يُثبت ❌",
       String(b.devicesCount),
+      String(b.latestDevicesCount || 0),
+      String(b.outdatedDevicesCount || 0),
       String(b.onlineDevicesCount),
-      String(b.installedUsersCount),
       vers,
       hasOld ? `قديم ⚠️ (${b.outdatedDevicesCount})` : "محدث بالكامل ✅",
       formatDate(b.lastActivityAt),
@@ -938,7 +1179,9 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
 
       if (c === 3) {
         withArabicFont(doc, true).fontSize(7.5).fillColor(isInst ? "#15803D" : "#B91C1C");
-      } else if (c === 8) {
+      } else if (c === 6 && (b.outdatedDevicesCount || 0) > 0) {
+        withArabicFont(doc, true).fontSize(7.5).fillColor("#B91C1C");
+      } else if (c === 9) {
         withArabicFont(doc, true).fontSize(7.5).fillColor(hasOld ? "#B45309" : "#15803D");
       } else {
         withArabicFont(doc, false).fontSize(7.5).fillColor("#0F172A");
@@ -966,26 +1209,7 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
   );
 
   // ---------------- PAGE 2: OUTDATED WORKSTATIONS PUNCH-LIST ----------------
-  // Collect all outdated devices strictly deduplicated
-  const seenWorkstationKeysPdf = new Set();
-  const allOutdatedDevicesPdf = [];
-
-  branches.forEach((b) => {
-    (b.devices || []).forEach((d) => {
-      if (d.isOutdated) {
-        const uKey = `${b.branchCode}_${d.user?.username || d.username}_${d.hostname}`.toLowerCase();
-        if (!seenWorkstationKeysPdf.has(uKey)) {
-          seenWorkstationKeysPdf.add(uKey);
-          allOutdatedDevicesPdf.push({
-            branch: b,
-            device: d,
-          });
-        }
-      }
-    });
-  });
-
-  if (allOutdatedDevicesPdf.length > 0) {
+  if (outdatedDevicesPdf.length > 0) {
     doc.addPage({ margin: 28, size: "A4", layout: "landscape" });
     drawPageHeader("🚨 كشف الأجهزة والمحطات التي تستخدم إصدارات قديمة وتتطلب تحديثاً عاجلاً");
 
@@ -994,7 +1218,7 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
     doc.roundedRect(28, 80, usableWidth, 26, 4).strokeColor("#FECACA").stroke();
     withArabicFont(doc, true).fontSize(8.5).fillColor("#991B1B");
     doc.text(
-      processArabicText(`تنبيه الدعم الفني: تم رصد ${allOutdatedDevicesPdf.length} محطة عمل تعمل بنسخ غير معتمدة أو قديمة. يرجى التنسيق لتحديثها إلى الإصدار v${CURRENT_APP_VERSION}.`),
+      processArabicText(`تنبيه الدعم الفني: تم رصد ${outdatedDevicesPdf.length} محطة عمل تعمل بنسخ قديمة غير معتمدة. يرجى التنسيق لتحديثها إلى الإصدار المعتمد v${targetVersion}.`),
       34,
       87,
       { width: usableWidth - 12, align: "center" }
@@ -1002,14 +1226,15 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
 
     const outColumns = [
       { label: "م", w: 26 },
-      { label: "كود الفرع", w: 60 },
-      { label: "اسم الفرع", w: 130 },
-      { label: "اسم الجهاز (Hostname)", w: 120 },
-      { label: "نظام التشغيل", w: 110 },
-      { label: "عنوان IP", w: 90 },
-      { label: "الموظف المسجل", w: 110 },
-      { label: "الإصدار القديم", w: 75 },
-      { label: "الحالة", w: 64 },
+      { label: "كود الفرع", w: 55 },
+      { label: "اسم الفرع", w: 120 },
+      { label: "الموظف المسؤول", w: 110 },
+      { label: "المسمى الوظيفي", w: 90 },
+      { label: "اسم الجهاز (Hostname)", w: 105 },
+      { label: "عنوان IP الداخلي", w: 85 },
+      { label: "الإصدار القديم", w: 70 },
+      { label: "المطلوب", w: 60 },
+      { label: "الحالة", w: 65 },
     ];
 
     let outY = 114;
@@ -1026,7 +1251,7 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
     drawOutHeader(outY);
     outY += headerH;
 
-    for (let i = 0; i < allOutdatedDevicesPdf.length; i++) {
+    for (let i = 0; i < outdatedDevicesPdf.length; i++) {
       if (outY + rowH > doc.page.height - 35) {
         doc.addPage({ margin: 28, size: "A4", layout: "landscape" });
         drawPageHeader("🚨 كشف الأجهزة والمحطات التي تستخدم إصدارات قديمة (تابع)");
@@ -1035,7 +1260,7 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
         outY += headerH;
       }
 
-      const item = allOutdatedDevicesPdf[i];
+      const item = outdatedDevicesPdf[i];
       const b = item.branch;
       const d = item.device;
       const isEven = i % 2 === 0;
@@ -1046,11 +1271,12 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
         String(i + 1),
         b.branchCode,
         b.branchName,
+        d.user?.fullName || d.fullName || "-",
+        d.user?.jobTitle || d.workstationType || "-",
         d.hostname || "-",
-        d.os || "Windows",
         d.ipAddress || "-",
-        d.user?.fullName || d.user?.username || "-",
         `v${d.appVersion} ${isCritical ? "🚨" : "⚠️"}`,
+        `v${targetVersion}`,
         d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
       ];
 
@@ -1062,6 +1288,8 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
         if (c === 7) {
           withArabicFont(doc, true).fontSize(7.5).fillColor(isCritical ? "#B91C1C" : "#B45309");
         } else if (c === 8) {
+          withArabicFont(doc, true).fontSize(7.5).fillColor("#15803D");
+        } else if (c === 9) {
           withArabicFont(doc, true).fontSize(7.5).fillColor(d.isOnline ? "#15803D" : "#64748B");
         } else {
           withArabicFont(doc, false).fontSize(7.5).fillColor("#0F172A");
@@ -1081,6 +1309,97 @@ async function buildDeploymentPdfReport(data, actor, requestedTargetVersion = nu
     withArabicFont(doc, false).fontSize(7).fillColor("#64748B");
     doc.text(
       processArabicText(`منظومة iSmart Messenger   |   المسؤول: ${actor?.fullName || actor?.username || "Admin"}   |   صفحة المتابعة الفنية للإصدارات`),
+      28,
+      footerY,
+      { width: usableWidth, align: "center" }
+    );
+  }
+
+  // ---------------- PAGE 3: UP-TO-DATE WORKSTATIONS LIST ----------------
+  if (upToDateDevicesPdf.length > 0) {
+    doc.addPage({ margin: 28, size: "A4", layout: "landscape" });
+    drawPageHeader("✅ كشف الأجهزة ومحطات العمل المحدثة للنسخة المعتمدة");
+
+    const upColumns = [
+      { label: "م", w: 26 },
+      { label: "كود الفرع", w: 55 },
+      { label: "اسم الفرع", w: 125 },
+      { label: "الموظف المسؤول", w: 120 },
+      { label: "المسمى الوظيفي", w: 100 },
+      { label: "اسم الجهاز (Hostname)", w: 110 },
+      { label: "عنوان IP", w: 90 },
+      { label: "الإصدار", w: 75 },
+      { label: "الحالة", w: 85 },
+    ];
+
+    let upY = 82;
+    function drawUpHeader(y) {
+      let x = 28;
+      for (const c of upColumns) {
+        doc.rect(x, y, c.w, headerH).fill("#15803D").strokeColor("#166534").stroke();
+        withArabicFont(doc, true).fontSize(8).fillColor("#FFFFFF");
+        doc.text(processArabicText(c.label), x + 2, y + 5, { width: c.w - 4, align: "center" });
+        x += c.w;
+      }
+    }
+
+    drawUpHeader(upY);
+    upY += headerH;
+
+    for (let i = 0; i < upToDateDevicesPdf.length; i++) {
+      if (upY + rowH > doc.page.height - 35) {
+        doc.addPage({ margin: 28, size: "A4", layout: "landscape" });
+        drawPageHeader("✅ كشف الأجهزة ومحطات العمل المحدثة (تابع)");
+        upY = 82;
+        drawUpHeader(upY);
+        upY += headerH;
+      }
+
+      const item = upToDateDevicesPdf[i];
+      const b = item.branch;
+      const d = item.device;
+      const isEven = i % 2 === 0;
+      const rowBg = isEven ? "#F0FDF4" : "#FFFFFF";
+
+      const rData = [
+        String(i + 1),
+        b.branchCode,
+        b.branchName,
+        d.user?.fullName || d.fullName || "-",
+        d.user?.jobTitle || d.workstationType || "-",
+        d.hostname || "-",
+        d.ipAddress || "-",
+        `v${d.appVersion}`,
+        d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
+      ];
+
+      let rX = 28;
+      for (let c = 0; c < upColumns.length; c++) {
+        const col = upColumns[c];
+        doc.rect(rX, upY, col.w, rowH).fill(rowBg).strokeColor("#BBF7D0").stroke();
+
+        if (c === 7) {
+          withArabicFont(doc, true).fontSize(7.5).fillColor("#15803D");
+        } else if (c === 8) {
+          withArabicFont(doc, true).fontSize(7.5).fillColor(d.isOnline ? "#15803D" : "#64748B");
+        } else {
+          withArabicFont(doc, false).fontSize(7.5).fillColor("#0F172A");
+        }
+
+        doc.text(processArabicText(rData[c]), rX + 2, upY + 3.5, {
+          width: col.w - 4,
+          align: "center",
+          ellipsis: true,
+          lineBreak: false,
+        });
+        rX += col.w;
+      }
+      upY += rowH;
+    }
+
+    withArabicFont(doc, false).fontSize(7).fillColor("#64748B");
+    doc.text(
+      processArabicText(`منظومة iSmart Messenger   |   المسؤول: ${actor?.fullName || actor?.username || "Admin"}   |   تقرير الأجهزة المحدثة بالكامل`),
       28,
       footerY,
       { width: usableWidth, align: "center" }
