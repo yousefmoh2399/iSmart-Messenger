@@ -2932,11 +2932,18 @@ function updateAppBadge(count, dataUrl) {
   }
 
   // 4. macOS / Linux Dock Badge
-  try {
-    if (app && typeof app.setBadgeCount === "function") {
+  // CRITICAL: NEVER call app.setBadgeCount on Windows. On Windows, Chromium implements
+  // app.setBadgeCount by setting its own default dark charcoal overlay icon, which
+  // immediately overwrites and destroys our custom 16x16 vibrant red overlay badge!
+  if (process.platform === "darwin" && app.dock && typeof app.dock.setBadge === "function") {
+    try {
+      app.dock.setBadge(validCount > 0 ? String(validCount) : "");
+    } catch (_) {}
+  } else if (process.platform === "linux" && typeof app.setBadgeCount === "function") {
+    try {
       app.setBadgeCount(validCount);
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 }
 
 ipcMain.handle("window:set-badge", async (_event, payload = {}) => {
