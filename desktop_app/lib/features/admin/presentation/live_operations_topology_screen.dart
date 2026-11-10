@@ -343,7 +343,7 @@ class _LiveOperationsTopologyScreenState
     // 1. Gateway Node in Center
     final gatewayNode = _CoreServiceNode(
       id: 'node_gateway',
-      name: 'خادم المنظومة وبوابة الاتصال',
+      name: 'iSmart Server',
       subtitle: 'Express Gateway & Socket.IO Router',
       category: 'GATEWAY / ROUTER',
       description:
@@ -371,7 +371,7 @@ class _LiveOperationsTopologyScreenState
     // 2. Core Engines on the Right Column
     final chatEngineNode = _CoreServiceNode(
       id: 'node_chat_engine',
-      name: 'محرك المحادثات والرسائل',
+      name: 'Chat Engine',
       subtitle: 'Real-time Messaging & Event Bus',
       category: 'CHAT ENGINE',
       description:
@@ -396,7 +396,7 @@ class _LiveOperationsTopologyScreenState
 
     final docEngineNode = _CoreServiceNode(
       id: 'node_doc_engine',
-      name: 'محرك المستندات والطلبات',
+      name: 'Documents & Files Engine',
       subtitle: 'Documents & Orders Pipeline',
       category: 'DOCS ENGINE',
       description:
@@ -418,7 +418,7 @@ class _LiveOperationsTopologyScreenState
 
     final printerEngineNode = _CoreServiceNode(
       id: 'node_printer_engine',
-      name: 'سيرفر الطباعة والفواتير',
+      name: 'Printer Engine',
       subtitle: 'Print Spooler & ESC/POS',
       category: 'PRINT SPOOLER',
       description:
@@ -440,7 +440,7 @@ class _LiveOperationsTopologyScreenState
 
     final releaseEngineNode = _CoreServiceNode(
       id: 'node_release_engine',
-      name: 'سيرفر التحديثات ونشر الحزم',
+      name: 'Updates Engine',
       subtitle: 'Auto-Update & Version Cache',
       category: 'UPDATE HUB',
       description:
@@ -462,7 +462,7 @@ class _LiveOperationsTopologyScreenState
 
     final databaseNode = _CoreServiceNode(
       id: 'node_database',
-      name: 'عنقود قاعدة بيانات MongoDB',
+      name: 'MongoDB Engine',
       subtitle: 'Primary Cluster ReplicaSet',
       category: 'MONGODB',
       description:

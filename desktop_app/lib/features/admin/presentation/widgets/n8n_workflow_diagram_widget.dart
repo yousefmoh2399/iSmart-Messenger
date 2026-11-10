@@ -176,7 +176,7 @@ class N8nWorkflowDiagramWidget extends StatelessWidget {
 
               final stage2 = _buildNodeCard(
                 isDark: isDark,
-                title: 'خادم المنظومة المركزي وبوابة الاتصال',
+                title: 'iSmart Server',
                 subtitle: 'iSmart Core Gateway & Cluster',
                 category: 'GATEWAY / ROUTER',
                 icon: Icons.router_rounded,
