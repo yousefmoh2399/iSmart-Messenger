@@ -10,11 +10,9 @@ class BackupScreen extends StatefulWidget {
 
 class _BackupScreenState extends State<BackupScreen> {
   bool _isLoading = false;
-  String _statusMessage = '';
 
   void _setStatus(String message) {
     if (mounted) {
-      setState(() => _statusMessage = message);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
@@ -71,9 +69,9 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _isLoading = true);
     try {
       final uploadsDir = r'C:\iSmart\data\uploads';
-      final backupFile = r'C:\iSmart\data\backups\files_backup_' + DateTime.now().millisecondsSinceEpoch.toString() + '.zip';
+      final backupFile = 'C:\\iSmart\\data\\backups\\files_backup_${DateTime.now().millisecondsSinceEpoch}.zip';
       
-      final res = await Process.run('powershell', ['-Command', 'Compress-Archive -Path "$uploadsDir\*" -DestinationPath "$backupFile"']);
+      final res = await Process.run('powershell', ['-Command', 'Compress-Archive -Path "$uploadsDir/*" -DestinationPath "$backupFile"']);
       if (res.exitCode == 0) {
         _setStatus('Files backup created at: $backupFile');
       } else {

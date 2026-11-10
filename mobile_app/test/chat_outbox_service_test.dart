@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 // ignore: depend_on_referenced_packages
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -53,6 +54,7 @@ class _FakeChatRepository extends Fake implements ChatRepository {
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   })? sendFileMessageFn;
 
@@ -94,6 +96,7 @@ class _FakeChatRepository extends Fake implements ChatRepository {
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   }) {
     if (sendFileMessageFn != null) {
@@ -104,6 +107,7 @@ class _FakeChatRepository extends Fake implements ChatRepository {
         replyToMessageId: replyToMessageId,
         customFileName: customFileName,
         metadata: metadata,
+        cancelToken: cancelToken,
         onProgress: onProgress,
       );
     }
@@ -298,6 +302,7 @@ void main() {
         String? replyToMessageId,
         String? customFileName,
         Map<String, dynamic>? metadata,
+        CancelToken? cancelToken,
         void Function(int sent, int total)? onProgress,
       }) async {
         sentFilePath = filePath;
