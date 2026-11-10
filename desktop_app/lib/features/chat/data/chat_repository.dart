@@ -1200,12 +1200,27 @@ class ChatRepository {
         return targetFilePath;
       }
       final downloadUrl = _downloadUrlFor(message.fileUrl!);
-      await _apiClient.dio.download(
-        downloadUrl,
-        targetFilePath,
-        cancelToken: cancelToken,
-        onReceiveProgress: onProgress,
-      );
+      for (var attempt = 0; attempt < 4; attempt++) {
+        try {
+          await _apiClient.dio.download(
+            downloadUrl,
+            targetFilePath,
+            cancelToken: cancelToken,
+            deleteOnError: false,
+            options: Options(
+              extra: <String, Object?>{
+                'isTransfer': true,
+              },
+            ),
+            onReceiveProgress: onProgress,
+          );
+          return targetFilePath;
+        } on DioException {
+          if (cancelToken?.isCancelled == true) rethrow;
+          if (attempt == 3) rethrow;
+          await Future<void>.delayed(Duration(seconds: 1 + attempt * 2));
+        }
+      }
       return targetFilePath;
     }
     final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
@@ -1370,7 +1385,10 @@ class ChatRepository {
         cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.bytes,
-          extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},
+          extra: <String, Object?>{
+            if (skipErrorLog) 'skipErrorLog': true,
+            'isTransfer': true,
+          },
         ),
         onReceiveProgress: onProgress,
       );

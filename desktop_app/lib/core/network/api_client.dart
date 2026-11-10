@@ -93,11 +93,14 @@ class ApiClient {
 
           final isTransferEndpoint =
               options.data is FormData ||
+              options.extra['isTransfer'] == true ||
               requestPath.contains('/transfers') ||
               requestPath.contains('/upload') ||
               requestPath.contains('/download') ||
               requestPath.contains('/releases') ||
-              requestPath.contains('/updates');
+              requestPath.contains('/updates') ||
+              requestPath.contains('/chat/messages/') ||
+              requestPath.contains('/documents/');
           final isFastEndpoint = requestPath.contains('/auth/login') ||
               requestPath.contains('/auth/register') ||
               requestPath.contains('/health');
@@ -107,7 +110,14 @@ class ApiClient {
             if (!kIsWeb) {
               options.sendTimeout = const Duration(seconds: 15);
             }
-          } else if (!isTransferEndpoint) {
+          } else if (isTransferEndpoint) {
+            // Generous timeouts for large files, uploads, and downloads over slow branch VPNs
+            options.connectTimeout = const Duration(seconds: 45);
+            options.receiveTimeout = const Duration(minutes: 30);
+            if (!kIsWeb) {
+              options.sendTimeout = const Duration(minutes: 30);
+            }
+          } else {
             // Reduced from 90s to 20s so slow VPN connections fail fast
             // and fall back to cache instead of freezing the UI for 90 seconds.
             options.receiveTimeout = const Duration(seconds: 20);
@@ -361,6 +371,18 @@ class ApiClient {
           error.type == DioExceptionType.receiveTimeout ||
           error.type == DioExceptionType.sendTimeout ||
           error.type == DioExceptionType.connectionError) {
+        final reqPath = error.requestOptions.path.toLowerCase();
+        final isTransfer = error.requestOptions.extra['isTransfer'] == true ||
+            reqPath.contains('/download') ||
+            reqPath.contains('/upload') ||
+            reqPath.contains('/transfers') ||
+            reqPath.contains('/chat/messages/') ||
+            reqPath.contains('/documents/');
+        if (isTransfer) {
+          return const ApiException(
+            'فشل نقل الملف بسبب ضعف أو انقطاع شبكة الـ VPN. يرجى التحقق من الاتصال وإعادة المحاولة.',
+          );
+        }
         return const ApiException(
           'الخادم غير متاح حاليا. سيتم تحديث البيانات تلقائيا عند عودة الاتصال.',
         );

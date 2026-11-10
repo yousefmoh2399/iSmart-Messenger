@@ -33,13 +33,16 @@ async function sendUploadFile(
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Timing-Allow-Origin", "*");
 
-  // Set Content-Length so clients can show accurate download progress
+  // Allow long-running downloads over slow branch VPNs
   try {
-    const { size } = await fs.stat(resolvedPath);
-    if (size > 0) {
-      res.setHeader("Content-Length", String(size));
+    const req = res.req;
+    if (req && req.socket) {
+      req.socket.setTimeout(30 * 60 * 1000);
     }
+    res.setTimeout(30 * 60 * 1000);
   } catch (_) {}
+
+  res.setHeader("Accept-Ranges", "bytes");
 
   const resolvedContentType = contentType || inferContentType(resolvedPath);
   if (resolvedContentType) {

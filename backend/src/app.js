@@ -138,8 +138,18 @@ app.use("/api/updates", (req, res, next) => {
   next();
 });
 app.use("/api/chat/transfers", (req, res, next) => {
-  req.setTimeout(15 * 60 * 1000);
-  res.setTimeout(15 * 60 * 1000);
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
+  next();
+});
+app.use("/api/chat/messages", (req, res, next) => {
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
+  next();
+});
+app.use("/api/documents", (req, res, next) => {
+  req.setTimeout(30 * 60 * 1000);
+  res.setTimeout(30 * 60 * 1000);
   next();
 });
 

@@ -4098,11 +4098,44 @@ function calculateFileSha256(filePath) {
 
 function downloadFile(url, destinationPath, token, onProgress, transferId) {
   return new Promise((resolve, reject) => {
-    const fileStream = fs.createWriteStream(destinationPath);
-    let request;
     const downloadKey = transferId ? String(transferId).trim() : null;
+    const partPath = destinationPath + ".part";
+    let isCancelled = false;
+    let currentRequest = null;
+    let currentStream = null;
+    let attempt = 0;
+    const maxAttempts = 8;
 
-    const startDownload = (targetUrl) => {
+    if (downloadKey) {
+      activeDownloadRequests.set(downloadKey, {
+        get request() { return currentRequest; },
+        get fileStream() { return currentStream; },
+        destinationPath,
+        partPath,
+        cancel: () => {
+          isCancelled = true;
+          try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
+          try { if (currentStream) currentStream.close(); } catch (_) {}
+          try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+          try { if (fs.existsSync(destinationPath)) fs.unlinkSync(destinationPath); } catch (_) {}
+        }
+      });
+    }
+
+    const runAttempt = (targetUrl) => {
+      if (isCancelled) {
+        return reject(new Error("Download cancelled by user."));
+      }
+
+      let existingBytes = 0;
+      try {
+        if (fs.existsSync(partPath)) {
+          existingBytes = fs.statSync(partPath).size;
+        }
+      } catch (_) {
+        existingBytes = 0;
+      }
+
       const parsedUrl = new URL(targetUrl);
       const protocol = parsedUrl.protocol === "https:" ? https : http;
 
@@ -4110,76 +4143,161 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
         "Accept": "*/*",
       };
       if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
+        headers["Authorization"] = "Bearer " + token;
+      }
+      if (existingBytes > 0) {
+        headers["Range"] = "bytes=" + existingBytes + "-";
       }
 
-      request = protocol.get(parsedUrl, { headers }, (response) => {
-        if (downloadKey) {
-          activeDownloadRequests.set(downloadKey, { request, fileStream, destinationPath });
-        }
+      let timeoutTimer = null;
+      const resetInactivityTimer = () => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        timeoutTimer = setTimeout(() => {
+          if (!isCancelled && currentRequest) {
+            console.warn("[downloadFile] Inactivity timeout (45s no data) on VPN link, retrying...");
+            currentRequest.destroy(new Error("ETIMEDOUT: Connection inactive on VPN link"));
+          }
+        }, 45000);
+      };
+
+      currentRequest = protocol.get(parsedUrl, { headers }, (response) => {
         const statusCode = response.statusCode || 0;
 
-        // Handle redirects (e.g. 302 Found)
+        // Handle redirects (e.g. 301, 302, 303, 307, 308)
         if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
-          fileStream.close();
-          try { fs.unlinkSync(destinationPath); } catch (_) {}
-          
           const redirectUrl = new URL(response.headers.location, parsedUrl).toString();
-          downloadFile(redirectUrl, destinationPath, token, onProgress).then(resolve).catch(reject);
-          return;
+          return runAttempt(redirectUrl);
         }
 
-        if (statusCode !== 200) {
+        // Handle 416 Range Not Satisfiable (file size changed on server or completed)
+        if (statusCode === 416) {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
-          fileStream.close();
-          try { fs.unlinkSync(destinationPath); } catch (_) {}
-          reject(new Error(`Failed to download. Status code: ${statusCode}`));
-          return;
+          try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+          return runAttempt(targetUrl);
         }
 
-        const totalHeader = response.headers["content-length"] || response.headers["x-file-size"];
-        const totalBytes = totalHeader ? parseInt(totalHeader, 10) : 0;
-        let receivedBytes = 0;
+        const isPartial = statusCode === 206;
+        if (statusCode !== 200 && !isPartial) {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          response.resume();
+          const err = new Error("Failed to download. Status code: " + statusCode);
+          return handleRetryOrReject(err, targetUrl);
+        }
+
+        // Write mode: append if 206, write/overwrite if 200
+        const writeMode = isPartial ? "a" : "w";
+        let receivedBytes = isPartial ? existingBytes : 0;
+        let totalBytes = 0;
+
+        if (isPartial) {
+          const contentRange = response.headers["content-range"];
+          if (contentRange) {
+            const match = contentRange.match(/\/(\d+)$/);
+            if (match) {
+              totalBytes = parseInt(match[1], 10);
+            }
+          }
+          if (!totalBytes && response.headers["content-length"]) {
+            totalBytes = existingBytes + parseInt(response.headers["content-length"], 10);
+          }
+        } else {
+          totalBytes = parseInt(response.headers["content-length"] || response.headers["x-file-size"] || "0", 10);
+        }
+
+        try {
+          currentStream = fs.createWriteStream(partPath, { flags: writeMode });
+        } catch (streamErr) {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          response.resume();
+          return reject(streamErr);
+        }
+
+        resetInactivityTimer();
 
         response.on("data", (chunk) => {
+          if (isCancelled) {
+            response.resume();
+            return;
+          }
           receivedBytes += chunk.length;
-          fileStream.write(chunk);
+          currentStream.write(chunk);
+          resetInactivityTimer();
           if (onProgress) {
             onProgress(receivedBytes, totalBytes);
           }
         });
 
         response.on("end", () => {
-          fileStream.end();
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (isCancelled) return;
+          currentStream.end();
         });
 
         response.on("error", (err) => {
-          fileStream.close();
-          try { fs.unlinkSync(destinationPath); } catch (_) {}
-          reject(err);
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          handleRetryOrReject(err, targetUrl);
+        });
+
+        currentStream.on("finish", () => {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (isCancelled) return;
+          if (totalBytes > 0 && receivedBytes < totalBytes) {
+            const incompleteErr = new Error("Incomplete download: received " + receivedBytes + " of " + totalBytes + " bytes");
+            return handleRetryOrReject(incompleteErr, targetUrl);
+          }
+
+          try {
+            if (fs.existsSync(destinationPath)) {
+              try { fs.unlinkSync(destinationPath); } catch (_) {}
+            }
+            fs.renameSync(partPath, destinationPath);
+            if (downloadKey) activeDownloadRequests.delete(downloadKey);
+            resolve();
+          } catch (renameErr) {
+            reject(renameErr);
+          }
+        });
+
+        currentStream.on("error", (err) => {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          handleRetryOrReject(err, targetUrl);
         });
       });
 
-      request.on("error", (err) => {
-        fileStream.close();
-        try { fs.unlinkSync(destinationPath); } catch (_) {}
-        reject(err);
+      currentRequest.on("error", (err) => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        handleRetryOrReject(err, targetUrl);
       });
     };
 
-    fileStream.on("finish", () => {
-      if (downloadKey) activeDownloadRequests.delete(downloadKey);
-      resolve();
-    });
+    const handleRetryOrReject = (err, targetUrl) => {
+      if (isCancelled) {
+        return reject(new Error("Download cancelled by user."));
+      }
+      try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
+      try { if (currentStream) currentStream.close(); } catch (_) {}
 
-    fileStream.on("error", (err) => {
-      fileStream.close();
-      try { fs.unlinkSync(destinationPath); } catch (_) {}
-      reject(err);
-    });
+      attempt++;
+      if (attempt < maxAttempts) {
+        const delay = Math.min(1000 * Math.pow(1.5, attempt - 1), 10000);
+        console.warn("[downloadFile] Download attempt " + attempt + "/" + maxAttempts + " failed (" + err.message + "). Resuming in " + delay + "ms...");
+        setTimeout(() => {
+          if (!isCancelled) {
+            runAttempt(targetUrl);
+          }
+        }, delay);
+      } else {
+        console.error("[downloadFile] Download permanently failed after " + maxAttempts + " attempts:", err);
+        try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+        if (downloadKey) activeDownloadRequests.delete(downloadKey);
+        reject(err);
+      }
+    };
 
-    startDownload(url);
+    runAttempt(url);
   });
 }
 
