@@ -68,7 +68,7 @@ class ChatSocketService {
             'deviceInfo': {
               'platform': 'android',
               'os': 'Android',
-              'appVersion': '1.2.8',
+              'appVersion': '1.2.9',
             },
           })
           .setExtraHeaders({
