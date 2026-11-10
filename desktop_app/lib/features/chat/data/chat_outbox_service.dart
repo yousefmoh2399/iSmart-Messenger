@@ -8,6 +8,7 @@ import '../models/chat_models.dart';
 import 'chat_local_cache.dart';
 import 'chat_repository.dart';
 import 'chat_socket_service.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 
 bool isNetworkOrOfflineError(Object? error) {
   if (error == null) return false;
@@ -291,10 +292,21 @@ class ChatOutboxService {
 
           if (item.isFile) {
             final localPath = item.localFilePath ?? '';
-            // Verify file exists if running natively
-            if (!kIsWeb && localPath.isNotEmpty) {
-              final file = io.File(localPath);
-              if (!file.existsSync()) {
+            // Verify file exists if running natively or in Electron
+            if (localPath.isNotEmpty) {
+              final bool exists;
+              if (kIsWeb) {
+                exists = web_bridge.isElectron()
+                    ? await web_bridge.electronFileExists(localPath)
+                    : true;
+              } else {
+                exists = io.File(localPath).existsSync();
+              }
+
+              if (!exists) {
+                if (_socketService != null && !_socketService.isConnected) {
+                  break;
+                }
                 _eventsController.add(ChatOutboxFailedEvent(
                   clientMessageId: item.clientMessageId,
                   conversationId: item.conversationId,
@@ -355,7 +367,10 @@ class ChatOutboxService {
           item.isProcessing = false;
           item.retryAttempts++;
 
-          if (isNetworkOrOfflineError(error)) {
+          final isNetErr = isNetworkOrOfflineError(error) ||
+              (_socketService != null && !_socketService.isConnected);
+
+          if (isNetErr) {
             // Network is unreachable or server is offline.
             // Keep in outbox with 'pending' status so it will be retried automatically upon reconnection.
             debugPrint('[ChatOutbox] Network offline for message ${item.clientMessageId}. Will auto-retry on reconnect.');

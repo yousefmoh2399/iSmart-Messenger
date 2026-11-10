@@ -182,6 +182,7 @@ contextBridge.exposeInMainWorld("electronBridge", {
   markTransferNotificationsRead: () => ipcRenderer.invoke("lan:mark-notifications-read"),
   openInboxFileLocation: (filePath) => ipcRenderer.invoke("lan:open-inbox-file-location", filePath),
   pickDirectory: (payload) => ipcRenderer.invoke("dialog:pick-directory", payload),
+  pickFiles: (payload) => ipcRenderer.invoke("dialog:pick-files", payload),
   setStartup: (enabled) => ipcRenderer.invoke("startup:set", enabled),
   getStartup: () => ipcRenderer.invoke("startup:get"),
   startUpdate: (payload) => ipcRenderer.invoke("updater:start-update", payload),

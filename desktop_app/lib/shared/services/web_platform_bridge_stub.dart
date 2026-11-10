@@ -100,6 +100,14 @@ Future<Map<String, dynamic>?> getElectronWindowState() async {
 
 Future<bool> setElectronWindowTheme(String mode) async => false;
 
+Stream<dynamic>? get onWindowOnline => null;
+
+Future<List<Map<String, dynamic>>?> pickElectronFiles({
+  bool allowMultiple = true,
+  bool isImageOnly = false,
+  String? title,
+}) async => null;
+
 Future<String?> pickElectronDirectory({
   String? title,
   String? defaultPath,

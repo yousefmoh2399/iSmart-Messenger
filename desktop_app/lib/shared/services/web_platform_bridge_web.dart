@@ -299,6 +299,35 @@ Future<bool> setElectronWindowTheme(String mode) async {
   }
 }
 
+Stream<dynamic>? get onWindowOnline => html.window.onOnline;
+
+Future<List<Map<String, dynamic>>?> pickElectronFiles({
+  bool allowMultiple = true,
+  bool isImageOnly = false,
+  String? title,
+}) async {
+  if (!isElectron()) {
+    return null;
+  }
+  final result = _asStringMap(
+    await _callElectron('pickFiles', {
+      'allowMultiple': allowMultiple,
+      'isImageOnly': isImageOnly,
+      if (title != null) 'title': title,
+    }),
+  );
+  if (result['success'] == true && result['canceled'] != true) {
+    final rawFiles = result['files'];
+    if (rawFiles is List) {
+      return rawFiles
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    }
+  }
+  return null;
+}
+
 Future<String?> pickElectronDirectory({
   String? title,
   String? defaultPath,

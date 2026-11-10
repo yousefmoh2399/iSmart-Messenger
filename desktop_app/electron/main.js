@@ -3983,6 +3983,44 @@ ipcMain.handle("dialog:pick-directory", async (_event, payload = {}) => {
   return { success: true, canceled: false, path: result.filePaths[0] };
 });
 
+ipcMain.handle("dialog:pick-files", async (_event, payload = {}) => {
+  const allowMultiple = payload.allowMultiple !== false;
+  const isImageOnly = payload.isImageOnly === true;
+  const filters = isImageOnly
+    ? [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"] }]
+    : undefined;
+
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: String(payload.title || (isImageOnly ? "Select images" : "Select files")),
+    properties: allowMultiple ? ["openFile", "multiSelections"] : ["openFile"],
+    filters,
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return { success: false, canceled: true, files: [] };
+  }
+
+  const files = [];
+  for (const fp of result.filePaths) {
+    try {
+      const stat = await fs.promises.stat(fp);
+      files.push({
+        path: fp,
+        name: require('path').basename(fp),
+        size: stat.size,
+      });
+    } catch (_) {
+      files.push({
+        path: fp,
+        name: require('path').basename(fp),
+        size: 0,
+      });
+    }
+  }
+
+  return { success: true, canceled: false, files };
+});
+
 ipcMain.handle("startup:set", async (_event, enabled) => {
   ensureStartup(enabled === true);
   return { success: true, enabled: enabled === true };

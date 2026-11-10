@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../shared/providers/providers.dart';
+import '../../../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../data/chat_outbox_service.dart';
 import '../data/chat_repository.dart';
 import '../data/chat_socket_service.dart';
@@ -1954,7 +1955,7 @@ class ConversationMessagesController
           (m.id.startsWith('temp_') ? m.id.substring(5) : null);
       final isInOutbox = clientMsgId != null && outboxService.hasItem(clientMsgId);
       final msgStatus = m.metadata?['status']?.toString();
-      if (msgStatus == 'pending' && !isInOutbox) {
+      if ((msgStatus == 'pending' || msgStatus == 'uploading') && !isInOutbox) {
         final updated = Map<String, dynamic>.from(m.metadata ?? {});
         updated['status'] = 'failed';
         return m.copyWith(metadata: updated);
@@ -2419,17 +2420,36 @@ class ConversationMessagesController
 
       final stableClientMessageId =
           'file_${DateTime.now().microsecondsSinceEpoch}_${(1000 + (DateTime.now().millisecond * 7)) % 9999}';
+
+      String effectiveFilePath = filePath;
+      if (kIsWeb &&
+          web_bridge.isElectron() &&
+          fileBytes != null &&
+          fileBytes.isNotEmpty) {
+        try {
+          final cachedDiskPath = await web_bridge.cacheElectronChatAttachment(
+            messageId: stableClientMessageId,
+            fileName: resolvedFileName,
+            bytes: fileBytes,
+          );
+          if (cachedDiskPath != null && cachedDiskPath.isNotEmpty) {
+            effectiveFilePath = cachedDiskPath;
+          }
+        } catch (_) {}
+      }
+
       final currentUser = ref.read(currentUserProvider);
       final currentUserId =
           ref.read(authControllerProvider).valueOrNull?.id ?? '';
       final tempCreatedAt = DateTime.now();
 
+      final isOffline = _socketService != null && !_socketService!.isConnected;
       final effectiveMetadata = <String, dynamic>{
         ...?metadata,
         'clientMessageId': stableClientMessageId,
-        'status': 'uploading',
+        'status': isOffline ? 'pending' : 'uploading',
         'progress': 0.0,
-        if (filePath.isNotEmpty) 'localFilePath': filePath,
+        if (effectiveFilePath.isNotEmpty) 'localFilePath': effectiveFilePath,
       };
 
       final tempMessage = ChatMessage(
@@ -2533,8 +2553,8 @@ class ConversationMessagesController
         final result = await _guardAuth(
           () => _repository().sendFileMessage(
             conversationId: arg,
-            filePath: filePath,
-            fileBytes: fileBytes,
+            filePath: effectiveFilePath,
+            fileBytes: (effectiveFilePath != filePath && effectiveFilePath.isNotEmpty) ? null : fileBytes,
             sourceFileName: sourceFileName,
             content: content,
             replyToMessageId: replyToMessageId,
@@ -2577,7 +2597,7 @@ class ConversationMessagesController
         final isNetErr = isNetworkOrOfflineError(error) ||
             (_socketService != null && !_socketService!.isConnected);
 
-        if (isNetErr && filePath.isNotEmpty) {
+        if (isNetErr && effectiveFilePath.isNotEmpty) {
           // File upload failed due to network / VPN drop or offline state!
           // Add to persistent Outbox queue so it will auto-upload when network is restored!
           final outboxItem = ChatOutboxItem(
@@ -2585,7 +2605,7 @@ class ConversationMessagesController
             conversationId: arg,
             content: content ?? '',
             messageType: effectiveMessageType,
-            localFilePath: filePath,
+            localFilePath: effectiveFilePath,
             fileName: resolvedFileName,
             sourceFileName: sourceFileName,
             customFileName: customFileName,
@@ -2621,46 +2641,50 @@ class ConversationMessagesController
   }
 
   Future<void> retryMessage(ChatMessage message) async {
+    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
+        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
+
+    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
+    cleanMetadata.remove('error');
+    cleanMetadata.remove('progress');
+    cleanMetadata['status'] = message.hasAttachment ? 'uploading' : 'pending';
+
+    final updatedMsg = message.copyWith(metadata: cleanMetadata);
     final current = state.valueOrNull;
     if (current != null) {
-      // Instantly remove failed message from state and cache so it doesn't linger
       _setStateAndCache(
         current.copyWith(
-          messages: current.messages.where((m) => m.id != message.id).toList(),
+          messages: _upsertMessage(current.messages, updatedMsg),
         ),
         immediate: true,
       );
     }
 
-    final clientMessageId = message.metadata?['clientMessageId']?.toString() ??
-        (message.id.startsWith('temp_') ? message.id.substring(5) : null);
-
-    final cleanMetadata = Map<String, dynamic>.from(message.metadata ?? {});
-    cleanMetadata.remove('status');
-    cleanMetadata.remove('error');
-    cleanMetadata.remove('progress');
-
     final localPath = message.metadata?['localFilePath']?.toString();
-    if (message.hasAttachment && localPath != null && localPath.isNotEmpty) {
-      await sendFile(
-        localPath,
-        sourceFileName: message.fileName,
-        customFileName: message.fileName,
-        content: message.content.isNotEmpty ? message.content : null,
-        replyToMessageId: message.replyToMessageId,
-        metadata: cleanMetadata,
-      );
-      return;
-    }
+    try {
+      if (message.hasAttachment && localPath != null && localPath.isNotEmpty) {
+        await sendFile(
+          localPath,
+          sourceFileName: message.fileName,
+          customFileName: message.fileName,
+          content: message.content.isNotEmpty ? message.content : null,
+          replyToMessageId: message.replyToMessageId,
+          metadata: cleanMetadata,
+        );
+        return;
+      }
 
-    await sendMessage(
-      content: message.content,
-      replyToMessageId: message.replyToMessageId,
-      messageType: message.messageType,
-      fileUrl: message.fileUrl,
-      metadata: cleanMetadata,
-      clientMessageId: clientMessageId,
-    );
+      await sendMessage(
+        content: message.content,
+        replyToMessageId: message.replyToMessageId,
+        messageType: message.messageType,
+        fileUrl: message.fileUrl,
+        metadata: cleanMetadata,
+        clientMessageId: clientMessageId,
+      );
+    } catch (_) {
+      // Handled inside sendFile / sendMessage which updates metadata to failed
+    }
   }
 
   Future<void> editMessage({

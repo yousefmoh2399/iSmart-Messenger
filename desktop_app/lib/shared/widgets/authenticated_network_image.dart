@@ -57,15 +57,44 @@ class _AuthenticatedNetworkImageState
   Map<String, String>? _resolvedHeaders;
   String _activeKey = '';
   int _loadGeneration = 0;
+  StreamSubscription? _socketSub;
+  StreamSubscription? _windowOnlineSub;
 
   @override
   void initState() {
     super.initState();
+    _subscribeToReconnection();
     unawaited(_load());
+  }
+
+  void _subscribeToReconnection() {
+    try {
+      final socketService = ref.read(chatSocketServiceProvider);
+      _socketSub = socketService.events.listen((event) {
+        if (event.type == 'socket_connected' && mounted) {
+          if (_error != null || (_bytes == null && _webImageUrl == null)) {
+            _error = null;
+            unawaited(_load());
+          }
+        }
+      });
+    } catch (_) {}
+
+    final onOnline = web_bridge.onWindowOnline;
+    if (onOnline != null) {
+      _windowOnlineSub = onOnline.listen((_) {
+        if (mounted && (_error != null || (_bytes == null && _webImageUrl == null))) {
+          _error = null;
+          unawaited(_load());
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
+    _socketSub?.cancel();
+    _windowOnlineSub?.cancel();
     _revokeElectronObjectUrl();
     super.dispose();
   }

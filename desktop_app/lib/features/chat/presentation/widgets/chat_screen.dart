@@ -2272,28 +2272,51 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
       return;
     }
 
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: kIsWeb,
-    );
-    if (result == null || result.files.isEmpty) {
-      return;
-    }
+    final List<String> paths;
+    final Map<String, int> fileSizes = {};
 
-    if (kIsWeb) {
-      await _sendPickedWebFiles(
-        conversation: conversation,
-        files: result.files,
-        isImageBatch: false,
+    if (kIsWeb && web_bridge.isElectron()) {
+      final electronFiles = await web_bridge.pickElectronFiles(
+        allowMultiple: true,
+        isImageOnly: false,
       );
-      return;
-    }
+      if (electronFiles == null || electronFiles.isEmpty) {
+        return;
+      }
+      paths = electronFiles
+          .map((f) => f['path']?.toString())
+          .whereType<String>()
+          .where((p) => p.isNotEmpty)
+          .toList();
+      for (final f in electronFiles) {
+        final p = f['path']?.toString();
+        final sz = (f['size'] as num?)?.toInt();
+        if (p != null && sz != null) fileSizes[p] = sz;
+      }
+    } else {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        withData: kIsWeb,
+      );
+      if (result == null || result.files.isEmpty) {
+        return;
+      }
 
-    final paths = result.files
-        .map((entry) => entry.path)
-        .whereType<String>()
-        .where((path) => path.isNotEmpty)
-        .toList();
+      if (kIsWeb) {
+        await _sendPickedWebFiles(
+          conversation: conversation,
+          files: result.files,
+          isImageBatch: false,
+        );
+        return;
+      }
+
+      paths = result.files
+          .map((entry) => entry.path)
+          .whereType<String>()
+          .where((path) => path.isNotEmpty)
+          .toList();
+    }
     if (paths.isEmpty) {
       return;
     }
@@ -2380,29 +2403,52 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
       return;
     }
 
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      type: FileType.image,
-      withData: kIsWeb,
-    );
-    if (result == null || result.files.isEmpty) {
-      return;
-    }
+    final List<String> paths;
+    final Map<String, int> fileSizes = {};
 
-    if (kIsWeb) {
-      await _sendPickedWebFiles(
-        conversation: conversation,
-        files: result.files,
-        isImageBatch: true,
+    if (kIsWeb && web_bridge.isElectron()) {
+      final electronFiles = await web_bridge.pickElectronFiles(
+        allowMultiple: true,
+        isImageOnly: true,
       );
-      return;
-    }
+      if (electronFiles == null || electronFiles.isEmpty) {
+        return;
+      }
+      paths = electronFiles
+          .map((f) => f['path']?.toString())
+          .whereType<String>()
+          .where((p) => p.isNotEmpty)
+          .toList();
+      for (final f in electronFiles) {
+        final p = f['path']?.toString();
+        final sz = (f['size'] as num?)?.toInt();
+        if (p != null && sz != null) fileSizes[p] = sz;
+      }
+    } else {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.image,
+        withData: kIsWeb,
+      );
+      if (result == null || result.files.isEmpty) {
+        return;
+      }
 
-    final paths = result.files
-        .map((entry) => entry.path)
-        .whereType<String>()
-        .where((path) => path.isNotEmpty)
-        .toList();
+      if (kIsWeb) {
+        await _sendPickedWebFiles(
+          conversation: conversation,
+          files: result.files,
+          isImageBatch: true,
+        );
+        return;
+      }
+
+      paths = result.files
+          .map((entry) => entry.path)
+          .whereType<String>()
+          .where((path) => path.isNotEmpty)
+          .toList();
+    }
     if (paths.isEmpty) {
       return;
     }
