@@ -3659,7 +3659,8 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
         await sleep(attempt * 1500);
       }
     }
-  } finally {
+  }
+} finally {
     if (uploadKey) {
       activeUploadRequests.delete(uploadKey);
     }
