@@ -136,6 +136,11 @@ class _UpdateDistributionTopologyScreenState
   String _targetVersion = '1.1.22';
   ManagedUpdateRelease? _activeRelease;
 
+  // Live mutable device, release, and branch lists fetched directly from backend
+  List<ManagedUpdateDevice> _liveDevices = [];
+  List<ManagedUpdateRelease> _liveReleases = [];
+  List<BranchSummary> _liveBranches = [];
+
   // Active pulling devices visible on the n8n canvas (unlimited non-overlapping slots)
   final List<_ActivePullingDevice> _canvasPullingDevices = [];
 
@@ -203,6 +208,10 @@ class _UpdateDistributionTopologyScreenState
   void initState() {
     super.initState();
 
+    _liveDevices = List.from(widget.devices);
+    _liveReleases = List.from(widget.releases);
+    _liveBranches = List.from(widget.branches);
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -218,17 +227,16 @@ class _UpdateDistributionTopologyScreenState
       _tickDeviceCountdowns();
     });
 
-    // Periodic real backend sync while devices are actively pulling
-    _backendSyncTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+    // Periodic real backend sync to keep device statuses 100% fresh without closing/reopening the page
+    _backendSyncTicker = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
-      if (_canvasPullingDevices.any((d) => !d.isCompleted && !d.hasError)) {
-        unawaited(widget.onReload?.call());
-      }
+      unawaited(_reloadRealData(silent: true));
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _listenToLiveSocket();
+        unawaited(_reloadRealData(silent: true));
       }
     });
   }
@@ -239,6 +247,12 @@ class _UpdateDistributionTopologyScreenState
     if (oldWidget.releases != widget.releases ||
         oldWidget.devices != widget.devices ||
         oldWidget.targetVersion != widget.targetVersion) {
+      if (_liveDevices.isEmpty && widget.devices.isNotEmpty) {
+        _liveDevices = List.from(widget.devices);
+      }
+      if (_liveReleases.isEmpty && widget.releases.isNotEmpty) {
+        _liveReleases = List.from(widget.releases);
+      }
       _initTargetRelease();
       _buildFleetDevices();
     }
@@ -255,10 +269,11 @@ class _UpdateDistributionTopologyScreenState
   }
 
   void _initTargetRelease() {
-    if (widget.releases.isNotEmpty) {
-      _activeRelease = widget.releases.firstWhere(
+    final releasesPool = _liveReleases.isNotEmpty ? _liveReleases : widget.releases;
+    if (releasesPool.isNotEmpty) {
+      _activeRelease = releasesPool.firstWhere(
         (r) => widget.targetVersion != null && r.version == widget.targetVersion,
-        orElse: () => widget.releases.first,
+        orElse: () => releasesPool.first,
       );
       _targetVersion = widget.targetVersion ?? _activeRelease!.version;
     } else {
@@ -456,8 +471,11 @@ class _UpdateDistributionTopologyScreenState
   void _buildFleetDevices() {
     _allFleetDevices.clear();
 
-    // Populate strictly from real `widget.devices` stored in database
-    for (final d in widget.devices) {
+    // Populate strictly from real devices stored in database
+    final devicesPool = _liveDevices.isNotEmpty ? _liveDevices : widget.devices;
+    final branchesPool = _liveBranches.isNotEmpty ? _liveBranches : widget.branches;
+
+    for (final d in devicesPool) {
       final host = (d.hostName != null && d.hostName!.trim().isNotEmpty)
           ? d.hostName!.trim()
           : ((d.deviceName != null && d.deviceName!.trim().isNotEmpty)
@@ -472,7 +490,7 @@ class _UpdateDistributionTopologyScreenState
                       d.lastKnownUsername!.trim().isNotEmpty)
                   ? d.lastKnownUsername!.trim()
                   : 'موظف الفرع');
-      final bName = widget.branches
+      final bName = branchesPool
           .firstWhere(
             (b) => b.code == d.branchCode,
             orElse: () => BranchSummary(
@@ -608,13 +626,34 @@ class _UpdateDistributionTopologyScreenState
     return activeDev;
   }
 
-  Future<void> _reloadRealData() async {
+  Future<void> _reloadRealData({bool silent = false}) async {
     if (_isReloading) return;
-    setState(() => _isReloading = true);
+    if (!silent && mounted) setState(() => _isReloading = true);
     try {
-      await widget.onReload?.call();
-      _logEvent('INFO', 'Server',
-          '🔄 تم تحديث قائمة الأجهزة وحالات التحديث الفعلية من قاعدة البيانات.');
+      final repository = ref.read(updateManagementRepositoryProvider);
+      final results = await Future.wait([
+        repository.listDevices(limit: 200),
+        repository.listReleases(),
+        widget.onReload?.call() ?? Future.value(),
+      ]);
+      if (!mounted) return;
+      final freshDevices = results[0] as List<ManagedUpdateDevice>;
+      final freshReleases = results[1] as List<ManagedUpdateRelease>;
+
+      _liveDevices = freshDevices;
+      if (freshReleases.isNotEmpty) {
+        _liveReleases = freshReleases;
+        _initTargetRelease();
+      }
+      _buildFleetDevices();
+      if (!silent) {
+        _logEvent('SUCCESS', 'Server',
+            '🔄 [بيانات حقيقية] تم مزامنة أجهزة الفروع (${_allFleetDevices.length} جهاز) مباشرة من قاعدة البيانات.');
+      }
+    } catch (e) {
+      if (!silent) {
+        _logEvent('WARN', 'Server', 'تعذر جلب التحديثات من السيرفر: $e');
+      }
     } finally {
       if (mounted) {
         setState(() => _isReloading = false);
@@ -648,9 +687,9 @@ class _UpdateDistributionTopologyScreenState
     setState(() {
       active.phase = 'dispatching';
       active.hasError = false;
-      active.progress = 0.08;
+      active.progress = 0.0;
       active.statusMessage = '📡 جاري إرسال أمر التحديث للسيرفر...';
-      active.awaitingPullSeconds = 8;
+      active.awaitingPullSeconds = dev.isOnline ? 18 : 60;
     });
 
     _logEvent('INFO', dev.hostname,
@@ -667,23 +706,23 @@ class _UpdateDistributionTopologyScreenState
       setState(() {
         if (active.phase == 'dispatching') {
           active.phase = 'awaiting_pull';
-          active.progress = 0.14;
+          active.progress = 0.0;
           active.statusMessage = dev.isOnline
-              ? '⏳ تم تسليم الأمر • بانتظار بدء سحب الحزمة...'
-              : '⚪ الجهاز غير متصل حالياً • سيبدأ السحب فور اتصاله';
-          active.awaitingPullSeconds = 8;
+              ? '⏳ تم تسليم الأمر بالسيرفر • بانتظار بدء سحب الجهاز...'
+              : '⚪ الجهاز غير متصل حالياً • تم إدراج الأمر في انتظار فتح الجهاز';
+          active.awaitingPullSeconds = dev.isOnline ? 18 : 60;
         }
       });
       _logEvent('SUCCESS', dev.hostname,
           '✅ تم تسجيل مهمة التحديث في السيرفر للجهاز ${dev.hostname} — بانتظار استجابة الجهاز الفعلية.');
-      unawaited(widget.onReload?.call());
+      unawaited(_reloadRealData(silent: true));
     } catch (err) {
       if (!mounted) return;
       setState(() {
         active.phase = 'failed';
         active.hasError = true;
         active.statusMessage = 'تعذر إرسال الأمر: $err';
-        active.remainingSeconds = 5;
+        active.remainingSeconds = 6;
       });
       _logEvent('ERROR', dev.hostname,
           '❌ تعذر إنشاء مهمة التحديث للجهاز ${dev.hostname}: $err');
@@ -730,24 +769,30 @@ class _UpdateDistributionTopologyScreenState
       return;
     }
 
+    final onlineOutdated = outdatedList.where((d) => d.isOnline).toList();
+    final offlineOutdated = outdatedList.where((d) => !d.isOnline).toList();
+
     HapticFeedback.heavyImpact();
     setState(() {
       _isAutoRolloutActive = true;
       _activeTab = 0;
     });
 
-    // Show target devices on canvas in 'dispatching' state
+    // Show target devices on canvas in 'dispatching' state without fake progress bars
     for (final dev in outdatedList) {
       final card = _spawnDeviceOnCanvas(dev, initialPhase: 'dispatching');
       if (card != null) {
         card.phase = 'dispatching';
-        card.statusMessage = '📡 جاري إرسال أمر التحديث الجماعي...';
-        card.awaitingPullSeconds = 8;
+        card.progress = 0.0;
+        card.statusMessage = dev.isOnline
+            ? '📡 جاري إرسال أمر التحديث الجماعي...'
+            : '⚪ جهاز غير متصل • جاري إدراج التحديث بقائمة انتظار السيرفر...';
+        card.awaitingPullSeconds = dev.isOnline ? 18 : 60;
       }
     }
 
     _logEvent('INFO', 'Server',
-        '🚀 إرسال حملة تحديث فعلية لعدد (${outdatedList.length}) جهاز إلى السيرفر المركزي...');
+        '🚀 إرسال حملة تحديث فعلية لعدد (${outdatedList.length}) جهاز (${onlineOutdated.length} متصل، ${offlineOutdated.length} غير متصل)...');
 
     try {
       await ref.read(updateManagementRepositoryProvider).createUpdateJob(
@@ -762,16 +807,18 @@ class _UpdateDistributionTopologyScreenState
         for (final card in _canvasPullingDevices) {
           if (card.phase == 'dispatching') {
             card.phase = 'awaiting_pull';
-            card.progress = 0.14;
-            card.statusMessage =
-                '⏳ تم إرسال الأمر • بانتظار سحب الجهاز الفعلي...';
-            card.awaitingPullSeconds = 8;
+            card.progress = 0.0;
+            final isDevOnline = outdatedList.any((d) => d.id == card.id && d.isOnline);
+            card.statusMessage = isDevOnline
+                ? '⏳ تم إرسال الأمر بالسيرفر • بانتظار بدء سحب الحزمة من الجهاز...'
+                : '⚪ تم جدولة التحديث بالسيرفر • سيبدأ السحب فور تشغيل الجهاز بالفرع';
+            card.awaitingPullSeconds = isDevOnline ? 18 : 60;
           }
         }
       });
       _logEvent('SUCCESS', 'Server',
           '✅ تم إرسال أوامر التحديث الفعلية لجميع الأجهزة المستهدفة — ستتحول للأخضر فور إتمام كل جهاز للتثبيت.');
-      unawaited(widget.onReload?.call());
+      unawaited(_reloadRealData(silent: true));
     } catch (err) {
       if (!mounted) return;
       setState(() {
@@ -781,7 +828,7 @@ class _UpdateDistributionTopologyScreenState
             card.phase = 'failed';
             card.hasError = true;
             card.statusMessage = 'تعذر إرسال الأمر الجماعي';
-            card.remainingSeconds = 5;
+            card.remainingSeconds = 6;
           }
         }
       });
@@ -816,6 +863,10 @@ class _UpdateDistributionTopologyScreenState
     if (toRemove.isNotEmpty) {
       for (final r in toRemove) {
         _canvasPullingDevices.remove(r);
+        if (r.phase == 'awaiting_pull') {
+          _logEvent('INFO', r.hostname,
+              '📌 التحديث مجدول للجهاز ${r.hostname} في قائمة انتظار السيرفر لحين بدء سحب الحزمة.');
+        }
       }
       changed = true;
     }
@@ -1056,6 +1107,29 @@ class _UpdateDistributionTopologyScreenState
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w800),
                 ),
+              ),
+              const SizedBox(width: 8),
+
+              // Manual Real-time Refresh Button
+              IconButton(
+                onPressed: _isReloading ? null : () => _reloadRealData(silent: false),
+                style: IconButton.styleFrom(
+                  backgroundColor:
+                      isDark ? const Color(0xFF1E2536) : const Color(0xFFF1F5F9),
+                  foregroundColor:
+                      isDark ? Colors.white : const Color(0xFF0F172A),
+                  padding: const EdgeInsets.all(9),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                tooltip: 'مزامنة وتحديث البيانات لحظياً من السيرفر',
+                icon: _isReloading
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded, size: 18),
               ),
             ],
           ),
@@ -1624,8 +1698,8 @@ class _UpdateDistributionTopologyScreenState
     } else if (isError) {
       topBadgeText = 'تعذر التحديث ❌ (يختفي خلال ${dev.remainingSeconds}ث)';
       topBadgeIcon = Icons.error_outline_rounded;
-    } else if (isAwaiting) {
-      topBadgeText = 'تم إرسال الأمر 📡 (${dev.awaitingPullSeconds}ث)';
+    } else if (isAwaiting || dev.progress <= 0.0) {
+      topBadgeText = 'تم تسليم الأمر بالسيرفر 📡 (${dev.awaitingPullSeconds}ث)';
       topBadgeIcon = Icons.schedule_send_rounded;
     } else {
       topBadgeText = 'جارٍ سحب التحديث ${(dev.progress * 100).toInt()}% ⬇️';
@@ -1776,7 +1850,7 @@ class _UpdateDistributionTopologyScreenState
                 ClipRRect(
                   borderRadius: BorderRadius.circular(3),
                   child: LinearProgressIndicator(
-                    value: dev.progress.clamp(0.05, 1.0),
+                    value: dev.progress > 0.0 ? dev.progress.clamp(0.01, 1.0) : null,
                     backgroundColor: cardColor.withValues(alpha: 0.15),
                     valueColor: AlwaysStoppedAnimation<Color>(cardColor),
                     minHeight: 4.5,
