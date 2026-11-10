@@ -33,6 +33,8 @@ class _ActiveCanvasDevice {
     required this.color,
     required this.icon,
     required this.requestStartedAt,
+    this.deviceUid = '',
+    this.clientType = 'desktop',
     this.method = 'GET',
     this.endpoint = '',
     this.latencyMs = 12,
@@ -41,6 +43,8 @@ class _ActiveCanvasDevice {
 
   final String id;
   final String deviceId;
+  String deviceUid;
+  String clientType;
   final String username;
   String hostname;
   String cashierName;
@@ -62,7 +66,7 @@ class _ActiveCanvasDevice {
   int statusCode;
   int requestCount = 1;
   bool isCompleted = false;
-  int remainingSeconds = 5;
+  int remainingSeconds = 25;
 
   static const int stage1DurationMs = 750;
   static const int stage2DurationMs = 750;
@@ -116,10 +120,12 @@ class _FleetDeviceModel {
     required this.isOnline,
     required this.clientType,
     required this.os,
+    this.deviceUid = '',
     this.lastSeenAt,
   });
 
   final String id;
+  final String deviceUid;
   final String hostname;
   final String fullName;
   final String username;
@@ -269,7 +275,7 @@ class _LiveOperationsTopologyScreenState
     for (final dev in _activeDevices) {
       if (!dev.isCompleted && dev.routingStage >= 4) {
         dev.isCompleted = true;
-        dev.remainingSeconds = 5;
+        dev.remainingSeconds = 25;
         stateChanged = true;
       }
     }
@@ -745,11 +751,13 @@ class _LiveOperationsTopologyScreenState
     final hostName = (data['hostName'] ?? userMap?['hostName'] ?? '').toString();
     final deviceUid = (data['deviceUid'] ?? userMap?['deviceUid'] ?? '').toString();
     final customLabel = (data['actionLabel'] ?? '').toString();
+    final platform = (data['platform'] ?? '').toString();
+    final isMobile = platform.contains('mobile') || (data['platform']?.toString().contains('mobile') == true);
 
     // Match device from real fleet by deviceUid, hostName, username, branchCode or IP
     _FleetDeviceModel? matchedDev;
     for (final d in _allFleetDevices) {
-      if (deviceUid.isNotEmpty && d.id.contains(deviceUid)) {
+      if (deviceUid.isNotEmpty && (d.id.contains(deviceUid) || (d.deviceUid.isNotEmpty && d.deviceUid == deviceUid))) {
         matchedDev = d;
         break;
       }
@@ -762,6 +770,9 @@ class _LiveOperationsTopologyScreenState
           username != '-' &&
           !username.startsWith('host:') &&
           d.username.toLowerCase() == username.toLowerCase()) {
+        if (clientIp.isNotEmpty && clientIp != '-' && clientIp != '127.0.0.1' && d.ipAddress.isNotEmpty && d.ipAddress != '-' && d.ipAddress != clientIp) {
+          continue;
+        }
         matchedDev = d;
         break;
       }
@@ -786,19 +797,23 @@ class _LiveOperationsTopologyScreenState
         ? 'dev_$deviceUid'
         : (hostName.isNotEmpty
             ? 'host_${hostName.toLowerCase()}'
-            : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
-                ? 'user_${username.toLowerCase()}'
-                : 'ip_$clientIp'));
+            : (clientIp.isNotEmpty && clientIp != '-' && clientIp != '127.0.0.1' && clientIp != 'localhost'
+                ? 'ip_${clientIp.replaceAll(RegExp(r'[^0-9a-zA-Z]'), '_')}'
+                : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
+                    ? 'user_${username.toLowerCase()}_${isMobile ? "m" : "d"}'
+                    : 'act_${DateTime.now().millisecondsSinceEpoch}')));
 
     final displayName = hostName.isNotEmpty
         ? hostName
-        : (fullName.isNotEmpty && fullName != 'جهاز بالشبكة'
-            ? fullName
-            : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
-                ? username
-                : (branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
-                    ? 'كاشير فرع $branchCode'
-                    : (clientIp != '-' ? 'جهاز $clientIp' : 'محطة فرع'))));
+        : (clientIp.isNotEmpty && clientIp != '-' && clientIp != '127.0.0.1' && clientIp != 'localhost'
+            ? 'جهاز ($clientIp)'
+            : (fullName.isNotEmpty && fullName != 'جهاز بالشبكة'
+                ? (isMobile ? '$fullName (موبايل)' : fullName)
+                : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
+                    ? (isMobile ? '$username (موبايل)' : username)
+                    : (branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
+                        ? 'كاشير فرع $branchCode'
+                        : 'محطة فرع'))));
 
     final displayBranch = branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
         ? 'فرع $branchCode'
@@ -806,6 +821,7 @@ class _LiveOperationsTopologyScreenState
 
     matchedDev ??= _FleetDeviceModel(
       id: resolvedId,
+      deviceUid: deviceUid,
       hostname: displayName,
       fullName: fullName.isNotEmpty ? fullName : displayName,
       username: username.isNotEmpty ? username : displayName,
@@ -816,10 +832,8 @@ class _LiveOperationsTopologyScreenState
           widget.state.deploymentData?.summary.targetAppVersion ?? '1.1.22',
       isOutdated: false,
       isOnline: true,
-      clientType: data['platform']?.toString().contains('mobile') == true
-          ? 'mobile'
-          : 'desktop',
-      os: 'Windows',
+      clientType: isMobile ? 'mobile' : 'desktop',
+      os: isMobile ? 'Android' : 'Windows',
       lastSeenAt: DateTime.now(),
     );
 
@@ -1004,6 +1018,41 @@ class _LiveOperationsTopologyScreenState
         icon: Icons.wifi_tethering_rounded,
       );
     }
+    if (p.contains('/reactions')) {
+      return (
+        label: '❤️ تفاعل مع رسالة',
+        color: const Color(0xFFEC4899),
+        icon: Icons.favorite_rounded,
+      );
+    }
+    if (p.contains('/typing')) {
+      return (
+        label: '✍️ مؤشر كتابة رسالة',
+        color: const Color(0xFF3B82F6),
+        icon: Icons.edit_note_rounded,
+      );
+    }
+    if (p.contains('/seen')) {
+      return (
+        label: '✔️ تأكيد قراءة واستلام رسائل',
+        color: const Color(0xFF10B981),
+        icon: Icons.done_all_rounded,
+      );
+    }
+    if (p.contains('/join')) {
+      return (
+        label: '💬 فتح واستعراض محادثة',
+        color: const Color(0xFF6366F1),
+        icon: Icons.chat_bubble_outline_rounded,
+      );
+    }
+    if (p.contains('/connect')) {
+      return (
+        label: '🟢 اتصال جهاز بالشبكة',
+        color: const Color(0xFF10B981),
+        icon: Icons.wifi_tethering_rounded,
+      );
+    }
     if (p.contains('/chat') ||
         p.contains('/messages') ||
         p.contains('/conversations')) {
@@ -1103,15 +1152,58 @@ class _LiveOperationsTopologyScreenState
     final eng = _coreNodesMap[resolvedEngineId];
     if (eng != null) eng.executionCount++;
 
-    // Check if this device is ALREADY active on the canvas (deduplicate so one device doesn't spawn multiple overlapping cards)
+    // Check if this physical device is ALREADY active on the canvas
     _ActiveCanvasDevice? existing;
     for (final d in _activeDevices) {
-      final sameId = d.deviceId == dev.id;
-      final sameUser = dev.username.isNotEmpty &&
-          dev.username != '-' &&
-          d.username.toLowerCase() == dev.username.toLowerCase();
-      final sameHost = d.hostname.toLowerCase() == dev.hostname.toLowerCase();
-      if (sameId || sameUser || sameHost) {
+      // 1. Exact match on unique deviceId or deviceUid
+      if (dev.id.isNotEmpty && d.deviceId == dev.id) {
+        existing = d;
+        break;
+      }
+      if (dev.deviceUid.isNotEmpty && d.deviceUid.isNotEmpty && d.deviceUid == dev.deviceUid) {
+        existing = d;
+        break;
+      }
+      // 2. Physical hostname match (only if non-empty and non-generic)
+      final dHost = d.hostname.trim().toLowerCase();
+      final devHost = dev.hostname.trim().toLowerCase();
+      final isGenericHost = devHost.isEmpty ||
+          devHost == 'محطة فرع' ||
+          devHost == 'جهاز بالشبكة' ||
+          devHost.startsWith('جهاز -') ||
+          devHost.startsWith('pos-');
+      if (!isGenericHost && dHost == devHost) {
+        existing = d;
+        break;
+      }
+      // 3. Same IP address (only if non-local and real IP)
+      final dIp = d.ipAddress.trim();
+      final devIp = dev.ipAddress.trim();
+      final isRealIp = devIp.isNotEmpty &&
+          devIp != '-' &&
+          devIp != '127.0.0.1' &&
+          devIp != 'localhost' &&
+          devIp != '::1';
+      if (isRealIp && dIp == devIp) {
+        existing = d;
+        break;
+      }
+      // 4. Same username ONLY IF both devices have matching clientType, matching branch, AND no conflicting IP/host
+      final dUser = d.username.trim().toLowerCase();
+      final devUser = dev.username.trim().toLowerCase();
+      if (devUser.isNotEmpty && devUser != '-' && !devUser.startsWith('host:') && dUser == devUser) {
+        // If one is mobile and other is desktop, they are NOT the same device!
+        if (d.clientType.isNotEmpty && dev.clientType.isNotEmpty && d.clientType != dev.clientType) {
+          continue;
+        }
+        // If both have different real IPs, they are NOT the same device!
+        if (isRealIp && dIp.isNotEmpty && dIp != '-' && dIp != devIp) {
+          continue;
+        }
+        // If both have different non-generic hostnames, they are NOT the same device!
+        if (!isGenericHost && dHost.isNotEmpty && dHost != devHost) {
+          continue;
+        }
         existing = d;
         break;
       }
@@ -1124,6 +1216,8 @@ class _LiveOperationsTopologyScreenState
         existing.branchName = dev.branchName;
         existing.branchCode = dev.branchCode;
         existing.ipAddress = dev.ipAddress;
+        if (dev.deviceUid.isNotEmpty) existing.deviceUid = dev.deviceUid;
+        if (dev.clientType.isNotEmpty) existing.clientType = dev.clientType;
         existing.actionLabel = actionLabel;
         existing.targetEngineId = resolvedEngineId;
         existing.targetEngineName = engName;
@@ -1136,7 +1230,7 @@ class _LiveOperationsTopologyScreenState
         existing.requestCount++;
         existing.requestStartedAt = DateTime.now();
         existing.isCompleted = false;
-        existing.remainingSeconds = 5;
+        existing.remainingSeconds = 25;
 
         _liveLogs.insert(0, {
           'time': _formatTime(DateTime.now()),
@@ -1158,6 +1252,8 @@ class _LiveOperationsTopologyScreenState
     final activeDev = _ActiveCanvasDevice(
       id: 'act_${DateTime.now().microsecondsSinceEpoch}',
       deviceId: dev.id,
+      deviceUid: dev.deviceUid,
+      clientType: dev.clientType,
       username: dev.username,
       hostname: dev.hostname,
       cashierName: dev.fullName,
@@ -1378,14 +1474,14 @@ class _LiveOperationsTopologyScreenState
     for (final dev in _activeDevices) {
       if (!dev.isCompleted && dev.routingStage >= 4) {
         dev.isCompleted = true;
-        dev.remainingSeconds = 5;
+        dev.remainingSeconds = 25;
         changed = true;
       } else if (dev.isCompleted) {
         if (dev.remainingSeconds > 1) {
           dev.remainingSeconds--;
           changed = true;
         } else {
-          // 5 full seconds after completion elapsed — disappear!
+          // 25 full seconds after completion elapsed — disappear!
           toRemove.add(dev);
         }
       }
@@ -2104,7 +2200,7 @@ class _LiveOperationsTopologyScreenState
     String stageText;
     IconData stageIcon;
     if (isDone) {
-      stageText = 'تم الرد ✓ (يختفي خلال ${dev.remainingSeconds}ث)';
+      stageText = 'تم الرد ✓ (نشط لمدة ${dev.remainingSeconds}ث)';
       stageIcon = Icons.check_circle_rounded;
     } else if (stage == 1) {
       stageText = '1/3 📤 إرسال الطلب للسيرفر...';
@@ -3171,7 +3267,7 @@ class _N8nFullTopologyWiresPainter extends CustomPainter {
           path: devToGwPath,
           progress: 1.0 - pulseValue,
           color: const Color(0xFF10B981),
-          label: '✓ اكتمل (${dev.remainingSeconds}ث)',
+          label: '✓ نشط (${dev.remainingSeconds}ث)',
         );
       }
     }

@@ -171,19 +171,41 @@ const downloadReleaseArtifact = (req, res, next) => {
   })
     .then(async () => {
       const clientDeviceUid = String(
-        req.query.deviceUid || req.headers["x-device-uid"] || "",
+        req.query.deviceUid ||
+        req.headers["x-device-uid"] ||
+        req.user?.deviceUid ||
+        req.user?.deviceInfo?.deviceUid ||
+        "",
       ).trim();
-      if (clientDeviceUid) {
-        emitUpdateTelemetry(req, {
-          action: "download_started",
-          releaseId: req.params.id,
-          deviceUid: clientDeviceUid,
-          status: "downloading",
-          phase: "pulling",
-          progress: 5,
-          message: "بدأ سحب حزمة التحديث من السيرفر",
-        });
-      }
+      const hostName = String(
+        req.headers["x-device-name"] ||
+        req.headers["x-host-name"] ||
+        req.user?.deviceInfo?.hostName ||
+        req.user?.deviceInfo?.deviceName ||
+        req.user?.deviceInfo?.hostname ||
+        "",
+      ).trim();
+      const branchCode = String(
+        req.headers["x-branch-code"] ||
+        req.user?.branchCode ||
+        "MAIN",
+      ).toUpperCase();
+      const clientIp = req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "-";
+      const targetIdentifier = clientDeviceUid || (hostName ? `host_${hostName}` : (clientIp !== "-" ? `ip_${clientIp}` : "POS-Terminal"));
+
+      emitUpdateTelemetry(req, {
+        action: "download_started",
+        releaseId: req.params.id,
+        deviceUid: clientDeviceUid || targetIdentifier,
+        hostName: hostName || null,
+        deviceName: hostName || null,
+        branchCode: branchCode,
+        clientIp: clientIp,
+        status: "downloading",
+        phase: "pulling",
+        progress: 5,
+        message: "بدأ سحب حزمة التحديث من السيرفر",
+      });
 
       const info = await getReleaseDownloadInfo(req.params.id);
       if (info.mode === "redirect") {
@@ -256,14 +278,18 @@ const downloadReleaseArtifact = (req, res, next) => {
         let lastEmittedPct = 5;
         stream.on("data", (chunk) => {
           bytesSent += chunk.length;
-          if (clientDeviceUid && fileSize > 0) {
+          if (fileSize > 0) {
             const pct = Math.min(95, Math.round((bytesSent / fileSize) * 100));
             if (pct - lastEmittedPct >= 15) {
               lastEmittedPct = pct;
               emitUpdateTelemetry(req, {
                 action: "download_progress",
                 releaseId: req.params.id,
-                deviceUid: clientDeviceUid,
+                deviceUid: clientDeviceUid || targetIdentifier,
+                hostName: hostName || null,
+                deviceName: hostName || null,
+                branchCode: branchCode,
+                clientIp: clientIp,
                 status: "downloading",
                 phase: "pulling",
                 progress: pct,

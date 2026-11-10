@@ -819,6 +819,13 @@ function initializeChatSocketServer(httpServer) {
         }
         deliveryTarget.emit("message_delivered", entry);
       }
+      try {
+        recordSocketTelemetry(io, socket, "connection", 6, {
+          path: "/socket/connect",
+          label: "🟢 تسجيل اتصال جهاز بالشبكة",
+          statusCode: 200,
+        });
+      } catch (_) {}
     } catch (error) {
       socket.emit("socket_error", {
         message: error?.message || "Socket initialization failed.",
@@ -898,6 +905,11 @@ function initializeChatSocketServer(httpServer) {
             deliveredMessageIds,
             isReadOnly: !isActiveMember || isBlocked,
           },
+        });
+        recordSocketTelemetry(io, socket, "join_conversation", 8, {
+          path: "/socket/chat/join",
+          label: "💬 فتح واستعراض محادثة",
+          statusCode: 200,
         });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
@@ -1094,6 +1106,11 @@ function initializeChatSocketServer(httpServer) {
           fullName: currentUser.fullName || currentUser.username || "User",
         });
         socketAck(ack, { ok: true, success: true });
+        recordSocketTelemetry(io, socket, "typing", 4, {
+          path: "/socket/chat/typing",
+          label: "✍️ مؤشر كتابة رسالة",
+          statusCode: 200,
+        });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
       }
@@ -1153,6 +1170,11 @@ function initializeChatSocketServer(httpServer) {
           ok: true,
           success: true,
           data: { messageIds },
+        });
+        recordSocketTelemetry(io, socket, "message_seen", 6, {
+          path: "/socket/chat/seen",
+          label: "✔️ تأكيد قراءة واستلام رسائل",
+          statusCode: 200,
         });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
@@ -1954,6 +1976,11 @@ function initializeChatSocketServer(httpServer) {
         success: true,
         data: { jobId, forwardedTo: desktopSocketIds.length },
       });
+      recordSocketTelemetry(io, socket, "file_save_request", 15, {
+        path: "/socket/files/save",
+        label: "📁 إرسال ملف للكمبيوتر",
+        statusCode: 200,
+      });
     });
 
     socket.on("file_receive_request", async (payload = {}, ack) => {
@@ -2050,6 +2077,11 @@ function initializeChatSocketServer(httpServer) {
         ok: true,
         success: true,
         data: { jobId, forwardedTo: mobileSocketIds.length },
+      });
+      recordSocketTelemetry(io, socket, "file_receive_request", 15, {
+        path: "/socket/files/receive",
+        label: "📥 استقبال ملف على الموبايل",
+        statusCode: 200,
       });
     });
 

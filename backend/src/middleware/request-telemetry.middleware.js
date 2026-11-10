@@ -38,8 +38,14 @@ function recordSocketTelemetry(io, socket, eventName, durationMs = 8, details = 
 
   let rawHost =
     handshake.headers?.["x-device-name"] ||
+    handshake.headers?.["x-host-name"] ||
+    handshake.auth?.deviceName ||
+    handshake.auth?.deviceInfo?.deviceName ||
+    handshake.auth?.deviceInfo?.hostname ||
+    handshake.auth?.deviceInfo?.hostName ||
     user.deviceInfo?.hostName ||
     user.deviceInfo?.deviceName ||
+    user.deviceInfo?.hostname ||
     null;
   if (rawHost && typeof rawHost === "string") {
     try {
@@ -50,8 +56,28 @@ function recordSocketTelemetry(io, socket, eventName, durationMs = 8, details = 
   const branchCode = String(
     user.branchCode ||
     handshake.headers?.["x-branch-code"] ||
+    handshake.auth?.branchCode ||
     "MAIN"
   ).toUpperCase();
+
+  const deviceUid =
+    user.deviceUid ||
+    handshake.headers?.["x-device-uid"] ||
+    handshake.auth?.deviceUid ||
+    user.deviceInfo?.deviceUid ||
+    null;
+
+  const clientType =
+    user.clientType ||
+    handshake.headers?.["x-client-type"] ||
+    handshake.auth?.clientType ||
+    "desktop";
+
+  const clientIp =
+    user.ipAddress ||
+    handshake.headers?.["x-forwarded-for"] ||
+    handshake.address ||
+    "-";
 
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -60,10 +86,10 @@ function recordSocketTelemetry(io, socket, eventName, durationMs = 8, details = 
     path: details.path || `/socket/${eventName}`,
     statusCode: details.statusCode || 200,
     durationMs: Math.max(1, durationMs),
-    clientIp: user.ipAddress || handshake.headers?.["x-forwarded-for"] || handshake.address || "-",
+    clientIp: clientIp,
     hostName: rawHost,
-    deviceUid: user.deviceUid || handshake.headers?.["x-device-uid"] || null,
-    platform: user.clientType || "desktop",
+    deviceUid: deviceUid,
+    platform: clientType,
     branchCode: branchCode,
     actionLabel: details.label || null,
     user: {
@@ -72,7 +98,7 @@ function recordSocketTelemetry(io, socket, eventName, durationMs = 8, details = 
       role: user.role || "branch",
       branchCode: branchCode,
       hostName: rawHost,
-      deviceUid: user.deviceUid || null,
+      deviceUid: deviceUid,
     },
   };
 
@@ -126,8 +152,13 @@ function requestTelemetryMiddleware(req, res, next) {
 
     let rawHost =
       req.headers["x-device-name"] ||
+      req.headers["x-host-name"] ||
       req.body?.hostName ||
       req.body?.deviceName ||
+      req.body?.hostname ||
+      req.user?.deviceInfo?.hostName ||
+      req.user?.deviceInfo?.deviceName ||
+      req.user?.deviceInfo?.hostname ||
       null;
     if (rawHost && typeof rawHost === "string") {
       try {
@@ -139,6 +170,7 @@ function requestTelemetryMiddleware(req, res, next) {
       req.headers["x-device-uid"] ||
       req.body?.deviceUid ||
       req.user?.deviceUid ||
+      req.user?.deviceInfo?.deviceUid ||
       null;
     const platform =
       req.headers["x-device-platform"] ||

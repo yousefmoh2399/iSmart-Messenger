@@ -345,15 +345,41 @@ class _UpdateDistributionTopologyScreenState
     }
 
     if (match == null) {
-      // Reload real devices from backend if an unknown real device sent telemetry
+      final fallbackHost = hostName.isNotEmpty
+          ? hostName
+          : (deviceUid.isNotEmpty ? 'Device-$deviceUid' : 'POS-Terminal');
+      match = _FleetUpdateDevice(
+        id: deviceId.isNotEmpty
+            ? deviceId
+            : 'dev_${deviceUid.isNotEmpty ? deviceUid : DateTime.now().millisecondsSinceEpoch}',
+        deviceUid: deviceUid,
+        hostname: fallbackHost,
+        cashierName: (data['deviceName'] ?? data['lastKnownFullName'] ?? 'جهاز نشط بالفرع').toString(),
+        username: (data['username'] ?? '-').toString(),
+        branchName: data['branchCode'] != null && data['branchCode'] != '00' && data['branchCode'] != 'MAIN'
+            ? 'فرع ${data['branchCode']}'
+            : 'الفرع',
+        branchCode: (data['branchCode'] ?? '00').toString(),
+        ipAddress: (data['clientIp'] ?? '-').toString(),
+        currentVersion: (data['currentVersion'] ?? '1.1.20').toString(),
+        targetVersion: targetVer,
+        isOnline: true,
+        os: (data['platform'] ?? '').toString().contains('mobile')
+            ? 'Android'
+            : 'Windows Desktop',
+        updateStatus: status,
+        updateProgress: progressPct.toInt(),
+        isUpdated: status == 'completed',
+      );
+      _allFleetDevices.add(match);
       unawaited(widget.onReload?.call());
-      return;
     }
 
     _ActivePullingDevice? onCanvas;
     for (final c in _canvasPullingDevices) {
       if (c.id == match.id ||
-          (match.deviceUid.isNotEmpty && c.deviceUid == match.deviceUid)) {
+          (match.deviceUid.isNotEmpty && c.deviceUid == match.deviceUid) ||
+          (match.hostname.isNotEmpty && c.hostname.toLowerCase() == match.hostname.toLowerCase())) {
         onCanvas = c;
         break;
       }
@@ -381,7 +407,7 @@ class _UpdateDistributionTopologyScreenState
           onCanvas.isCompleted = true;
           onCanvas.hasError = false;
           onCanvas.statusMessage = 'تم التثبيت والمطابقة بنجاح ✓';
-          onCanvas.remainingSeconds = 5;
+          onCanvas.remainingSeconds = 25;
           match!.isUpdated = true;
           match.currentVersion = targetVer;
           match.updateStatus = 'completed';
@@ -396,7 +422,7 @@ class _UpdateDistributionTopologyScreenState
           onCanvas.hasError = true;
           onCanvas.statusMessage =
               message.isNotEmpty ? message : 'تعذر إكمال التحديث';
-          onCanvas.remainingSeconds = 6;
+          onCanvas.remainingSeconds = 15;
           match!.updateStatus = status;
           match.updateError = onCanvas.statusMessage;
         });
