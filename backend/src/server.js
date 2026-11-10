@@ -82,6 +82,9 @@ async function startServer() {
   const { startMessageScheduler } = require("./services/scheduler.service");
   startMessageScheduler(io);
 
+  const { startBackupScheduler, stopBackupScheduler } = require("./admin/backup/backup-scheduler.service");
+  startBackupScheduler();
+
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -95,6 +98,10 @@ async function startServer() {
 async function shutdown(signal) {
   logger.info("server.shutdown.start", { signal });
   try { stopPrinterScheduler(); } catch (_) {}
+  try {
+    const { stopBackupScheduler } = require("./admin/backup/backup-scheduler.service");
+    stopBackupScheduler();
+  } catch (_) {}
   try {
     if (serverRef) {
       await new Promise((resolve) => serverRef.close(() => resolve()));

@@ -41,6 +41,10 @@ class BackupRepository {
   Future<BackupArchive> createBackup() async {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/admin/backup/create',
+      options: Options(
+        sendTimeout: const Duration(hours: 2),
+        receiveTimeout: const Duration(hours: 2),
+      ),
     );
     final payload =
         response.data?['data'] as Map<String, dynamic>? ?? response.data;

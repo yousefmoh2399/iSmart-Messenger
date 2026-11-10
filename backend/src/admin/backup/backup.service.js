@@ -2,7 +2,7 @@ const fs = require("fs/promises");
 const fsSync = require("fs");
 const os = require("os");
 const path = require("path");
-const { execFile } = require("child_process");
+const { execFile, fork } = require("child_process");
 const { Writable } = require("stream");
 const { pipeline } = require("stream/promises");
 const archiver = require("archiver");
@@ -16,9 +16,9 @@ const { logAuditEvent } = require("../../chat/services/audit.service");
 const { getBackupsRoot, getUploadsRoot } = require("../../utils/storage-paths");
 
 const ZIP_FILE_NAME_PATTERN = /^[a-zA-Z0-9._-]+\.zip$/;
-const MAX_BACKUP_ENTRIES = Number(process.env.BACKUP_MAX_ENTRIES || 200000);
+const MAX_BACKUP_ENTRIES = Number(process.env.BACKUP_MAX_ENTRIES || 500000);
 const MAX_BACKUP_UNCOMPRESSED_BYTES =
-  Number(process.env.BACKUP_MAX_UNCOMPRESSED_GB || 10) * 1024 * 1024 * 1024;
+  Number(process.env.BACKUP_MAX_UNCOMPRESSED_GB || 250) * 1024 * 1024 * 1024;
 const AUTO_RESTART_ON_RESTORE =
   String(process.env.BACKUP_RESTORE_AUTO_RESTART || "").toLowerCase() ===
   "true";
@@ -48,9 +48,78 @@ async function createBackupArchive({
 }) {
   await ensureDirectoryExists(path.dirname(archivePath));
 
+  const workerPath = path.join(__dirname, "backup-worker.js");
+  const canFork = !process.pkg && fsSync.existsSync(workerPath);
+
+  if (canFork) {
+    logger.info("Backup archive: Launching isolated background worker", {
+      archivePath,
+      dumpDirectory,
+      uploadsPath,
+    });
+
+    return new Promise((resolve, reject) => {
+      const child = fork(workerPath, [], {
+        execArgv: ["--max-old-space-size=4096"],
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+      });
+
+      let settled = false;
+
+      child.stdout?.on("data", (data) => {
+        logger.info(`[BackupWorker] ${data.toString().trim()}`);
+      });
+
+      child.stderr?.on("data", (data) => {
+        logger.warn(`[BackupWorker:err] ${data.toString().trim()}`);
+      });
+
+      child.on("message", (msg) => {
+        if (msg && msg.type === "success") {
+          settled = true;
+          logger.info("Backup archive: Worker finished successfully", {
+            method: msg.method,
+          });
+          resolve();
+        } else if (msg && msg.type === "error") {
+          settled = true;
+          reject(new Error(msg.error || "Backup worker failed"));
+        }
+      });
+
+      child.on("error", (err) => {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      });
+
+      child.on("exit", (code, signal) => {
+        if (!settled) {
+          settled = true;
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(
+              new Error(`Backup worker exited with code ${code}, signal ${signal}`),
+            );
+          }
+        }
+      });
+
+      child.send({
+        archivePath,
+        dumpDirectory,
+        uploadsPath,
+        metadata,
+      });
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const output = fsSync.createWriteStream(archivePath);
-    const archive = archiver("zip", { zlib: { level: 9 } });
+    // Level 1: Fast compression with low memory footprint
+    const archive = archiver("zip", { zlib: { level: 1 } });
     let hasError = false;
 
     const handleError = (error) => {
