@@ -1883,7 +1883,13 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      if (!inlineFileBase64 && transferMeta) {
+      // Only inline if the file is tiny (<= 64KB). For anything larger, keep downloadUrl so clients download via HTTP stream.
+      const shouldInline =
+        !inlineFileBase64 &&
+        transferMeta &&
+        Number(transferMeta.fileSize || 0) > 0 &&
+        Number(transferMeta.fileSize || 0) <= 64 * 1024;
+      if (shouldInline) {
         const inlinePayload = await buildInlineTransferPayload(
           transferMeta,
           currentUser.role,

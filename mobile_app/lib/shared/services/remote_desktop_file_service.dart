@@ -116,7 +116,7 @@ class RemoteDesktopFileService {
     String? mimeType,
     String source = 'mobile_local_file_transfer',
     int maxInlineFileBytes = kMaxInlineFileSaveBytes,
-    Duration completionTimeout = const Duration(seconds: 40),
+    Duration completionTimeout = const Duration(minutes: 10),
     Duration? ackTimeout,
     RemoteDesktopTransferProgressCallback? onProgress,
   }) async {
@@ -160,6 +160,68 @@ class RemoteDesktopFileService {
       );
     }
 
+    final resolvedFileName = fileName ?? file.uri.pathSegments.last;
+
+    // For files larger than 64KB, upload via HTTP temporary transfer to avoid
+    // sending huge Base64 strings over Socket.IO (which causes WebSocket frame overflow,
+    // packet latency, heartbeat timeouts, and false "server down" errors over VPN).
+    if (size > 64 * 1024) {
+      try {
+        _notifyProgress(
+          onProgress,
+          stage: 'uploading',
+          progress: 0.10,
+          message: 'جاري رفع الملف للسيرفر...',
+        );
+        final transfer = await _uploadTemporaryTransfer(
+          filePath: filePath,
+          fileName: resolvedFileName,
+          mimeType: mimeType,
+          source: source,
+          fileSizeBytes: size,
+          onProgress: (sent, total) {
+            final ratio = total <= 0
+                ? 0.0
+                : (sent / total).clamp(0, 1).toDouble();
+            _notifyProgress(
+              onProgress,
+              stage: 'uploading',
+              progress: 0.10 + (ratio * 0.55),
+              message: total > 0
+                  ? 'جاري رفع الملف للسيرفر ${(ratio * 100).toStringAsFixed(0)}%'
+                  : 'جاري رفع الملف للسيرفر...',
+            );
+          },
+        );
+
+        return _requestAndAwaitResult(
+          payload: {
+            'transferId': transfer['id']?.toString(),
+            'fileName': resolvedFileName,
+            'mimeType': mimeType,
+            'fileSize': size,
+            'source': source,
+          },
+          completionTimeout: completionTimeout,
+          ackTimeout: ackTimeout ?? const Duration(seconds: 45),
+          onProgress: onProgress,
+        );
+      } catch (uploadError) {
+        _notifyProgress(
+          onProgress,
+          stage: 'failed',
+          progress: 1,
+          message: uploadError.toString(),
+        );
+        return RemoteDesktopFileSaveResult(
+          success: false,
+          message: 'فشل رفع الملف للسيرفر: $uploadError',
+          jobId: null,
+          savedPath: null,
+        );
+      }
+    }
+
     _notifyProgress(
       onProgress,
       stage: 'reading',
@@ -178,7 +240,7 @@ class RemoteDesktopFileService {
     return _requestAndAwaitResult(
       payload: {
         'inlineFileBase64': inlineFileBase64,
-        'fileName': fileName ?? file.uri.pathSegments.last,
+        'fileName': resolvedFileName,
         'mimeType': mimeType,
         'fileSize': size,
         'source': source,
@@ -194,8 +256,8 @@ class RemoteDesktopFileService {
     required String fileName,
     String? mimeType,
     String source = 'mobile_download_url_transfer',
-    Duration completionTimeout = const Duration(seconds: 40),
-    Duration ackTimeout = const Duration(seconds: 30),
+    Duration completionTimeout = const Duration(minutes: 10),
+    Duration ackTimeout = const Duration(seconds: 45),
     RemoteDesktopTransferProgressCallback? onProgress,
   }) async {
     _notifyProgress(
@@ -242,16 +304,17 @@ class RemoteDesktopFileService {
     final jobId = ackData['jobId']?.toString();
 
     if (!ackOk || jobId == null || jobId.isEmpty) {
+      final rawError = ack['error']?.toString() ?? '';
+      final userMessage = _resolveUserErrorMessage(rawError);
       _notifyProgress(
         onProgress,
         stage: 'failed',
         progress: 1,
-        message: ack['error']?.toString() ?? 'Unable to send file.',
+        message: userMessage,
       );
       return RemoteDesktopFileSaveResult(
         success: false,
-        message:
-            ack['error']?.toString() ?? 'تعذر إرسال الملف إلى تطبيق الكمبيوتر.',
+        message: userMessage,
         jobId: jobId,
         savedPath: null,
       );
@@ -315,11 +378,11 @@ class RemoteDesktopFileService {
         onProgress,
         stage: 'failed',
         progress: 1,
-        message: 'Desktop response timeout.',
+        message: 'انتهت مهلة انتظار رد الكمبيوتر.',
       );
       return const RemoteDesktopFileSaveResult(
         success: false,
-        message: 'انتهت مهلة انتظار رد الكمبيوتر على عملية الحفظ.',
+        message: 'انتهت مهلة انتظار رد الكمبيوتر على عملية الحفظ. تأكد من استجابة تطبيق الكمبيوتر.',
         jobId: null,
         savedPath: null,
       );
@@ -328,7 +391,22 @@ class RemoteDesktopFileService {
     }
   }
 
-  // ignore: unused_element
+  String _resolveUserErrorMessage(String raw) {
+    final lower = raw.toLowerCase().trim();
+    if (lower.contains('desktop app is not connected') ||
+        lower.contains('not connected for the selected target')) {
+      return 'تطبيق الكمبيوتر غير متصل حالياً بنفس الحساب.';
+    }
+    if (lower.contains('socket is not connected') ||
+        lower.contains('not connected')) {
+      return 'تعذر الاتصال بالخادم. يرجى التحقق من اتصال الشبكة.';
+    }
+    if (lower.contains('ack timeout')) {
+      return 'استغرق الخادم وقتاً أطول من المتوقع للاستجابة. يرجى المحاولة ثانية.';
+    }
+    return raw.isNotEmpty ? raw : 'تعذر إرسال الملف إلى تطبيق الكمبيوتر.';
+  }
+
   Future<Map<String, dynamic>> _uploadTemporaryTransfer({
     required String filePath,
     required String fileName,

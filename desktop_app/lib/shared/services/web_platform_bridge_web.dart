@@ -459,6 +459,7 @@ Future<String?> downloadBytes({
   required String fileName,
   String? mimeType,
   String? preferredDirectoryPath,
+  String? targetFilePath,
 }) async {
   if (isElectron()) {
     final result = _asStringMap(
@@ -466,6 +467,8 @@ Future<String?> downloadBytes({
         'base64': base64Encode(bytes),
         'fileName': fileName,
         'mimeType': mimeType,
+        if (targetFilePath != null && targetFilePath.trim().isNotEmpty)
+          'filePath': targetFilePath.trim(),
         if (preferredDirectoryPath != null &&
             preferredDirectoryPath.trim().isNotEmpty)
           'directoryPath': preferredDirectoryPath.trim(),

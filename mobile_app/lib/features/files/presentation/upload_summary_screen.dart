@@ -329,6 +329,10 @@ class _UploadSummaryScreenState extends ConsumerState<UploadSummaryScreen> {
         return 'جاري قراءة الملف...';
       case 'encoding':
         return 'جاري تجهيز الملف للإرسال...';
+      case 'uploading':
+        return progress.message.trim().isNotEmpty
+            ? progress.message
+            : 'جاري رفع الملف للسيرفر...';
       case 'sending':
         return 'جاري إرسال الطلب إلى الكمبيوتر...';
       case 'waiting_desktop':

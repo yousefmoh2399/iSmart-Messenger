@@ -1340,10 +1340,6 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       return prefs!.scanSaveDirectoryPath!.trim();
     }
 
-    if (prefs?.localStorageDirectoryPath?.trim().isNotEmpty == true) {
-      return prefs!.localStorageDirectoryPath!.trim();
-    }
-
     return null;
   }
 }

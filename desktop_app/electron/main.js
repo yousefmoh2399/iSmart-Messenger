@@ -3328,28 +3328,46 @@ ipcMain.handle("http:fetch-base64", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("files:save-base64", async (event, payload = {}) => {
+  const explicitPath = String(payload.filePath || "").trim();
   const requestedDirectory = String(payload.directoryPath || "").trim();
   let outputPath;
 
-  if (requestedDirectory) {
+  if (explicitPath) {
+    await fs.promises.mkdir(path.dirname(explicitPath), { recursive: true });
+    outputPath = explicitPath;
+  } else if (requestedDirectory) {
     await fs.promises.mkdir(requestedDirectory, { recursive: true });
     outputPath = uniqueOutputPath(
       requestedDirectory,
       payload.fileName || "file",
     );
   } else {
-    const browserWindow = BrowserWindow.fromWebContents(event.sender);
+    const browserWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (browserWindow && !browserWindow.isDestroyed()) {
+      if (browserWindow.isMinimized()) {
+        browserWindow.restore();
+      }
+      browserWindow.show();
+      browserWindow.focus();
+      browserWindow.setAlwaysOnTop(true);
+      browserWindow.setAlwaysOnTop(false);
+    }
     const defaultPath = path.join(app.getPath("downloads"), payload.fileName || "file");
     
-    const { canceled, filePath } = await dialog.showSaveDialog(browserWindow, {
-      title: "حفظ الملف",
-      defaultPath: defaultPath,
-    });
-
-    if (canceled || !filePath) {
-      return { success: false, message: "User canceled." };
+    let result;
+    try {
+      result = await dialog.showSaveDialog(browserWindow, {
+        title: "حفظ الملف",
+        defaultPath: defaultPath,
+      });
+    } catch (dialogErr) {
+      return { success: false, message: `Save dialog error: ${dialogErr.message}` };
     }
-    outputPath = filePath;
+
+    if (!result || result.canceled || !result.filePath) {
+      return { success: false, message: "تم إلغاء الحفظ بواسطة المستخدم." };
+    }
+    outputPath = result.filePath;
   }
 
   const buffer = Buffer.from(String(payload.base64 || ""), "base64");
@@ -4116,17 +4134,30 @@ ipcMain.handle("dialog:pick-files", async (_event, payload = {}) => {
 
 ipcMain.handle("dialog:show-save-dialog", async (event, payload = {}) => {
   const browserWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    if (browserWindow.isMinimized()) {
+      browserWindow.restore();
+    }
+    browserWindow.show();
+    browserWindow.focus();
+    browserWindow.setAlwaysOnTop(true);
+    browserWindow.setAlwaysOnTop(false);
+  }
   const defaultPath = path.join(app.getPath("downloads"), payload.fileName || "file");
 
-  const result = await dialog.showSaveDialog(browserWindow, {
-    title: String(payload.title || "نقل أو حفظ الملف في..."),
-    defaultPath: String(payload.defaultPath || defaultPath),
-  });
+  try {
+    const result = await dialog.showSaveDialog(browserWindow, {
+      title: String(payload.title || "نقل أو حفظ الملف في..."),
+      defaultPath: String(payload.defaultPath || defaultPath),
+    });
 
-  if (result.canceled || !result.filePath) {
-    return { success: false, canceled: true, path: null };
+    if (!result || result.canceled || !result.filePath) {
+      return { success: false, canceled: true, path: null };
+    }
+    return { success: true, canceled: false, path: result.filePath };
+  } catch (err) {
+    return { success: false, canceled: true, path: null, error: err.message };
   }
-  return { success: true, canceled: false, path: result.filePath };
 });
 
 ipcMain.handle("startup:set", async (_event, enabled) => {

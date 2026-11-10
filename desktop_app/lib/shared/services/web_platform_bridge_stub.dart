@@ -9,7 +9,14 @@ Future<String?> downloadBytes({
   required String fileName,
   String? mimeType,
   String? preferredDirectoryPath,
+  String? targetFilePath,
 }) async {
+  if (targetFilePath != null && targetFilePath.trim().isNotEmpty) {
+    final targetFile = File(targetFilePath.trim());
+    await targetFile.parent.create(recursive: true);
+    await targetFile.writeAsBytes(bytes, flush: true);
+    return targetFile.path;
+  }
   final targetFile = await _resolveDownloadFile(
     fileName,
     preferredDirectoryPath: preferredDirectoryPath,
