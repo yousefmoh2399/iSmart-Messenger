@@ -91,6 +91,8 @@ Future<void> electronDebugLog(
   Map<String, Object?>? details,
 ]) async {}
 
+Future<void> setTaskbarBadgeCount(int count) async {}
+
 void setElectronTrayActionHandler(void Function(String action)? handler) {}
 
 Future<Map<String, dynamic>> getElectronDeviceInfo() async {

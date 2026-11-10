@@ -27,6 +27,11 @@ void main() {
             source.contains('_titleAttentionTimer')) {
           continue;
         }
+        // Outbox queue periodic drain timer flushes pending offline messages
+        if (path.endsWith('features/chat/data/chat_outbox_service.dart') &&
+            source.contains('_drainTimer = Timer.periodic')) {
+          continue;
+        }
         // The printer monitoring screen intentionally refreshes the status of
         // an active print job while that screen is open. This is scoped UI
         // status refresh, not the removed app-wide background polling.

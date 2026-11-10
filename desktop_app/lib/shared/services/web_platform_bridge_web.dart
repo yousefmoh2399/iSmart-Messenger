@@ -100,6 +100,15 @@ Future<void> electronDebugLog(
   } catch (_) {}
 }
 
+Future<void> setTaskbarBadgeCount(int count) async {
+  if (!isElectron()) {
+    return;
+  }
+  try {
+    await _callElectron('setTaskbarBadge', count);
+  } catch (_) {}
+}
+
 void setElectronTrayActionHandler(void Function(String action)? handler) {
   _electronTrayActionSubscription?.cancel();
   _electronTrayActionSubscription = null;

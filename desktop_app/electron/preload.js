@@ -82,6 +82,40 @@ function ensureElectronTitlebar() {
   applyTitlebarTheme("dark");
 }
 
+function createBadgeDataUrl(count) {
+  if (!count || count <= 0) return null;
+  try {
+    const size = 32;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    // Background circle
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, (size / 2) - 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = "#E11D48";
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.stroke();
+
+    // Text
+    ctx.fillStyle = "#FFFFFF";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const label = count > 99 ? "99+" : String(count);
+    const fontSize = label.length >= 3 ? 12 : (label.length === 2 ? 15 : 18);
+    ctx.font = `bold ${fontSize}px "Segoe UI", Arial, sans-serif`;
+    ctx.fillText(label, size / 2, (size / 2) + 1);
+
+    return canvas.toDataURL("image/png");
+  } catch (_) {
+    return null;
+  }
+}
+
 window.addEventListener("DOMContentLoaded", ensureElectronTitlebar);
 
 ipcRenderer.on("tray-action", (_event, action) => {
@@ -150,6 +184,11 @@ contextBridge.exposeInMainWorld("electronBridge", {
   playAudioAsset: (payload) => ipcRenderer.invoke("audio:play-asset", payload),
   requestAttention: () => ipcRenderer.invoke("window:request-attention"),
   getWindowState: () => ipcRenderer.invoke("window:get-state"),
+  setTaskbarBadge: (count) => {
+    const num = typeof count === "number" ? count : parseInt(count, 10) || 0;
+    const dataUrl = num > 0 ? createBadgeDataUrl(num) : null;
+    return ipcRenderer.invoke("window:set-badge", { count: num, dataUrl });
+  },
   setWindowTheme: (payload) => {
     const mode = payload && payload.mode === "dark" ? "dark" : "light";
     applyTitlebarTheme(mode);

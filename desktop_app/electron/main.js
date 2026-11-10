@@ -2886,6 +2886,66 @@ ipcMain.handle("window:set-theme", async (_event, payload = {}) => {
   return { success: true, mode: currentWindowTheme };
 });
 
+let currentBadgeCount = 0;
+
+function updateAppBadge(count, dataUrl) {
+  const validCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  currentBadgeCount = validCount;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  // 1. Windows Taskbar Overlay Icon (works seamlessly when minimized or background)
+  if (process.platform === "win32") {
+    try {
+      if (validCount <= 0 || !dataUrl) {
+        mainWindow.setOverlayIcon(null, "");
+      } else {
+        const badgeImage = nativeImage.createFromDataURL(dataUrl);
+        if (!badgeImage.isEmpty()) {
+          const desc = validCount === 1 ? "رسالة جديدة واحدة" : `${validCount} رسائل غير مقروءة`;
+          mainWindow.setOverlayIcon(badgeImage, desc);
+        } else {
+          mainWindow.setOverlayIcon(null, "");
+        }
+      }
+    } catch (e) {
+      console.warn("[Badge] Failed to set overlay icon:", e.message);
+    }
+  }
+
+  // 2. Window Title
+  try {
+    const titlePrefix = validCount > 0 ? `(${validCount}) ` : "";
+    mainWindow.setTitle(`${titlePrefix}${APP_NAME}`);
+  } catch (_) {}
+
+  // 3. System Tray Tooltip
+  if (tray && !tray.isDestroyed()) {
+    try {
+      const tooltip = validCount > 0
+        ? `${APP_NAME} (${validCount} غير مقروء)`
+        : APP_NAME;
+      tray.setToolTip(tooltip);
+    } catch (_) {}
+  }
+
+  // 4. macOS / Linux Dock Badge
+  try {
+    if (app && typeof app.setBadgeCount === "function") {
+      app.setBadgeCount(validCount);
+    }
+  } catch (_) {}
+}
+
+ipcMain.handle("window:set-badge", async (_event, payload = {}) => {
+  const count = typeof payload === "number" ? payload : (payload?.count || 0);
+  const dataUrl = payload?.dataUrl || null;
+  updateAppBadge(count, dataUrl);
+  return { success: true, count: currentBadgeCount };
+});
+
 
 const STORAGE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".ico"]);
 const STORAGE_AUDIO_EXTS = new Set([".m4a", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".flac"]);

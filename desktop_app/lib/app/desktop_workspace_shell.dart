@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/chat/models/chat_models.dart';
 import '../features/chat/presentation/chat_dashboard_screen.dart';
 import '../features/files/presentation/files_dashboard_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
@@ -13,6 +14,7 @@ import '../features/purchasing/presentation/screens/purchase_requests_screen.dar
 import '../features/snipeit/presentation/snipeit_screen.dart';
 import '../features/admin/presentation/system_monitor_screen.dart';
 import '../shared/providers/providers.dart';
+import '../shared/services/web_platform_bridge.dart' as web_bridge;
 import '../shared/widgets/desktop_workspace_sidebar.dart';
 
 class DesktopWorkspaceShell extends ConsumerStatefulWidget {
@@ -32,12 +34,16 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initUpdateListener();
+      final initialUnread =
+          ref.read(chatOverviewControllerProvider).valueOrNull?.totalUnread ?? 0;
+      unawaited(web_bridge.setTaskbarBadgeCount(initialUnread));
     });
   }
 
   @override
   void dispose() {
     _updateEventsSub?.cancel();
+    unawaited(web_bridge.setTaskbarBadgeCount(0));
     super.dispose();
   }
 
@@ -195,6 +201,14 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<ChatOverviewData>>(
+      chatOverviewControllerProvider,
+      (previous, next) {
+        final unread = next.valueOrNull?.totalUnread ?? 0;
+        unawaited(web_bridge.setTaskbarBadgeCount(unread));
+      },
+    );
+
     final auth = ref.watch(authControllerProvider);
     final themeMode =
         ref.watch(themeModeControllerProvider).valueOrNull ?? ThemeMode.light;

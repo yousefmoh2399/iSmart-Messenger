@@ -270,6 +270,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _setTrayStatus('offline');
       _setChatVisibility(false);
       ref.read(chatSocketServiceProvider).disconnect();
+      unawaited(web_bridge.setTaskbarBadgeCount(0));
       return;
     }
 
