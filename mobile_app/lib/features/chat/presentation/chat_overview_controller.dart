@@ -1026,6 +1026,22 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
   }
 
+  void removePendingOutboxMessage(
+    String conversationId,
+    String tempId,
+  ) {
+    final current = state.valueOrNull;
+    if (current == null) return;
+    final index =
+        current.conversations.indexWhere((c) => c.id == conversationId);
+    if (index == -1) return;
+    final updated = [...current.conversations];
+    final existing = updated[index];
+    if (existing.lastMessage?.id == tempId) {
+      unawaited(refresh());
+    }
+  }
+
   void _applySeenUpdate({
     required String? conversationId,
     required String? userId,
@@ -2411,6 +2427,7 @@ class ConversationMessagesController
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   }) async {
     final keepAliveLink = ref.keepAlive();
@@ -2545,6 +2562,7 @@ class ConversationMessagesController
             replyToMessageId: replyToMessageId,
             customFileName: customFileName,
             metadata: effectiveMetadata,
+            cancelToken: cancelToken,
             onProgress: onProgress,
           ),
         );
@@ -2582,6 +2600,30 @@ class ConversationMessagesController
                   arg, tempMessage.id, confirmedMessage);
         } catch (_) {}
       } catch (error) {
+        final isCancelled = (cancelToken?.isCancelled ?? false) ||
+            (error is DioException && error.type == DioExceptionType.cancel) ||
+            error.toString().contains('إلغاء') ||
+            error.toString().toLowerCase().contains('cancel');
+        if (isCancelled) {
+          try {
+            await ref.read(chatOutboxServiceProvider).remove(stableClientMessageId);
+          } catch (_) {}
+          final latest = state.valueOrNull ?? current;
+          final withoutTemp =
+              latest.messages.where((m) => m.id != tempMessage.id).toList();
+          _setStateAndCache(
+            latest.copyWith(messages: withoutTemp),
+            immediate: true,
+          );
+          try {
+            ref
+                .read(chatOverviewControllerProvider.notifier)
+                .removePendingOutboxMessage(arg, tempMessage.id);
+          } catch (_) {}
+          debugPrint('[Chat] File upload cancelled by user: $fileName');
+          return;
+        }
+
         if (_isNetworkError(error)) {
           // Offline / network failure: WhatsApp-style, message stays pending in chat with clock icon!
           debugPrint(
@@ -2651,21 +2693,35 @@ class ConversationMessagesController
     );
   }
 
-  bool _isNetworkError(Object error) {
-    if (error is SocketException) return true;
-    if (error is TimeoutException) return true;
-    final str = error.toString().toLowerCase();
-    return str.contains('socketexception') ||
-        str.contains('connection refused') ||
-        str.contains('connection closed') ||
-        str.contains('connection reset') ||
-        str.contains('network is unreachable') ||
-        str.contains('failed host lookup') ||
-        str.contains('connection timeout') ||
-        str.contains('sendtimeout') ||
-        str.contains('receivetimeout') ||
-        str.contains('software caused connection abort');
+  void cancelPendingUpload(String clientMessageId) {
+    final tempId = clientMessageId.startsWith('temp_')
+        ? clientMessageId
+        : 'temp_$clientMessageId';
+    final pureClientMsgId = clientMessageId.startsWith('temp_')
+        ? clientMessageId.substring(5)
+        : clientMessageId;
+
+    final cur = state.valueOrNull;
+    if (cur != null) {
+      final updatedList = cur.messages
+          .where((m) =>
+              m.id != tempId &&
+              m.metadata?['clientMessageId'] != pureClientMsgId)
+          .toList();
+      _setStateAndCache(
+        cur.copyWith(messages: updatedList),
+        immediate: true,
+      );
+    }
+    unawaited(ref.read(chatOutboxServiceProvider).remove(pureClientMsgId));
+    try {
+      ref
+          .read(chatOverviewControllerProvider.notifier)
+          .removePendingOutboxMessage(arg, tempId);
+    } catch (_) {}
   }
+
+  bool _isNetworkError(Object error) => isNetworkOrOfflineError(error);
 
   Future<void> editMessage({
     required String messageId,

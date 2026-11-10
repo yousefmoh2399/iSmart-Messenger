@@ -1,11 +1,64 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/chat_models.dart';
 import 'chat_local_cache.dart';
 import 'chat_repository.dart';
+
+bool isNetworkOrOfflineError(Object? error) {
+  if (error == null) return false;
+  if (error is SocketException || error is TimeoutException) return true;
+  final errStr = error.toString().toLowerCase();
+  if (errStr.contains('socketexception') ||
+      errStr.contains('connection refused') ||
+      errStr.contains('connection timed out') ||
+      errStr.contains('network is unreachable') ||
+      errStr.contains('connection closed') ||
+      errStr.contains('handshake failed') ||
+      errStr.contains('connection reset') ||
+      errStr.contains('econnreset') ||
+      errStr.contains('etimedout') ||
+      errStr.contains('enotfound') ||
+      errStr.contains('epipe') ||
+      errStr.contains('connection error') ||
+      errStr.contains('receive timeout') ||
+      errStr.contains('send timeout') ||
+      errStr.contains('receivetimeout') ||
+      errStr.contains('sendtimeout') ||
+      errStr.contains('connection timeout') ||
+      errStr.contains('502') ||
+      errStr.contains('503') ||
+      errStr.contains('504') ||
+      errStr.contains('offline') ||
+      errStr.contains('failed to fetch') ||
+      errStr.contains('xmlhttprequest error') ||
+      errStr.contains('client is offline') ||
+      errStr.contains('لا يوجد اتصال') ||
+      errStr.contains('فشل الاتصال') ||
+      errStr.contains('تعذر الاتصال') ||
+      errStr.contains('تعذر استكمال نقل الملف') ||
+      errStr.contains('الخادم غير متاح حاليا') ||
+      errStr.contains('انتهت مهلة') ||
+      errStr.contains('ضعف أو انقطاع شبكة')) {
+    return true;
+  }
+  if (error is DioException) {
+    if (error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.connectionError) {
+      return true;
+    }
+    final status = error.response?.statusCode ?? 0;
+    if (status == 502 || status == 503 || status == 504 || status == 429) {
+      return true;
+    }
+  }
+  return false;
+}
 
 class ChatOutboxItem {
   const ChatOutboxItem({
@@ -209,9 +262,18 @@ class ChatOutboxService {
           await remove(item.clientMessageId);
           onConfirmed?.call(item, confirmed);
         } catch (error) {
-          final isNetwork = _isNetworkError(error);
+          final isCancelled = (error is DioException && error.type == DioExceptionType.cancel) ||
+              error.toString().contains('إلغاء') ||
+              error.toString().toLowerCase().contains('cancel');
+          if (isCancelled) {
+            debugPrint('[ChatOutbox] Item cancelled, removing: ${item.clientMessageId}');
+            await remove(item.clientMessageId);
+            continue;
+          }
+
+          final isNetwork = isNetworkOrOfflineError(error);
           if (isNetwork) {
-            // Transient network failure — halt queue draining and keep pending.
+            // Transient network failure — halt queue draining and keep pending with clock icon.
             debugPrint('[ChatOutbox] Network error during drain, halting: $error');
             break;
           } else {
@@ -227,24 +289,7 @@ class ChatOutboxService {
     }
   }
 
-  bool _isNetworkError(Object error) {
-    if (error is SocketException) return true;
-    if (error is TimeoutException) return true;
-    final str = error.toString().toLowerCase();
-    if (str.contains('socketexception') ||
-        str.contains('connection refused') ||
-        str.contains('connection closed') ||
-        str.contains('connection reset') ||
-        str.contains('network is unreachable') ||
-        str.contains('failed host lookup') ||
-        str.contains('connection timeout') ||
-        str.contains('sendtimeout') ||
-        str.contains('receivetimeout') ||
-        str.contains('software caused connection abort')) {
-      return true;
-    }
-    return false;
-  }
+  bool _isNetworkError(Object error) => isNetworkOrOfflineError(error);
 
   void dispose() {
     _changeController.close();

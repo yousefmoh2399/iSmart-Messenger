@@ -95,7 +95,7 @@ class ChatRepository {
 
   Duration _uploadTimeoutForBytes(int bytes) {
     const minSeconds = 90;
-    const maxSeconds = 420;
+    const maxSeconds = 1800; // 30 minutes for large file/video uploads on slow VPN/mobile networks
     final sizeInMb = bytes / (1024 * 1024);
     final scaledSeconds = minSeconds + (sizeInMb * 8).ceil();
     final seconds = scaledSeconds.clamp(minSeconds, maxSeconds);
@@ -470,6 +470,7 @@ class ChatRepository {
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   }) async {
     final fileName = p.basename(filePath);
@@ -496,11 +497,13 @@ class ChatRepository {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages',
       data: formData,
+      cancelToken: cancelToken,
       options: Options(
         contentType: 'multipart/form-data',
         connectTimeout: uploadTimeout,
         sendTimeout: uploadTimeout,
         receiveTimeout: uploadTimeout,
+        extra: const {'isTransfer': true},
       ),
       onSendProgress: onProgress,
     );
@@ -779,6 +782,7 @@ class ChatRepository {
   Future<String> downloadAttachment(
     ChatMessage message, {
     bool forceRefresh = false,
+    CancelToken? cancelToken,
     void Function(int received, int total)? onProgress,
   }) async {
     final targetFile = await _fullAttachmentCacheFile(message);
@@ -818,6 +822,7 @@ class ChatRepository {
         message,
         downloadUrl,
         targetFile.path,
+        cancelToken: cancelToken,
         onProgress: onProgress,
       );
       return targetFile.path;
@@ -835,6 +840,7 @@ class ChatRepository {
     ChatMessage message,
     String downloadUrl,
     String savePath, {
+    CancelToken? cancelToken,
     void Function(int received, int total)? onProgress,
     bool skipErrorLog = false,
   }) async {
@@ -858,8 +864,10 @@ class ChatRepository {
 
         final response = await _getDownloadDio().get<ResponseBody>(
           downloadUrl,
+          cancelToken: cancelToken,
           options: Options(
             responseType: ResponseType.stream,
+            extra: const {'isTransfer': true},
             headers: {
               if (authHeader != null) 'Authorization': authHeader,
               if (downloadedBytes > 0) 'Range': 'bytes=$downloadedBytes-',
@@ -903,6 +911,17 @@ class ChatRepository {
         fileSink = null;
         return; // success
       } catch (error) {
+        if (cancelToken?.isCancelled == true ||
+            (error is DioException && error.type == DioExceptionType.cancel)) {
+          if (fileSink != null) {
+            try {
+              await fileSink.flush();
+              await fileSink.close();
+            } catch (_) {}
+            fileSink = null;
+          }
+          rethrow;
+        }
         if (fileSink != null) {
           try {
             await fileSink.flush();

@@ -128,9 +128,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   bool _isUploadingAttachment = false;
   double _uploadProgress = 0;
   String? _uploadingFileName;
+  CancelToken? _activeUploadCancelToken;
 
   // Per-message download state: messageId -> {progress: double, fileName: String}
   final Map<String, _MessageDownloadState> _downloadStates = {};
+  final Map<String, CancelToken> _activeDownloadCancelTokens = {};
   final Set<String> _cachedAttachmentIds = <String>{};
   final Set<String> _checkedAttachmentIds = <String>{};
 
@@ -149,6 +151,63 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         _pendingCachedIds.clear();
       });
     });
+  }
+
+  void _cancelActiveUpload() {
+    _activeUploadCancelToken?.cancel('تم إلغاء الرفع من قبل المستخدم.');
+    _activeUploadCancelToken = null;
+    if (mounted) {
+      setState(() {
+        _isUploadingAttachment = false;
+        _uploadProgress = 0;
+        _uploadingFileName = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم إلغاء رفع الملف.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _cancelPendingUploadMessage(ChatMessage message) {
+    if (_activeUploadCancelToken != null) {
+      _cancelActiveUpload();
+    }
+    final clientMsgId = message.metadata?['clientMessageId']?.toString() ??
+        (message.id.startsWith('temp_') ? message.id.substring(5) : message.id);
+    ref
+        .read(
+          conversationMessagesControllerProvider(
+            widget.conversation.id,
+          ).notifier,
+        )
+        .cancelPendingUpload(clientMsgId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم إلغاء رفع الملف.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _cancelDownload(String messageId) {
+    final token = _activeDownloadCancelTokens.remove(messageId);
+    token?.cancel('تم إلغاء التنزيل من قبل المستخدم.');
+    if (mounted) {
+      setState(() {
+        _downloadStates.remove(messageId);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم إلغاء تنزيل المرفق.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _syncCachedAttachments(List<ChatMessage> messages) {
@@ -1780,6 +1839,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         'allowForward': false,
     };
 
+    final cancelToken = CancelToken();
+    _activeUploadCancelToken = cancelToken;
+
     setState(() {
       _isUploadingAttachment = true;
       _uploadProgress = 0;
@@ -1799,6 +1861,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             replyToMessageId: _replyingTo?.id,
             customFileName: displayName,
             metadata: metadata,
+            cancelToken: cancelToken,
             onProgress: (sent, total) {
               if (!mounted) {
                 return;
@@ -1824,12 +1887,23 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       if (!mounted) {
         return;
       }
+      if (cancelToken.isCancelled ||
+          (e is DioException && e.type == DioExceptionType.cancel)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم إلغاء رفع الملف.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
       if (!_isNetworkError(e)) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(messageFromChatDioError(e))));
       }
     } finally {
+      _activeUploadCancelToken = null;
       if (mounted) {
         setState(() {
           _isUploadingAttachment = false;
@@ -2536,8 +2610,11 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       final repository = ref.read(chatRepositoryProvider);
       final isCached = !forceRedownload && await repository.isAttachmentCached(message);
 
+      CancelToken? cancelToken;
       // Register download state for this message only if we actually need to download
       if (!isCached && mounted) {
+        cancelToken = CancelToken();
+        _activeDownloadCancelTokens[message.id] = cancelToken;
         setState(() {
           _downloadStates[message.id] = _MessageDownloadState(
             fileName: message.fileName ?? 'مرفق',
@@ -2550,6 +2627,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       final localPath = await repository.downloadAttachment(
         message,
         forceRefresh: forceRedownload,
+        cancelToken: cancelToken,
         onProgress: (received, total) {
           if (!mounted) {
             return;
@@ -2621,6 +2699,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       }
     } catch (error) {
       if (!mounted) return;
+      if (error is DioException && error.type == DioExceptionType.cancel) {
+        return;
+      }
+      if (error.toString().contains('إلغاء')) {
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2632,6 +2716,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         ),
       );
     } finally {
+      _activeDownloadCancelTokens.remove(message.id);
       if (mounted) {
         setState(() {
           _downloadStates.remove(message.id);
@@ -6587,37 +6672,65 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                       ),
                                                                                     )
                                                                                   : message.isImageMessage
-                                                                                  ? InkWell(
-                                                                                      onTap: _selectionMode
-                                                                                          ? () => _toggleMessageSelection(message.id)
-                                                                                          : () => _openAttachment(message),
-                                                                                      onDoubleTap: () => _handleDoubleTapReaction(message),
-                                                                                      onLongPress: _selectionMode
-                                                                                          ? () => _toggleMessageSelection(message.id)
-                                                                                          : (message.isStickerMessage
-                                                                                              ? () => _saveReceivedSticker(message)
-                                                                                              : () => _showWhatsAppContextMenu(message)),
-                                                                                      borderRadius: BorderRadius.circular(
-                                                                                        14,
-                                                                                      ),
-                                                                                      child: ClipRRect(
-                                                                                        borderRadius: BorderRadius.circular(
-                                                                                          14,
-                                                                                        ),
-                                                                                        child: SizedBox(
-                                                                                          width: maxBubbleWidth,
-                                                                                          height: 180,
-                                                                                          child: Hero(
-                                                                                            tag: 'image_$stableItemKey',
-                                                                                            child: _ChatAttachmentImage(
-                                                                                              message: message,
-                                                                                              fit: BoxFit.cover,
-                                                                                              height: 180,
+                                                                                  ? Stack(
+                                                                                      children: [
+                                                                                        InkWell(
+                                                                                          onTap: _selectionMode
+                                                                                              ? () => _toggleMessageSelection(message.id)
+                                                                                              : () => _openAttachment(message),
+                                                                                          onDoubleTap: () => _handleDoubleTapReaction(message),
+                                                                                          onLongPress: _selectionMode
+                                                                                              ? () => _toggleMessageSelection(message.id)
+                                                                                              : (message.isStickerMessage
+                                                                                                  ? () => _saveReceivedSticker(message)
+                                                                                                  : () => _showWhatsAppContextMenu(message)),
+                                                                                          borderRadius: BorderRadius.circular(
+                                                                                            14,
+                                                                                          ),
+                                                                                          child: ClipRRect(
+                                                                                            borderRadius: BorderRadius.circular(
+                                                                                              14,
+                                                                                            ),
+                                                                                            child: SizedBox(
                                                                                               width: maxBubbleWidth,
+                                                                                              height: 180,
+                                                                                              child: Hero(
+                                                                                                tag: 'image_$stableItemKey',
+                                                                                                child: _ChatAttachmentImage(
+                                                                                                  message: message,
+                                                                                                  fit: BoxFit.cover,
+                                                                                                  height: 180,
+                                                                                                  width: maxBubbleWidth,
+                                                                                                ),
+                                                                                              ),
                                                                                             ),
                                                                                           ),
                                                                                         ),
-                                                                                      ),
+                                                                                        if (message.id.startsWith('temp_') || message.isPending)
+                                                                                          Positioned(
+                                                                                            top: 8,
+                                                                                            left: 8,
+                                                                                            child: Tooltip(
+                                                                                              message: 'إلغاء الرفع',
+                                                                                              child: InkWell(
+                                                                                                borderRadius: BorderRadius.circular(16),
+                                                                                                onTap: () => _cancelPendingUploadMessage(message),
+                                                                                                child: Container(
+                                                                                                  padding: const EdgeInsets.all(6),
+                                                                                                  decoration: const BoxDecoration(
+                                                                                                    color: Colors.black54,
+                                                                                                    shape: BoxShape.circle,
+                                                                                                  ),
+                                                                                                  child: const Icon(
+                                                                                                    Icons.close_rounded,
+                                                                                                    size: 16,
+                                                                                                    color: Colors.white,
+                                                                                                  ),
+                                                                                                ),
+                                                                                              ),
+                                                                                            ),
+                                                                                          ),
+                                                                                      ],
                                                                                     )
                                                                                   : Builder(
                                                                                       builder: (context) {
@@ -6696,16 +6809,53 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                                                                                       color: subTextColor,
                                                                                                     ),
                                                                                                   ),
-                                                                                                if (_downloadStates.containsKey(message.id))
-                                                                                                  SizedBox(
-                                                                                                    width: 20,
-                                                                                                    height: 20,
-                                                                                                    child: CircularProgressIndicator(
-                                                                                                      value: _downloadStates[message.id]!.progress > 0
-                                                                                                          ? _downloadStates[message.id]!.progress
-                                                                                                          : null,
-                                                                                                      strokeWidth: 2,
-                                                                                                      color: subTextColor,
+                                                                                                if (message.id.startsWith('temp_') || message.isPending)
+                                                                                                  Tooltip(
+                                                                                                    message: 'إلغاء الرفع',
+                                                                                                    child: InkWell(
+                                                                                                      borderRadius: BorderRadius.circular(12),
+                                                                                                      onTap: () => _cancelPendingUploadMessage(message),
+                                                                                                      child: Container(
+                                                                                                        padding: const EdgeInsets.all(4),
+                                                                                                        decoration: BoxDecoration(
+                                                                                                          color: colorScheme.error.withValues(alpha: 0.12),
+                                                                                                          shape: BoxShape.circle,
+                                                                                                        ),
+                                                                                                        child: Icon(
+                                                                                                          Icons.close_rounded,
+                                                                                                          size: 16,
+                                                                                                          color: colorScheme.error,
+                                                                                                        ),
+                                                                                                      ),
+                                                                                                    ),
+                                                                                                  )
+                                                                                                else if (_downloadStates.containsKey(message.id))
+                                                                                                  Tooltip(
+                                                                                                    message: 'إلغاء التنزيل',
+                                                                                                    child: InkWell(
+                                                                                                      borderRadius: BorderRadius.circular(12),
+                                                                                                      onTap: () => _cancelDownload(message.id),
+                                                                                                      child: Stack(
+                                                                                                        alignment: Alignment.center,
+                                                                                                        children: [
+                                                                                                          SizedBox(
+                                                                                                            width: 22,
+                                                                                                            height: 22,
+                                                                                                            child: CircularProgressIndicator(
+                                                                                                              value: _downloadStates[message.id]!.progress > 0
+                                                                                                                  ? _downloadStates[message.id]!.progress
+                                                                                                                  : null,
+                                                                                                              strokeWidth: 2,
+                                                                                                              color: subTextColor,
+                                                                                                            ),
+                                                                                                          ),
+                                                                                                          Icon(
+                                                                                                            Icons.close_rounded,
+                                                                                                            size: 12,
+                                                                                                            color: subTextColor,
+                                                                                                          ),
+                                                                                                        ],
+                                                                                                      ),
                                                                                                     ),
                                                                                                   )
                                                                                                 else if (isAttachmentDownloaded)
@@ -7015,6 +7165,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           colorScheme: colorScheme,
                           fileName: entry.value.fileName,
                           progress: entry.value.progress,
+                          onCancel: () => _cancelDownload(entry.key),
                         ),
                       );
                     }).toList(),
@@ -7141,6 +7292,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     isUploading: _isUploadingAttachment,
                     uploadFileName: _uploadingFileName,
                     uploadProgress: _uploadProgress,
+                    onCancelUpload: _cancelActiveUpload,
                     enterSendsMessage: enterSendsMessage,
                     onAttach: _sendFile,
                     onPickImage: _sendImages,
@@ -7945,11 +8097,13 @@ class _DownloadBanner extends StatelessWidget {
     required this.colorScheme,
     required this.fileName,
     required this.progress,
+    this.onCancel,
   });
 
   final ColorScheme colorScheme;
   final String fileName;
   final double progress;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -7959,6 +8113,7 @@ class _DownloadBanner extends StatelessWidget {
         child: AppDownloadProgressBanner(
           fileName: fileName,
           progress: progress,
+          onCancel: onCancel,
         ),
       );
     }
@@ -7994,6 +8149,17 @@ class _DownloadBanner extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if (onCancel != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: onCancel,
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  tooltip: 'إلغاء التنزيل',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 10),
@@ -8016,11 +8182,13 @@ class _TelegramComposerUploadStrip extends StatelessWidget {
     required this.colorScheme,
     required this.fileName,
     required this.progress,
+    this.onCancel,
   });
 
   final ColorScheme colorScheme;
   final String fileName;
   final double progress;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -8087,6 +8255,17 @@ class _TelegramComposerUploadStrip extends StatelessWidget {
             color: colorScheme.onSurfaceVariant,
           ),
         ),
+        if (onCancel != null) ...[
+          const SizedBox(width: 4),
+          IconButton(
+            onPressed: onCancel,
+            icon: const Icon(Icons.close_rounded, size: 20),
+            tooltip: 'إلغاء الرفع',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
       ],
     );
   }
@@ -8371,6 +8550,7 @@ class _MessageComposer extends StatefulWidget {
     required this.isUploading,
     required this.uploadFileName,
     required this.uploadProgress,
+    this.onCancelUpload,
     required this.enterSendsMessage,
     required this.onAttach,
     required this.onPickImage,
@@ -8410,6 +8590,7 @@ class _MessageComposer extends StatefulWidget {
   final bool isUploading;
   final String? uploadFileName;
   final double uploadProgress;
+  final VoidCallback? onCancelUpload;
   final bool enterSendsMessage;
   final VoidCallback onAttach;
   final VoidCallback onPickImage;
@@ -8542,6 +8723,7 @@ class _MessageComposerState extends State<_MessageComposer> {
                 colorScheme: colorScheme,
                 fileName: uploadFileName ?? 'مرفق',
                 progress: uploadProgress,
+                onCancel: widget.onCancelUpload,
               ),
             ),
           Row(

@@ -100,6 +100,34 @@ class ApiClient {
             'authRetryCount=$retryCount',
           );
 
+          final isTransferEndpoint =
+              options.data is FormData ||
+              options.extra['isTransfer'] == true ||
+              requestPath.contains('/transfers') ||
+              requestPath.contains('/upload') ||
+              requestPath.contains('/download') ||
+              requestPath.contains('/releases') ||
+              requestPath.contains('/updates') ||
+              requestPath.contains('/chat/messages') ||
+              requestPath.contains('/documents');
+          final isFastEndpoint = requestPath.contains('/auth/login') ||
+              requestPath.contains('/auth/register') ||
+              requestPath.contains('/health');
+          if (isFastEndpoint) {
+            options.connectTimeout = const Duration(seconds: 10);
+            options.receiveTimeout = const Duration(seconds: 15);
+            options.sendTimeout = const Duration(seconds: 15);
+          } else if (isTransferEndpoint) {
+            // Generous timeouts for large files, uploads, and downloads over slow branch VPNs and mobile networks
+            options.connectTimeout = const Duration(seconds: 45);
+            options.receiveTimeout = const Duration(minutes: 30);
+            options.sendTimeout = const Duration(minutes: 30);
+          } else {
+            // Fast failure for normal queries so slow networks don't freeze UI
+            options.receiveTimeout = const Duration(seconds: 20);
+            options.sendTimeout = const Duration(seconds: 20);
+          }
+
           handler.next(options);
         },
         onResponse: (response, handler) {
@@ -325,15 +353,27 @@ class ApiClient {
         );
       }
 
-      if (error.type == DioExceptionType.connectionTimeout ||
-          error.type == DioExceptionType.receiveTimeout ||
-          error.type == DioExceptionType.sendTimeout) {
-        return const ApiException(
-          'الخادم غير متاح حاليا. جاري العمل على الإصلاح، وسيتم تحديث البيانات تلقائيا عند عودة الاتصال.',
-        );
+      if (error.type == DioExceptionType.cancel) {
+        return const ApiException('تم إلغاء العملية.');
       }
 
-      if (error.type == DioExceptionType.connectionError) {
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
+          error.type == DioExceptionType.connectionError) {
+        final reqPath = error.requestOptions.path.toLowerCase();
+        final isTransfer = error.requestOptions.data is FormData ||
+            error.requestOptions.extra['isTransfer'] == true ||
+            reqPath.contains('/download') ||
+            reqPath.contains('/upload') ||
+            reqPath.contains('/transfers') ||
+            reqPath.contains('/chat/messages') ||
+            reqPath.contains('/documents');
+        if (isTransfer) {
+          return const ApiException(
+            'تعذر استكمال نقل الملف بسبب ضعف أو انقطاع الاتصال بالشبكة. يرجى التحقق من الاتصال وإعادة المحاولة.',
+          );
+        }
         return const ApiException(
           'الخادم غير متاح حاليا. جاري العمل على الإصلاح، وسيتم تحديث البيانات تلقائيا عند عودة الاتصال.',
         );
