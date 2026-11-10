@@ -63,7 +63,8 @@ async function sendUploadFile(
 
     const isClientAbort =
       ["ECONNABORTED", "EPIPE", "ECONNRESET", "ECANCELED", "ETIMEDOUT"].includes(error.code) ||
-      error.message === "Request aborted";
+      error.message === "Request aborted" ||
+      error.status === 416;
 
     if (!isClientAbort) {
       console.warn(`[${logLabel}] sendFile failed`, {
@@ -80,6 +81,11 @@ async function sendUploadFile(
 
     if (error.code === "ENOENT") {
       res.status(404).json({ message: notFoundMessage });
+      return;
+    }
+
+    if (error.status === 416 || error.statusCode === 416) {
+      res.status(416).json({ message: "Range Not Satisfiable" });
       return;
     }
 
