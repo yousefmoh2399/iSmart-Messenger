@@ -1391,16 +1391,17 @@ Future<Map<String, dynamic>> uploadElectronChatAttachment({
   String? replyToMessageId,
   String? fileName,
   Map<String, dynamic>? metadata,
+  String? transferId,
   void Function(int sent, int total)? onProgress,
 }) async {
   if (!isElectron()) {
     return const {'success': false, 'error': 'Electron not available'};
   }
-  final transferId = 'upl_${DateTime.now().microsecondsSinceEpoch}';
+  final effectiveTransferId = transferId ?? 'upl_${DateTime.now().microsecondsSinceEpoch}';
   StreamSubscription? sub;
   if (onProgress != null) {
     sub = listenToElectronUploadProgress((data) {
-      if (data['transferId'] == transferId) {
+      if (data['transferId'] == effectiveTransferId) {
         final sent = (data['sent'] as num?)?.toInt() ?? 0;
         final total = (data['total'] as num?)?.toInt() ?? 0;
         onProgress(sent, total);
@@ -1417,11 +1418,23 @@ Future<Map<String, dynamic>> uploadElectronChatAttachment({
       if (replyToMessageId != null && replyToMessageId.isNotEmpty) 'replyToMessageId': replyToMessageId,
       if (fileName != null && fileName.isNotEmpty) 'fileName': fileName,
       if (metadata != null) 'metadata': jsonEncode(metadata),
-      'transferId': transferId,
+      'transferId': effectiveTransferId,
     });
     return _asStringMap(res);
   } finally {
     await sub?.cancel();
+  }
+}
+
+Future<Map<String, dynamic>> cancelElectronUpload(String transferId) async {
+  if (!isElectron()) {
+    return const {'success': false, 'error': 'Electron not available'};
+  }
+  try {
+    final res = await _callElectron('cancelUploadAttachment', transferId);
+    return _asStringMap(res);
+  } catch (e) {
+    return {'success': false, 'error': e.toString()};
   }
 }
 

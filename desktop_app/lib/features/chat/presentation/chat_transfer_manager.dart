@@ -120,9 +120,11 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
 
   void cancelTask(String taskId) {
     _cleanupTimers.remove(taskId)?.cancel();
-    _activeCancelTokens.remove(taskId)?.cancel('تم إلغاء التحميل من قبل المستخدم.');
+    final cancelToken = _activeCancelTokens.remove(taskId);
+    cancelToken?.cancel('تم إلغاء النقل من قبل المستخدم.');
     if (kIsWeb && web_bridge.isElectron()) {
       unawaited(web_bridge.cancelElectronDownload(taskId));
+      unawaited(web_bridge.cancelElectronUpload(taskId));
     }
     final idx = state.tasks.indexWhere((t) => t.id == taskId);
     if (idx != -1) {
@@ -130,7 +132,7 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
       _upsertTask(
         task.copyWith(
           status: ChatTransferStatus.failed,
-          errorMessage: 'تم إلغاء التحميل',
+          errorMessage: task.isUpload ? 'تم إلغاء الرفع' : 'تم إلغاء التحميل',
         ),
       );
       _scheduleTaskCleanup(taskId, delay: const Duration(seconds: 2));
@@ -224,6 +226,8 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
     }
 
     final taskId = _nextTaskId('upload');
+    final cancelToken = CancelToken();
+    _activeCancelTokens[taskId] = cancelToken;
     final task = ChatTransferTask(
       id: taskId,
       conversationId: conversationId,
@@ -246,6 +250,8 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
             replyToMessageId: replyToMessageId,
             customFileName: displayName,
             metadata: metadata,
+            transferId: taskId,
+            cancelToken: cancelToken,
             onProgress: (sent, total) {
               final fraction =
                   total <= 0 ? 0.0 : (sent / total).clamp(0.0, 1.0).toDouble();
@@ -279,6 +285,17 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
 
       return true;
     } catch (error) {
+      _activeCancelTokens.remove(taskId);
+      if (cancelToken.isCancelled) {
+        _upsertTask(
+          task.copyWith(
+            status: ChatTransferStatus.failed,
+            errorMessage: 'تم إلغاء الرفع',
+          ),
+        );
+        _scheduleTaskCleanup(taskId, delay: const Duration(seconds: 2));
+        return false;
+      }
       final errMsg = messageFromChatDioError(error);
       _upsertTask(
         task.copyWith(
@@ -289,6 +306,8 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
       _scheduleTaskCleanup(taskId, delay: const Duration(seconds: 6));
       onError?.call(errMsg);
       return false;
+    } finally {
+      _activeCancelTokens.remove(taskId);
     }
   }
 

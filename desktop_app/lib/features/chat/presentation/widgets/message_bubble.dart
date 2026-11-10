@@ -74,6 +74,7 @@ class MessageBubble extends StatefulWidget {
     this.isDownloadingAttachment = false,
     this.downloadAttachmentProgress = 0.0,
     this.onCancelDownloadAttachment,
+    this.onCancelUploadAttachment,
   });
 
   final ChatMessage message;
@@ -120,6 +121,7 @@ class MessageBubble extends StatefulWidget {
   final bool isDownloadingAttachment;
   final double downloadAttachmentProgress;
   final VoidCallback? onCancelDownloadAttachment;
+  final VoidCallback? onCancelUploadAttachment;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -740,6 +742,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     isDownloading: widget.isDownloadingAttachment,
                                     downloadProgress: widget.downloadAttachmentProgress,
                                     onCancelDownload: widget.onCancelDownloadAttachment,
+                                    onCancelUpload: widget.onCancelUploadAttachment,
                                   ),
                                 ),
                             ],
@@ -1022,6 +1025,7 @@ class _AttachmentPreview extends StatelessWidget {
     this.isDownloading = false,
     this.downloadProgress = 0.0,
     this.onCancelDownload,
+    this.onCancelUpload,
   });
 
   final VoidCallback? onRetry;
@@ -1036,6 +1040,7 @@ class _AttachmentPreview extends StatelessWidget {
   final bool isDownloading;
   final double downloadProgress;
   final VoidCallback? onCancelDownload;
+  final VoidCallback? onCancelUpload;
 
   @override
   Widget build(BuildContext context) {
@@ -1197,6 +1202,24 @@ class _AttachmentPreview extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
+                          if (onCancelUpload != null) ...[
+                            const SizedBox(width: 8),
+                            Tooltip(
+                              message: 'إلغاء الرفع',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: onCancelUpload,
+                                child: const Padding(
+                                  padding: EdgeInsets.all(2),
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 16,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1459,21 +1482,44 @@ class _AttachmentPreview extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (progressVal > 0)
-                        Text(
-                          '$progressPct%',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: textColor.withValues(alpha: 0.7),
-                          ),
-                        )
-                      else
-                        Icon(
-                          Icons.access_time_rounded,
-                          size: 13,
-                          color: textColor.withValues(alpha: 0.6),
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (progressVal > 0)
+                            Text(
+                              '$progressPct%',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: textColor.withValues(alpha: 0.7),
+                              ),
+                            )
+                          else
+                            Icon(
+                              Icons.access_time_rounded,
+                              size: 13,
+                              color: textColor.withValues(alpha: 0.6),
+                            ),
+                          if (onCancelUpload != null) ...[
+                            const SizedBox(width: 8),
+                            Tooltip(
+                              message: 'إلغاء الرفع',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: onCancelUpload,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(2),
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 15,
+                                    color: textColor.withValues(alpha: 0.7),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),

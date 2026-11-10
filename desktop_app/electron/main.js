@@ -3427,6 +3427,28 @@ ipcMain.handle("files:archive-chat-attachment", async (_event, payload = {}) => 
   }
 });
 
+const activeUploadRequests = new Map();
+
+ipcMain.handle("chat:cancel-upload", async (_event, transferId) => {
+  if (!transferId) return { success: false, message: "Missing transferId" };
+  const key = String(transferId).trim();
+  const active = activeUploadRequests.get(key);
+  if (active) {
+    try {
+      active.aborted = true;
+      if (active.fileStream) {
+        try { active.fileStream.destroy(); } catch (_) {}
+      }
+      if (active.req) {
+        try { active.req.destroy(new Error("Upload cancelled by user.")); } catch (_) {}
+      }
+    } catch (_) {}
+    activeUploadRequests.delete(key);
+    return { success: true, canceled: true };
+  }
+  return { success: false, message: "Upload not found or already finished." };
+});
+
 ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
   const {
     url,
@@ -3445,10 +3467,24 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
     return { success: false, error: "Missing upload parameters or file does not exist." };
   }
 
+  const uploadKey = transferId ? String(transferId).trim() : null;
+  const activeRecord = {
+    req: null,
+    fileStream: null,
+    aborted: false,
+  };
+  if (uploadKey) {
+    activeUploadRequests.set(uploadKey, activeRecord);
+  }
+
   const maxAttempts = 3;
   let lastError = "Upload failed.";
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (activeRecord.aborted) {
+        return { success: false, error: "تم إلغاء الرفع من قبل المستخدم.", isCancelled: true };
+      }
     try {
       const stat = await fs.promises.stat(filePath);
       const boundary = "----iSmartUploadBoundary" + Date.now().toString(16) + Math.random().toString(16);
@@ -3556,14 +3592,21 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
         });
 
         req.on("error", (err) => {
-          safeResolve({ success: false, error: err.message || String(err), isNetworkError: true });
+          if (activeRecord.aborted) {
+            safeResolve({ success: false, error: "تم إلغاء الرفع من قبل المستخدم.", isCancelled: true });
+          } else {
+            safeResolve({ success: false, error: err.message || String(err), isNetworkError: true });
+          }
         });
+
+        activeRecord.req = req;
 
         // Write preamble
         req.write(headBuf);
 
         // Stream file with backpressure handling (crucial for slow branch VPN networks)
         const fileStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
+        activeRecord.fileStream = fileStream;
         let sentBytes = headBuf.length;
 
         fileStream.on("data", (chunk) => {
@@ -3612,10 +3655,18 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
       }
     } catch (err) {
       lastError = err.message || String(err);
-      if (attempt < maxAttempts) {
+      if (attempt < maxAttempts && !activeRecord.aborted) {
         await sleep(attempt * 1500);
       }
     }
+  } finally {
+    if (uploadKey) {
+      activeUploadRequests.delete(uploadKey);
+    }
+  }
+
+  if (activeRecord.aborted) {
+    return { success: false, error: "تم إلغاء الرفع من قبل المستخدم.", isCancelled: true };
   }
 
   return { success: false, error: lastError };

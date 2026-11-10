@@ -5328,6 +5328,46 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
                                                .read(chatTransferManagerProvider.notifier)
                                                .cancelTask(activeDownload.id)
                                            : null,
+                                       onCancelUploadAttachment: (message.id.startsWith('temp_') ||
+                                               message.metadata?['status'] == 'uploading' ||
+                                               message.metadata?['status'] == 'pending')
+                                           ? () {
+                                               final clientMsgId = message.metadata?['clientMessageId']?.toString() ??
+                                                   (message.id.startsWith('temp_')
+                                                       ? message.id.substring(5)
+                                                       : message.id);
+                                               final transferManager = ref.read(chatTransferManagerProvider.notifier);
+                                               final activeUpload = ref
+                                                   .read(chatTransferManagerProvider)
+                                                   .tasks
+                                                   .where(
+                                                     (t) =>
+                                                         t.isUpload &&
+                                                         t.isRunning &&
+                                                         t.conversationId == _conversationId,
+                                                   )
+                                                   .firstOrNull;
+                                               if (activeUpload != null) {
+                                                 transferManager.cancelTask(activeUpload.id);
+                                               }
+                                               ref
+                                                   .read(
+                                                     conversationMessagesControllerProvider(
+                                                       _conversationId,
+                                                     ).notifier,
+                                                   )
+                                                   .cancelPendingUpload(clientMsgId);
+
+                                               if (mounted) {
+                                                 ScaffoldMessenger.of(context).showSnackBar(
+                                                   const SnackBar(
+                                                     content: Text('تم إلغاء رفع الملف.'),
+                                                     duration: Duration(seconds: 2),
+                                                   ),
+                                                 );
+                                               }
+                                             }
+                                           : null,
                                        ),
                                     ),
                                   ),

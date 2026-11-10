@@ -498,6 +498,8 @@ class ChatRepository {
     String? replyToMessageId,
     String? customFileName,
     Map<String, dynamic>? metadata,
+    String? transferId,
+    CancelToken? cancelToken,
     void Function(int sent, int total)? onProgress,
   }) async {
     final safeCustomName = customFileName?.trim();
@@ -529,11 +531,19 @@ class ChatRepository {
         replyToMessageId: replyToMessageId,
         fileName: safeCustomName ?? resolvedFileName,
         metadata: nextMetadata,
+        transferId: transferId,
         onProgress: onProgress,
       );
 
       if (res['success'] != true) {
         final errMsg = res['error']?.toString() ?? 'فشل رفع الملف عبر التطبيق.';
+        if (res['isCancelled'] == true || errMsg.contains('إلغاء')) {
+          throw DioException(
+            requestOptions: RequestOptions(path: uploadUrl),
+            type: DioExceptionType.cancel,
+            message: errMsg,
+          );
+        }
         throw Exception(errMsg);
       }
 
@@ -610,6 +620,7 @@ class ChatRepository {
     final response = await _apiClient.dio.post<Map<String, dynamic>>(
       '/api/chat/messages',
       data: formData,
+      cancelToken: cancelToken,
       options: Options(
         contentType: 'multipart/form-data',
         connectTimeout: uploadTimeout,

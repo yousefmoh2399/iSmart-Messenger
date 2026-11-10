@@ -378,8 +378,12 @@ Future<Map<String, dynamic>> uploadElectronChatAttachment({
   String? replyToMessageId,
   String? fileName,
   Map<String, dynamic>? metadata,
+  String? transferId,
   void Function(int sent, int total)? onProgress,
 }) async => const <String, dynamic>{'success': false, 'error': 'Not supported'};
+
+Future<Map<String, dynamic>> cancelElectronUpload(String transferId) async =>
+    const <String, dynamic>{'success': false, 'error': 'Not supported'};
 
 Future<Map<String, dynamic>> downloadElectronChatAttachment({
   required String url,

@@ -197,6 +197,7 @@ contextBridge.exposeInMainWorld("electronBridge", {
   clearStorageCache: (payload) => ipcRenderer.invoke("storage:clear-cache", payload),
   probePeerStatus: (payload) => ipcRenderer.invoke("net:probe-peer-status", payload),
   uploadChatAttachment: (payload) => ipcRenderer.invoke("chat:upload-attachment", payload),
+  cancelUploadAttachment: (transferId) => ipcRenderer.invoke("chat:cancel-upload", transferId),
   downloadChatAttachment: (payload) => ipcRenderer.invoke("files:download-chat-attachment", payload),
   cancelDownloadAttachment: (transferId) => ipcRenderer.invoke("files:cancel-download", transferId),
   showSaveDialog: (payload) => ipcRenderer.invoke("dialog:show-save-dialog", payload),
