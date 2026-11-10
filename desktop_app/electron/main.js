@@ -2887,19 +2887,6 @@ ipcMain.handle("window:set-theme", async (_event, payload = {}) => {
 });
 
 let currentBadgeCount = 0;
-let defaultAppNativeIcon = null;
-
-function getDefaultAppNativeIcon() {
-  if (!defaultAppNativeIcon) {
-    const iconPath = appIconPath();
-    if (iconPath && fs.existsSync(iconPath)) {
-      try {
-        defaultAppNativeIcon = nativeImage.createFromPath(iconPath);
-      } catch (_) {}
-    }
-  }
-  return defaultAppNativeIcon;
-}
 
 function updateAppBadge(count, dataUrl) {
   const validCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
@@ -2909,29 +2896,22 @@ function updateAppBadge(count, dataUrl) {
     return;
   }
 
-  // 1. Windows Taskbar Icon (with Top-Right vibrant red notification bubble)
+  // 1. Windows Taskbar Overlay Icon (16x16 crisp red badge)
   if (process.platform === "win32") {
     try {
-      if (validCount > 0 && dataUrl) {
-        const badgeImage = nativeImage.createFromDataURL(dataUrl);
-        if (!badgeImage.isEmpty()) {
-          mainWindow.setIcon(badgeImage);
-        }
+      if (validCount <= 0 || !dataUrl) {
         mainWindow.setOverlayIcon(null, "");
       } else {
-        const defaultIcon = getDefaultAppNativeIcon();
-        if (defaultIcon && !defaultIcon.isEmpty()) {
-          mainWindow.setIcon(defaultIcon);
+        const badgeImage = nativeImage.createFromDataURL(dataUrl);
+        if (!badgeImage.isEmpty()) {
+          const desc = validCount === 1 ? "رسالة جديدة واحدة" : `${validCount} رسائل غير مقروءة`;
+          mainWindow.setOverlayIcon(badgeImage, desc);
         } else {
-          const iconPath = appIconPath();
-          if (iconPath && fs.existsSync(iconPath)) {
-            mainWindow.setIcon(iconPath);
-          }
+          mainWindow.setOverlayIcon(null, "");
         }
-        mainWindow.setOverlayIcon(null, "");
       }
     } catch (e) {
-      console.warn("[Badge] Failed to set taskbar icon:", e.message);
+      console.warn("[Badge] Failed to set overlay icon:", e.message);
     }
   }
 
@@ -2941,25 +2921,13 @@ function updateAppBadge(count, dataUrl) {
     mainWindow.setTitle(`${titlePrefix}${APP_NAME}`);
   } catch (_) {}
 
-  // 3. System Tray Tooltip and Icon
+  // 3. System Tray Tooltip
   if (tray && !tray.isDestroyed()) {
     try {
       const tooltip = validCount > 0
         ? `${APP_NAME} (${validCount} غير مقروء)`
         : APP_NAME;
       tray.setToolTip(tooltip);
-
-      if (validCount > 0 && dataUrl) {
-        const trayBadged = nativeImage.createFromDataURL(dataUrl);
-        if (!trayBadged.isEmpty()) {
-          tray.setImage(trayBadged);
-        }
-      } else {
-        const iconPath = appIconPath();
-        if (iconPath && fs.existsSync(iconPath)) {
-          tray.setImage(iconPath);
-        }
-      }
     } catch (_) {}
   }
 
