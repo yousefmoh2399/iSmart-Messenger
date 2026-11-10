@@ -364,8 +364,8 @@ class _LiveOperationsTopologyScreenState
         'Node Version': stats?.nodeVersion ?? 'v22.x',
         'Sockets Cluster': 'Active',
       },
-      inputPayload: {'auth': 'Bearer token', 'route': '/api/v1/dispatch'},
-      outputPayload: {'authorized': true, 'dispatched': true},
+      inputPayload: {'route': '/api/v1/dispatch', 'protocol': 'HTTP/2 & WebSocket'},
+      outputPayload: {'authorized': true, 'activeSockets': stats?.liveSocketsCount ?? 0},
     );
 
     // 2. Core Engines on the Right Column
@@ -390,8 +390,8 @@ class _LiveOperationsTopologyScreenState
         'Engine': 'iSmart Chat Orchestrator',
         'CPU Cores': '$cpuCores Cores',
       },
-      inputPayload: {'type': 'chat_message', 'channel': 'pos_cashiers'},
-      outputPayload: {'status': 'broadcast_delivered', 'timeMs': 8},
+      inputPayload: {'service': 'chat_messaging', 'channel': 'realtime_broadcast'},
+      outputPayload: {'status': 'active_listening', 'usersOnline': stats?.liveUsersCount ?? 0},
     );
 
     final docEngineNode = _CoreServiceNode(
@@ -412,8 +412,8 @@ class _LiveOperationsTopologyScreenState
         'الأخطاء': '${stats?.unresolvedErrors ?? 0}',
       },
       details: {'Worker': 'Document Workflow Processor', 'Queue': 'Empty'},
-      inputPayload: {'docType': 'order_transfer', 'branchCode': '110'},
-      outputPayload: {'status': 'processed', 'timeMs': 12},
+      inputPayload: {'service': 'documents_orders', 'sync': 'bidirectional'},
+      outputPayload: {'status': 'ready_standby'},
     );
 
     final printerEngineNode = _CoreServiceNode(
@@ -434,8 +434,8 @@ class _LiveOperationsTopologyScreenState
         'زمن الإرسال': '4ms',
       },
       details: {'Driver': 'Thermal POS Spooler', 'Status': 'Ready'},
-      inputPayload: {'printJob': 'receipt_80mm', 'copies': 1},
-      outputPayload: {'printed': true, 'timeMs': 4},
+      inputPayload: {'service': 'print_spooler', 'protocol': 'ESC/POS Raw'},
+      outputPayload: {'status': 'spooler_active'},
     );
 
     final releaseEngineNode = _CoreServiceNode(
@@ -456,8 +456,8 @@ class _LiveOperationsTopologyScreenState
         'نظام النشر': 'HTTP Chunked Stream',
       },
       details: {'Release': 'v$targetVer', 'Protocol': 'HTTP Stream'},
-      inputPayload: {'checkVersion': 'v$targetVer'},
-      outputPayload: {'status': 'up_to_date'},
+      inputPayload: {'service': 'auto_update_hub', 'targetVersion': 'v$targetVer'},
+      outputPayload: {'status': 'serving_releases'},
     );
 
     final databaseNode = _CoreServiceNode(
@@ -478,8 +478,8 @@ class _LiveOperationsTopologyScreenState
         'المضيف': dbHost,
       },
       details: {'Engine': 'MongoDB ReplicaSet', 'Host': dbHost},
-      inputPayload: {'op': 'write_audit_log'},
-      outputPayload: {'acknowledged': true, 'timeMs': 3.4},
+      inputPayload: {'service': 'mongodb_cluster', 'database': dbName},
+      outputPayload: {'status': dbStatus, 'replicaSet': 'Primary'},
     );
 
     _coreNodes.addAll([
@@ -803,17 +803,19 @@ class _LiveOperationsTopologyScreenState
                     ? 'user_${username.toLowerCase()}_${isMobile ? "m" : "d"}'
                     : 'act_${DateTime.now().millisecondsSinceEpoch}')));
 
-    final displayName = hostName.isNotEmpty
+    final resolvedFullName = fullName.isNotEmpty && fullName != 'جهاز بالشبكة'
+        ? (isMobile ? '$fullName (موبايل)' : fullName)
+        : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
+            ? (isMobile ? '$username (موبايل)' : username)
+            : (branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
+                ? 'كاشير فرع $branchCode'
+                : 'محطة فرع'));
+
+    final resolvedHostName = hostName.isNotEmpty
         ? hostName
         : (clientIp.isNotEmpty && clientIp != '-' && clientIp != '127.0.0.1' && clientIp != 'localhost'
             ? 'جهاز ($clientIp)'
-            : (fullName.isNotEmpty && fullName != 'جهاز بالشبكة'
-                ? (isMobile ? '$fullName (موبايل)' : fullName)
-                : (username.isNotEmpty && username != '-' && !username.startsWith('host:')
-                    ? (isMobile ? '$username (موبايل)' : username)
-                    : (branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
-                        ? 'كاشير فرع $branchCode'
-                        : 'محطة فرع'))));
+            : (isMobile ? 'هاتف محمول' : 'محطة العمل'));
 
     final displayBranch = branchCode.isNotEmpty && branchCode != 'MAIN' && branchCode != '00'
         ? 'فرع $branchCode'
@@ -822,9 +824,9 @@ class _LiveOperationsTopologyScreenState
     matchedDev ??= _FleetDeviceModel(
       id: resolvedId,
       deviceUid: deviceUid,
-      hostname: displayName,
-      fullName: fullName.isNotEmpty ? fullName : displayName,
-      username: username.isNotEmpty ? username : displayName,
+      hostname: resolvedHostName,
+      fullName: resolvedFullName,
+      username: username.isNotEmpty ? username : resolvedFullName,
       branchName: displayBranch,
       branchCode: branchCode.isNotEmpty ? branchCode : '00',
       ipAddress: clientIp,
@@ -1150,7 +1152,24 @@ class _LiveOperationsTopologyScreenState
     final gw = _coreNodesMap['node_gateway'];
     if (gw != null) gw.executionCount++;
     final eng = _coreNodesMap[resolvedEngineId];
-    if (eng != null) eng.executionCount++;
+    if (eng != null) {
+      eng.executionCount++;
+      eng.inputPayload.clear();
+      eng.inputPayload.addAll({
+        'action': actionLabel,
+        'endpoint': endpoint,
+        'method': method,
+        'user': dev.fullName,
+        'device': dev.hostname,
+        'branch': dev.branchName,
+      });
+      eng.outputPayload.clear();
+      eng.outputPayload.addAll({
+        'statusCode': statusCode,
+        'latencyMs': latencyMs,
+        'status': statusCode < 400 ? 'SUCCESS' : 'FAILED',
+      });
+    }
 
     // Check if this physical device is ALREADY active on the canvas
     _ActiveCanvasDevice? existing;
@@ -2319,7 +2338,9 @@ class _LiveOperationsTopologyScreenState
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          dev.hostname,
+                          dev.cashierName.trim().isNotEmpty
+                              ? dev.cashierName
+                              : dev.hostname,
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w900,
@@ -2333,7 +2354,10 @@ class _LiveOperationsTopologyScreenState
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${dev.cashierName} • ${dev.branchName}',
+                          dev.hostname.trim().isNotEmpty &&
+                                  dev.hostname.trim() != dev.cashierName.trim()
+                              ? '${dev.hostname} • ${dev.branchName}'
+                              : dev.branchName,
                           style: TextStyle(
                             fontSize: 9.2,
                             height: 1.15,
@@ -2787,7 +2811,7 @@ class _LiveOperationsTopologyScreenState
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  dev.hostname,
+                  dev.fullName.trim().isNotEmpty ? dev.fullName : dev.hostname,
                   style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w900,
@@ -2809,7 +2833,9 @@ class _LiveOperationsTopologyScreenState
           ),
           const SizedBox(height: 4),
           Text(
-            '${dev.fullName} • IP: ${dev.ipAddress}',
+            dev.hostname.trim().isNotEmpty && dev.hostname.trim() != dev.fullName.trim()
+                ? '${dev.hostname} • ${dev.branchName} • IP: ${dev.ipAddress}'
+                : '${dev.branchName} • IP: ${dev.ipAddress}',
             style: TextStyle(
                 fontSize: 10.5,
                 color: isDark

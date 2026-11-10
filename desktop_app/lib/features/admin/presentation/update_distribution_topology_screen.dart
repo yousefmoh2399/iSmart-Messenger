@@ -1720,7 +1720,9 @@ class _UpdateDistributionTopologyScreenState
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      dev.hostname,
+                      dev.cashierName.trim().isNotEmpty
+                          ? dev.cashierName
+                          : dev.hostname,
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w900,
@@ -1733,7 +1735,10 @@ class _UpdateDistributionTopologyScreenState
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${dev.cashierName} • ${dev.branchName}',
+                      dev.hostname.trim().isNotEmpty &&
+                              dev.hostname.trim() != dev.cashierName.trim()
+                          ? '${dev.hostname} • ${dev.branchName}'
+                          : dev.branchName,
                       style: TextStyle(
                         fontSize: 9.2,
                         height: 1.15,
@@ -1894,14 +1899,19 @@ class _UpdateDistributionTopologyScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      dev.hostname,
+                      dev.cashierName.trim().isNotEmpty
+                          ? dev.cashierName
+                          : dev.hostname,
                       style: const TextStyle(
                           fontSize: 13, fontWeight: FontWeight.w900),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      '${dev.cashierName} • ${dev.branchName}',
+                      dev.hostname.trim().isNotEmpty &&
+                              dev.hostname.trim() != dev.cashierName.trim()
+                          ? '${dev.hostname} • ${dev.branchName}'
+                          : dev.branchName,
                       style: TextStyle(
                           fontSize: 10.5,
                           color: isDark
@@ -2092,14 +2102,19 @@ class _UpdateDistributionTopologyScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      dev.hostname,
+                      dev.cashierName.trim().isNotEmpty
+                          ? dev.cashierName
+                          : dev.hostname,
                       style: const TextStyle(
                           fontSize: 13, fontWeight: FontWeight.w900),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      '${dev.cashierName} • ${dev.branchName}',
+                      dev.hostname.trim().isNotEmpty &&
+                              dev.hostname.trim() != dev.cashierName.trim()
+                          ? '${dev.hostname} • ${dev.branchName}'
+                          : dev.branchName,
                       style: TextStyle(
                           fontSize: 10.5,
                           color: isDark
