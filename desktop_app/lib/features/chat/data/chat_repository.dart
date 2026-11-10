@@ -1103,23 +1103,37 @@ class ChatRepository {
   Future<String> saveAttachmentToLocalStorage(
     ChatMessage message, {
     String? customSaveDirectory,
+    String? targetFilePath,
+    CancelToken? cancelToken,
+    String? transferId,
     void Function(int received, int total)? onProgress,
   }) async {
     final safeFileName = _resolveCleanFileName(message);
 
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
-        final targetDirPath = await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
-        final existingPath = targetDirPath.isNotEmpty ? p.join(targetDirPath, safeFileName) : safeFileName;
+        final targetDirPath = targetFilePath != null
+            ? p.dirname(targetFilePath)
+            : await resolveEffectiveSaveDirectoryPath(customPath: customSaveDirectory);
+        final existingPath = targetFilePath ??
+            (targetDirPath.isNotEmpty ? p.join(targetDirPath, safeFileName) : safeFileName);
 
         // Check if message is already archived/cached locally in Electron
         final cachedPath = await web_bridge.getElectronCachedAttachmentPath(
           messageId: message.id,
           fileName: safeFileName,
-          preferredDirectoryPath: targetDirPath.isNotEmpty ? targetDirPath : null,
+          preferredDirectoryPath: targetFilePath == null && targetDirPath.isNotEmpty ? targetDirPath : null,
         );
         if (cachedPath != null && cachedPath.isNotEmpty) {
-          return cachedPath;
+          if (targetFilePath != null) {
+            final copied = await web_bridge.copyElectronFile(
+              sourcePath: cachedPath,
+              destinationPath: targetFilePath,
+            );
+            if (copied) return targetFilePath;
+          } else {
+            return cachedPath;
+          }
         }
 
         // Direct streaming download via Electron (zero Dart memory, zero UI thread lag)
@@ -1130,6 +1144,7 @@ class ChatRepository {
             url: downloadUrl,
             destinationPath: existingPath,
             token: token,
+            transferId: transferId,
             onProgress: onProgress,
           );
           if (res['success'] == true && res['path'] != null) {
@@ -1145,6 +1160,7 @@ class ChatRepository {
           bytes = await _downloadAttachmentBytesWithRestore(
             message,
             _downloadUrlFor(message.fileUrl!),
+            cancelToken: cancelToken,
             onProgress: onProgress,
           );
           unawaited(_cacheAttachmentPreviewBytes(message, bytes).catchError((_) {}));
@@ -1161,6 +1177,7 @@ class ChatRepository {
       final bytes = await _downloadAttachmentBytesWithRestore(
         message,
         _downloadUrlFor(message.fileUrl!),
+        cancelToken: cancelToken,
         onProgress: onProgress,
       );
       await web_bridge.downloadBytes(
@@ -1172,6 +1189,25 @@ class ChatRepository {
     }
 
     // Native Desktop (Windows / macOS / Linux)
+    if (targetFilePath != null && targetFilePath.isNotEmpty) {
+      final destFile = File(targetFilePath);
+      if (!destFile.parent.existsSync()) {
+        await destFile.parent.create(recursive: true);
+      }
+      final cached = await getCachedAttachmentPath(message);
+      if (cached != null && File(cached).existsSync()) {
+        await File(cached).copy(targetFilePath);
+        return targetFilePath;
+      }
+      final downloadUrl = _downloadUrlFor(message.fileUrl!);
+      await _apiClient.dio.download(
+        downloadUrl,
+        targetFilePath,
+        cancelToken: cancelToken,
+        onReceiveProgress: onProgress,
+      );
+      return targetFilePath;
+    }
     final targetDir = await resolveEffectiveSaveDirectory(customPath: customSaveDirectory);
     final baseName = p.basenameWithoutExtension(safeFileName);
     final extension = p.extension(safeFileName);
@@ -1324,12 +1360,14 @@ class ChatRepository {
   Future<Uint8List> _downloadAttachmentBytesWithRestore(
     ChatMessage message,
     String downloadUrl, {
+    CancelToken? cancelToken,
     void Function(int received, int total)? onProgress,
     bool skipErrorLog = false,
   }) async {
     try {
       final response = await _apiClient.dio.get<List<int>>(
         downloadUrl,
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.bytes,
           extra: <String, Object?>{if (skipErrorLog) 'skipErrorLog': true},

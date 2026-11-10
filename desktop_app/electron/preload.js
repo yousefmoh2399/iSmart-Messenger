@@ -198,6 +198,9 @@ contextBridge.exposeInMainWorld("electronBridge", {
   probePeerStatus: (payload) => ipcRenderer.invoke("net:probe-peer-status", payload),
   uploadChatAttachment: (payload) => ipcRenderer.invoke("chat:upload-attachment", payload),
   downloadChatAttachment: (payload) => ipcRenderer.invoke("files:download-chat-attachment", payload),
+  cancelDownloadAttachment: (transferId) => ipcRenderer.invoke("files:cancel-download", transferId),
+  showSaveDialog: (payload) => ipcRenderer.invoke("dialog:show-save-dialog", payload),
+  copyFile: (payload) => ipcRenderer.invoke("files:copy-file", payload),
   calculateFileSha256: (payload) => ipcRenderer.invoke("files:calculate-sha256", payload),
 });
 console.log("[preload] electronBridge exposed");

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -114,6 +116,26 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
   int _taskCounter = 0;
   int _lastProgressUpdateTimestamp = 0;
   final Map<String, Timer> _cleanupTimers = <String, Timer>{};
+  final Map<String, CancelToken> _activeCancelTokens = <String, CancelToken>{};
+
+  void cancelTask(String taskId) {
+    _cleanupTimers.remove(taskId)?.cancel();
+    _activeCancelTokens.remove(taskId)?.cancel('تم إلغاء التحميل من قبل المستخدم.');
+    if (kIsWeb && web_bridge.isElectron()) {
+      unawaited(web_bridge.cancelElectronDownload(taskId));
+    }
+    final idx = state.tasks.indexWhere((t) => t.id == taskId);
+    if (idx != -1) {
+      final task = state.tasks[idx];
+      _upsertTask(
+        task.copyWith(
+          status: ChatTransferStatus.failed,
+          errorMessage: 'تم إلغاء التحميل',
+        ),
+      );
+      _scheduleTaskCleanup(taskId, delay: const Duration(seconds: 2));
+    }
+  }
 
   @override
   ChatTransferManagerState build() {
@@ -275,6 +297,7 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
   /// minimizes the window, and supports downloading multiple files simultaneously.
   Future<String?> startDownload({
     required ChatMessage message,
+    String? targetFilePath,
     bool openAfterDownload = false,
     void Function(String savedPath)? onCompleted,
     void Function(String errorMessage)? onError,
@@ -293,7 +316,9 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
       return null;
     }
 
-    final fileName = message.fileName ?? 'مرفق';
+    final fileName = targetFilePath != null
+        ? p.basename(targetFilePath)
+        : (message.fileName ?? 'مرفق');
     final taskId = _nextTaskId('download');
     final task = ChatTransferTask(
       id: taskId,
@@ -307,16 +332,25 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
     );
     _upsertTask(task);
 
+    final cancelToken = CancelToken();
+    _activeCancelTokens[taskId] = cancelToken;
+
     try {
       final repo = ref.read(chatRepositoryProvider);
       final savedPath = await repo.saveAttachmentToLocalStorage(
         message,
+        customSaveDirectory: targetFilePath != null ? p.dirname(targetFilePath) : null,
+        targetFilePath: targetFilePath,
+        cancelToken: cancelToken,
+        transferId: taskId,
         onProgress: (received, total) {
           final fraction =
               total <= 0 ? 0.0 : (received / total).clamp(0.0, 1.0).toDouble();
           _updateTaskProgress(taskId, fraction);
         },
       );
+
+      _activeCancelTokens.remove(taskId);
 
       _upsertTask(
         task.copyWith(
@@ -354,6 +388,10 @@ class ChatTransferManager extends Notifier<ChatTransferManagerState> {
 
       return savedPath;
     } catch (error) {
+      _activeCancelTokens.remove(taskId);
+      if (cancelToken.isCancelled) {
+        return null;
+      }
       final raw = error.toString().trim();
       final errMsg = raw.isEmpty ? 'تعذر تنزيل المرفق حاليًا' : raw;
       _upsertTask(
@@ -533,6 +571,9 @@ class ChatMultiTransferBanner extends ConsumerWidget {
                         onDismiss: () => ref
                             .read(chatTransferManagerProvider.notifier)
                             .dismissTask(task.id),
+                        onCancel: () => ref
+                            .read(chatTransferManagerProvider.notifier)
+                            .cancelTask(task.id),
                       );
                     },
                   ),
@@ -550,11 +591,13 @@ class _TransferTaskRow extends StatelessWidget {
     required this.task,
     required this.isDark,
     required this.onDismiss,
+    required this.onCancel,
   });
 
   final ChatTransferTask task;
   final bool isDark;
   final VoidCallback onDismiss;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -656,7 +699,24 @@ class _TransferTaskRow extends StatelessWidget {
                 ChatTransferManager.revealDownloadedFileInFolder(task.savedPath!),
           ),
         ],
-        if (!task.isRunning) ...[
+        if (task.isRunning) ...[
+          const SizedBox(width: 4),
+          Tooltip(
+            message: 'إلغاء التحميل',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onCancel,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 16,
+                  color: isDark ? Colors.redAccent : const Color(0xFFEF4444),
+                ),
+              ),
+            ),
+          ),
+        ] else ...[
           const SizedBox(width: 4),
           InkWell(
             borderRadius: BorderRadius.circular(12),

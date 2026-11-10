@@ -71,6 +71,9 @@ class MessageBubble extends StatefulWidget {
     this.onForward,
     this.onRemindMessage,
     this.onConvertToTicket,
+    this.isDownloadingAttachment = false,
+    this.downloadAttachmentProgress = 0.0,
+    this.onCancelDownloadAttachment,
   });
 
   final ChatMessage message;
@@ -114,6 +117,9 @@ class MessageBubble extends StatefulWidget {
   final VoidCallback? onForward;
   final VoidCallback? onRemindMessage;
   final VoidCallback? onConvertToTicket;
+  final bool isDownloadingAttachment;
+  final double downloadAttachmentProgress;
+  final VoidCallback? onCancelDownloadAttachment;
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
@@ -731,6 +737,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     token: widget.token,
                                     isMine: widget.isMine,
                                     onRetry: widget.onRetry,
+                                    isDownloading: widget.isDownloadingAttachment,
+                                    downloadProgress: widget.downloadAttachmentProgress,
+                                    onCancelDownload: widget.onCancelDownloadAttachment,
                                   ),
                                 ),
                             ],
@@ -1010,6 +1019,9 @@ class _AttachmentPreview extends StatelessWidget {
     this.onPrint,
     this.onSaveSticker,
     this.onRetry,
+    this.isDownloading = false,
+    this.downloadProgress = 0.0,
+    this.onCancelDownload,
   });
 
   final VoidCallback? onRetry;
@@ -1021,6 +1033,9 @@ class _AttachmentPreview extends StatelessWidget {
   final VoidCallback? onSaveAttachment;
   final VoidCallback? onPrint;
   final VoidCallback? onSaveSticker;
+  final bool isDownloading;
+  final double downloadProgress;
+  final VoidCallback? onCancelDownload;
 
   @override
   Widget build(BuildContext context) {
@@ -1182,6 +1197,56 @@ class _AttachmentPreview extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              else if (isDownloading)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black38,
+                    alignment: Alignment.center,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              value: downloadProgress > 0 ? downloadProgress : null,
+                              strokeWidth: 2,
+                              valueColor: const AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            downloadProgress > 0
+                                ? '${(downloadProgress * 100).toInt().clamp(0, 100)}%'
+                                : 'جاري التحميل...',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (onCancelDownload != null) ...[
+                            const SizedBox(width: 8),
+                            InkWell(
+                              onTap: onCancelDownload,
+                              child: const Icon(
+                                Icons.close_rounded,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1416,6 +1481,88 @@ class _AttachmentPreview extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     child: LinearProgressIndicator(
                       value: progressVal > 0 ? progressVal : null,
+                      minHeight: 4,
+                      backgroundColor: fileStyle.primaryColor.withValues(alpha: 0.15),
+                      valueColor: AlwaysStoppedAnimation(fileStyle.primaryColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else if (isDownloading) ...[
+            Divider(
+              height: 1,
+              thickness: 0.8,
+              color: borderColor.withValues(alpha: 0.7),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              value: downloadProgress > 0 ? downloadProgress : null,
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(fileStyle.primaryColor),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            downloadProgress > 0 ? 'جاري التحميل...' : 'بدء التحميل...',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: fileStyle.primaryColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          if (downloadProgress > 0)
+                            Text(
+                              '${(downloadProgress * 100).toInt().clamp(0, 100)}%',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: textColor.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          if (onCancelDownload != null) ...[
+                            const SizedBox(width: 8),
+                            Tooltip(
+                              message: 'إلغاء التحميل',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: onCancelDownload,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(2),
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 15,
+                                    color: isDark ? Colors.redAccent : const Color(0xFFEF4444),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: downloadProgress > 0 ? downloadProgress : null,
                       minHeight: 4,
                       backgroundColor: fileStyle.primaryColor.withValues(alpha: 0.15),
                       valueColor: AlwaysStoppedAnimation(fileStyle.primaryColor),

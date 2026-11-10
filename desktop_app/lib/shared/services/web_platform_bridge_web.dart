@@ -328,6 +328,46 @@ Future<List<Map<String, dynamic>>?> pickElectronFiles({
   return null;
 }
 
+Future<bool> cancelElectronDownload(String transferId) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(
+    await _callElectron('cancelDownloadAttachment', transferId),
+  );
+  return result['success'] == true;
+}
+
+Future<String?> pickElectronSavePath({
+  required String defaultFileName,
+  String? title,
+}) async {
+  if (!isElectron()) return null;
+  final result = _asStringMap(
+    await _callElectron('showSaveDialog', {
+      'fileName': defaultFileName,
+      if (title != null) 'title': title,
+    }),
+  );
+  if (result['success'] == true && result['canceled'] != true) {
+    final path = result['path']?.toString().trim();
+    return (path != null && path.isNotEmpty) ? path : null;
+  }
+  return null;
+}
+
+Future<bool> copyElectronFile({
+  required String sourcePath,
+  required String destinationPath,
+}) async {
+  if (!isElectron()) return false;
+  final result = _asStringMap(
+    await _callElectron('copyFile', {
+      'sourcePath': sourcePath,
+      'destinationPath': destinationPath,
+    }),
+  );
+  return result['success'] == true;
+}
+
 Future<String?> pickElectronDirectory({
   String? title,
   String? defaultPath,
@@ -1389,16 +1429,17 @@ Future<Map<String, dynamic>> downloadElectronChatAttachment({
   required String url,
   required String destinationPath,
   String? token,
+  String? transferId,
   void Function(int received, int total)? onProgress,
 }) async {
   if (!isElectron()) {
     return const {'success': false, 'error': 'Electron not available'};
   }
-  final transferId = 'dwn_${DateTime.now().microsecondsSinceEpoch}';
+  final effectiveTransferId = transferId ?? 'dwn_${DateTime.now().microsecondsSinceEpoch}';
   StreamSubscription? sub;
   if (onProgress != null) {
     sub = listenToElectronDownloadProgress((data) {
-      if (data['transferId'] == transferId) {
+      if (data['transferId'] == effectiveTransferId) {
         final received = (data['received'] as num?)?.toInt() ?? 0;
         final total = (data['total'] as num?)?.toInt() ?? 0;
         onProgress(received, total);
@@ -1410,7 +1451,7 @@ Future<Map<String, dynamic>> downloadElectronChatAttachment({
       'url': url,
       'destinationPath': destinationPath,
       if (token != null && token.isNotEmpty) 'token': token,
-      'transferId': transferId,
+      'transferId': effectiveTransferId,
     });
     return _asStringMap(res);
   } finally {

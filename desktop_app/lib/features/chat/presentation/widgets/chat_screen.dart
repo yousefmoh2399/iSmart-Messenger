@@ -108,9 +108,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   String? _focusedMessageId;
   Timer? _focusedMessageClearTimer;
 
-  bool _isDownloadingAttachment = false;
-  double _downloadProgress = 0;
-  String? _downloadingFileName;
   bool _broadcastSendToAllDepartments = true;
   Set<String> _broadcastTargetDepartmentIds = <String>{};
   Set<String> _broadcastTargetUserIds = <String>{};
@@ -3540,84 +3537,78 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
     }
 
     try {
-      final repo = ref.read(chatRepositoryProvider);
       final suggestedName = p.basename(message.fileName ?? 'attachment');
+      String? destinationPath;
 
       if (kIsWeb) {
         if (web_bridge.isElectron()) {
-          final bytes = await repo.fetchAttachmentBytes(message);
-          final savedPath = await web_bridge.downloadBytes(
-            bytes: bytes,
-            fileName: suggestedName,
-            preferredDirectoryPath: null,
+          destinationPath = await web_bridge.pickElectronSavePath(
+            defaultFileName: suggestedName,
+            title: 'نقل أو حفظ الملف في...',
           );
-          if (savedPath != null && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('تم حفظ $suggestedName بنجاح'),
-                action: SnackBarAction(
-                  label: 'فتح الملف',
-                  onPressed: () => web_bridge.openElectronLocalFile(savedPath),
-                ),
-              ),
-            );
-          }
+        } else {
+          final repo = ref.read(chatRepositoryProvider);
+          await repo.downloadAttachment(message);
           return;
         }
-
-        await repo.downloadAttachment(message);
-        return;
-      }
-
-      var localPath = await repo.getCachedAttachmentPath(message);
-      if (localPath == null) {
-        if (mounted) {
-          setState(() {
-            _isDownloadingAttachment = true;
-            _downloadProgress = 0;
-            _downloadingFileName = message.fileName ?? 'مرفق';
-          });
-        }
-        var lastProgressMs = 0;
-        localPath = await repo.downloadAttachment(
-          message,
-          onProgress: (received, total) {
-            if (!mounted) return;
-            final now = DateTime.now().millisecondsSinceEpoch;
-            final fraction = total <= 0
-                ? 0.0
-                : (received / total).clamp(0.0, 1.0).toDouble();
-            if (fraction < 1.0 && (now - lastProgressMs < 120)) {
-              return;
-            }
-            lastProgressMs = now;
-            setState(() {
-              _downloadProgress = fraction;
-            });
-          },
+      } else {
+        destinationPath = await FilePicker.platform.saveFile(
+          dialogTitle: 'نقل أو حفظ الملف في...',
+          fileName: suggestedName,
+          lockParentWindow: true,
         );
       }
 
-      final destinationPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'نقل أو حفظ الملف',
-        fileName: suggestedName,
-        lockParentWindow: true,
-      );
       if (destinationPath == null || destinationPath.trim().isEmpty) {
         return;
       }
-      await File(localPath).copy(destinationPath);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم حفظ $suggestedName بنجاح'),
-            action: SnackBarAction(
-              label: 'فتح الملف',
-              onPressed: () => OpenFilex.open(destinationPath),
-            ),
-          ),
-        );
-      }
+
+      final transferManager = _container.read(chatTransferManagerProvider.notifier);
+      unawaited(
+        transferManager.startDownload(
+          message: message,
+          targetFilePath: destinationPath.trim(),
+          openAfterDownload: false,
+          onCompleted: (savedPath) {
+            if (!mounted) return;
+            final fileName = p.basename(savedPath);
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: Color(0xFF34C759),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'تم نقل وحفظ $fileName بنجاح',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                duration: const Duration(seconds: 4),
+                action: SnackBarAction(
+                  label: 'عرض في المجلد',
+                  textColor: const Color(0xFF007AFF),
+                  onPressed: () => _revealFileInFolder(savedPath),
+                ),
+              ),
+            );
+          },
+          onError: (errMsg) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(errMsg)),
+            );
+          },
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3629,14 +3620,6 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
           ),
         ),
       );
-    } finally {
-      if (mounted && _isDownloadingAttachment) {
-        setState(() {
-          _isDownloadingAttachment = false;
-          _downloadProgress = 0;
-          _downloadingFileName = null;
-        });
-      }
     }
   }
 
@@ -4642,6 +4625,7 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
             .firstOrNull ??
         widget.conversation;
 
+    final transferState = ref.watch(chatTransferManagerProvider);
     final messagesValue = ref.watch(
       conversationMessagesControllerProvider(_conversationId),
     );
@@ -5068,6 +5052,10 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
                                     olderLocalDate.year !=
                                         messageLocalDate.year;
 
+                                final activeDownload = transferState.tasks
+                                    .where((t) => t.isDownload && t.isRunning && t.messageId == message.id)
+                                    .firstOrNull;
+
                                 final stableItemKey =
                                     message.metadata?['clientMessageId']
                                         ?.toString() ??
@@ -5333,7 +5321,14 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
                                       onRetry: message.isFailed
                                           ? () => _retryMessage(message)
                                           : null,
-                                      ),
+                                      isDownloadingAttachment: activeDownload != null,
+                                       downloadAttachmentProgress: activeDownload?.progress ?? 0.0,
+                                       onCancelDownloadAttachment: activeDownload != null
+                                           ? () => ref
+                                               .read(chatTransferManagerProvider.notifier)
+                                               .cancelTask(activeDownload.id)
+                                           : null,
+                                       ),
                                     ),
                                   ),
                                 ],
@@ -5497,12 +5492,6 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
                 conversationId: _conversationId,
                 isDark: isDark,
               ),
-              if (_isDownloadingAttachment)
-                _DesktopDownloadBanner(
-                  fileName: _downloadingFileName ?? 'مرفق',
-                  progress: _downloadProgress,
-                  isDark: isDark,
-                ),
 
               if (_slashReplyQuery != null && !isReadOnly)
                 Padding(

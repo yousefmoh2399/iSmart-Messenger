@@ -3621,6 +3621,8 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
   return { success: false, error: lastError };
 });
 
+const activeDownloadRequests = new Map();
+
 ipcMain.handle("files:download-chat-attachment", async (_event, payload = {}) => {
   const { url, destinationPath, token, transferId } = payload;
   if (!url || !destinationPath) {
@@ -3639,7 +3641,46 @@ ipcMain.handle("files:download-chat-attachment", async (_event, payload = {}) =>
           total,
         });
       }
-    });
+    }, transferId);
+    return { success: true, path: destinationPath };
+  } catch (err) {
+    return { success: false, error: String(err && err.message ? err.message : err) };
+  }
+});
+
+ipcMain.handle("files:cancel-download", async (_event, transferId) => {
+  if (!transferId) return { success: false, message: "Missing transferId" };
+  const key = String(transferId).trim();
+  const active = activeDownloadRequests.get(key);
+  if (active) {
+    try {
+      if (active.request) active.request.destroy();
+    } catch (_) {}
+    try {
+      if (active.fileStream) active.fileStream.close();
+    } catch (_) {}
+    try {
+      if (active.destinationPath && fs.existsSync(active.destinationPath)) {
+        fs.unlinkSync(active.destinationPath);
+      }
+    } catch (_) {}
+    activeDownloadRequests.delete(key);
+    return { success: true, canceled: true };
+  }
+  return { success: false, message: "Download not found or already finished." };
+});
+
+ipcMain.handle("files:copy-file", async (_event, payload = {}) => {
+  const { sourcePath, destinationPath } = payload || {};
+  if (!sourcePath || !destinationPath || !fs.existsSync(sourcePath)) {
+    return { success: false, message: "Source file not found" };
+  }
+  try {
+    const dir = path.dirname(destinationPath);
+    if (!fs.existsSync(dir)) {
+      await fs.promises.mkdir(dir, { recursive: true });
+    }
+    await fs.promises.copyFile(sourcePath, destinationPath);
     return { success: true, path: destinationPath };
   } catch (err) {
     return { success: false, error: String(err && err.message ? err.message : err) };
@@ -4021,6 +4062,21 @@ ipcMain.handle("dialog:pick-files", async (_event, payload = {}) => {
   return { success: true, canceled: false, files };
 });
 
+ipcMain.handle("dialog:show-save-dialog", async (event, payload = {}) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  const defaultPath = path.join(app.getPath("downloads"), payload.fileName || "file");
+
+  const result = await dialog.showSaveDialog(browserWindow, {
+    title: String(payload.title || "نقل أو حفظ الملف في..."),
+    defaultPath: String(payload.defaultPath || defaultPath),
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, canceled: true, path: null };
+  }
+  return { success: true, canceled: false, path: result.filePath };
+});
+
 ipcMain.handle("startup:set", async (_event, enabled) => {
   ensureStartup(enabled === true);
   return { success: true, enabled: enabled === true };
@@ -4040,10 +4096,11 @@ function calculateFileSha256(filePath) {
   });
 }
 
-function downloadFile(url, destinationPath, token, onProgress) {
+function downloadFile(url, destinationPath, token, onProgress, transferId) {
   return new Promise((resolve, reject) => {
     const fileStream = fs.createWriteStream(destinationPath);
     let request;
+    const downloadKey = transferId ? String(transferId).trim() : null;
 
     const startDownload = (targetUrl) => {
       const parsedUrl = new URL(targetUrl);
@@ -4057,6 +4114,9 @@ function downloadFile(url, destinationPath, token, onProgress) {
       }
 
       request = protocol.get(parsedUrl, { headers }, (response) => {
+        if (downloadKey) {
+          activeDownloadRequests.set(downloadKey, { request, fileStream, destinationPath });
+        }
         const statusCode = response.statusCode || 0;
 
         // Handle redirects (e.g. 302 Found)
@@ -4109,6 +4169,7 @@ function downloadFile(url, destinationPath, token, onProgress) {
     };
 
     fileStream.on("finish", () => {
+      if (downloadKey) activeDownloadRequests.delete(downloadKey);
       resolve();
     });
 

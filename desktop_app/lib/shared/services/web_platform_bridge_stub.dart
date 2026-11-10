@@ -108,6 +108,18 @@ Future<List<Map<String, dynamic>>?> pickElectronFiles({
   String? title,
 }) async => null;
 
+Future<bool> cancelElectronDownload(String transferId) async => false;
+
+Future<bool> copyElectronFile({
+  required String sourcePath,
+  required String destinationPath,
+}) async => false;
+
+Future<String?> pickElectronSavePath({
+  required String defaultFileName,
+  String? title,
+}) async => null;
+
 Future<String?> pickElectronDirectory({
   String? title,
   String? defaultPath,
@@ -373,6 +385,7 @@ Future<Map<String, dynamic>> downloadElectronChatAttachment({
   required String url,
   required String destinationPath,
   String? token,
+  String? transferId,
   void Function(int received, int total)? onProgress,
 }) async => const <String, dynamic>{'success': false, 'error': 'Not supported'};
 
