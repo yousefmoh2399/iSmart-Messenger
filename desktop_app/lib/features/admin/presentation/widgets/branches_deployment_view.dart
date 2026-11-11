@@ -76,14 +76,21 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     widget.notifier.refreshDeployment(targetVersion: ver);
   }
 
-  Future<void> _handleExport(String format, {String? scope}) async {
+  Future<void> _handleExport(
+    String format, {
+    String? scope,
+    List<String>? branchCodes,
+  }) async {
     final messenger = ScaffoldMessenger.of(context);
     final isOutdated = scope == 'outdated';
+    final isPerBranch = scope == 'per_branch';
     messenger.showSnackBar(
       SnackBar(
         content: Text(isOutdated
             ? 'جاري إعداد وتصدير كشف أجهزة الكمبيوتر القديمة Excel...'
-            : 'جاري إعداد وتصدير تقرير ${format == "pdf" ? "PDF" : "Excel"}...'),
+            : isPerBranch
+                ? 'جاري إنشاء ملف إكسيل مقسم بالفروع مع تفاصيل الأجهزة...'
+                : 'جاري إعداد وتصدير تقرير ${format == "pdf" ? "PDF" : "Excel"}...'),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -92,13 +99,16 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
         format,
         targetVersion: _appliedTargetVersion,
         scope: scope,
+        branchCodes: branchCodes,
       );
       if (mounted) {
         messenger.showSnackBar(
           SnackBar(
             content: Text(isOutdated
                 ? '✅ تم تصدير كشف الأجهزة القديمة بنجاح وحفظه في مجلد التنزيلات!'
-                : '✅ تم تصدير تقرير ${format == "pdf" ? "PDF" : "Excel"} بنجاح وحفظه!'),
+                : isPerBranch
+                    ? '✅ تم تصدير تقرير الفروع المقسم Excel بنجاح وحفظه في مجلد التنزيلات!'
+                    : '✅ تم تصدير تقرير ${format == "pdf" ? "PDF" : "Excel"} بنجاح وحفظه!'),
             backgroundColor: const Color(0xFF10B981),
             duration: const Duration(seconds: 3),
           ),
@@ -227,6 +237,432 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
     );
   }
 
+  void _showPerBranchExportDialog(
+    BuildContext context,
+    List<BranchDeploymentItem> allBranches,
+    String targetVer,
+  ) {
+    if (allBranches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا توجد فروع متاحة للتصدير حالياً'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    final isDark = widget.isDark;
+    final Set<String> selectedCodes = allBranches.map((b) => b.branchCode).toSet();
+    String branchSearch = '';
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            final filteredBranches = allBranches.where((b) {
+              if (branchSearch.trim().isEmpty) return true;
+              final q = branchSearch.trim().toLowerCase();
+              return b.branchName.toLowerCase().contains(q) ||
+                  b.branchCode.toLowerCase().contains(q);
+            }).toList();
+
+            final totalSelected = selectedCodes.length;
+            final isAllSelected = selectedCodes.length == allBranches.length;
+            final outdatedBranchesCount = allBranches.where((b) => b.outdatedDevicesCount > 0).length;
+
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              backgroundColor: isDark ? const Color(0xFF131926) : Colors.white,
+              child: Container(
+                width: 680,
+                constraints: const BoxConstraints(maxHeight: 640),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.view_carousel_rounded, color: Color(0xFF0284C7), size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'تصدير إكسيل مقسم بالفروع (ورقة لكل فرع)',
+                                style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'يحتوي الملف على ملخص مقارنة الفروع + صفحة مخصصة لكل فرع بالأجهزة وحالة التحديث',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Quick Select Actions & Filter
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark ? Colors.white.withValues(alpha: 0.06) : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          // Search Box
+                          SizedBox(
+                            height: 38,
+                            child: TextField(
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  branchSearch = val;
+                                });
+                              },
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'بحث باسم الفرع أو الكود...',
+                                hintStyle: TextStyle(
+                                  fontSize: 12.5,
+                                  color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                                ),
+                                prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                                filled: true,
+                                fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // Action Chips
+                          Row(
+                            children: [
+                              // Select All
+                              InkWell(
+                                onTap: () {
+                                setDialogState(() {
+                                  selectedCodes.addAll(allBranches.map((b) => b.branchCode));
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: isAllSelected
+                                      ? const Color(0xFF0284C7).withValues(alpha: 0.15)
+                                      : (isDark ? const Color(0xFF1E293B) : Colors.white),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: isAllSelected
+                                        ? const Color(0xFF0284C7)
+                                        : (isDark ? Colors.white.withValues(alpha: 0.1) : const Color(0xFFCBD5E1)),
+                                  ),
+                                ),
+                                child: Text(
+                                  'تحديد كافة الفروع (${allBranches.length})',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isAllSelected ? FontWeight.w800 : FontWeight.w600,
+                                    color: isAllSelected ? const Color(0xFF0284C7) : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+
+                            // Deselect All
+                            InkWell(
+                              onTap: () {
+                                setDialogState(() {
+                                  selectedCodes.clear();
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: isDark ? Colors.white.withValues(alpha: 0.1) : const Color(0xFFCBD5E1),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'إلغاء التحديد',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+
+                            // Only Outdated
+                            if (outdatedBranchesCount > 0)
+                              InkWell(
+                                onTap: () {
+                                  setDialogState(() {
+                                    selectedCodes.clear();
+                                    for (final b in allBranches) {
+                                      if (b.outdatedDevicesCount > 0) {
+                                        selectedCodes.add(b.branchCode);
+                                      }
+                                    }
+                                  });
+                                },
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'الفروع ذات النسخ القديمة فقط ($outdatedBranchesCount) ⚠️',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFFEF4444),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Scrollable Branch List
+                  Expanded(
+                    child: filteredBranches.isEmpty
+                        ? Center(
+                            child: Text(
+                              'لا توجد فروع مطابقة للبحث',
+                              style: TextStyle(
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          )
+                        : Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: ListView.separated(
+                              itemCount: filteredBranches.length,
+                              separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
+                              ),
+                              itemBuilder: (context, index) {
+                                final branch = filteredBranches[index];
+                                final isChecked = selectedCodes.contains(branch.branchCode);
+                                final hasOutdated = branch.outdatedDevicesCount > 0;
+
+                                return InkWell(
+                                  onTap: () {
+                                    setDialogState(() {
+                                      if (isChecked) {
+                                        selectedCodes.remove(branch.branchCode);
+                                      } else {
+                                        selectedCodes.add(branch.branchCode);
+                                      }
+                                    });
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    child: Row(
+                                      children: [
+                                        Checkbox(
+                                          value: isChecked,
+                                          activeColor: const Color(0xFF0284C7),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          onChanged: (val) {
+                                            setDialogState(() {
+                                              if (val == true) {
+                                                selectedCodes.add(branch.branchCode);
+                                              } else {
+                                                selectedCodes.remove(branch.branchCode);
+                                              }
+                                            });
+                                          },
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                branch.branchName,
+                                                style: const TextStyle(
+                                                  fontSize: 13.5,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              Text(
+                                                'كود: ${branch.branchCode} • ${branch.devicesCount} محطة عمل',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (hasOutdated)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              '⚠️ ${branch.outdatedDevicesCount} قديم',
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                color: Color(0xFFEF4444),
+                                              ),
+                                            ),
+                                          )
+                                        else if (branch.isInstalled)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: const Text(
+                                              '✅ محدث',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                                color: Color(0xFF10B981),
+                                              ),
+                                            ),
+                                          )
+                                        else
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              'غير مثبت',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Footer actions
+                  Row(
+                    children: [
+                      Text(
+                        'تم اختيار $totalSelected فرع من أصل ${allBranches.length}',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('إلغاء', style: TextStyle(fontSize: 13.5)),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: totalSelected == 0
+                            ? null
+                            : () {
+                                Navigator.pop(ctx);
+                                _handleExport(
+                                  'xlsx',
+                                  scope: 'per_branch',
+                                  branchCodes: isAllSelected ? null : selectedCodes.toList(),
+                                );
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0284C7),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        icon: const Icon(Icons.download_rounded, size: 16),
+                        label: Text(
+                          isAllSelected
+                              ? 'تصدير كافة الفروع (${allBranches.length} صفحة)'
+                              : 'تصدير الفروع المحددة ($totalSelected صفحة)',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
   String _formatTimeAgo(DateTime? dt) {
     if (dt == null) return 'غير متوفر';
     final now = DateTime.now();
@@ -347,6 +783,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
         _buildUnifiedToolbar(
           state: state,
           notifier: notifier,
+          allBranches: allBranches,
           allCount: allBranches.length,
           exactBranchesCount: exactBranchesCount,
           exactDevsCount: totalExactDevs,
@@ -720,6 +1157,7 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
   Widget _buildUnifiedToolbar({
     required SystemMonitorState state,
     required SystemMonitorController notifier,
+    required List<BranchDeploymentItem> allBranches,
     required int allCount,
     required int exactBranchesCount,
     required int exactDevsCount,
@@ -854,6 +1292,30 @@ class _BranchesDeploymentViewState extends State<BranchesDeploymentView> {
                     : const Icon(Icons.table_chart_rounded, size: 16),
                 label: const Text(
                   'تصدير إكسيل',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+
+              // Excel Export per Branch
+              FilledButton.icon(
+                onPressed: isExporting || allBranches.isEmpty
+                    ? null
+                    : () => _showPerBranchExportDialog(context, allBranches, targetVersion),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: isExporting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.view_carousel_rounded, size: 16),
+                label: const Text(
+                  'تصدير إكسيل بالفروع',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                 ),
               ),

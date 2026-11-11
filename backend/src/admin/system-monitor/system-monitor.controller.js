@@ -337,16 +337,30 @@ const exportDeploymentReport = asyncHandler(async (req, res) => {
   const format = (req.query.format || "xlsx").toLowerCase();
   const targetVersion = req.query.targetVersion;
   const scope = req.query.scope || "all";
- const data = await getBranchesDeploymentData(targetVersion);
+  const branchCodes = req.query.branches
+    ? String(req.query.branches)
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    : null;
+  const data = await getBranchesDeploymentData(targetVersion);
   const actor = req.user;
 
   if (format === "pdf") {
-    const { buffer, fileName } = await buildDeploymentPdfReport(data, actor, { scope, targetVersion });
+    const { buffer, fileName } = await buildDeploymentPdfReport(data, actor, {
+      scope,
+      targetVersion,
+      branchCodes,
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(buffer);
   } else {
-    const { buffer, fileName } = await buildDeploymentExcelReport(data, actor, { scope, targetVersion });
+    const { buffer, fileName } = await buildDeploymentExcelReport(data, actor, {
+      scope,
+      targetVersion,
+      branchCodes,
+    });
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

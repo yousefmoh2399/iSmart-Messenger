@@ -276,11 +276,21 @@ Future<void> refreshPolls({String? search, String? status}) async {
     }
   }
 
-  Future<void> exportReport(String format, {String? targetVersion, String? scope}) async {
+  Future<void> exportReport(
+    String format, {
+    String? targetVersion,
+    String? scope,
+    List<String>? branchCodes,
+  }) async {
     state = state.copyWith(isExportingReport: true);
     try {
       final repo = ref.read(systemMonitorRepositoryProvider);
-      await repo.exportDeploymentReport(format: format, targetVersion: targetVersion, scope: scope);
+      await repo.exportDeploymentReport(
+        format: format,
+        targetVersion: targetVersion,
+        scope: scope,
+        branchCodes: branchCodes,
+      );
     } finally {
       state = state.copyWith(isExportingReport: false);
     }

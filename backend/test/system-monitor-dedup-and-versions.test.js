@@ -180,6 +180,39 @@ test("system-monitor: Excel export with scope 'outdated' produces dedicated outd
   assert.ok(result.fileName.endsWith(".xlsx"));
 });
 
+test("system-monitor: Excel export with scope 'per_branch' creates separate sheet per branch", async () => {
+  const result = await buildDeploymentExcelReport(testData, actor, { scope: "per_branch" });
+  assert.ok(result.buffer && result.buffer.length > 3000);
+  assert.ok(result.fileName.startsWith("ismart-branches-per-sheet-"));
+  assert.ok(result.fileName.endsWith(".xlsx"));
+
+  const ExcelJS = require("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(result.buffer);
+
+  // Sheet 1 is summary, followed by 2 branches in testData (101 and 102)
+  assert.equal(workbook.worksheets.length, 3, "Expected 1 summary sheet + 2 branch sheets");
+  assert.equal(workbook.worksheets[0].name, "ملخص مقارنة الفروع");
+});
+
+test("system-monitor: Excel export with scope 'per_branch' filters to selected branches", async () => {
+  const result = await buildDeploymentExcelReport(testData, actor, {
+    scope: "per_branch",
+    branchCodes: ["101"],
+  });
+  assert.ok(result.buffer && result.buffer.length > 2000);
+  assert.ok(result.fileName.startsWith("ismart-branch-101-deployment-"));
+
+  const ExcelJS = require("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(result.buffer);
+
+  // Sheet 1 is summary, Sheet 2 is branch 101
+  assert.equal(workbook.worksheets.length, 2, "Expected 1 summary sheet + 1 filtered branch sheet");
+  assert.equal(workbook.worksheets[0].name, "ملخص مقارنة الفروع");
+  assert.ok(workbook.worksheets[1].name.includes("الرئيسي") || workbook.worksheets[1].name.includes("101"));
+});
+
 test("system-monitor: reports strictly exclude mobile devices and duplicate user entries", async () => {
   const testDataWithMobileAndDuplicates = {
     summary: { ...testData.summary },

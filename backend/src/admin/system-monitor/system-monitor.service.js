@@ -624,9 +624,316 @@ async function getBranchesDeploymentData(requestedTargetVersion = null) {
   };
 }
 
+async function buildPerBranchExcelReport(workbook, data, actor, { targetVersion, selectedBranchCodes, PC, pcBorder }) {
+  const branches = data.branches || [];
+  const targetBranches = selectedBranchCodes && selectedBranchCodes.length > 0
+    ? branches.filter((b) => selectedBranchCodes.includes(String(b.branchCode || "").trim().toLowerCase()))
+    : branches;
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEET 1: ملخص مقارنة الفروع وموقف التحديث
+  // ════════════════════════════════════════════════════════════════════════════
+  const sheet1 = workbook.addWorksheet("ملخص مقارنة الفروع");
+  sheet1.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 4 }];
+  sheet1.columns = [
+    { width: 6 },   // م
+    { width: 14 },  // كود الفرع
+    { width: 28 },  // اسم الفرع
+    { width: 18 },  // حالة التثبيت
+    { width: 16 },  // المحطات الفعلية
+    { width: 16 },  // المحطات المحدثة
+    { width: 18 },  // المحطات القديمة ⚠️
+    { width: 16 },  // نسبة التحديث %
+    { width: 26 },  // موقف التحديث بالفرع
+    { width: 18 },  // المتصلة الآن 🟢
+    { width: 16 },  // إجمالي الموظفين
+    { width: 22 },  // إصدارات البرنامج
+    { width: 22 },  // آخر نشاط مسجل
+  ];
+
+  sheet1.mergeCells("A1:M1");
+  const t1 = sheet1.getCell("A1");
+  t1.value = "🏢 تقرير موقف تحديث ومحطات عمل الفروع (مقسم بالصفحات)";
+  t1.font = { name: "Arial", size: 14, bold: true, color: { argb: PC.white } };
+  t1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
+  t1.alignment = { horizontal: "center", vertical: "middle" };
+  sheet1.getRow(1).height = 40;
+
+  sheet1.mergeCells("A2:M2");
+  const s1 = sheet1.getCell("A2");
+  s1.value = `تاريخ التقرير: ${formatDate(new Date())}  |  المسؤول المستخرج: ${actor?.fullName || actor?.username || "Admin"}  |  الإصدار المعتمد للفحص: v${targetVersion}  |  عدد الفروع المشمولة: ${targetBranches.length} فرع`;
+  s1.font = { name: "Arial", size: 9.5, italic: true, color: { argb: PC.white } };
+  s1.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.midBlue } };
+  s1.alignment = { horizontal: "center", vertical: "middle" };
+  sheet1.getRow(2).height = 24;
+
+  const headers = [
+    "م",
+    "كود الفرع",
+    "اسم الفرع",
+    "حالة التثبيت",
+    "المحطات الفعلية",
+    "المحطات المحدثة ✅",
+    "المحطات القديمة ⚠️",
+    "نسبة التحديث",
+    "موقف التحديث بالفرع",
+    "المتصلة الآن 🟢",
+    "إجمالي الموظفين",
+    "إصدارات البرنامج",
+    "آخر نشاط مسجل",
+  ];
+  const hRow = sheet1.getRow(4);
+  hRow.height = 30;
+  headers.forEach((h, i) => {
+    const c = hRow.getCell(i + 1);
+    c.value = h;
+    c.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.white } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
+    c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    pcBorder(c);
+  });
+
+  targetBranches.forEach((b, idx) => {
+    const row = sheet1.getRow(5 + idx);
+    row.height = 22;
+    const isInst = b.isInstalled;
+    const totalDevs = b.devicesCount || 0;
+    const latestDevs = b.latestDevicesCount || 0;
+    const outdatedDevs = b.outdatedDevicesCount || 0;
+    const rate = totalDevs > 0 ? Math.round((latestDevs / totalDevs) * 100) : 0;
+    const vers = b.appVersions && b.appVersions.length > 0 ? b.appVersions.join(", ") : "-";
+    const statusLabel = !isInst
+      ? "لم يُثبت بعد ❌"
+      : (outdatedDevs === 0 && totalDevs > 0)
+        ? "محدث بالكامل ✅ (100%)"
+        : `يحتاج تحديث (${outdatedDevs} قديم) ⚠️`;
+
+    row.values = [
+      idx + 1,
+      b.branchCode,
+      b.branchName,
+      isInst ? "تم التثبيت ✅" : "لم يُثبت ❌",
+      totalDevs,
+      latestDevs,
+      outdatedDevs,
+      `${rate}%`,
+      statusLabel,
+      b.onlineDevicesCount || 0,
+      b.installedUsersCount || 0,
+      vers,
+      formatDate(b.lastActivityAt),
+    ];
+
+    const isEven = idx % 2 === 0;
+    row.eachCell((cell, ci) => {
+      cell.font = { name: "Arial", size: 9.5, color: { argb: PC.slateText } };
+      cell.alignment = { horizontal: [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(ci) ? "center" : "right", vertical: "middle" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
+      pcBorder(cell);
+
+      if (ci === 4) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isInst ? PC.greenDark : PC.redDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isInst ? PC.greenBg : PC.redBg } };
+      }
+      if (ci === 7 && outdatedDevs > 0) {
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.redDark } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.redBg } };
+      }
+      if (ci === 8) {
+        const isFull = rate === 100 && totalDevs > 0;
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isFull ? PC.greenDark : (outdatedDevs > 0 ? PC.amberDark : PC.slateText) } };
+        if (isFull) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenBg } };
+      }
+      if (ci === 9) {
+        const isFull = rate === 100 && totalDevs > 0;
+        cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isFull ? PC.greenDark : (outdatedDevs > 0 ? PC.amberDark : PC.redDark) } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isFull ? PC.greenBg : (outdatedDevs > 0 ? PC.amberBg : PC.redBg) } };
+      }
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SHEETS 2..N: Dedicated worksheet for each branch
+  // ════════════════════════════════════════════════════════════════════════════
+  const usedSheetNames = new Set(["ملخص مقارنة الفروع"]);
+  targetBranches.forEach((b, bIdx) => {
+    let rawName = (b.branchName || b.branchCode || `فرع ${bIdx + 1}`).trim();
+    let clean = rawName.replace(/[\\/*?:\[\]]/g, "-").trim();
+    if (clean.length > 25) clean = clean.substring(0, 25).trim();
+    let sheetName = clean;
+    let counter = 1;
+    while (usedSheetNames.has(sheetName.toLowerCase())) {
+      sheetName = `${clean.substring(0, 20)} (${counter++})`;
+    }
+    usedSheetNames.add(sheetName.toLowerCase());
+
+    const bSheet = workbook.addWorksheet(sheetName);
+    bSheet.views = [{ rightToLeft: true, showGridLines: true, state: "frozen", ySplit: 5 }];
+
+    const cols = [
+      { header: "م", width: 6 },
+      { header: "اسم الموظف المسؤول", width: 24 },
+      { header: "اسم المستخدم", width: 18 },
+      { header: "المسمى الوظيفي", width: 20 },
+      { header: "اسم الجهاز (Hostname)", width: 22 },
+      { header: "نظام التشغيل والمعمارية", width: 24 },
+      { header: "عنوان IP الداخلي", width: 18 },
+      { header: "نوع المحطة", width: 18 },
+      { header: "إصدار البرنامج الحالي", width: 20 },
+      { header: "الإصدار المطلوب", width: 18 },
+      { header: "موقف التحديث", width: 24 },
+      { header: "الحالة الآن", width: 14 },
+      { header: "آخر ظهور ونشاط", width: 22 },
+    ];
+    bSheet.columns = cols;
+
+    // Row 1: Branch Title Header
+    bSheet.mergeCells("A1:M1");
+    const tCell = bSheet.getCell("A1");
+    tCell.value = `🏢 فرع: ${b.branchName} (${b.branchCode}) — تقرير محطات العمل وموقف التحديث`;
+    tCell.font = { name: "Arial", size: 12.5, bold: true, color: { argb: PC.white } };
+    tCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.darkBlue } };
+    tCell.alignment = { horizontal: "center", vertical: "middle" };
+    bSheet.getRow(1).height = 36;
+
+    // Row 2: Branch KPIs Summary
+    bSheet.mergeCells("A2:M2");
+    const kCell = bSheet.getCell("A2");
+    const totalD = b.devicesCount || 0;
+    const latestD = b.latestDevicesCount || 0;
+    const oldD = b.outdatedDevicesCount || 0;
+    const rate = totalD > 0 ? Math.round((latestD / totalD) * 100) : 0;
+    kCell.value = `حالة التثبيت: ${b.isInstalled ? "تم التثبيت ✅" : "لم يُثبت بعد ❌"}  |  إجمالي المحطات: ${totalD}  |  المحدثة: ${latestD}  |  القديمة: ${oldD}  |  نسبة الإنجاز: ${rate}%  |  المتصلة الآن: ${b.onlineDevicesCount || 0}  |  الإصدار المعتمد المطلوب: v${targetVersion}`;
+    kCell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.white } };
+    kCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: oldD > 0 ? PC.amberDark : PC.midBlue } };
+    kCell.alignment = { horizontal: "center", vertical: "middle" };
+    bSheet.getRow(2).height = 24;
+
+    // Row 4: Device Table Headers
+    const devHeaders = cols.map((c) => c.header);
+    const dHRow = bSheet.getRow(4);
+    dHRow.height = 28;
+    devHeaders.forEach((dh, di) => {
+      const cell = dHRow.getCell(di + 1);
+      cell.value = dh;
+      cell.font = { name: "Arial", size: 10, bold: true, color: { argb: PC.white } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: oldD > 0 ? "FF334155" : PC.darkBlue } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      pcBorder(cell);
+    });
+
+    // Deduplicate and filter workstations in this branch
+    const branchWorkstations = [];
+    const seenUids = new Set();
+    const seenHosts = new Set();
+    const seenUsers = new Set();
+
+    (b.devices || []).forEach((d) => {
+      if (!isDesktopWorkstation(d)) return;
+      const rawUid = d.deviceUid ? String(d.deviceUid).trim().toLowerCase() : "";
+      const rawHost = d.hostname && d.hostname !== "-" ? String(d.hostname).trim().toLowerCase() : "";
+      const rawUserId = d.user?.id ? String(d.user.id).trim() : (d.user?.username || d.username || "");
+
+      if (rawUid && seenUids.has(rawUid)) return;
+      if (rawHost && rawHost !== "unknown" && seenHosts.has(rawHost)) return;
+      if (rawUserId && seenUsers.has(rawUserId)) return;
+
+      if (rawUid) seenUids.add(rawUid);
+      if (rawHost && rawHost !== "unknown") seenHosts.add(rawHost);
+      if (rawUserId) seenUsers.add(rawUserId);
+
+      branchWorkstations.push(d);
+    });
+
+    // Sort: Outdated first, then by employee/username
+    branchWorkstations.sort((a, bDev) => {
+      if (a.isOutdated && !bDev.isOutdated) return -1;
+      if (!a.isOutdated && bDev.isOutdated) return 1;
+      return (a.user?.fullName || a.username || "").localeCompare(bDev.user?.fullName || bDev.username || "", "ar");
+    });
+
+    if (branchWorkstations.length === 0) {
+      bSheet.mergeCells("A5:M5");
+      const emptyCell = bSheet.getCell("A5");
+      emptyCell.value = "ℹ️ لا توجد محطات عمل مسجلة في هذا الفرع حتى الآن (الفرع لم يقم بتثبيت المنظومة بعد أو الأجهزة لم تتصل).";
+      emptyCell.font = { name: "Arial", size: 10, italic: true, color: { argb: "FF64748B" } };
+      emptyCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+      emptyCell.alignment = { horizontal: "center", vertical: "middle" };
+      bSheet.getRow(5).height = 36;
+      pcBorder(emptyCell);
+    } else {
+      branchWorkstations.forEach((d, dIdx) => {
+        const dRow = bSheet.getRow(5 + dIdx);
+        dRow.height = 22;
+        const isMatch = compareAppVersions(d.appVersion, targetVersion) >= 0;
+        const isCritical = compareAppVersions(d.appVersion, targetVersion) < 0 && (d.appVersion === "1.0.9" || d.appVersion < "1.1.20");
+        const statusLabel = isMatch
+          ? "مطابق للمعتمد ✅"
+          : (isCritical ? "قديم حرج 🚨 (عاجل)" : "نسخة سابقة ⚠️ (يحتاج تحديث)");
+
+        dRow.values = [
+          dIdx + 1,
+          d.user?.fullName || d.fullName || "-",
+          d.user?.username || d.username || "-",
+          d.user?.jobTitle || d.workstationType || "-",
+          d.hostname || "-",
+          `${d.os || "Windows"} ${d.osVersion || ""}`.trim(),
+          d.ipAddress || "-",
+          d.workstationType || "محطة عمل",
+          `v${d.appVersion}`,
+          `v${targetVersion} (المعتمد)`,
+          statusLabel,
+          d.isOnline ? "متصل 🟢" : "غير متصل ⚪",
+          formatDate(d.lastSeenAt),
+        ];
+
+        const isEven = dIdx % 2 === 0;
+        dRow.eachCell((cell, ci) => {
+          cell.font = { name: "Arial", size: 9.5, color: { argb: PC.slateText } };
+          cell.alignment = { horizontal: [1, 5, 7, 8, 9, 10, 11, 12, 13].includes(ci) ? "center" : "right", vertical: "middle" };
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isEven ? PC.rowAlt : PC.white } };
+          pcBorder(cell);
+
+          // Current Version column (ci: 9)
+          if (ci === 9) {
+            cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isMatch ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isMatch ? PC.greenBg : (isCritical ? PC.redBg : PC.amberBg) } };
+          }
+          // Target Version column (ci: 10)
+          if (ci === 10) {
+            cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: PC.greenDark } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PC.greenBg } };
+          }
+          // Update status column (ci: 11)
+          if (ci === 11) {
+            cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: isMatch ? PC.greenDark : (isCritical ? PC.redDark : PC.amberDark) } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isMatch ? PC.greenBg : (isCritical ? PC.redBg : PC.amberBg) } };
+          }
+          // Online column (ci: 12)
+          if (ci === 12) {
+            cell.font = { name: "Arial", size: 9.5, bold: true, color: { argb: d.isOnline ? PC.greenDark : "FF64748B" } };
+          }
+        });
+      });
+    }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const dateStamp = Date.now();
+  const fileName = selectedBranchCodes && selectedBranchCodes.length === 1
+    ? `ismart-branch-${selectedBranchCodes[0]}-deployment-v${targetVersion}-${dateStamp}.xlsx`
+    : `ismart-branches-per-sheet-v${targetVersion}-${dateStamp}.xlsx`;
+  return { buffer: Buffer.from(buffer), fileName };
+}
+
 async function buildDeploymentExcelReport(data, actor, options = {}) {
   const requestedTargetVersion = typeof options === "string" ? options : options?.targetVersion;
   const isOutdatedScope = options?.scope === "outdated";
+  const isPerBranchScope = options?.scope === "per_branch" || options?.scope === "by_branch";
+  const selectedBranchCodes = Array.isArray(options?.branchCodes) && options.branchCodes.length > 0
+    ? options.branchCodes.map((c) => String(c).trim().toLowerCase())
+    : null;
+
   if (!data) {
     data = await getBranchesDeploymentData(requestedTargetVersion);
   }
@@ -661,6 +968,15 @@ async function buildDeploymentExcelReport(data, actor, options = {}) {
       left: { style: "thin", color: { argb: PC.borderCol } },
       right: { style: "thin", color: { argb: PC.borderCol } },
     };
+  }
+
+  if (isPerBranchScope) {
+    return await buildPerBranchExcelReport(workbook, data, actor, {
+      targetVersion,
+      selectedBranchCodes,
+      PC,
+      pcBorder,
+    });
   }
 
   // Flatten and strictly deduplicate all desktop computer devices across all branches

@@ -118,7 +118,12 @@ class SystemMonitorRepository {
     return RequestTelemetryData.fromJson(data);
   }
 
-  Future<void> exportDeploymentReport({String format = 'xlsx', String? targetVersion, String? scope}) async {
+  Future<void> exportDeploymentReport({
+    String format = 'xlsx',
+    String? targetVersion,
+    String? scope,
+    List<String>? branchCodes,
+  }) async {
     final response = await _apiClient.dio.get<dynamic>(
       '/api/admin/system-monitor/reports/export',
       queryParameters: {
@@ -127,6 +132,11 @@ class SystemMonitorRepository {
           'targetVersion': targetVersion.trim(),
         if (scope != null && scope.trim().isNotEmpty)
           'scope': scope.trim(),
+        if (branchCodes != null && branchCodes.isNotEmpty)
+          'branches': branchCodes
+              .map((c) => c.trim())
+              .where((c) => c.isNotEmpty)
+              .join(','),
       },
       options: Options(responseType: ResponseType.bytes),
     );
@@ -143,7 +153,7 @@ class SystemMonitorRepository {
         : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     await web_bridge.downloadBytes(
       bytes: bytes,
-      fileName: '${scope == "outdated" ? "ismart-outdated-devices" : "ismart-branches-deployment"}-${DateTime.now().millisecondsSinceEpoch}.$ext',
+      fileName: '${scope == "outdated" ? "ismart-outdated-devices" : scope == "per_branch" ? "ismart-branches-per-sheet-report" : "ismart-branches-deployment"}-${DateTime.now().millisecondsSinceEpoch}.$ext',
       mimeType: mime,
     );
   }
