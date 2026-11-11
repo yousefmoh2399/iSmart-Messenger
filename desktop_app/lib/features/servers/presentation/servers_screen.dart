@@ -43,9 +43,14 @@ const List<_ServerTarget> _defaultServerTargets = [
 ];
 
 class ServersScreen extends ConsumerStatefulWidget {
-  const ServersScreen({super.key, this.isWrapped = false});
+  const ServersScreen({
+    super.key,
+    this.isWrapped = false,
+    this.isVisible = true,
+  });
 
   final bool isWrapped;
+  final bool isVisible;
 
   @override
   ConsumerState<ServersScreen> createState() => _ServersScreenState();
@@ -138,6 +143,19 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
   }
 
   @override
+  void didUpdateWidget(covariant ServersScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isVisible && widget.isVisible) {
+      final stale =
+          _lastRefreshAt == null ||
+          DateTime.now().difference(_lastRefreshAt!) > const Duration(seconds: 15);
+      if (stale) {
+        unawaited(_requestRefresh(showLoading: false));
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _socketEventsSubscription?.cancel();
@@ -147,7 +165,8 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
+    if (widget.isVisible &&
+        state == AppLifecycleState.resumed &&
         !(kIsWeb && web_bridge.isElectron())) {
       unawaited(_requestRefresh(showLoading: false));
     }
@@ -157,7 +176,7 @@ class _ServersScreenState extends ConsumerState<ServersScreen>
     _socketEventsSubscription?.cancel();
     final socket = ref.read(chatSocketServiceProvider);
     _socketEventsSubscription = socket.events.listen((event) {
-      if (!mounted) {
+      if (!mounted || !widget.isVisible) {
         return;
       }
       if (event.type == 'socket_connected' ||

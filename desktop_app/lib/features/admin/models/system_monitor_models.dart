@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../../../core/config/app_config.dart';
+
 int compareAppVersions(String? v1, String? v2) {
   if (v1 == null || v1.isEmpty || v1 == 'غير محدد' || v1 == 'unknown') {
     return (v2 == null || v2.isEmpty) ? 0 : -1;
@@ -333,8 +335,12 @@ class BranchDeploymentSummary {
       outdatedDevicesCount: (json['outdatedDevicesCount'] as num?)?.toInt() ?? 0,
       criticalOutdatedDevicesCount: (json['criticalOutdatedDevicesCount'] as num?)?.toInt() ?? 0,
       outdatedBranchesCount: (json['outdatedBranchesCount'] as num?)?.toInt() ?? 0,
-      currentAppVersion: json['currentAppVersion'] as String? ?? '1.1.21',
-      targetAppVersion: json['targetAppVersion'] as String? ?? json['currentAppVersion'] as String? ?? '1.1.21',
+      currentAppVersion:
+          json['currentAppVersion'] as String? ?? AppConfig.fallbackAppVersion,
+      targetAppVersion:
+          json['targetAppVersion'] as String? ??
+          json['currentAppVersion'] as String? ??
+          AppConfig.fallbackAppVersion,
       versionBreakdown: vMap,
       platformBreakdown: pMap,
       calculatedAt: json['calculatedAt'] != null
@@ -416,8 +422,8 @@ class BranchDeviceItem {
 
   factory BranchDeviceItem.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>? ?? {};
-    final v = json['appVersion'] as String? ?? '1.1.21';
-    final isOut = json['isOutdated'] as bool? ?? (v != '1.1.21');
+    final v = json['appVersion'] as String? ?? AppConfig.fallbackAppVersion;
+    final isOut = json['isOutdated'] as bool? ?? (v != AppConfig.fallbackAppVersion);
 
     return BranchDeviceItem(
       hostname: json['hostname'] as String? ?? 'Unknown Device',
@@ -428,7 +434,7 @@ class BranchDeviceItem {
       appVersion: v,
       isOutdated: isOut,
       versionStatus: json['versionStatus'] as String? ?? (isOut ? 'previous' : 'latest'),
-      versionStatusLabel: json['versionStatusLabel'] as String? ?? (isOut ? 'نسخة قديمة ⚠️' : 'محدث (v1.1.21)'),
+      versionStatusLabel: json['versionStatusLabel'] as String? ?? (isOut ? 'نسخة قديمة ⚠️' : 'محدث (v${AppConfig.fallbackAppVersion})'),
       workstationType: json['workstationType'] as String? ?? 'محطة عمل',
       isOnline: json['isOnline'] as bool? ?? false,
       lastSeenAt: json['lastSeenAt'] != null

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../shared/models/app_user.dart';
@@ -516,11 +517,21 @@ class AuthRepository {
         throw const ApiException('الجلسة غير صالحة.', statusCode: 401);
       }
       final deviceUid = await _loadOrCreateDeviceUid();
+      String resolvedAppVersion = AppConfig.fallbackAppVersion;
+      if (kIsWeb && web_bridge.isElectron()) {
+        try {
+          final info = await web_bridge.getElectronDeviceInfo();
+          final v = info['appVersion']?.toString().trim();
+          if (v != null && v.isNotEmpty) {
+            resolvedAppVersion = v;
+          }
+        } catch (_) {}
+      }
       final meta = <String, String>{
         'deviceUid': deviceUid,
         'platform': 'windows',
         'deviceName': 'كمبيوتر المكتب Windows',
-        'appVersion': '1.1.21',
+        'appVersion': resolvedAppVersion,
       };
       final deviceName = meta['deviceName'] ?? 'Desktop Windows';
       final response = await _apiClient.dio.get<Map<String, dynamic>>(
@@ -533,7 +544,7 @@ class AuthRepository {
             if (deviceName.isNotEmpty)
               'x-device-name': Uri.encodeComponent(deviceName),
             'x-device-platform': 'windows',
-            'x-app-version': '1.1.21',
+            'x-app-version': resolvedAppVersion,
           },
         ),
       );

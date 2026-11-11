@@ -268,7 +268,10 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
                         ? const FilesDashboardScreen(isWrapped: true)
                         : const SizedBox.shrink(),
                     _mountedTabIndices.contains(2)
-                        ? const ServersScreen(isWrapped: true)
+                        ? ServersScreen(
+                            isWrapped: true,
+                            isVisible: activeIndex == 2,
+                          )
                         : const SizedBox.shrink(),
                     _mountedTabIndices.contains(3)
                         ? const ProfileScreen(isWrapped: true)

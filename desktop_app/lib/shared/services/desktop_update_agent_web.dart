@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/config/app_config.dart';
 import '../../features/admin/data/update_management_repository.dart';
 import '../../features/admin/models/update_management_models.dart';
 import '../models/app_user.dart';
@@ -234,7 +235,7 @@ class DesktopUpdateAgent {
     try {
       final isElectron = web_bridge.isElectron();
       final electronInfo = isElectron ? await web_bridge.getElectronDeviceInfo() : const <String, dynamic>{};
-      final appVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
+      final appVersion = electronInfo['appVersion']?.toString() ?? AppConfig.fallbackAppVersion;
       _deviceUid ??= await _loadOrCreateDeviceUid();
 
       String? primaryIp = electronInfo['localIp']?.toString();
@@ -607,7 +608,7 @@ class DesktopUpdateAgent {
         return v;
       }
     } catch (_) {}
-    return '1.1.23';
+    return AppConfig.fallbackAppVersion;
   }
 
   Future<bool> hasPreparedUpdate() async {

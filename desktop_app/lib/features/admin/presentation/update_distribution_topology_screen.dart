@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../shared/providers/providers.dart';
 import '../../chat/data/chat_socket_service.dart';
 import '../../chat/models/chat_models.dart';
@@ -130,12 +131,13 @@ class _UpdateDistributionTopologyScreenState
   Timer? _onReloadDebounceTimer;
 
   StreamSubscription<ChatSocketEvent>? _socketSub;
+  ProviderSubscription<bool>? _visibilitySub;
   bool _isSocketConnected = false;
   bool _isAutoRolloutActive = false;
   bool _isReloading = false;
   bool _isSyncInFlight = false;
 
-  String _targetVersion = '1.1.22';
+  String _targetVersion = AppConfig.fallbackAppVersion;
   ManagedUpdateRelease? _activeRelease;
 
   // Live mutable device, release, and branch lists fetched directly from backend
@@ -217,23 +219,41 @@ class _UpdateDistributionTopologyScreenState
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
-    )..repeat();
+    );
+    if (ref.read(chatAppVisibilityProvider)) {
+      _pulseController.repeat();
+    }
 
     _initTargetRelease();
     _buildFleetDevices();
     _buildInitialLogs();
 
-    // 1-Second Ticker for countdowns
+    // 1-Second Ticker for countdowns (paused while app window is minimized/hidden)
     _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
+      if (!mounted || !ref.read(chatAppVisibilityProvider)) return;
       _tickDeviceCountdowns();
     });
 
-    // Periodic real backend sync to keep device statuses 100% fresh without flooding over branch VPN
+    // Periodic real backend sync (skipped while window is minimized/hidden)
     _backendSyncTicker = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (!mounted) return;
+      if (!mounted || !ref.read(chatAppVisibilityProvider)) return;
       unawaited(_reloadRealData(silent: true));
     });
+
+    _visibilitySub = ref.listenManual<bool>(
+      chatAppVisibilityProvider,
+      (previous, isVisible) {
+        if (!mounted) return;
+        if (isVisible) {
+          if (!_pulseController.isAnimating) {
+            _pulseController.repeat();
+          }
+          unawaited(_reloadRealData(silent: true));
+        } else {
+          _pulseController.stop(canceled: false);
+        }
+      },
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -262,6 +282,7 @@ class _UpdateDistributionTopologyScreenState
 
   @override
   void dispose() {
+    _visibilitySub?.close();
     _pulseController.dispose();
     _interactiveController.dispose();
     _countdownTicker?.cancel();
@@ -280,7 +301,7 @@ class _UpdateDistributionTopologyScreenState
       );
       _targetVersion = widget.targetVersion ?? _activeRelease!.version;
     } else {
-      _targetVersion = widget.targetVersion ?? '1.1.22';
+      _targetVersion = widget.targetVersion ?? AppConfig.fallbackAppVersion;
     }
   }
 

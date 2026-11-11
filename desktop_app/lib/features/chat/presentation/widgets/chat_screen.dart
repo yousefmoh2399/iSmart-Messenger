@@ -293,6 +293,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
   void dispose() {
     _messageController.removeListener(_onMessageTextChanged);
     _messageController.removeListener(_onMessageDraftChanged);
+    unawaited(_draftStore.flush());
     final disposedConversationId = _conversationId;
     Future<void>(() {
       final activeConversation = _container.read(activeConversationIdProvider);
@@ -4073,6 +4074,33 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
     return displayed;
   }
 
+  Map<String, List<ChatMessage>> _buildAlbumsByGroupId(
+    List<ChatMessage> messages,
+  ) {
+    final map = <String, List<ChatMessage>>{};
+    for (final item in messages) {
+      if (!item.isImageMessage) continue;
+      final groupId = item.metadata?['mediaGroupId']?.toString();
+      if (groupId == null || groupId.isEmpty) continue;
+      (map[groupId] ??= <ChatMessage>[]).add(item);
+    }
+    for (final album in map.values) {
+      album.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    }
+    return map;
+  }
+
+  List<ChatMessage> _albumFromMap(
+    ChatMessage message,
+    Map<String, List<ChatMessage>> albumsByGroupId,
+  ) {
+    final groupId = message.metadata?['mediaGroupId']?.toString();
+    if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
+      return <ChatMessage>[message];
+    }
+    return albumsByGroupId[groupId] ?? <ChatMessage>[message];
+  }
+
   List<ChatMessage> _albumFor(ChatMessage message, List<ChatMessage> messages) {
     final groupId = message.metadata?['mediaGroupId']?.toString();
     if (!message.isImageMessage || groupId == null || groupId.isEmpty) {
@@ -4649,6 +4677,11 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
     final messageById = <String, ChatMessage>{
       for (final m in messages) m.id: m,
     };
+    final albumsByGroupId = _buildAlbumsByGroupId(filteredMessages);
+    final runningDownloadsByMessageId = {
+      for (final t in transferState.tasks)
+        if (t.isDownload && t.isRunning && t.messageId != null) t.messageId!: t,
+    };
 
     if (messages.length != _lastMessageCount) {
       final isInitial = _lastMessageCount == 0;
@@ -5052,9 +5085,8 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
                                     olderLocalDate.year !=
                                         messageLocalDate.year;
 
-                                final activeDownload = transferState.tasks
-                                    .where((t) => t.isDownload && t.isRunning && t.messageId == message.id)
-                                    .firstOrNull;
+                                final activeDownload =
+                                    runningDownloadsByMessageId[message.id];
 
                                 final stableItemKey =
                                     message.metadata?['clientMessageId']
@@ -5134,9 +5166,9 @@ if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
                                     child: RepaintBoundary(
                                       child: MessageBubble(
                                         message: message,
-                                      albumMessages: _albumFor(
+                                      albumMessages: _albumFromMap(
                                         message,
-                                        filteredMessages,
+                                        albumsByGroupId,
                                       ),
                                       onOpenAlbum: _showImagePreview,
                                       isMine: isMine,

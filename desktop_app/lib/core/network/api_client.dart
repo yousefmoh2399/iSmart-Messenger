@@ -80,16 +80,18 @@ class ApiClient {
           final retryCount = (options.extra['authRetryCount'] as int?) ?? 0;
           final gen = options.extra['tokenGenerationUsed'] ?? 'null';
 
-          debugPrint(
-            '[API]\n'
-            'time=$time\n'
-            'source=$source\n'
-            '${options.method} ${options.path}\n'
-            'auth=$hasAuth\n'
-            'token=$tokenFingerprint\n'
-            'generation=$gen\n'
-            'authRetryCount=$retryCount',
-          );
+          if (kDebugMode) {
+            debugPrint(
+              '[API]\n'
+              'time=$time\n'
+              'source=$source\n'
+              '${options.method} ${options.path}\n'
+              'auth=$hasAuth\n'
+              'token=$tokenFingerprint\n'
+              'generation=$gen\n'
+              'authRetryCount=$retryCount',
+            );
+          }
 
           final isTransferEndpoint =
               options.data is FormData ||
@@ -182,10 +184,12 @@ class ApiClient {
             }
 
             try {
-              debugPrint(
-                '[API] 401 for ${requestOptions.path}; joining auth refresh '
-                'generation=$currentGeneration retryCount=$retryCount',
-              );
+              if (kDebugMode) {
+                debugPrint(
+                  '[API] 401 for ${requestOptions.path}; joining auth refresh '
+                  'generation=$currentGeneration retryCount=$retryCount',
+                );
+              }
               final refreshResult = await _sessionManager.refreshOnce();
               if (!_isReplayableRequestData(requestOptions.data)) {
                 handler.reject(_notReplayableDioError(requestOptions));
@@ -240,9 +244,11 @@ class ApiClient {
               _isReplayableRequestData(requestOptions.data)) {
             final retryDelay =
                 Duration(milliseconds: 600 * (networkRetryCount + 1));
-            debugPrint(
-              '[API] Transient network error (${error.type}) on ${requestOptions.method} ${requestOptions.path}. Retrying attempt ${networkRetryCount + 1} after ${retryDelay.inMilliseconds}ms...',
-            );
+            if (kDebugMode) {
+              debugPrint(
+                '[API] Transient network error (${error.type}) on ${requestOptions.method} ${requestOptions.path}. Retrying attempt ${networkRetryCount + 1} after ${retryDelay.inMilliseconds}ms...',
+              );
+            }
             await Future.delayed(retryDelay);
             final retryOptions = _cloneRequestOptions(requestOptions);
             retryOptions.extra['networkRetryCount'] = networkRetryCount + 1;
