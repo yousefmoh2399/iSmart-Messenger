@@ -226,6 +226,7 @@ const downloadReleaseArtifact = (req, res, next) => {
 
       const stat = fsSync.statSync(filePath);
       const fileSize = stat.size;
+      const etag = `"${stat.ino}-${stat.size}-${stat.mtimeMs}"`;
 
       res.setHeader("Content-Type", "application/octet-stream");
       res.setHeader(
@@ -233,17 +234,32 @@ const downloadReleaseArtifact = (req, res, next) => {
         `attachment; filename="${fileName}"`,
       );
       res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.setHeader("ETag", `"${stat.ino}-${stat.size}-${stat.mtimeMs}"`);
+      res.setHeader("Cache-Control", "no-transform, no-cache, no-store, must-revalidate");
+      res.setHeader("x-no-compression", "1");
+      res.setHeader("Content-Encoding", "identity");
+      res.setHeader("X-File-Size", String(fileSize));
+      if (info.checksumSha256) {
+        res.setHeader("X-Checksum-Sha256", String(info.checksumSha256));
+      }
+      res.setHeader("ETag", etag);
       res.setHeader("X-Content-Type-Options", "nosniff");
 
+      const ifRange = req.headers["if-range"];
+      const rangeAllowed = !ifRange || ifRange === etag;
       const range = req.headers.range;
-      if (range && range.startsWith("bytes=")) {
+      if (rangeAllowed && range && range.startsWith("bytes=")) {
         const parts = range.substring(6).split(",")[0].split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const start = parts[0] ? parseInt(parts[0], 10) : Math.max(0, fileSize - parseInt(parts[1], 10));
+        const end = parts[0] && parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
-        if (start < 0 || start >= fileSize || end < start || end >= fileSize) {
+        if (
+          Number.isNaN(start) ||
+          Number.isNaN(end) ||
+          start < 0 ||
+          start >= fileSize ||
+          end < start ||
+          end >= fileSize
+        ) {
           res.status(416);
           res.setHeader("Content-Range", `bytes */${fileSize}`);
           res.end();

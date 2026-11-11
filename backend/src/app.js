@@ -85,7 +85,33 @@ app.use(
     origin: buildCorsOrigin(),
   }),
 );
-app.use(compression());
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"] || res.getHeader("x-no-compression")) {
+        return false;
+      }
+      const reqUrl = String(req.originalUrl || req.url || "").toLowerCase();
+      if (
+        reqUrl.includes("/download") ||
+        reqUrl.includes("/api/updates/releases") ||
+        reqUrl.includes("/api/chat/transfers")
+      ) {
+        return false;
+      }
+      const contentType = String(res.getHeader("Content-Type") || "").toLowerCase();
+      if (
+        contentType.includes("octet-stream") ||
+        contentType.includes("zip") ||
+        contentType.includes("x-msdownload") ||
+        contentType.includes("vnd.android.package-archive")
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }),
+);
 app.use(helmet());
 app.use(requestTelemetryMiddleware);
 app.use(
@@ -128,13 +154,13 @@ app.use(
 
 // Increase timeout for upload endpoints
 app.use("/api/admin/updates/releases", (req, res, next) => {
-  req.setTimeout(15 * 60 * 1000); // 15 minutes for releases upload
-  res.setTimeout(15 * 60 * 1000);
+  req.setTimeout(60 * 60 * 1000); // 60 minutes for large release uploads over VPN
+  res.setTimeout(60 * 60 * 1000);
   next();
 });
 app.use("/api/updates", (req, res, next) => {
-  req.setTimeout(10 * 60 * 1000); // 10 minutes for update endpoints
-  res.setTimeout(10 * 60 * 1000);
+  req.setTimeout(60 * 60 * 1000); // 60 minutes for slow branch VPN downloads
+  res.setTimeout(60 * 60 * 1000);
   next();
 });
 app.use("/api/chat/transfers", (req, res, next) => {

@@ -303,7 +303,8 @@ export interface CheckDownloadResult {
 export function checkDownloadAllowed(
   ip: string,
   fileKey: 'windows' | 'mobile',
-  config: PortalConfig
+  config: PortalConfig,
+  options?: { isRangeResume?: boolean }
 ): CheckDownloadResult {
   cleanupStaleSessions();
 
@@ -335,17 +336,23 @@ export function checkDownloadAllowed(
     return { allowed: true, fileConfig: fileConf };
   }
 
-  // 4. Same Device Check (Don't allow same IP to start multiple concurrent downloads)
+  // 4. Same Device Check (Allow Range resumes from the same IP/file after a VPN hiccup)
   const activeForIp = Array.from(activeSessions.values()).filter(
     (s) => s.ip === ip && s.status === 'downloading'
   );
   if (activeForIp.length >= config.vpnPolicy.maxConcurrentPerIp) {
-    return {
-      allowed: false,
-      reason: 'device_busy',
-      busyIp: ip,
-      message: 'جهازك يقوم بالتحميل حالياً! يرجى الانتظار حتى اكتمال التحميل الأول لتجنب استهلاك سعة الاتصال.',
-    };
+    const canResumeSameFile =
+      options?.isRangeResume === true &&
+      activeForIp.some((s) => s.fileKey === fileKey);
+    if (!canResumeSameFile) {
+      return {
+        allowed: false,
+        reason: 'device_busy',
+        busyIp: ip,
+        message: 'جهازك يقوم بالتحميل حالياً! يرجى الانتظار حتى اكتمال التحميل الأول لتجنب استهلاك سعة الاتصال.',
+      };
+    }
+    return { allowed: true, fileConfig: fileConf };
   }
 
   // 5. Same Branch (Subnet) Check

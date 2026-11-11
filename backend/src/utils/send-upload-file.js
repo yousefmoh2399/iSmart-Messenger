@@ -43,6 +43,7 @@ async function sendUploadFile(
   } catch (_) {}
 
   res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("x-no-compression", "1");
 
   const resolvedContentType = contentType || inferContentType(resolvedPath);
   if (resolvedContentType) {

@@ -22,8 +22,12 @@ export async function GET(request: NextRequest) {
   const clientIp = getClientIp(request);
   const config = getConfig();
 
+  const rangeHeader = request.headers.get('range');
+
   // 1. Verify download permissions & concurrency
-  const check = checkDownloadAllowed(clientIp, fileKey, config);
+  const check = checkDownloadAllowed(clientIp, fileKey, config, {
+    isRangeResume: Boolean(rangeHeader),
+  });
   if (!check.allowed) {
     return new NextResponse(
       JSON.stringify({
@@ -60,8 +64,52 @@ export async function GET(request: NextRequest) {
 
   const fileStats = fs.statSync(absoluteFilePath);
   const totalFileSize = fileStats.size;
+  const etag = `"${fileStats.ino}-${totalFileSize}-${fileStats.mtimeMs}"`;
 
-  // 3. Register Active Download Session in Admin Monitor
+  // 3. Handle Range Requests strictly (with If-Range / ETag guard)
+  let start = 0;
+  let end = totalFileSize - 1;
+  let isPartial = false;
+  const ifRange = request.headers.get('if-range');
+  const rangeAllowed = !ifRange || ifRange === etag;
+
+  if (rangeAllowed && rangeHeader && rangeHeader.startsWith('bytes=')) {
+    const parts = rangeHeader.replace(/bytes=/, '').split(',')[0].split('-');
+    const hasStart = parts[0].trim() !== '';
+    const hasEnd = parts[1] !== undefined && parts[1].trim() !== '';
+
+    const parsedStart = hasStart ? parseInt(parts[0], 10) : NaN;
+    const parsedEnd = hasEnd ? parseInt(parts[1], 10) : NaN;
+
+    if (hasStart) {
+      if (isNaN(parsedStart) || parsedStart < 0 || parsedStart >= totalFileSize) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: { 'Content-Range': `bytes */${totalFileSize}` },
+        });
+      }
+      start = parsedStart;
+      end = hasEnd && !isNaN(parsedEnd) ? Math.min(parsedEnd, totalFileSize - 1) : totalFileSize - 1;
+    } else if (hasEnd && !isNaN(parsedEnd) && parsedEnd > 0) {
+      start = Math.max(0, totalFileSize - parsedEnd);
+      end = totalFileSize - 1;
+    } else {
+      return new NextResponse(null, {
+        status: 416,
+        headers: { 'Content-Range': `bytes */${totalFileSize}` },
+      });
+    }
+
+    if (start > end) {
+      return new NextResponse(null, {
+        status: 416,
+        headers: { 'Content-Range': `bytes */${totalFileSize}` },
+      });
+    }
+    isPartial = true;
+  }
+
+  // 4. Register Active Download Session in Admin Monitor
   const session = registerDownloadSession(
     clientIp,
     fileKey,
@@ -69,25 +117,6 @@ export async function GET(request: NextRequest) {
     totalFileSize,
     config
   );
-
-  // 4. Handle Range Requests if present
-  let start = 0;
-  let end = totalFileSize - 1;
-  const rangeHeader = request.headers.get('range');
-  let isPartial = false;
-
-  if (rangeHeader && rangeHeader.startsWith('bytes=')) {
-    const parts = rangeHeader.replace(/bytes=/, '').split('-');
-    const partialStart = parseInt(parts[0], 10);
-    const partialEnd = parts[1] ? parseInt(parts[1], 10) : end;
-    if (!isNaN(partialStart) && partialStart >= 0 && partialStart < totalFileSize) {
-      start = partialStart;
-    }
-    if (!isNaN(partialEnd) && partialEnd >= start && partialEnd < totalFileSize) {
-      end = partialEnd;
-    }
-    isPartial = true;
-  }
 
   const contentLength = end - start + 1;
   const speedLimitBytesPerSec = (config.vpnPolicy.speedLimitKBps || 0) * 1024;
@@ -222,7 +251,9 @@ export async function GET(request: NextRequest) {
     'Content-Length': contentLength.toString(),
     'Accept-Ranges': 'bytes',
     'Content-Encoding': 'identity',
-    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'ETag': etag,
+    'X-File-Size': totalFileSize.toString(),
+    'Cache-Control': 'no-transform, no-store, no-cache, must-revalidate, proxy-revalidate',
     'Pragma': 'no-cache',
     'Expires': '0',
     'X-Content-Type-Options': 'nosniff',

@@ -365,7 +365,7 @@ class UpdateManagementRepository {
     String? downloadUrl,
     String? destinationDirectory,
     void Function(int received, int total)? onReceiveProgress,
-    int maxAttempts = 3,
+    int maxAttempts = 6,
   }) async {
     final directory = destinationDirectory == null
         ? await _defaultArtifactDirectory()
@@ -402,7 +402,7 @@ class UpdateManagementRepository {
         }
 
         final response = await request.close().timeout(
-          const Duration(minutes: 10),
+          const Duration(minutes: 45),
         );
         if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable &&
             existingBytes > 0) {
@@ -427,9 +427,28 @@ class UpdateManagementRepository {
           );
         }
 
-        final canAppend =
+        var canAppend =
             existingBytes > 0 &&
             response.statusCode == HttpStatus.partialContent;
+        if (canAppend) {
+          final contentRange =
+              response.headers.value(HttpHeaders.contentRangeHeader) ?? '';
+          final rangeMatch = RegExp(
+            r'^bytes\s+(\d+)-',
+            caseSensitive: false,
+          ).firstMatch(contentRange.trim());
+          final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '');
+          if (rangeStart == null || rangeStart != existingBytes) {
+            final partialFile = File(partialDestination);
+            if (partialFile.existsSync()) {
+              await partialFile.delete();
+            }
+            throw HttpException(
+              'Range start offset mismatch (expected $existingBytes, got $rangeStart).',
+              uri: targetUri,
+            );
+          }
+        }
         final partialFile = File(partialDestination);
         sink = await partialFile.open(
           mode: canAppend ? FileMode.append : FileMode.write,
@@ -452,6 +471,23 @@ class UpdateManagementRepository {
         }
         await sink.close();
         sink = null;
+
+        final actualSize = await partialFile.length();
+        if (actualSize <= 0) {
+          if (partialFile.existsSync()) {
+            await partialFile.delete();
+          }
+          throw HttpException('Downloaded file is empty (0 bytes)', uri: targetUri);
+        }
+        if (totalBytes > 0 && actualSize != totalBytes) {
+          if (actualSize > totalBytes && partialFile.existsSync()) {
+            await partialFile.delete();
+          }
+          throw HttpException(
+            'Incomplete or corrupted download: got $actualSize bytes, expected $totalBytes bytes',
+            uri: targetUri,
+          );
+        }
 
         final finalFile = File(destination);
         if (finalFile.existsSync()) {
@@ -519,6 +555,10 @@ class UpdateManagementRepository {
     if (length > 0) {
       return initialBytes + length;
     }
-    return initialBytes;
+    final xFileSize = int.tryParse(response.headers.value('x-file-size') ?? '');
+    if (xFileSize != null && xFileSize > 0) {
+      return xFileSize;
+    }
+    return 0;
   }
 }

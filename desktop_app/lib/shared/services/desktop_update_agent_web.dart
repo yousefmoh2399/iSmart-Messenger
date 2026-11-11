@@ -646,6 +646,7 @@ class DesktopUpdateAgent {
     if (installResult['success'] != true) {
       final errMsg =
           installResult['error']?.toString() ?? 'فشل تطبيق التحديث في إلكترون.';
+      hasPreparedUpdateNotifier.value = false;
       await _stateStore.markFailed(errMsg);
       if (taskId != null && taskId.isNotEmpty && !taskId.startsWith('manual_')) {
         await _reportTaskProgress(

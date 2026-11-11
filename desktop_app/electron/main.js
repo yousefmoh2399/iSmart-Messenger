@@ -4288,15 +4288,57 @@ function calculateFileSha256(filePath) {
   });
 }
 
-function downloadFile(url, destinationPath, token, onProgress, transferId) {
+function downloadFile(url, destinationPath, token, onProgress, transferId, options = {}) {
   return new Promise((resolve, reject) => {
     const downloadKey = transferId ? String(transferId).trim() : null;
     const partPath = destinationPath + ".part";
+    const partMetaPath = destinationPath + ".part.meta.json";
+    const expectedChecksum = options && options.checksumSha256 ? String(options.checksumSha256).trim().toLowerCase() : "";
     let isCancelled = false;
     let currentRequest = null;
     let currentStream = null;
     let attempt = 0;
-    const maxAttempts = 8;
+    const maxAttempts = 10;
+
+    const getUrlKey = (u) => {
+      try {
+        const p = new URL(u);
+        return p.origin + p.pathname;
+      } catch (_) {
+        return String(u || "");
+      }
+    };
+    const baseUrlKey = getUrlKey(url);
+
+    const readPartMeta = () => {
+      try {
+        if (fs.existsSync(partMetaPath)) {
+          return JSON.parse(fs.readFileSync(partMetaPath, "utf8"));
+        }
+      } catch (_) {}
+      return null;
+    };
+
+    const writePartMeta = (meta) => {
+      try {
+        fs.writeFileSync(partMetaPath, JSON.stringify(meta), "utf8");
+      } catch (_) {}
+    };
+
+    const clearPartialArtifacts = () => {
+      try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+      try { if (fs.existsSync(partMetaPath)) fs.unlinkSync(partMetaPath); } catch (_) {}
+    };
+
+    // Guard against stale or mismatched .part files from a previous version or failed run
+    if (fs.existsSync(partPath)) {
+      const savedMeta = readPartMeta();
+      const urlMatches = savedMeta && savedMeta.urlKey === baseUrlKey;
+      const checksumMatches = !expectedChecksum || !savedMeta || !savedMeta.checksumSha256 || savedMeta.checksumSha256.toLowerCase() === expectedChecksum;
+      if (!savedMeta || !urlMatches || !checksumMatches) {
+        clearPartialArtifacts();
+      }
+    }
 
     if (downloadKey) {
       activeDownloadRequests.set(downloadKey, {
@@ -4307,8 +4349,8 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
         cancel: () => {
           isCancelled = true;
           try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
-          try { if (currentStream) currentStream.close(); } catch (_) {}
-          try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+          try { if (currentStream) currentStream.destroy(); } catch (_) {}
+          clearPartialArtifacts();
           try { if (fs.existsSync(destinationPath)) fs.unlinkSync(destinationPath); } catch (_) {}
         }
       });
@@ -4319,6 +4361,10 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
         return reject(new Error("Download cancelled by user."));
       }
 
+      let attemptSettled = false;
+      let responseEndedNormally = false;
+      let timeoutTimer = null;
+
       let existingBytes = 0;
       try {
         if (fs.existsSync(partPath)) {
@@ -4328,94 +4374,157 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
         existingBytes = 0;
       }
 
+      const savedMeta = readPartMeta();
       const parsedUrl = new URL(targetUrl);
       const protocol = parsedUrl.protocol === "https:" ? https : http;
 
       const headers = {
         "Accept": "*/*",
+        "Cache-Control": "no-cache",
       };
       if (token) {
         headers["Authorization"] = "Bearer " + token;
       }
       if (existingBytes > 0) {
         headers["Range"] = "bytes=" + existingBytes + "-";
+        if (savedMeta && savedMeta.etag) {
+          headers["If-Range"] = savedMeta.etag;
+        }
       }
 
-      let timeoutTimer = null;
+      const failAttempt = (err, { resetPartial = false } = {}) => {
+        if (attemptSettled) return;
+        attemptSettled = true;
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer);
+          timeoutTimer = null;
+        }
+        const streamToClose = currentStream;
+        currentStream = null;
+        try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
+        currentRequest = null;
+        if (streamToClose) {
+          try { streamToClose.destroy(); } catch (_) {}
+        }
+        if (resetPartial) {
+          clearPartialArtifacts();
+        }
+        handleRetryOrReject(err, url);
+      };
+
       const resetInactivityTimer = () => {
         if (timeoutTimer) clearTimeout(timeoutTimer);
         timeoutTimer = setTimeout(() => {
-          if (!isCancelled && currentRequest) {
+          if (!isCancelled && !attemptSettled) {
             console.warn("[downloadFile] Inactivity timeout (45s no data) on VPN link, retrying...");
-            currentRequest.destroy(new Error("ETIMEDOUT: Connection inactive on VPN link"));
+            failAttempt(new Error("ETIMEDOUT: Connection inactive on VPN link"));
           }
         }, 45000);
       };
 
+      resetInactivityTimer();
+
       currentRequest = protocol.get(parsedUrl, { headers }, (response) => {
+        if (attemptSettled) {
+          response.resume();
+          return;
+        }
+
         const statusCode = response.statusCode || 0;
 
         // Handle redirects (e.g. 301, 302, 303, 307, 308)
         if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
+          attemptSettled = true;
           if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
           const redirectUrl = new URL(response.headers.location, parsedUrl).toString();
           return runAttempt(redirectUrl);
         }
 
-        // Handle 416 Range Not Satisfiable (file size changed on server or completed)
+        // Handle 416 Range Not Satisfiable (file size changed on server or corrupted .part)
         if (statusCode === 416) {
+          attemptSettled = true;
           if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
-          try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
-          return runAttempt(targetUrl);
+          clearPartialArtifacts();
+          return runAttempt(url);
         }
 
         const isPartial = statusCode === 206;
         if (statusCode !== 200 && !isPartial) {
-          if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
-          const err = new Error("Failed to download. Status code: " + statusCode);
-          return handleRetryOrReject(err, targetUrl);
+          return failAttempt(new Error("Failed to download. Status code: " + statusCode));
         }
 
-        // Write mode: append if 206, write/overwrite if 200
-        const writeMode = isPartial ? "a" : "w";
-        let receivedBytes = isPartial ? existingBytes : 0;
         let totalBytes = 0;
+        let receivedBytes = 0;
 
         if (isPartial) {
-          const contentRange = response.headers["content-range"];
-          if (contentRange) {
-            const match = contentRange.match(/\/(\d+)$/);
-            if (match) {
-              totalBytes = parseInt(match[1], 10);
-            }
+          const contentRange = response.headers["content-range"] || "";
+          const rangeMatch = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
+          if (!rangeMatch) {
+            response.resume();
+            return failAttempt(new Error("Invalid Content-Range header on 206 response"), { resetPartial: true });
           }
-          if (!totalBytes && response.headers["content-length"]) {
+          const rangeStart = parseInt(rangeMatch[1], 10);
+          if (rangeStart !== existingBytes) {
+            response.resume();
+            return failAttempt(
+              new Error("Range offset mismatch: requested " + existingBytes + ", server sent " + rangeStart),
+              { resetPartial: true }
+            );
+          }
+          if (rangeMatch[3] !== "*") {
+            totalBytes = parseInt(rangeMatch[3], 10);
+          } else if (response.headers["content-length"]) {
             totalBytes = existingBytes + parseInt(response.headers["content-length"], 10);
           }
+          receivedBytes = existingBytes;
         } else {
           totalBytes = parseInt(response.headers["content-length"] || response.headers["x-file-size"] || "0", 10);
+          receivedBytes = 0;
         }
+
+        if (!totalBytes && response.headers["x-file-size"]) {
+          totalBytes = parseInt(response.headers["x-file-size"], 10) || 0;
+        }
+
+        const serverChecksum = response.headers["x-checksum-sha256"]
+          ? String(response.headers["x-checksum-sha256"]).trim().toLowerCase()
+          : null;
+        if (expectedChecksum && serverChecksum && serverChecksum !== expectedChecksum) {
+          response.resume();
+          return failAttempt(new Error("Server checksum header mismatch"), { resetPartial: true });
+        }
+
+        writePartMeta({
+          urlKey: baseUrlKey,
+          etag: response.headers["etag"] || null,
+          totalBytes: totalBytes || 0,
+          checksumSha256: expectedChecksum || serverChecksum || null,
+        });
+
+        // Write mode: append only when verified 206 matches existingBytes, otherwise overwrite from 0
+        const writeMode = isPartial ? "a" : "w";
 
         try {
           currentStream = fs.createWriteStream(partPath, { flags: writeMode });
         } catch (streamErr) {
-          if (timeoutTimer) clearTimeout(timeoutTimer);
           response.resume();
-          return reject(streamErr);
+          return failAttempt(streamErr);
         }
 
         resetInactivityTimer();
 
         response.on("data", (chunk) => {
-          if (isCancelled) {
+          if (isCancelled || attemptSettled) {
             response.resume();
             return;
           }
           receivedBytes += chunk.length;
-          currentStream.write(chunk);
+          if (currentStream) {
+            currentStream.write(chunk);
+          }
           resetInactivityTimer();
           if (onProgress) {
             onProgress(receivedBytes, totalBytes);
@@ -4424,44 +4533,91 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
 
         response.on("end", () => {
           if (timeoutTimer) clearTimeout(timeoutTimer);
-          if (isCancelled) return;
-          currentStream.end();
+          if (isCancelled || attemptSettled) return;
+          if (!response.complete) {
+            return failAttempt(new Error("HTTP response ended prematurely before EOF"));
+          }
+          responseEndedNormally = true;
+          if (currentStream) {
+            currentStream.end();
+          }
+        });
+
+        response.on("aborted", () => {
+          failAttempt(new Error("Download connection aborted by peer/VPN"));
+        });
+
+        response.on("close", () => {
+          if (!responseEndedNormally && !attemptSettled && !isCancelled) {
+            failAttempt(new Error("Download connection closed before EOF"));
+          }
         });
 
         response.on("error", (err) => {
-          if (timeoutTimer) clearTimeout(timeoutTimer);
-          handleRetryOrReject(err, targetUrl);
+          failAttempt(err);
         });
 
         currentStream.on("finish", () => {
           if (timeoutTimer) clearTimeout(timeoutTimer);
-          if (isCancelled) return;
-          if (totalBytes > 0 && receivedBytes < totalBytes) {
-            const incompleteErr = new Error("Incomplete download: received " + receivedBytes + " of " + totalBytes + " bytes");
-            return handleRetryOrReject(incompleteErr, targetUrl);
+          if (isCancelled || attemptSettled) return;
+          if (!responseEndedNormally) {
+            return failAttempt(new Error("Stream finished before response completed"));
           }
+
+          let actualSize = 0;
+          try {
+            actualSize = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0;
+          } catch (_) {
+            actualSize = 0;
+          }
+
+          if (actualSize <= 0) {
+            return failAttempt(new Error("Downloaded file is empty (0 bytes)"), { resetPartial: true });
+          }
+
+          if (totalBytes > 0) {
+            if (actualSize > totalBytes) {
+              return failAttempt(
+                new Error("Corrupted download: file size (" + actualSize + ") exceeds expected (" + totalBytes + ")"),
+                { resetPartial: true }
+              );
+            }
+            if (actualSize < totalBytes || receivedBytes !== totalBytes) {
+              return failAttempt(
+                new Error("Incomplete download: received " + actualSize + " of " + totalBytes + " bytes")
+              );
+            }
+          }
+
+          attemptSettled = true;
+          currentStream = null;
+          currentRequest = null;
 
           try {
             if (fs.existsSync(destinationPath)) {
               try { fs.unlinkSync(destinationPath); } catch (_) {}
             }
             fs.renameSync(partPath, destinationPath);
+            try { if (fs.existsSync(partMetaPath)) fs.unlinkSync(partMetaPath); } catch (_) {}
             if (downloadKey) activeDownloadRequests.delete(downloadKey);
-            resolve();
+            resolve({
+              filePath: destinationPath,
+              totalBytes: totalBytes || actualSize,
+              actualSize,
+              checksumHeader: serverChecksum,
+            });
           } catch (renameErr) {
             reject(renameErr);
           }
         });
 
         currentStream.on("error", (err) => {
-          if (timeoutTimer) clearTimeout(timeoutTimer);
-          handleRetryOrReject(err, targetUrl);
+          failAttempt(err);
         });
       });
 
       currentRequest.on("error", (err) => {
-        if (timeoutTimer) clearTimeout(timeoutTimer);
-        handleRetryOrReject(err, targetUrl);
+        failAttempt(err);
       });
     };
 
@@ -4469,8 +4625,6 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
       if (isCancelled) {
         return reject(new Error("Download cancelled by user."));
       }
-      try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
-      try { if (currentStream) currentStream.close(); } catch (_) {}
 
       attempt++;
       if (attempt < maxAttempts) {
@@ -4483,7 +4637,7 @@ function downloadFile(url, destinationPath, token, onProgress, transferId) {
         }, delay);
       } else {
         console.error("[downloadFile] Download permanently failed after " + maxAttempts + " attempts:", err);
-        try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+        clearPartialArtifacts();
         if (downloadKey) activeDownloadRequests.delete(downloadKey);
         reject(err);
       }
@@ -4530,13 +4684,14 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
 
-  // Clean up any previous update artifacts
+  // Clean up previous update output artifacts (keep matching .part ONLY if verified in downloadFile)
   const cleanups = [
     "update-download.tmp",
     "update-installer.exe",
     "update-installer.msi",
     "update-package.zip",
     "app-update.zip",
+    "update-meta.json",
   ];
   for (const c of cleanups) {
     try {
@@ -4577,40 +4732,65 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       message: "جاري بدء تحميل التحديث...",
     }, { force: true });
 
-    await downloadFile(downloadUrl, tempDownloadPath, token, (received, total) => {
-      let progress = 0;
-      let message = "";
-      if (total > 0) {
-        progress = Math.min(95, Math.round((received / total) * 100));
-        const receivedMb = (received / (1024 * 1024)).toFixed(1);
-        const totalMb = (total / (1024 * 1024)).toFixed(1);
-        message = `جاري تحميل التحديث: ${progress}% (${receivedMb} / ${totalMb} MB)`;
-      } else {
-        const receivedMb = (received / (1024 * 1024)).toFixed(1);
-        progress = Math.min(90, Math.round((received / (60 * 1024 * 1024)) * 100));
-        message = `جاري تحميل التحديث: ${receivedMb} MB`;
-      }
-      sendUpdaterProgress({
-        status: "downloading",
-        progress: progress,
-        message: message,
-      });
-    });
+    const downloadResult = await downloadFile(
+      downloadUrl,
+      tempDownloadPath,
+      token,
+      (received, total) => {
+        let progress = 0;
+        let message = "";
+        if (total > 0) {
+          progress = Math.min(95, Math.round((received / total) * 100));
+          const receivedMb = (received / (1024 * 1024)).toFixed(1);
+          const totalMb = (total / (1024 * 1024)).toFixed(1);
+          message = `جاري تحميل التحديث: ${progress}% (${receivedMb} / ${totalMb} MB)`;
+        } else {
+          const receivedMb = (received / (1024 * 1024)).toFixed(1);
+          progress = Math.min(90, Math.round((received / (60 * 1024 * 1024)) * 100));
+          message = `جاري تحميل التحديث: ${receivedMb} MB`;
+        }
+        sendUpdaterProgress({
+          status: "downloading",
+          progress: progress,
+          message: message,
+        });
+      },
+      null,
+      { checksumSha256 }
+    );
 
-    if (checksumSha256 && checksumSha256.trim()) {
+    const effectiveChecksum =
+      (checksumSha256 && checksumSha256.trim()) ||
+      (downloadResult && downloadResult.checksumHeader) ||
+      "";
+
+    if (effectiveChecksum) {
       sendUpdaterProgress({
         status: "downloading",
-        progress: 95,
-        message: "جاري التحقق من سلامة ملف التحديث...",
+        progress: 96,
+        message: "جاري التحقق من سلامة وبصمة ملف التحديث...",
       }, { force: true });
       const calculatedHash = await calculateFileSha256(tempDownloadPath);
-      if (calculatedHash.toLowerCase() !== checksumSha256.trim().toLowerCase()) {
-        throw new Error(`بصمة الملف غير مطابقة! المتوقع: ${checksumSha256.trim().toLowerCase()}، المحسوب: ${calculatedHash.toLowerCase()}`);
+      if (calculatedHash.toLowerCase() !== effectiveChecksum.trim().toLowerCase()) {
+        // Delete corrupted artifact + partials immediately so next run downloads fresh
+        try { if (fs.existsSync(tempDownloadPath)) fs.unlinkSync(tempDownloadPath); } catch (_) {}
+        try { if (fs.existsSync(tempDownloadPath + ".part")) fs.unlinkSync(tempDownloadPath + ".part"); } catch (_) {}
+        try { if (fs.existsSync(tempDownloadPath + ".part.meta.json")) fs.unlinkSync(tempDownloadPath + ".part.meta.json"); } catch (_) {}
+        throw new Error(`بصمة ملف التحديث غير مطابقة (الملف تالف أو غير مكتمل)! المتوقع: ${effectiveChecksum.trim().toLowerCase()}، المحسوب: ${calculatedHash.toLowerCase()}`);
       }
     }
 
-    // Inspect file magic bytes to determine real file type
+    // Inspect file magic bytes to determine real file type and reject non-binary/HTML error responses
     const detectedType = detectFileType(tempDownloadPath);
+    const lowerTarget = (fileName || downloadUrl || "").toLowerCase();
+    const expectsExe = lowerTarget.endsWith(".exe") || (installerKind || "").toLowerCase() === "exe";
+    if (expectsExe && detectedType !== "exe") {
+      try { if (fs.existsSync(tempDownloadPath)) fs.unlinkSync(tempDownloadPath); } catch (_) {}
+      try { if (fs.existsSync(tempDownloadPath + ".part")) fs.unlinkSync(tempDownloadPath + ".part"); } catch (_) {}
+      try { if (fs.existsSync(tempDownloadPath + ".part.meta.json")) fs.unlinkSync(tempDownloadPath + ".part.meta.json"); } catch (_) {}
+      throw new Error("الملف المحمل ليس ملف تثبيت Windows صالح (.exe). قد يكون التحميل تالفاً بسبب الشبكة.");
+    }
+
     let finalPackagePath = "";
     if (detectedType === "exe") {
       finalPackagePath = path.join(tempDir, "update-installer.exe");
@@ -4619,14 +4799,11 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
     } else if (detectedType === "zip") {
       finalPackagePath = path.join(tempDir, "update-package.zip");
     } else {
-      // Fallback based on fileName or downloadUrl
-      const lower = (fileName || downloadUrl).toLowerCase();
-      if (lower.includes(".msi")) {
+      if (lowerTarget.includes(".msi")) {
         finalPackagePath = path.join(tempDir, "update-installer.msi");
-      } else if (lower.includes(".zip")) {
+      } else if (lowerTarget.includes(".zip")) {
         finalPackagePath = path.join(tempDir, "update-package.zip");
       } else {
-        // Default to executable installer
         finalPackagePath = path.join(tempDir, "update-installer.exe");
       }
     }
@@ -4635,13 +4812,16 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       try { fs.unlinkSync(finalPackagePath); } catch (_) {}
     }
     fs.renameSync(tempDownloadPath, finalPackagePath);
+    const finalStats = fs.statSync(finalPackagePath);
 
-    // Save update metadata for updater:apply-update
+    // Save update metadata for pre-launch integrity verification in updater:apply-update
     const meta = {
       packagePath: finalPackagePath,
       packageType: detectedType,
       fileName: fileName || path.basename(finalPackagePath),
       downloadUrl: downloadUrl,
+      checksumSha256: effectiveChecksum || null,
+      expectedSize: finalStats.size,
       silentInstallArgs: silentInstallArgs || "",
       installerKind: installerKind || "",
       downloadedAt: new Date().toISOString(),
@@ -4651,12 +4831,13 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
     sendUpdaterProgress({
       status: "downloaded",
       progress: 100,
-      message: "تم تحميل التحديث بنجاح وجاهز للتثبيت.",
+      message: "تم تحميل التحديث بنجاح والتحقق من سلامته بالكامل.",
     }, { force: true });
 
     return { success: true, filePath: finalPackagePath, packageType: detectedType };
   } catch (error) {
     console.error("Update download failed:", error);
+    try { if (fs.existsSync(tempDownloadPath)) fs.unlinkSync(tempDownloadPath); } catch (_) {}
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send("updater-progress", {
         status: "failed",
@@ -4720,6 +4901,31 @@ ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   const detectedType = detectFileType(packagePath);
   const isExe = detectedType === "exe" || packagePath.toLowerCase().endsWith(".exe");
   const isMsi = detectedType === "msi" || packagePath.toLowerCase().endsWith(".msi");
+
+  // Pre-launch integrity check: refuse to launch a truncated or corrupted NSIS installer
+  try {
+    const pkgStat = fs.statSync(packagePath);
+    if (pkgStat.size < 1024 || (meta.expectedSize && Number(meta.expectedSize) > 0 && pkgStat.size !== Number(meta.expectedSize))) {
+      throw new Error(`File size mismatch: actual=${pkgStat.size}, expected=${meta.expectedSize || 'unknown'}`);
+    }
+    if (isExe && detectedType !== "exe") {
+      throw new Error(`Invalid Windows PE executable header (detectedType=${detectedType})`);
+    }
+    if (meta.checksumSha256 && String(meta.checksumSha256).trim()) {
+      const actualHash = await calculateFileSha256(packagePath);
+      if (actualHash.toLowerCase() !== String(meta.checksumSha256).trim().toLowerCase()) {
+        throw new Error(`SHA-256 mismatch before launch: expected=${meta.checksumSha256}, actual=${actualHash}`);
+      }
+    }
+  } catch (integrityErr) {
+    writeLog(`FATAL INTEGRITY ERROR: ${integrityErr.message}. Removing damaged package so updater can re-download cleanly.`);
+    try { if (fs.existsSync(packagePath)) fs.unlinkSync(packagePath); } catch (_) {}
+    try { if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath); } catch (_) {}
+    return {
+      success: false,
+      error: "ملف التحديث تالف أو غير مكتمل. تم حذفه بأمان لمنع خطأ NSIS، يرجى إعادة المحاولة.",
+    };
+  }
 
   const appDir = path.dirname(process.execPath);
   const exePath = process.execPath;

@@ -1770,10 +1770,21 @@ async function getReleaseDownloadInfo(releaseId) {
       "Release artifact file is not available on server.",
     );
   }
+  let checksumSha256 = release.checksumSha256 || null;
+  if (!checksumSha256) {
+    try {
+      checksumSha256 = await calculateSha256(artifactPath);
+      await UpdateRelease.updateOne(
+        { _id: release._id },
+        { $set: { checksumSha256 } },
+      ).catch(() => {});
+    } catch (_) {}
+  }
   return {
     mode: "file",
     filePath: artifactPath,
     fileName: release.fileName || path.basename(artifactPath),
+    checksumSha256,
   };
 }
 

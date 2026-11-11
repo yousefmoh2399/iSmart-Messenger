@@ -400,6 +400,21 @@ class DesktopUpdateAgent {
         },
       );
 
+      final isExpectedExe =
+          (task.release.fileName ?? '').toLowerCase().endsWith('.exe') ||
+          task.release.installerKind.toLowerCase() == 'exe';
+      if (isExpectedExe) {
+        final downloadedFile = File(artifactPath);
+        final bytes = downloadedFile.existsSync()
+            ? await downloadedFile.openRead(0, 2).first.catchError((_) => <int>[])
+            : <int>[];
+        if (bytes.length < 2 || bytes[0] != 0x4D || bytes[1] != 0x5A) {
+          try { if (downloadedFile.existsSync()) await downloadedFile.delete(); } catch (_) {}
+          try { final pf = File('$artifactPath.part'); if (pf.existsSync()) await pf.delete(); } catch (_) {}
+          throw StateError('Downloaded update package is not a valid Windows executable (.exe).');
+        }
+      }
+
       String digest = '';
       if ((task.release.checksumSha256 ?? '').trim().isNotEmpty) {
         await _emitAndReport(
@@ -411,6 +426,14 @@ class DesktopUpdateAgent {
         digest = await _calculateFileSha256(artifactPath);
         final expected = task.release.checksumSha256!.trim().toLowerCase();
         if (digest.toLowerCase() != expected) {
+          try {
+            final f = File(artifactPath);
+            if (f.existsSync()) await f.delete();
+          } catch (_) {}
+          try {
+            final pf = File('$artifactPath.part');
+            if (pf.existsSync()) await pf.delete();
+          } catch (_) {}
           throw StateError(
             'Checksum mismatch. expected=$expected actual=$digest',
           );
@@ -656,6 +679,34 @@ class DesktopUpdateAgent {
       );
     }
 
+    // Re-verify artifact integrity before launching external NSIS/MSI installer
+    final isExeArtifact = artifactPath.toLowerCase().endsWith('.exe') ||
+        release.installerKind.toLowerCase() == 'exe';
+    try {
+      final artifactFile = File(artifactPath);
+      if (isExeArtifact) {
+        final headerBytes = await artifactFile.openRead(0, 2).first.catchError((_) => <int>[]);
+        if (headerBytes.length < 2 || headerBytes[0] != 0x4D || headerBytes[1] != 0x5A) {
+          throw StateError('Invalid Windows executable header.');
+        }
+      }
+      final expectedHash = (state.artifactSha256 ?? '').trim().toLowerCase();
+      if (expectedHash.isNotEmpty) {
+        final actualHash = (await _calculateFileSha256(artifactPath)).trim().toLowerCase();
+        if (actualHash != expectedHash) {
+          throw StateError('Pre-launch checksum mismatch ($actualHash != $expectedHash).');
+        }
+      }
+    } catch (e) {
+      try {
+        final artifactFile = File(artifactPath);
+        if (artifactFile.existsSync()) await artifactFile.delete();
+      } catch (_) {}
+      await _stateStore.markFailed('حزمة التحديث تالفة أو غير مكتملة. سيتم إعادة التحميل.');
+      hasPreparedUpdateNotifier.value = false;
+      rethrow;
+    }
+
     await _emitAndReport(
       taskId: taskId,
       status: 'installing',
@@ -719,10 +770,18 @@ class DesktopUpdateAgent {
         state.artifactPath != null &&
         state.artifactPath!.trim().isNotEmpty &&
         File(state.artifactPath!).existsSync();
-    if (hasPreparedArtifact &&
-        (state.status == 'failed' || state.status == 'downloaded')) {
-      await restartToApplyPreparedUpdate();
-      return;
+    if (hasPreparedArtifact && state.status == 'downloaded') {
+      try {
+        await restartToApplyPreparedUpdate();
+        return;
+      } catch (_) {
+        // Integrity check failed on prepared artifact; fall through to re-download cleanly.
+      }
+    }
+    if (hasPreparedArtifact && state.status == 'failed') {
+      try {
+        await File(state.artifactPath!).delete();
+      } catch (_) {}
     }
     await checkNow();
   }
