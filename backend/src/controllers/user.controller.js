@@ -127,8 +127,6 @@ const resetManagedUserPassword = asyncHandler(async (req, res) => {
   );
   const io = req.app.get("io");
   if (io) {
-    io.emit("users_updated", {});
-    io.emit("user_profile_updated", { user });
     io.to(`user:${req.params.id}`).emit("force_logout", {
       reason: "password_reset",
     });
@@ -149,7 +147,13 @@ const updateMyProfile = asyncHandler(async (req, res) => {
   const user = result.user || result;
   const io = req.app.get("io");
   if (io) {
-    io.emit("user_profile_updated", { user });
+    const publicProfileChanged =
+      req.body?.fullName != null || req.body?.jobTitle !== undefined;
+    if (publicProfileChanged) {
+      io.emit("user_profile_updated", { user });
+    } else {
+      io.to(`user:${req.user.id}`).emit("user_profile_updated", { user });
+    }
     if (req.body?.password) {
       const currentDeviceUid = req.body?.deviceUid || req.user.deviceUid || null;
       io.to(`user:${req.user.id}`).emit("force_logout", {
@@ -191,8 +195,11 @@ const unregisterMyPushDevice = asyncHandler(async (req, res) => {
 
 const downloadAvatar = asyncHandler(async (req, res) => {
   const filePath = await getAvatarFilePath(req.params.id);
+  const hasVersionBuster = String(req.query?.v || "").trim().length > 0;
   await sendUploadFile(res, filePath, {
-    cacheControl: "private, max-age=300",
+    cacheControl: hasVersionBuster
+      ? "private, max-age=604800, immutable"
+      : "private, max-age=1800",
     disposition: "inline",
     notFoundMessage: "Avatar not found.",
     logLabel: "avatar-download",

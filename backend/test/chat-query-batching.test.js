@@ -389,6 +389,9 @@ test("listBranches and listDepartments aggregate user counts in a single batch q
   };
 
   try {
+    branchService.invalidateBranchesCache();
+    departmentService.invalidateDepartmentsCache();
+
     const [branches, departments] = await Promise.all([
       branchService.listBranches(),
       departmentService.listDepartments(),
@@ -400,10 +403,75 @@ test("listBranches and listDepartments aggregate user counts in a single batch q
     assert.equal(branches[1].membersCount, 0);
     assert.equal(departments[0].membersCount, 0);
     assert.equal(departments[1].membersCount, 9);
+
+    // Repeat reads within TTL should serve from cache without re-running User.aggregate
+    await Promise.all([
+      branchService.listBranches(),
+      departmentService.listDepartments(),
+    ]);
+    assert.equal(aggregateCount, 2);
   } finally {
+    branchService.invalidateBranchesCache();
+    departmentService.invalidateDepartmentsCache();
     Branch.find = origBranchFind;
     Department.find = origDeptFind;
     User.aggregate = origUserAggregate;
     User.countDocuments = origUserCountDocuments;
+  }
+});
+
+test("markMessageDeliveredForUsers batches multiple recipients into one write", async () => {
+  const origFindById = Message.findById;
+  const origFindByIdAndUpdate = Message.findByIdAndUpdate;
+  const origFindOne = Message.findOne;
+  const origConvUpdateOne = Conversation.updateOne;
+
+  let updateCalls = 0;
+  let pushedCount = 0;
+
+  Message.findById = () => ({
+    select: () => ({
+      lean: async () => ({
+        _id: "66f700000000000000000001",
+        conversationId: "66f700000000000000000010",
+        senderId: "sender-1",
+        deliveredTo: [{ userId: "u-existing" }],
+      }),
+    }),
+  });
+  Message.findByIdAndUpdate = (_id, update) => {
+    updateCalls += 1;
+    pushedCount = update?.$push?.deliveredTo?.$each?.length || 0;
+    return {
+      lean: async () => ({
+        _id: "66f700000000000000000001",
+        conversationId: "66f700000000000000000010",
+      }),
+    };
+  };
+  Message.findOne = () => ({
+    sort: () => ({
+      populate: () => ({
+        exec: async () => null,
+      }),
+    }),
+  });
+  Conversation.updateOne = async () => ({ acknowledged: true });
+
+  try {
+    await chatService.markMessageDeliveredForUsers("66f700000000000000000001", [
+      "sender-1",
+      "u-existing",
+      "u-2",
+      "u-3",
+      "u-3",
+    ]);
+    assert.equal(updateCalls, 1);
+    assert.equal(pushedCount, 2, "Only missing non-sender recipients should be pushed");
+  } finally {
+    Message.findById = origFindById;
+    Message.findByIdAndUpdate = origFindByIdAndUpdate;
+    Message.findOne = origFindOne;
+    Conversation.updateOne = origConvUpdateOne;
   }
 });

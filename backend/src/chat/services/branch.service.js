@@ -26,7 +26,19 @@ function serializeBranch(branch, membersCount = branch.membersCount || 0) {
   };
 }
 
+const BRANCH_CACHE_TTL_MS = 15000;
+let _branchesCache = null;
+let _branchesCacheExpiresAt = 0;
+
+function invalidateBranchesCache() {
+  _branchesCache = null;
+  _branchesCacheExpiresAt = 0;
+}
+
 async function listBranches() {
+  if (_branchesCache && Date.now() < _branchesCacheExpiresAt) {
+    return _branchesCache;
+  }
   const [branches, aggregatedCounts] = await Promise.all([
     Branch.find({ deletedAt: null }).sort({ name: 1 }).lean(),
     User.aggregate([
@@ -37,9 +49,12 @@ async function listBranches() {
   const countMap = new Map(
     aggregatedCounts.map((row) => [String(row._id), row.count]),
   );
-  return branches.map((branch) =>
+  const serialized = branches.map((branch) =>
     serializeBranch(branch, countMap.get(branch._id.toString()) || 0),
   );
+  _branchesCache = serialized;
+  _branchesCacheExpiresAt = Date.now() + BRANCH_CACHE_TTL_MS;
+  return serialized;
 }
 
 async function createBranch(actor, payload) {
@@ -78,6 +93,7 @@ async function createBranch(actor, payload) {
     throw error;
   }
 
+  invalidateBranchesCache();
   return serializeBranch(branch);
 }
 
@@ -121,6 +137,7 @@ async function updateBranch(actor, branchId, payload) {
     }
     throw error;
   }
+  invalidateBranchesCache();
   return serializeBranch(branch);
 }
 
@@ -139,6 +156,7 @@ async function deleteBranch(actor, branchId) {
   await User.updateMany({ branchId: branch._id }, { $set: { branchId: null } });
 
   await Branch.deleteOne({ _id: branchId });
+  invalidateBranchesCache();
 }
 
 module.exports = {
@@ -147,4 +165,5 @@ module.exports = {
   updateBranch,
   deleteBranch,
   serializeBranch,
+  invalidateBranchesCache,
 };

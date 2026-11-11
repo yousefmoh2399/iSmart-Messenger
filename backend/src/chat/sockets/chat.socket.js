@@ -20,6 +20,7 @@ const {
   getUserPresence,
 } = require("../services/chat.service");
 const { getEffectivePermissionsForUser } = require("../services/role.service");
+const { AUTH_USER_PROJECTION } = require("../../middleware/auth.middleware");
 const {
   getUnreadCountsForUser,
   getConversationState,
@@ -378,7 +379,7 @@ async function resolveSocketUser(socket) {
 
   const payload = jwt.verify(rawToken, jwtSecret);
   const user = await User.findById(payload.sub)
-    .select("+tokenVersion +refreshSessions")
+    .select(AUTH_USER_PROJECTION)
     .lean();
   if (!user || user.isActive === false) {
     throw new Error("User not found.");
@@ -1197,11 +1198,6 @@ function initializeChatSocketServer(httpServer) {
           fullName: currentUser.fullName || currentUser.username || "User",
         });
         socketAck(ack, { ok: true, success: true });
-        recordSocketTelemetry(io, socket, "typing", 4, {
-          path: "/socket/chat/typing",
-          label: "✍️ مؤشر كتابة رسالة",
-          statusCode: 200,
-        });
       } catch (error) {
         socketAck(ack, { ok: false, success: false, error: error.message });
       }

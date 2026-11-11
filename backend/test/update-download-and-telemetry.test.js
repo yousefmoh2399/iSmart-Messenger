@@ -218,3 +218,27 @@ test("createByteRateLimiter paces throughput while preserving byte-for-byte inte
   assert.equal(output.equals(payload), true);
   assert.ok(elapsedMs >= 150, `Expected paced stream to take >=150ms, took ${elapsedMs}ms`);
 });
+
+test("requestTelemetryMiddleware skips noisy avatar, attachment file, progress, and heartbeat routes", () => {
+  const { requestTelemetryMiddleware } = require("../src/middleware/request-telemetry.middleware");
+  const io = createMockIo();
+
+  for (const skipPath of [
+    "/api/users/u1/avatar",
+    "/api/chat/conversations/c1/avatar",
+    "/api/chat/messages/m1/test.png/file",
+    "/api/updates/tasks/t1/progress",
+    "/api/updates/devices/heartbeat",
+  ]) {
+    let calledNext = false;
+    let finishedHook = null;
+    requestTelemetryMiddleware(
+      { path: skipPath, method: "GET", headers: {}, app: { get: () => io } },
+      { statusCode: 200, on: (ev, cb) => { if (ev === "finish") finishedHook = cb; } },
+      () => { calledNext = true; },
+    );
+    assert.equal(calledNext, true, `Expected next() on ${skipPath}`);
+    assert.equal(finishedHook, null, `Expected telemetry listener NOT registered on ${skipPath}`);
+  }
+  assert.equal(io.roomEmits.length, 0);
+});

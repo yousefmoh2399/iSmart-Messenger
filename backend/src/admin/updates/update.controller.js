@@ -357,10 +357,15 @@ const downloadReleaseArtifact = (req, res, next) => {
     actor: req.user || null,
     downloadToken: req.query.token,
   })
-    .then(async () => {
+    .then(async (accessInfo) => {
+      const tokenDeviceUid =
+        accessInfo && typeof accessInfo === "object" && accessInfo.deviceUid
+          ? String(accessInfo.deviceUid).trim()
+          : "";
       const clientDeviceUid = String(
         req.query.deviceUid ||
         req.headers["x-device-uid"] ||
+        tokenDeviceUid ||
         req.user?.deviceUid ||
         req.user?.deviceInfo?.deviceUid ||
         "",

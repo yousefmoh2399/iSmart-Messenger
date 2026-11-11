@@ -9,6 +9,9 @@ function resolveTokenVersion(value) {
   return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
+const AUTH_USER_PROJECTION =
+  "_id username role permissionOverrides fullName departmentId departmentIds branchId branchCode isOnline presenceStatus isActive avatarUrl lastSeen lastActiveAt maxAttachmentSizeMB +tokenVersion +refreshSessions";
+
 function buildUserPayload(user, permissions, deviceUid = null) {
   return {
     id: user._id.toString(),
@@ -67,7 +70,7 @@ async function authenticateRequest(req) {
   }
 
   const user = await User.findById(payload.sub)
-    .select('+tokenVersion +refreshSessions')
+    .select(AUTH_USER_PROJECTION)
     .lean();
   if (!user || user.isActive === false) {
     return null;
@@ -113,7 +116,7 @@ const requireAuth = asyncHandler(async (req, res, next) => {
   }
 
   const user = await User.findById(payload.sub)
-    .select('+tokenVersion +refreshSessions')
+    .select(AUTH_USER_PROJECTION)
     .lean();
   if (!user) {
     throw new ApiError(401, 'User no longer exists.');
@@ -141,9 +144,11 @@ const requireAuth = asyncHandler(async (req, res, next) => {
 });
 
 module.exports = {
+  AUTH_USER_PROJECTION,
   requireAuth,
   optionalAuth,
   authenticateRequest,
+  buildUserPayload,
 };
 
 function resolveRequestToken(req, authorizationHeader) {

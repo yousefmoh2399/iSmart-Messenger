@@ -35,7 +35,19 @@ function serializeDepartment(department, membersCount = department.membersCount 
   };
 }
 
+const DEPARTMENT_CACHE_TTL_MS = 15000;
+let _departmentsCache = null;
+let _departmentsCacheExpiresAt = 0;
+
+function invalidateDepartmentsCache() {
+  _departmentsCache = null;
+  _departmentsCacheExpiresAt = 0;
+}
+
 async function listDepartments() {
+  if (_departmentsCache && Date.now() < _departmentsCacheExpiresAt) {
+    return _departmentsCache;
+  }
   const [departments, aggregatedCounts] = await Promise.all([
     Department.find({ deletedAt: null }).sort({ name: 1 }).lean(),
     User.aggregate([
@@ -62,12 +74,15 @@ async function listDepartments() {
   const countMap = new Map(
     aggregatedCounts.map((row) => [String(row._id), row.count]),
   );
-  return departments.map((department) =>
+  const serialized = departments.map((department) =>
     serializeDepartment(
       department,
       countMap.get(department._id.toString()) || 0,
     ),
   );
+  _departmentsCache = serialized;
+  _departmentsCacheExpiresAt = Date.now() + DEPARTMENT_CACHE_TTL_MS;
+  return serialized;
 }
 
 async function createDepartment(actor, payload) {
@@ -107,6 +122,7 @@ async function createDepartment(actor, payload) {
     throw error;
   }
 
+  invalidateDepartmentsCache();
   return serializeDepartment(department);
 }
 
@@ -157,6 +173,7 @@ async function updateDepartment(actor, departmentId, payload) {
     throw error;
   }
 
+  invalidateDepartmentsCache();
   return serializeDepartment(department);
 }
 
@@ -217,6 +234,7 @@ async function deleteDepartment(actor, departmentId) {
   }
   await Conversation.deleteMany({ departmentId: department._id });
   await Department.deleteOne({ _id: departmentId });
+  invalidateDepartmentsCache();
 }
 
 module.exports = {
@@ -225,4 +243,5 @@ module.exports = {
   updateDepartment,
   deleteDepartment,
   serializeDepartment,
+  invalidateDepartmentsCache,
 };

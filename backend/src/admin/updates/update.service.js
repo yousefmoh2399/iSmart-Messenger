@@ -1795,7 +1795,7 @@ async function validateReleaseDownloadAccess({
 }) {
   const resolvedReleaseId = String(releaseId || "");
   if (actor) {
-    return true;
+    return { valid: true, deviceUid: actor.deviceUid || null, taskId: null };
   }
 
   const payload = verifyReleaseDownloadToken(downloadToken);
@@ -1830,7 +1830,7 @@ async function validateReleaseDownloadAccess({
     throw new ApiError(403, "Task is not active for download.");
   }
 
-  return true;
+  return { valid: true, deviceUid, taskId };
 }
 
 async function pruneDisabledReleaseArtifact(actor, releaseId) {

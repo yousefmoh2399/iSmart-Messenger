@@ -143,6 +143,9 @@ const conversationSchema = new mongoose.Schema(
 
 conversationSchema.index({ type: 1, departmentId: 1 });
 conversationSchema.index({ members: 1, updatedAt: -1 });
+conversationSchema.index({ createdBy: 1, deletedAt: 1 });
+conversationSchema.index({ admins: 1, deletedAt: 1 });
+conversationSchema.index({ broadcastPublisherIds: 1, deletedAt: 1 });
 conversationSchema.index({ type: 1, directKey: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("Conversation", conversationSchema);

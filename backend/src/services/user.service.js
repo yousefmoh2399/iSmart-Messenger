@@ -859,7 +859,7 @@ async function updateUserAvatar(actor, file) {
 }
 
 async function getAvatarFilePath(userId) {
-  const user = await User.findById(userId).lean();
+  const user = await User.findById(userId).select("_id").lean();
   if (!user) {
     throw new ApiError(404, "Avatar not found.");
   }

@@ -2539,21 +2539,45 @@ async function markConversationDelivered(currentUser, conversationId) {
   return deliveredIds.map((id) => id.toString());
 }
 
-async function markMessageDeliveredForUser(messageId, userId) {
-  const receipt = { userId, at: new Date() };
-  const updatedMessage = await Message.findOneAndUpdate(
-    {
-      _id: messageId,
-      senderId: { $ne: userId },
-      "deliveredTo.userId": { $ne: userId },
-    },
-    { $push: { deliveredTo: receipt } },
+async function markMessageDeliveredForUsers(messageId, userIds = []) {
+  const uniqueIds = [...new Set((userIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    return null;
+  }
+
+  const existing = await Message.findById(messageId)
+    .select("_id conversationId senderId deliveredTo.userId")
+    .lean();
+  if (!existing) {
+    return null;
+  }
+
+  const senderIdStr = existing.senderId ? String(existing.senderId) : "";
+  const alreadyDelivered = new Set(
+    (existing.deliveredTo || []).map((entry) => String(entry?.userId || "")),
+  );
+  const missingIds = uniqueIds.filter(
+    (id) => id !== senderIdStr && !alreadyDelivered.has(id),
+  );
+  if (missingIds.length === 0) {
+    return existing;
+  }
+
+  const now = new Date();
+  const entries = missingIds.map((id) => ({ userId: id, at: now }));
+  const updatedMessage = await Message.findByIdAndUpdate(
+    messageId,
+    { $push: { deliveredTo: { $each: entries } } },
     { new: true },
   ).lean();
   if (updatedMessage) {
     await refreshConversationLastMessage(updatedMessage.conversationId);
   }
   return updatedMessage;
+}
+
+async function markMessageDeliveredForUser(messageId, userId) {
+  return markMessageDeliveredForUsers(messageId, [userId]);
 }
 
 async function markPendingDeliveriesForUser(currentUser) {
@@ -2590,13 +2614,18 @@ async function markPendingDeliveriesForUser(currentUser) {
     return [];
   }
 
+  const recentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const undeliveredMessages = await Message.find({
     conversationId: { $in: conversationIds },
     isDeleted: { $ne: true },
+    isScheduled: { $ne: true },
+    createdAt: { $gte: recentCutoff },
     senderId: { $ne: currentUser.id },
     "deliveredTo.userId": { $ne: currentUser.id },
   })
     .select("_id conversationId metadata.broadcastTargets")
+    .sort({ _id: -1 })
+    .limit(500)
     .lean();
 
   const grouped = new Map();
@@ -4580,7 +4609,9 @@ async function getConversationAvatarFilePath(conversationId) {
   const conversation = await Conversation.findOne({
     _id: conversationId,
     deletedAt: null,
-  }).lean();
+  })
+    .select("_id")
+    .lean();
   if (!conversation) {
     throw new ApiError(404, "Avatar not found.");
   }
@@ -4691,6 +4722,7 @@ module.exports = {
   toggleMessageFavorite,
   markConversationDelivered,
   markMessageDeliveredForUser,
+  markMessageDeliveredForUsers,
   markPendingDeliveriesForUser,
   markConversationSeen,
   markMessageSeen,

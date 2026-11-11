@@ -108,7 +108,7 @@ function recordSocketTelemetry(io, socket, eventName, durationMs = 8, details = 
 }
 
 function requestTelemetryMiddleware(req, res, next) {
-  // Ignore static assets, health checks, and system-monitor polls to prevent telemetry self-loop
+  // Ignore static assets, health checks, avatars/progress streams, and monitor polls to prevent telemetry overhead/self-loops
   const p = req.path || "";
   if (
     p.startsWith("/assets") ||
@@ -116,6 +116,10 @@ function requestTelemetryMiddleware(req, res, next) {
     p === "/favicon.ico" ||
     p.includes("/system-monitor/") ||
     p.includes("/request-telemetry") ||
+    p.includes("/progress") ||
+    p.endsWith("/avatar") ||
+    p.endsWith("/file") ||
+    p.endsWith("/devices/heartbeat") ||
     p === "/health" ||
     p === "/api/health"
   ) {

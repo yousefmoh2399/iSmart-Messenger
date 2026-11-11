@@ -161,6 +161,7 @@ const releaseSchema = new mongoose.Schema(
 );
 
 releaseSchema.index({ version: 1, channel: 1, platform: 1 }, { unique: true });
+releaseSchema.index({ platform: 1, isEnabled: 1, createdAt: -1 });
 
 module.exports = mongoose.model("UpdateRelease", releaseSchema);
 

@@ -27,7 +27,7 @@ const {
   listMessagesForConversation,
   createMessage,
   markConversationDelivered,
-  markMessageDeliveredForUser,
+  markMessageDeliveredForUsers,
   updateMessage,
   toggleMessageReaction,
   toggleMessageFavorite,
@@ -408,7 +408,7 @@ const downloadConversationAvatar = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const filePath = await getConversationAvatarFilePath(id);
   await sendUploadFile(res, filePath, {
-    cacheControl: "private, max-age=300",
+    cacheControl: String(req.query?.v || "").trim() ? "private, max-age=604800, immutable" : "private, max-age=1800",
     disposition: "inline",
     notFoundMessage: "Avatar not found.",
     logLabel: "conversation-avatar-download",
@@ -735,11 +735,7 @@ const postChatMessage = asyncHandler(async (req, res) => {
         return delivery.hasMobile || delivery.hasDesktop || delivery.hasWeb;
       },
     );
-    await Promise.all(
-      liveRecipientIds.map((userId) =>
-        markMessageDeliveredForUser(result.message.id, userId),
-      ),
-    );
+    await markMessageDeliveredForUsers(result.message.id, liveRecipientIds);
     if (liveRecipientIds.length > 0) {
       const deliveredIds = new Set(
         (result.message.deliveredTo || []).map((entry) => String(entry.userId)),
@@ -811,7 +807,6 @@ const reactToChatMessage = asyncHandler(async (req, res) => {
   const io = req.app.get("io");
   if (io) {
     await emitMessageUpdated(io, message);
-    emitConversationToMembers(io, message.conversationId);
     if (toggleResult.reactionAdded) {
       const senderId = String(message.senderId || "").trim();
       const reactorId = String(req.user.id);
