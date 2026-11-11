@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../shared/models/app_user.dart';
 import '../../../shared/models/managed_user.dart';
 import '../../../shared/providers/providers.dart';
 
@@ -35,7 +36,7 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
     final current = state;
     state = const AsyncLoading<List<ManagedUser>>().copyWithPrevious(current);
     state = await AsyncValue.guard(() async {
-      final hasSession = await _waitForAuthenticatedSession();
+      final hasSession = await _waitForAuthenticatedSession(listen: false);
       if (!hasSession) {
         return const <ManagedUser>[];
       }
@@ -76,31 +77,26 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
     }
   }
 
-  Future<bool> _waitForAuthenticatedSession() async {
-    ref.watch(authCredentialsRevisionProvider);
-    final authUser = ref.watch(currentUserProvider);
-    if (authUser == null) {
-      return false;
-    }
-    final token = await ref.watch(authTokenProvider.future);
-    if (token == null || token.trim().isEmpty) {
-      return false;
-    }
-    return true;
+  Future<bool> _waitForAuthenticatedSession({bool listen = false}) {
+    return waitForAuthenticatedSession(ref, listen: listen);
+  }
+
+  static bool _hasManageUsersPermission(AppUser? user) {
+    return user != null &&
+        (user.isAdmin || user.role == 'manager' || user.can('canCreateUsers'));
   }
 
   bool _canReadManagedUsers({bool listen = false}) {
-    final user = listen
-        ? ref.watch(currentUserProvider)
-        : ref.read(currentUserProvider);
-    return user != null &&
-        (user.isAdmin || user.role == 'manager' || user.can('canCreateUsers'));
+    if (listen) {
+      return ref.watch(currentUserProvider.select(_hasManageUsersPermission));
+    }
+    return _hasManageUsersPermission(ref.read(currentUserProvider));
   }
 
   @override
   Future<List<ManagedUser>> build() async {
     ref.watch(serverRecoveryRevisionProvider);
-    final hasSession = await _waitForAuthenticatedSession();
+    final hasSession = await _waitForAuthenticatedSession(listen: true);
     if (!hasSession) {
       return const [];
     }
@@ -131,7 +127,7 @@ class UsersController extends AsyncNotifier<List<ManagedUser>> {
     final future = () async {
       state = const AsyncLoading<List<ManagedUser>>().copyWithPrevious(current);
       state = await AsyncValue.guard(() async {
-        final hasSession = await _waitForAuthenticatedSession();
+        final hasSession = await _waitForAuthenticatedSession(listen: false);
         if (!hasSession) {
           return const <ManagedUser>[];
         }

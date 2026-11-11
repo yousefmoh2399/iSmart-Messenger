@@ -729,6 +729,27 @@ final authTokenProvider = FutureProvider<String?>((ref) async {
   return ref.read(authRepositoryProvider).getValidToken();
 });
 
+/// Checks whether a user session and token are active without subscribing
+/// callers to silent JWT refresh revisions ([authCredentialsRevisionProvider]).
+Future<bool> waitForAuthenticatedSession(
+  Ref ref, {
+  bool listen = false,
+}) async {
+  final authUserId = listen
+      ? ref.watch(currentUserProvider.select((u) => u?.id))
+      : ref.read(currentUserProvider)?.id;
+  if (authUserId == null || authUserId.isEmpty) {
+    return false;
+  }
+  final token = await ref.read(authTokenProvider.future);
+  if (token == null ||
+      token.trim().isEmpty ||
+      token.trim().toLowerCase() == 'null') {
+    return false;
+  }
+  return true;
+}
+
 
 
 final chatOverviewControllerProvider =

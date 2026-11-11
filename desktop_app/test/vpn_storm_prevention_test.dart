@@ -165,12 +165,16 @@ class _FakeStormChatRepository implements ChatRepository {
   final List<ChatConversation> conversations;
   final List<ChatDirectoryUser> users;
   final Map<String, int> fetchMessagesCounts = {};
+  int fetchConversationsCount = 0;
 
   @override
   final ChatLocalCache cache = ChatLocalCache();
 
   @override
-  Future<List<ChatConversation>> fetchConversations() async => conversations;
+  Future<List<ChatConversation>> fetchConversations() async {
+    fetchConversationsCount++;
+    return conversations;
+  }
 
   @override
   Future<List<ChatConversation>> fetchManageableConversations() async =>
@@ -550,6 +554,64 @@ void main() {
           2,
           reason: 'Transient 502 on GET retries at most once (initial + 1 retry)',
         );
+      },
+    );
+
+    test(
+      'Silent authCredentialsRevisionProvider bump does not rebuild ChatOverview or kept-alive conversations',
+      () async {
+        final fakeRepo = _FakeStormChatRepository(
+          conversations: [
+            _buildConversation('conv_1'),
+            _buildConversation('conv_2'),
+          ],
+        );
+        final fakeSocket = _FakeChatSocketService();
+        addTearDown(fakeSocket.dispose);
+
+        final container = ProviderContainer(
+          overrides: [
+            chatRepositoryProvider.overrideWithValue(fakeRepo),
+            chatSocketServiceProvider.overrideWithValue(fakeSocket),
+            chatSocketConnectionProvider.overrideWith(
+              (ref) => Future<void>.value(),
+            ),
+            authControllerProvider.overrideWith(_FakeAuthController.new),
+            currentUserProvider.overrideWithValue(_buildTestUser()),
+            authTokenProvider.overrideWith((ref) async {
+              final rev = ref.watch(authCredentialsRevisionProvider);
+              return 'token_rev_$rev';
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(chatOverviewControllerProvider.future);
+        await container.read(
+          conversationMessagesControllerProvider('conv_1').future,
+        );
+        await container.read(
+          conversationMessagesControllerProvider('conv_2').future,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(fakeRepo.fetchConversationsCount, 1);
+        expect(fakeRepo.fetchMessagesCounts['conv_1'], 1);
+        expect(fakeRepo.fetchMessagesCounts['conv_2'], 1);
+
+        // Simulate two silent token refreshes.
+        container.read(authCredentialsRevisionProvider.notifier).state++;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        container.read(authCredentialsRevisionProvider.notifier).state++;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        expect(
+          fakeRepo.fetchConversationsCount,
+          1,
+          reason: 'Overview must not reload on silent token rotation',
+        );
+        expect(fakeRepo.fetchMessagesCounts['conv_1'], 1);
+        expect(fakeRepo.fetchMessagesCounts['conv_2'], 1);
       },
     );
   });

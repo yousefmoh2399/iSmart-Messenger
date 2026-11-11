@@ -104,24 +104,13 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     }
   }
 
-  Future<bool> _waitForAuthenticatedSession() async {
-    ref.watch(authCredentialsRevisionProvider);
-    final authUser = ref.watch(currentUserProvider);
-    if (authUser == null) {
-      return false;
-    }
-    final token = await ref.watch(authTokenProvider.future);
-    if (token == null ||
-        token.trim().isEmpty ||
-        token.trim().toLowerCase() == 'null') {
-      return false;
-    }
-    return true;
+  Future<bool> _waitForAuthenticatedSession({bool listen = false}) {
+    return waitForAuthenticatedSession(ref, listen: listen);
   }
 
   @override
   Future<ChatOverviewData> build() async {
-    final hasSession = await _waitForAuthenticatedSession();
+    final hasSession = await _waitForAuthenticatedSession(listen: true);
     if (!hasSession) {
       return const ChatOverviewData(
         conversations: [],
@@ -156,7 +145,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   }
 
   Future<ChatOverviewData> _loadOverview({bool forceNetwork = false}) async {
-    final hasSession = await _waitForAuthenticatedSession();
+    final hasSession = await _waitForAuthenticatedSession(listen: false);
     if (!hasSession) {
       return const ChatOverviewData(
         conversations: [],
@@ -1938,25 +1927,14 @@ class ConversationMessagesController
     }
   }
 
-  Future<bool> _waitForAuthenticatedSession() async {
-    ref.watch(authCredentialsRevisionProvider);
-    final authUser = ref.watch(currentUserProvider);
-    if (authUser == null) {
-      return false;
-    }
-    final token = await ref.watch(authTokenProvider.future);
-    if (token == null ||
-        token.trim().isEmpty ||
-        token.trim().toLowerCase() == 'null') {
-      return false;
-    }
-    return true;
+  Future<bool> _waitForAuthenticatedSession({bool listen = false}) {
+    return waitForAuthenticatedSession(ref, listen: listen);
   }
 
   @override
   Future<ConversationMessagesState> build(String arg) async {
     ref.keepAlive();
-    final hasSession = await _waitForAuthenticatedSession();
+    final hasSession = await _waitForAuthenticatedSession(listen: true);
     if (!hasSession) {
       return const ConversationMessagesState(
         messages: [],
@@ -2351,7 +2329,7 @@ class ConversationMessagesController
     if (_isRefreshing || _disposed || _isInitialBuildFetchingNetwork) {
       return;
     }
-    if (!await _waitForAuthenticatedSession()) {
+    if (!await _waitForAuthenticatedSession(listen: false)) {
       return;
     }
     _staleOnReconnect = false;
@@ -2397,7 +2375,7 @@ class ConversationMessagesController
     if (current == null || !current.hasMore || current.isLoadingMore) {
       return;
     }
-    if (!await _waitForAuthenticatedSession()) {
+    if (!await _waitForAuthenticatedSession(listen: false)) {
       return;
     }
 

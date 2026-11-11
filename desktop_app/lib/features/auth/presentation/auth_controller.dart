@@ -127,6 +127,7 @@ class AuthController extends Notifier<AuthState> {
           {'userId': user.id, 'username': user.username},
         );
         ref.read(activeConversationIdProvider.notifier).state = null;
+        ref.invalidate(authTokenProvider);
         ref.invalidate(chatOverviewControllerProvider);
         ref.invalidate(chatRealtimeControllerProvider);
         ref.invalidate(usersControllerProvider);
