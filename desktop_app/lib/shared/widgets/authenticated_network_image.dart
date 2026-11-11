@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:desktop_app/core/network/in_flight_coalescer.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -186,13 +187,10 @@ class _AuthenticatedNetworkImageState
         }
 
         try {
-          final bytes = await _inFlight.putIfAbsent(
+          final bytes = await runCoalescedInFlight(
+            _inFlight,
             cacheKey,
-            () => _fetchWithAuthRetry(
-              url,
-              headers,
-              authRepository,
-            ).whenComplete(() => _inFlight.remove(cacheKey)),
+            () => _fetchWithAuthRetry(url, headers, authRepository),
           );
           _remember(cacheKey, bytes);
           if (mounted &&
@@ -391,6 +389,7 @@ class _AuthenticatedNetworkImageState
           cacheWidth: _cacheExtent(context, widget.width),
           cacheHeight: _cacheExtent(context, widget.height),
           errorBuilder: (_, error, __) {
+            debugPrint('Image.network decode failed: $_webImageUrl -> $error');
             return errorWidget;
           },
         );
@@ -415,6 +414,9 @@ class _AuthenticatedNetworkImageState
         cacheWidth: _cacheExtent(context, widget.width),
         cacheHeight: _cacheExtent(context, widget.height),
         errorBuilder: (_, error, __) {
+          debugPrint(
+            'Image.memory decode failed (${_bytes?.length ?? 0} bytes): $error',
+          );
           return errorWidget;
         },
       );
