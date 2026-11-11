@@ -17,6 +17,7 @@ class DesktopUpdateEvent {
     this.status,
     this.message = '',
     this.progress,
+    this.version,
   });
 
   final String type;
@@ -24,6 +25,7 @@ class DesktopUpdateEvent {
   final String? status;
   final String message;
   final int? progress;
+  final String? version;
 
   factory DesktopUpdateEvent.status({
     required String taskId,
@@ -67,12 +69,14 @@ class DesktopUpdateEvent {
   factory DesktopUpdateEvent.readyToRestart({
     required String taskId,
     required String message,
+    String? version,
   }) {
     return DesktopUpdateEvent(
       type: 'ready_to_restart',
       taskId: taskId,
       message: message,
       progress: 100,
+      version: version,
     );
   }
 
@@ -91,6 +95,7 @@ class DesktopUpdateEvent {
       status: 'available',
       message: message,
       progress: 0,
+      version: version,
     );
   }
 }
@@ -116,6 +121,8 @@ class DesktopUpdateAgent {
   Future<DeviceHeartbeatResponse?>? _activeHeartbeatFuture;
   int _lastProgressReported = -1;
   String? _lastReportedStatus;
+  String? _lastNotifiedAvailableVersion;
+  String? _lastNotifiedDownloadedVersion;
 
   final ValueNotifier<bool> hasPreparedUpdateNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<bool> hasUpdateAvailableNotifier = ValueNotifier<bool>(false);
@@ -251,19 +258,37 @@ class DesktopUpdateAgent {
         final targetVer = hasPending
             ? response.pendingTasks.first.release.version
             : response.latestRelease!.version;
-        _eventsController.add(
-          DesktopUpdateEvent.updateAvailable(
-            version: targetVer,
-            message: 'يتوفر إصدار جديد (' + targetVer + ') لتطبيق المنظومة.',
-            taskId: hasPending ? response.pendingTasks.first.id : null,
-          ),
-        );
-        unawaited(
-          web_bridge.showBrowserNotification(
-            title: 'تحديث جديد متاح',
-            body: 'يتوفر إصدار جديد (' + targetVer + ') لتطبيق المنظومة. انقر للاطلاع عليه.',
-          ),
-        );
+        if (_lastNotifiedAvailableVersion != targetVer) {
+          _lastNotifiedAvailableVersion = targetVer;
+          _eventsController.add(
+            DesktopUpdateEvent.updateAvailable(
+              version: targetVer,
+              message: 'يتوفر إصدار جديد (' + targetVer + ') لتطبيق المنظومة.',
+              taskId: hasPending ? response.pendingTasks.first.id : null,
+            ),
+          );
+          unawaited(
+            web_bridge.showBrowserNotification(
+              title: 'تحديث جديد متاح',
+              body: 'يتوفر إصدار جديد (' + targetVer + ') لتطبيق المنظومة. انقر للاطلاع عليه.',
+            ),
+          );
+        }
+      } else {
+        hasUpdateAvailableNotifier.value = false;
+        _lastNotifiedAvailableVersion = null;
+        _lastNotifiedDownloadedVersion = null;
+        try {
+          final currentState = await _stateStore.load();
+          if (currentState.status == 'downloaded') {
+            await _stateStore.clear();
+          }
+        } catch (_) {}
+        if (!_isTaskRunning) {
+          _eventsController.add(
+            const DesktopUpdateEvent(type: 'clear'),
+          );
+        }
       }
 
       if (isElectron && response.pendingTasks.isNotEmpty && !_isTaskRunning) {
@@ -423,18 +448,22 @@ class DesktopUpdateAgent {
         message: 'تم تحميل التحديث بالكامل وجاهز لإعادة التشغيل.',
       );
 
-      unawaited(
-        web_bridge.showBrowserNotification(
-          title: 'اكتمل تحميل التحديث',
-          body: 'تم تنزيل الإصدار ' + task.release.version + ' بنجاح. أعد تشغيل التطبيق لإكمال التثبيت.',
-        ),
-      );
+      if (_lastNotifiedDownloadedVersion != task.release.version) {
+        _lastNotifiedDownloadedVersion = task.release.version;
+        unawaited(
+          web_bridge.showBrowserNotification(
+            title: 'اكتمل تحميل التحديث',
+            body: 'تم تنزيل الإصدار ' + task.release.version + ' بنجاح. أعد تشغيل التطبيق لإكمال التثبيت.',
+          ),
+        );
+      }
 
       _eventsController.add(
         DesktopUpdateEvent.readyToRestart(
           taskId: task.id,
           message:
               'تم تنزيل التحديث ${task.release.version}. يمكنك متابعة عملك الآن ثم إعادة تشغيل التطبيق لاحقًا لتثبيته.',
+          version: task.release.version,
         ),
       );
     } catch (error) {
@@ -565,17 +594,21 @@ class DesktopUpdateAgent {
       downloadProgressNotifier.value = 1.0;
       statusMessageNotifier.value = 'تم تحميل التحديث بنجاح وجاهز للتثبيت.';
 
-      unawaited(
-        web_bridge.showBrowserNotification(
-          title: 'اكتمل تنزيل التحديث',
-          body: 'الإصدار ' + release.version + ' جاهز للتثبيت عند إعادة التشغيل.',
-        ),
-      );
+      if (_lastNotifiedDownloadedVersion != release.version) {
+        _lastNotifiedDownloadedVersion = release.version;
+        unawaited(
+          web_bridge.showBrowserNotification(
+            title: 'اكتمل تنزيل التحديث',
+            body: 'الإصدار ' + release.version + ' جاهز للتثبيت عند إعادة التشغيل.',
+          ),
+        );
+      }
 
       _eventsController.add(
         DesktopUpdateEvent.readyToRestart(
           taskId: 'manual_' + release.id,
           message: 'تم تنزيل التحديث ' + release.version + '. يمكنك إعادة تشغيل التطبيق لتثبيته.',
+          version: release.version,
         ),
       );
     } catch (e) {
@@ -699,6 +732,7 @@ class DesktopUpdateAgent {
           taskId: taskId,
           message:
               'يوجد تحديث جاهز للتثبيت بالفعل. أعد تشغيل التطبيق عندما يناسبك.',
+          version: taskState.targetVersion,
         ),
       );
     }

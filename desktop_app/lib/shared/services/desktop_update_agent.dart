@@ -25,6 +25,7 @@ class DesktopUpdateEvent {
     this.status,
     this.message = '',
     this.progress,
+    this.version,
   });
 
   final String type;
@@ -32,6 +33,7 @@ class DesktopUpdateEvent {
   final String? status;
   final String message;
   final int? progress;
+  final String? version;
 
   factory DesktopUpdateEvent.status({
     required String taskId,
@@ -75,12 +77,14 @@ class DesktopUpdateEvent {
   factory DesktopUpdateEvent.readyToRestart({
     required String taskId,
     required String message,
+    String? version,
   }) {
     return DesktopUpdateEvent(
       type: 'ready_to_restart',
       taskId: taskId,
       message: message,
       progress: 100,
+      version: version,
     );
   }
 
@@ -99,6 +103,7 @@ class DesktopUpdateEvent {
       status: 'available',
       message: message,
       progress: 0,
+      version: version,
     );
   }
 }

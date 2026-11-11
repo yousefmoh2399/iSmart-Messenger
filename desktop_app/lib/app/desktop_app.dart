@@ -155,6 +155,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _lastKnownWindowMinimized = false;
   // Throttle: last time we fired a health-ping from updates_updated event
   DateTime? _lastUpdatesRefreshAt;
+  String? _lastNotifiedUpdateVersion;
+  Timer? _updateBannerAutoDismissTimer;
 
   // Event-driven connection flag.
   // True while the app is still establishing/re-establishing its connection.
@@ -173,9 +175,14 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(error.toString())));
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          content: Text(error.toString()),
+        ),
+      );
     }
   }
 
@@ -186,9 +193,14 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.maybeOf(
-        context,
-      )?.showSnackBar(SnackBar(content: Text(error.toString())));
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.hideCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 4),
+          content: Text(error.toString()),
+        ),
+      );
     }
   }
 
@@ -545,6 +557,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
 
   @override
   void dispose() {
+    _updateBannerAutoDismissTimer?.cancel();
     _desktopEventsSubscription?.cancel();
     _updateAgentEventsSubscription?.cancel();
     _lanIncomingSubscription?.cancel();
@@ -731,6 +744,13 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                   isPendingRestart: _isPendingRestart,
                   onTap: () {
                     setState(() => _isUpdateDialogMinimized = false);
+                  },
+                  onDismiss: () {
+                    _updateBannerAutoDismissTimer?.cancel();
+                    setState(() {
+                      _isUpdateInProgress = false;
+                      _isUpdateDialogMinimized = false;
+                    });
                   },
                   onRestartNow: _isPendingRestart
                       ? _restartPreparedUpdate
@@ -968,11 +988,22 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           if (!mounted) {
             return;
           }
+          final messenger = ScaffoldMessenger.maybeOf(context);
           if (event.type == 'update_available') {
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            if (_lastNotifiedUpdateVersion == event.version) {
+              return;
+            }
+            _lastNotifiedUpdateVersion = event.version;
+            messenger?.hideCurrentSnackBar();
+            messenger?.showSnackBar(
               SnackBar(
                 backgroundColor: const Color(0xFF1E293B),
-                duration: const Duration(seconds: 10),
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 content: Row(
                   children: [
                     const Icon(Icons.system_update_rounded, color: Color(0xFF38BDF8), size: 22),
@@ -982,6 +1013,13 @@ class _AuthGateState extends ConsumerState<_AuthGate>
                         event.message,
                         style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
                       ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                      tooltip: 'إغلاق',
+                      onPressed: () {
+                        ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+                      },
                     ),
                   ],
                 ),
@@ -1000,6 +1038,19 @@ class _AuthGateState extends ConsumerState<_AuthGate>
             );
             return;
           }
+          if (event.type == 'clear') {
+            _lastNotifiedUpdateVersion = null;
+            _updateBannerAutoDismissTimer?.cancel();
+            messenger?.hideCurrentSnackBar();
+            setState(() {
+              _isUpdateInProgress = false;
+              _isUpdateDialogMinimized = false;
+              _isPendingRestart = false;
+              _updateStatusMessage = '';
+              _updateProgress = 0;
+            });
+            return;
+          }
           if (event.type == 'status') {
             setState(() {
               _isUpdateInProgress = true;
@@ -1016,24 +1067,60 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               _updateStatusMessage = event.message;
               _updateProgress = event.progress ?? 100;
             });
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            messenger?.hideCurrentSnackBar();
+            messenger?.showSnackBar(
               SnackBar(
-                content: Text(
-                  event.message.isEmpty
-                      ? 'اكتمل تنزيل التحديث. يمكنك إعادة تشغيل التطبيق عندما يناسبك.'
-                      : event.message,
+                backgroundColor: const Color(0xFF0F172A),
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                content: Row(
+                  children: [
+                    const Icon(Icons.restart_alt_rounded, color: Color(0xFF4ADE80), size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        event.message.isEmpty
+                            ? 'اكتمل تنزيل التحديث. يمكنك إعادة تشغيل التطبيق عندما يناسبك.'
+                            : event.message,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                      tooltip: 'إغلاق',
+                      onPressed: () {
+                        ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+                      },
+                    ),
+                  ],
                 ),
                 action: SnackBarAction(
                   label: 'إعادة التشغيل',
+                  textColor: const Color(0xFF4ADE80),
                   onPressed: () {
                     unawaited(_restartPreparedUpdate());
                   },
                 ),
               ),
             );
+            // Auto-dismiss the floating corner banner after 10s so it doesn't stay stuck
+            _updateBannerAutoDismissTimer?.cancel();
+            _updateBannerAutoDismissTimer = Timer(const Duration(seconds: 10), () {
+              if (mounted && _isPendingRestart) {
+                setState(() {
+                  _isUpdateInProgress = false;
+                });
+              }
+            });
             return;
           }
           if (event.type == 'completed') {
+            _updateBannerAutoDismissTimer?.cancel();
+            messenger?.hideCurrentSnackBar();
             setState(() {
               _isUpdateInProgress = false;
               _isUpdateDialogMinimized = false;
@@ -1041,8 +1128,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               _updateStatusMessage = '';
               _updateProgress = 100;
             });
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            messenger?.showSnackBar(
               SnackBar(
+                duration: const Duration(seconds: 4),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
                 content: Text(
                   event.message.isEmpty
                       ? 'تم تثبيت التحديث بنجاح.'
@@ -1053,6 +1143,8 @@ class _AuthGateState extends ConsumerState<_AuthGate>
             return;
           }
           if (event.type == 'failed') {
+            _updateBannerAutoDismissTimer?.cancel();
+            messenger?.hideCurrentSnackBar();
             final message = event.message.trim();
             setState(() {
               _isUpdateInProgress = false;
@@ -1061,8 +1153,11 @@ class _AuthGateState extends ConsumerState<_AuthGate>
               _updateStatusMessage = '';
               _updateProgress = 0;
             });
-            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            messenger?.showSnackBar(
               SnackBar(
+                duration: const Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+                dismissDirection: DismissDirection.horizontal,
                 content: Text(
                   message.isEmpty
                       ? 'فشل تحديث التطبيق.'
@@ -1099,16 +1194,22 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.stage == 'completed') {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(
           SnackBar(
+            duration: const Duration(seconds: 4),
             content: Text(
               'تم استلام ${event.fileName} من ${event.peerIp ?? 'جهاز على الشبكة'} بنجاح.',
             ),
           ),
         );
       } else if (event.stage == 'failed') {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(
           SnackBar(
+            duration: const Duration(seconds: 4),
             content: Text(
               event.message?.trim().isNotEmpty == true
                   ? event.message!
@@ -1687,6 +1788,7 @@ class _UpdateProgressBanner extends StatelessWidget {
     required this.isPendingRestart,
     required this.onTap,
     required this.onRestartNow,
+    this.onDismiss,
   });
 
   final String message;
@@ -1694,6 +1796,7 @@ class _UpdateProgressBanner extends StatelessWidget {
   final bool isPendingRestart;
   final VoidCallback onTap;
   final VoidCallback? onRestartNow;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -1752,6 +1855,21 @@ class _UpdateProgressBanner extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    if (onDismiss != null)
+                      Tooltip(
+                        message: 'إغلاق الإشعار',
+                        child: GestureDetector(
+                          onTap: onDismiss,
+                          child: const Padding(
+                            padding: EdgeInsets.only(left: 4),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 6),

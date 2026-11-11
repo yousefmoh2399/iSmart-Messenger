@@ -2017,8 +2017,28 @@ function showLanReceiveNotification(entry) {
       title: "طلب استقبال ملف",
       body: `${entry.senderName} يريد إرسال ${entry.fileName} (${formatBytes(entry.fileSizeBytes)})`,
       silent: false,
+      timeoutType: "default",
     });
-    notification.on("click", () => openPendingLanReceiveDialog(entry.requestId));
+    const autoCloseTimer = setTimeout(() => {
+      try {
+        notification.close();
+      } catch (_) {}
+    }, 6000);
+    notification.on("click", () => {
+      clearTimeout(autoCloseTimer);
+      try {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        notification.close();
+      } catch (_) {}
+      openPendingLanReceiveDialog(entry.requestId);
+    });
+    notification.on("close", () => {
+      clearTimeout(autoCloseTimer);
+    });
     notification.show();
   } catch (error) {
     console.warn(`LAN receive notification failed: ${error.message}`);
@@ -2822,14 +2842,36 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
       `[electron] Notification.isSupported=${Notification.isSupported()} platform=${process.platform}`,
     );
     if (Notification.isSupported()) {
-      const notif = new Notification({ title, body, silent });
+      const notif = new Notification({
+        title,
+        body,
+        silent,
+        timeoutType: "default",
+      });
+      const autoCloseTimer = setTimeout(() => {
+        try {
+          notif.close();
+        } catch (_) {}
+      }, 5000);
       try {
         notif.on("show", () =>
           console.log("[electron] native notification shown"),
         );
-        notif.on("click", () =>
-          console.log("[electron] native notification clicked"),
-        );
+        notif.on("click", () => {
+          clearTimeout(autoCloseTimer);
+          try {
+            if (mainWindow) {
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.show();
+              mainWindow.focus();
+            }
+            notif.close();
+          } catch (_) {}
+          console.log("[electron] native notification clicked");
+        });
+        notif.on("close", () => {
+          clearTimeout(autoCloseTimer);
+        });
       } catch (e) {}
       notif.show();
       console.log("[electron] native notification created and show() called");

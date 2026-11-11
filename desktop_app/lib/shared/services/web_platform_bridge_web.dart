@@ -785,7 +785,12 @@ Future<void> showBrowserNotification({
   if (permission != 'granted') {
     return;
   }
-  html.Notification(title, body: body);
+  final notif = html.Notification(title, body: body);
+  Timer(const Duration(seconds: 5), () {
+    try {
+      notif.close();
+    } catch (_) {}
+  });
 }
 
 bool isPageVisible() {
