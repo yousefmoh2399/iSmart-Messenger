@@ -98,13 +98,15 @@ class ChatSocketService implements PrintStatusEmitter {
         io.io(
             Uri.parse(baseUrl).origin,
           io.OptionBuilder()
-              .setTransports(['websocket'])
+              .setTransports(['websocket', 'polling'])
               .setPath('/socket.io')
               .enableForceNew()
               .disableAutoConnect()
               .enableReconnection()
-              .setReconnectionDelay(2500) // increased from 1200ms to reduce reconnect storms on weak VPN
-              .setReconnectionDelayMax(12000) // increased from 4000ms to cap exponential back-off
+              .setReconnectionDelay(2000)
+              .setReconnectionDelayMax(10000)
+              .setReconnectionAttempts(999999)
+              .setRandomizationFactor(0.4)
               .setAuth({
                 'token': token, 
                 'clientType': clientType,
@@ -180,11 +182,6 @@ class ChatSocketService implements PrintStatusEmitter {
             },
           ),
         );
-        Future.delayed(const Duration(seconds: 4), () {
-          if (!_manualDisconnect && socket.disconnected) {
-            socket.connect();
-          }
-        });
         return;
       }
       _eventsController.add(

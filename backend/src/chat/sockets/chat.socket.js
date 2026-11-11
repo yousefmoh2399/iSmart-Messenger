@@ -596,6 +596,10 @@ function initializeChatSocketServer(httpServer) {
     // Base64 inline transfers (mobile -> desktop save/print) can exceed
     // the default Engine.IO limit (~1MB), which causes silent disconnect/ack timeouts.
     maxHttpBufferSize: SOCKET_MAX_PAYLOAD_BYTES,
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    connectTimeout: 45000,
+    transports: ["websocket", "polling"],
     cors: {
       origin: socketCorsOrigin,
       credentials: true,

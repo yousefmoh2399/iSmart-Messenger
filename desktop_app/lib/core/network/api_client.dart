@@ -16,7 +16,7 @@ class ApiClient {
     : dio = Dio(
         BaseOptions(
           baseUrl: baseUrl,
-          connectTimeout: const Duration(seconds: 8),
+          connectTimeout: const Duration(seconds: 25),
           receiveTimeout: const Duration(minutes: 10),
           sendTimeout: kIsWeb ? null : const Duration(minutes: 10),
         ),
@@ -105,10 +105,10 @@ class ApiClient {
               requestPath.contains('/auth/register') ||
               requestPath.contains('/health');
           if (isFastEndpoint) {
-            options.connectTimeout = const Duration(seconds: 10);
-            options.receiveTimeout = const Duration(seconds: 15);
+            options.connectTimeout = const Duration(seconds: 15);
+            options.receiveTimeout = const Duration(seconds: 20);
             if (!kIsWeb) {
-              options.sendTimeout = const Duration(seconds: 15);
+              options.sendTimeout = const Duration(seconds: 20);
             }
           } else if (isTransferEndpoint) {
             // Generous timeouts for large files, uploads, and downloads over slow branch VPNs
@@ -118,11 +118,12 @@ class ApiClient {
               options.sendTimeout = const Duration(minutes: 30);
             }
           } else {
-            // Reduced from 90s to 20s so slow VPN connections fail fast
-            // and fall back to cache instead of freezing the UI for 90 seconds.
-            options.receiveTimeout = const Duration(seconds: 20);
+            // Generous connectTimeout (25s) for branch VPNs with high latency/jitter,
+            // while keeping receive/send timeouts reasonable (25s) so dead connections fail over to cache.
+            options.connectTimeout ??= const Duration(seconds: 25);
+            options.receiveTimeout = const Duration(seconds: 25);
             if (!kIsWeb) {
-              options.sendTimeout = const Duration(seconds: 20);
+              options.sendTimeout = const Duration(seconds: 25);
             }
           }
 
@@ -215,6 +216,42 @@ class ApiClient {
               }
               handler.reject(readable);
               return;
+            }
+          }
+
+          // Transient network failure auto-retry (especially for branch VPN packet drops and latency spikes)
+          final isTransientNetworkError =
+              error.type == DioExceptionType.connectionTimeout ||
+              error.type == DioExceptionType.connectionError ||
+              error.type == DioExceptionType.sendTimeout ||
+              (statusCode != null &&
+                  (statusCode == 502 ||
+                      statusCode == 503 ||
+                      statusCode == 504));
+          final isIdempotentMethod =
+              requestOptions.method.toUpperCase() == 'GET' ||
+              requestOptions.method.toUpperCase() == 'HEAD' ||
+              requestOptions.extra['allowRetry'] == true;
+          final networkRetryCount =
+              (requestOptions.extra['networkRetryCount'] as int?) ?? 0;
+
+          if (isTransientNetworkError &&
+              isIdempotentMethod &&
+              networkRetryCount < 2 &&
+              _isReplayableRequestData(requestOptions.data)) {
+            final retryDelay =
+                Duration(milliseconds: 600 * (networkRetryCount + 1));
+            debugPrint(
+              '[API] Transient network error (${error.type}) on ${requestOptions.method} ${requestOptions.path}. Retrying attempt ${networkRetryCount + 1} after ${retryDelay.inMilliseconds}ms...',
+            );
+            await Future.delayed(retryDelay);
+            final retryOptions = _cloneRequestOptions(requestOptions);
+            retryOptions.extra['networkRetryCount'] = networkRetryCount + 1;
+            try {
+              handler.resolve(await dio.fetch(retryOptions));
+              return;
+            } catch (_) {
+              // If retry fails, fall through to normal error handling
             }
           }
 

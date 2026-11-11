@@ -137,7 +137,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     return _loadOverview();
   }
 
-  Future<ChatOverviewData> _loadOverview() async {
+  Future<ChatOverviewData> _loadOverview({bool forceNetwork = false}) async {
     final hasSession = await _waitForAuthenticatedSession();
     if (!hasSession) {
       return const ChatOverviewData(
@@ -150,6 +150,42 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       );
     }
     final repository = _repository();
+
+    if (!forceNetwork) {
+      final cachedConversations = await repository.cache.loadConversations();
+      if (cachedConversations != null && cachedConversations.isNotEmpty) {
+        final cachedDepartments = await repository.cache.loadDepartments() ?? const [];
+        final cachedBranches = await repository.cache.loadBranches() ?? const [];
+        final cachedUsers = await repository.cache.loadUsers() ?? const [];
+
+        // Stale-While-Revalidate: Return cached overview immediately so the UI is responsive
+        // (<50ms) even over high-latency branch VPNs, and trigger a fresh network fetch in the background.
+        unawaited(Future.microtask(() async {
+          if (_disposed) return;
+          try {
+            final fresh = await _loadOverview(forceNetwork: true);
+            if (!_disposed) {
+              _setStateAndCache(fresh);
+            }
+          } catch (_) {}
+        }));
+
+        final sortedCached = _sortConversations(cachedConversations);
+        final manageableCached = _sortConversations(
+          cachedConversations.where((c) => c.type != 'direct').toList(),
+        );
+
+        return ChatOverviewData(
+          conversations: sortedCached,
+          manageableConversations: manageableCached,
+          users: cachedUsers,
+          departments: cachedDepartments,
+          branches: cachedBranches,
+          roles: const [],
+        );
+      }
+    }
+
     Future<List<T>> safeList<T>(Future<List<T>> Function() loader) async {
       try {
         return await _guardAuth(loader);
@@ -1348,7 +1384,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     if (showLoader || previous == null) {
       state = const AsyncLoading();
     }
-    final next = await AsyncValue.guard(() => _guardAuth(_loadOverview));
+    final next = await AsyncValue.guard(
+      () => _guardAuth(() => _loadOverview(forceNetwork: true)),
+    );
     if (_disposed) {
       return;
     }
