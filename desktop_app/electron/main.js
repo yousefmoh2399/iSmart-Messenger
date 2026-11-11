@@ -132,6 +132,11 @@ function debugLogPath() {
   return path.join(app.getPath("userData"), "auth-debug.log");
 }
 
+const _DEBUG_LOG_MAX_BYTES = 2 * 1024 * 1024;
+let _debugLogDirReady = false;
+let _debugLogWriteCount = 0;
+let _debugLogChain = Promise.resolve();
+
 function appendDebugLog(scope, message, details) {
   try {
     const line = JSON.stringify({
@@ -140,8 +145,25 @@ function appendDebugLog(scope, message, details) {
       message: String(message || ""),
       details: details == null ? null : details,
     });
-    fs.mkdirSync(path.dirname(debugLogPath()), { recursive: true });
-    fs.appendFileSync(debugLogPath(), `${line}\n`, "utf8");
+    const logFile = debugLogPath();
+    _debugLogChain = _debugLogChain
+      .then(async () => {
+        if (!_debugLogDirReady) {
+          await fs.promises.mkdir(path.dirname(logFile), { recursive: true });
+          _debugLogDirReady = true;
+        }
+        _debugLogWriteCount += 1;
+        if (_debugLogWriteCount % 100 === 0) {
+          try {
+            const st = await fs.promises.stat(logFile);
+            if (st.size > _DEBUG_LOG_MAX_BYTES) {
+              await fs.promises.truncate(logFile, 0);
+            }
+          } catch (_) {}
+        }
+        await fs.promises.appendFile(logFile, `${line}\n`, "utf8");
+      })
+      .catch(() => {});
   } catch (_) {}
 }
 
@@ -1748,10 +1770,17 @@ function resolveWebAssetPath(assetPath) {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      if (_resolvedWebAssetCache.size > 200) {
+        _resolvedWebAssetCache.clear();
+      }
       _resolvedWebAssetCache.set(rawKey, candidate);
       return candidate;
     }
   }
+  if (_resolvedWebAssetCache.size > 200) {
+    _resolvedWebAssetCache.clear();
+  }
+  _resolvedWebAssetCache.set(rawKey, null);
   console.warn("[electron] asset not found", { assetPath, candidates });
   return null;
 }
@@ -2477,6 +2506,10 @@ function settlePendingLanReceiveRequest(entry, result) {
     return;
   }
   pendingLanReceiveRequests.delete(entry.requestId);
+  if (pendingLanReceiveRequests.size === 0 && lanReceiveReminderTimer) {
+    clearInterval(lanReceiveReminderTimer);
+    lanReceiveReminderTimer = null;
+  }
   if (entry.window && !entry.window.isDestroyed()) {
     entry.window.removeAllListeners("closed");
     entry.window.close();
@@ -3017,11 +3050,20 @@ async function printFile(target, printerName) {
 }
 
 ipcMain.handle("app:get-device-info", async () => {
-  const bestIp = getBestLocalIpv4();
-  const allIps = localIpv4s();
+  const ranked = getRankedIpv4Addresses();
+  const seenIps = new Set();
+  const allIps = [];
+  for (const item of ranked) {
+    if (!seenIps.has(item.ip)) {
+      seenIps.add(item.ip);
+      allIps.push(item.ip);
+    }
+  }
+  const bestPhysical = ranked.find((item) => !item.isVirtual);
+  const bestIp = bestPhysical ? bestPhysical.ip : (allIps[0] || null);
   return {
     hostName: os.hostname(),
-    localIp: bestIp || (allIps.length > 0 ? allIps[0] : null),
+    localIp: bestIp,
     localIps: allIps,
     osName: process.platform,
     osVersion: os.release(),
@@ -3199,13 +3241,6 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
   const soundAssetPath = String(payload.soundAssetPath || "").trim();
   const silent = true;
   try {
-    console.log("[electron] notifications:show", {
-      title,
-      body,
-      silent,
-      rawSilent: payload.silent,
-      soundAssetPath,
-    });
     if (soundAssetPath) {
       const now = Date.now();
       if (now - _lastNotificationAudioAt >= NOTIFICATION_AUDIO_COOLDOWN_MS) {
@@ -3215,16 +3250,9 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
           playWavFile(filePath, { fromNotification: true }).catch((error) =>
             console.error("[electron] notification sound failed", error),
           );
-        } else {
-          console.warn(
-            `[electron] notification sound asset was not found: ${soundAssetPath}`,
-          );
         }
       }
     }
-    console.log(
-      `[electron] Notification.isSupported=${Notification.isSupported()} platform=${process.platform}`,
-    );
     if (Notification.isSupported()) {
       const notif = new Notification({
         title,
@@ -3238,9 +3266,6 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
         } catch (_) {}
       }, 5000);
       try {
-        notif.on("show", () =>
-          console.log("[electron] native notification shown"),
-        );
         notif.on("click", () => {
           clearTimeout(autoCloseTimer);
           try {
@@ -3251,18 +3276,12 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
             }
             notif.close();
           } catch (_) {}
-          console.log("[electron] native notification clicked");
         });
         notif.on("close", () => {
           clearTimeout(autoCloseTimer);
         });
       } catch (e) {}
       notif.show();
-      console.log("[electron] native notification created and show() called");
-    } else {
-      console.log(
-        "[electron] native Notification not supported on this platform",
-      );
     }
     if (mainWindow && !mainWindow.isFocused()) {
       mainWindow.flashFrame(true);

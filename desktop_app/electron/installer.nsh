@@ -1,9 +1,11 @@
 !include "LogicLib.nsh"
 
 !macro customInit
-  ; Ensure all instances of old or new process are terminated
+  ; Ensure all instances of old or new process (and clipboard helper) are terminated
   nsExec::Exec 'taskkill /IM "iSmart Messenger.exe" /F'
   nsExec::Exec 'taskkill /IM "ismart-messenger.exe" /F'
+  nsExec::Exec 'taskkill /IM "clip_helper.exe" /F'
+  Sleep 800
 !macroend
 
 !macro customUnInit
