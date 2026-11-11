@@ -7,9 +7,9 @@ let scheduledTask = null;
 function startPrinterScheduler() {
   if (scheduledTask) return;
 
-  // Poll at midnight (00:00) for daily snapshot, and during business hours (09:00, 13:00, 16:30)
-  // so branch printers that are powered off at night are reliably synced while active during workday.
-  const cronExpression = process.env.PRINTER_SYNC_CRON || "0 0,9,13,16,17 * * *";
+  // Poll at 00:25 for daily snapshot, and during off-peak minutes (09:25, 13:25, 16:25, 17:25)
+  // so branch SNMP/HTTP printer scans never collide with the 09:00 AM morning login surge over VPNs.
+  const cronExpression = process.env.PRINTER_SYNC_CRON || "25 0,9,13,16,17 * * *";
   // D3: Retry on transient SNMP / network failures (up to 2 retries, 30s apart)
   const MAX_RETRIES = 2;
   const RETRY_DELAY_MS = 30_000;

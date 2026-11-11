@@ -196,3 +196,25 @@ test("presence disconnect grace cancels offline/online flap when socket reconnec
     User.updateOne = origUpdateOne;
   }
 });
+
+test("createByteRateLimiter paces throughput while preserving byte-for-byte integrity", async () => {
+  const { Readable } = require("stream");
+  const payload = Buffer.alloc(64 * 1024, 0x5a);
+  const limiter = _downloadAdmission.createByteRateLimiter(128 * 1024);
+  assert.ok(limiter, "Expected transform limiter when rate > 0");
+  assert.equal(_downloadAdmission.createByteRateLimiter(0), null);
+
+  const chunks = [];
+  const startedAt = Date.now();
+  await new Promise((resolve, reject) => {
+    Readable.from([payload])
+      .pipe(limiter)
+      .on("data", (chunk) => chunks.push(chunk))
+      .on("end", resolve)
+      .on("error", reject);
+  });
+  const elapsedMs = Date.now() - startedAt;
+  const output = Buffer.concat(chunks);
+  assert.equal(output.equals(payload), true);
+  assert.ok(elapsedMs >= 150, `Expected paced stream to take >=150ms, took ${elapsedMs}ms`);
+});

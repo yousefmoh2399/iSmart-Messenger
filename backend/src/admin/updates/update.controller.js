@@ -1,6 +1,7 @@
 const asyncHandler = require("../../utils/async-handler");
 const fsSync = require("fs");
 const path = require("path");
+const { Transform } = require("stream");
 const {
   registerDeviceHeartbeat,
   listBranchPeerDevices,
@@ -29,9 +30,75 @@ const MAX_CONCURRENT_UPDATES_PER_BRANCH = Math.max(
   1,
   Number(process.env.UPDATE_MAX_CONCURRENT_PER_BRANCH) || 2,
 );
+const DEFAULT_UPDATE_MAX_BYTES_PER_SEC = (() => {
+  const raw = process.env.UPDATE_MAX_BYTES_PER_SEC;
+  if (raw !== undefined && String(raw).trim() !== "") {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 768 * 1024;
+  }
+  return 768 * 1024; // ~6 Mbps per download stream to prevent branch VPN bufferbloat
+})();
 const STALE_DOWNLOAD_SLOT_MS = 15 * 60 * 1000;
 const activeDownloadSlots = new Map();
 let downloadSlotSequence = 0;
+
+function createByteRateLimiter(bytesPerSecond = DEFAULT_UPDATE_MAX_BYTES_PER_SEC) {
+  const rate = Number(bytesPerSecond);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return null;
+  }
+  const chunkSliceBytes = Math.max(
+    256,
+    Math.min(rate, Math.min(32 * 1024, Math.floor(rate / 4) || rate)),
+  );
+  let tokens = chunkSliceBytes;
+  let lastRefillAt = Date.now();
+  let delayTimer = null;
+
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      let offset = 0;
+      const flushSlice = () => {
+        if (offset >= chunk.length) {
+          callback();
+          return;
+        }
+        const now = Date.now();
+        const elapsedMs = Math.max(0, now - lastRefillAt);
+        if (elapsedMs > 0) {
+          tokens = Math.min(rate, tokens + (rate * elapsedMs) / 1000);
+          lastRefillAt = now;
+        }
+        const toSend = Math.min(chunkSliceBytes, chunk.length - offset);
+        if (tokens >= toSend) {
+          tokens -= toSend;
+          this.push(chunk.subarray(offset, offset + toSend));
+          offset += toSend;
+          if (offset >= chunk.length) {
+            callback();
+            return;
+          }
+          setImmediate(flushSlice);
+          return;
+        }
+        const deficitBytes = toSend - tokens;
+        const waitMs = Math.max(5, Math.ceil((deficitBytes / rate) * 1000));
+        delayTimer = setTimeout(() => {
+          delayTimer = null;
+          flushSlice();
+        }, waitMs);
+      };
+      flushSlice();
+    },
+    destroy(err, callback) {
+      if (delayTimer) {
+        clearTimeout(delayTimer);
+        delayTimer = null;
+      }
+      callback(err);
+    },
+  });
+}
 
 function extractIpv4SubnetBucket(clientIp) {
   const clean = String(clientIp || "")
@@ -419,6 +486,11 @@ const downloadReleaseArtifact = (req, res, next) => {
           start,
           end,
         });
+        const limiter = createByteRateLimiter();
+        const destroyStreams = () => {
+          stream.destroy();
+          if (limiter) limiter.destroy();
+        };
         stream.once("error", (err) => {
           releaseSlotOnce();
           console.error(
@@ -428,16 +500,32 @@ const downloadReleaseArtifact = (req, res, next) => {
           if (!res.headersSent) {
             res.status(500).end();
           }
-          stream.destroy();
+          destroyStreams();
         });
+        if (limiter) {
+          limiter.once("error", () => {
+            releaseSlotOnce();
+            destroyStreams();
+          });
+        }
+        res.once("close", destroyStreams);
         res.once("error", () => {
           releaseSlotOnce();
-          stream.destroy();
+          destroyStreams();
         });
-        stream.pipe(res);
+        if (limiter) {
+          stream.pipe(limiter).pipe(res);
+        } else {
+          stream.pipe(res);
+        }
       } else {
         res.setHeader("Content-Length", fileSize);
         const stream = fsSync.createReadStream(filePath);
+        const limiter = createByteRateLimiter();
+        const destroyStreams = () => {
+          stream.destroy();
+          if (limiter) limiter.destroy();
+        };
         let bytesSent = 0;
         let lastEmittedPct = 5;
         stream.on("data", (chunk) => {
@@ -471,13 +559,24 @@ const downloadReleaseArtifact = (req, res, next) => {
           if (!res.headersSent) {
             res.status(500).end();
           }
-          stream.destroy();
+          destroyStreams();
         });
+        if (limiter) {
+          limiter.once("error", () => {
+            releaseSlotOnce();
+            destroyStreams();
+          });
+        }
+        res.once("close", destroyStreams);
         res.once("error", () => {
           releaseSlotOnce();
-          stream.destroy();
+          destroyStreams();
         });
-        stream.pipe(res);
+        if (limiter) {
+          stream.pipe(limiter).pipe(res);
+        } else {
+          stream.pipe(res);
+        }
       }
     })
     .catch(next);
@@ -704,5 +803,6 @@ module.exports = {
     releaseDownloadSlot,
     resetDownloadSlots,
     getActiveDownloadStats,
+    createByteRateLimiter,
   },
 };

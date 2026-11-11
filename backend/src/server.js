@@ -1,3 +1,9 @@
+// Expand libuv threadpool before any crypto/fs/bcrypt work runs so morning bcrypt logins
+// do not starve file/avatar disk reads and HTTP serving.
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = "16";
+}
+
 const { TextEncoder, TextDecoder } = require("text-encoding");
 const util = require("util");
 global.TextEncoder = TextEncoder;

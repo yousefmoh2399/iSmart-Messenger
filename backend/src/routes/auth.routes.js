@@ -38,15 +38,20 @@ const authLimiter = rateLimit({
 
 const refreshLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
-  max: 120,
+  max: (req) => (req.body?.deviceUid ? 60 : 600),
   standardHeaders: true,
   legacyHeaders: false,
   store: createRateLimitStore("rl:auth_refresh:"),
   passOnStoreError: true,
   keyGenerator: (req) => {
-    // We can't reliably bucket by user without verifying the refresh token here,
-    // so use the requester IP.
-    return `refresh_ip:${req.ip}`;
+    // Key per (IP, deviceUid) when deviceUid is available so one shared branch NAT/VPN
+    // gateway IP does not throttle 30-50 workstations signing in at peak morning hours.
+    const deviceUid = String(req.body?.deviceUid || "")
+      .trim()
+      .slice(0, 80);
+    return deviceUid
+      ? `refresh_dev:${req.ip}:${deviceUid}`
+      : `refresh_ip:${req.ip}`;
   },
   message: {
     message: "تم تجاوز عدد محاولات تحديث الجلسة. حاول مرة أخرى بعد قليل.",
