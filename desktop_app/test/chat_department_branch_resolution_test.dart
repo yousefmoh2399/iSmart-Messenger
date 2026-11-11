@@ -194,5 +194,85 @@ void main() {
       expect(depts, isNotEmpty);
       expect(depts.first.name, 'IT Dept');
     });
+
+    test('All tab ordering: recent direct conversation appears at top above older department rooms', () {
+      DateTime conversationActivityAt(ChatConversation c) {
+        return c.lastMessage?.createdAt ?? c.updatedAt;
+      }
+
+      int compareConversations(ChatConversation a, ChatConversation b) {
+        if (a.isPinned != b.isPinned) {
+          return a.isPinned ? -1 : 1;
+        }
+        return conversationActivityAt(b).compareTo(conversationActivityAt(a));
+      }
+
+      final now = DateTime.now();
+
+      ChatLastMessage makeMessage(String id, DateTime dt) {
+        return ChatLastMessage(
+          id: id,
+          content: 'msg',
+          senderId: 'u1',
+          senderName: 'User',
+          messageType: 'text',
+          createdAt: dt,
+        );
+      }
+
+      final olderDepartmentRoom = ChatConversation(
+        id: 'room_1',
+        type: 'department',
+        name: 'غرفة الدعم الفني',
+        description: '',
+        departmentId: 'dept_1',
+        createdBy: 'u1',
+        members: const [],
+        admins: const [],
+        broadcastPublisherIds: const [],
+        blockedMemberIds: const [],
+        pinnedMessage: null,
+        unreadCount: 0,
+        isArchived: false,
+        isMuted: false,
+        isPinned: false,
+        isFavorite: false,
+        isActive: true,
+        createdAt: now.subtract(const Duration(days: 2)),
+        updatedAt: now.subtract(const Duration(hours: 3)),
+        lastMessage: makeMessage('msg_old', now.subtract(const Duration(hours: 3))),
+      );
+
+      final recentDirectChat = ChatConversation(
+        id: 'direct_1',
+        type: 'direct',
+        name: 'محادثة محمد',
+        description: '',
+        departmentId: null,
+        createdBy: 'u2',
+        members: const [],
+        admins: const [],
+        broadcastPublisherIds: const [],
+        blockedMemberIds: const [],
+        pinnedMessage: null,
+        unreadCount: 1,
+        isArchived: false,
+        isMuted: false,
+        isPinned: false,
+        isFavorite: false,
+        isActive: true,
+        createdAt: now.subtract(const Duration(days: 1)),
+        updatedAt: now.subtract(const Duration(minutes: 1)),
+        lastMessage: makeMessage('msg_new', now.subtract(const Duration(minutes: 1))),
+      );
+
+      final list = <ChatConversation>[olderDepartmentRoom, recentDirectChat]..sort(compareConversations);
+
+      // The recent direct chat MUST be index 0 (at the very top)
+      expect(list.first.id, 'direct_1');
+      expect(list.first.type, 'direct');
+      expect(list.last.id, 'room_1');
+      expect(list.last.type, 'department');
+    });
   });
 }

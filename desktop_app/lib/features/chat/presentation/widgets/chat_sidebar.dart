@@ -305,9 +305,7 @@ class ChatSidebar extends ConsumerWidget {
     final orderedDepartmentEntries = [
       for (final department in overview.departments)
         if (usersByDepartment[department]?.isNotEmpty == true ||
-            (query.isEmpty &&
-                (currentFilter == ChatSidebarFilter.departments ||
-                    currentFilter == ChatSidebarFilter.all)))
+            (query.isEmpty && currentFilter == ChatSidebarFilter.departments))
           MapEntry(
             department,
             usersByDepartment[department] ?? const <ChatDirectoryUser>[],
@@ -321,9 +319,7 @@ class ChatSidebar extends ConsumerWidget {
     final orderedBranchEntries = [
       for (final branch in overview.branches)
         if (usersByBranch[branch]?.isNotEmpty == true ||
-            (query.isEmpty &&
-                (currentFilter == ChatSidebarFilter.branches ||
-                    currentFilter == ChatSidebarFilter.all)))
+            (query.isEmpty && currentFilter == ChatSidebarFilter.branches))
           MapEntry(
             branch,
             usersByBranch[branch] ?? const <ChatDirectoryUser>[],
@@ -335,7 +331,18 @@ class ChatSidebar extends ConsumerWidget {
         ),
     ];
 
-    // Conversations organized by logical category
+    // Conversations organized by chronological activity (pinned first, then latest activity)
+    DateTime conversationActivityAt(ChatConversation c) {
+      return c.lastMessage?.createdAt ?? c.updatedAt;
+    }
+
+    int compareConversations(ChatConversation a, ChatConversation b) {
+      if (a.isPinned != b.isPinned) {
+        return a.isPinned ? -1 : 1;
+      }
+      return conversationActivityAt(b).compareTo(conversationActivityAt(a));
+    }
+
     final matchingConversations = conversations
         .where((c) => !folderConversationIds.contains(c.id))
         .where((c) => ChatSearchUtils.matchesConversation(
@@ -345,15 +352,17 @@ class ChatSidebar extends ConsumerWidget {
             ))
         .toList();
 
-    final unarchivedConversations =
-        matchingConversations.where((c) => !c.isArchived).toList();
+    final unarchivedConversations = matchingConversations
+        .where((c) => !c.isArchived)
+        .toList()
+      ..sort(compareConversations);
 
     final departmentRooms = unarchivedConversations
         .where((c) => c.type == 'department')
         .toList();
 
     final groupConversations = unarchivedConversations
-        .where((c) => c.type == 'group' || c.type == 'broadcast')
+        .where((c) => c.type == 'group' || c.type == 'broadcast' || c.type == 'department')
         .toList();
 
     final directConversations = unarchivedConversations
@@ -370,8 +379,10 @@ class ChatSidebar extends ConsumerWidget {
         .where((c) => c.isFavorite)
         .toList();
 
-    final archivedConversations =
-        matchingConversations.where((c) => c.isArchived).toList();
+    final archivedConversations = matchingConversations
+        .where((c) => c.isArchived)
+        .toList()
+      ..sort(compareConversations);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -708,17 +719,16 @@ class ChatSidebar extends ConsumerWidget {
 
                         // ── Regular Filtering (when not searching) ─────────────────
                         if (query.isEmpty) ...[
-                          // 1. ALL TAB: Grouped by type so nothing is mixed up
+                          // 1. ALL TAB: Unified chronological stream of all conversations (Latest first)
                           if (currentFilter == ChatSidebarFilter.all) ...[
-                            if (departmentRooms.isNotEmpty) ...[
-                              _SidebarSectionHeader(
-                                title: 'غرف الأقسام الرسمية (${departmentRooms.length})',
-                                subtitle: 'الغرف الجماعية الرسمية المخصصة لأقسام وإدارات الشركة.',
+                            if (unarchivedConversations.isEmpty)
+                              _SidebarInlineNotice(
+                                label: 'لا توجد محادثات مفتوحة حاليًا. اختر زميلًا من تبويب "مباشر" أو "الأقسام" لبدء محادثة.',
                                 appearance: appearance,
                                 isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              ...departmentRooms.map(
+                              )
+                            else
+                              ...unarchivedConversations.map(
                                 (conversation) => Padding(
                                   padding: const EdgeInsets.only(bottom: 2),
                                   child: ChatListItem(
@@ -737,66 +747,7 @@ class ChatSidebar extends ConsumerWidget {
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 12),
-                            ],
-                            if (groupConversations.isNotEmpty) ...[
-                              _SidebarSectionHeader(
-                                title: 'المجموعات والقنوات (${groupConversations.length})',
-                                subtitle: 'فرق العمل، قنوات الإعلانات والمجموعات الخاصة.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              ...groupConversations.map(
-                                (conversation) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 2),
-                                  child: ChatListItem(
-                                    conversation: conversation,
-                                    unreadBadgeColor: appearance.unreadBadgeColor,
-                                    currentUserId: currentUserId,
-                                    typingPreviewText:
-                                        typingPreviewByConversationId[conversation.id],
-                                    selected: selectedConversationId == conversation.id,
-                                    onTap: () => onConversationSelected(conversation),
-                                    onTogglePin: () => onTogglePin(conversation),
-                                    onToggleMute: () => onToggleMute(conversation),
-                                    onToggleArchive: () => onToggleArchive(conversation),
-                                    onToggleFavorite: () => onToggleFavorite(conversation),
-                                    onDeleteConversation: () => onDeleteConversation(conversation),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                            ],
-                            if (directConversations.isNotEmpty) ...[
-                              _SidebarSectionHeader(
-                                title: 'المحادثات المباشرة (${directConversations.length})',
-                                subtitle: 'محادثاتك الفردية المباشرة مع الزملاء.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              ...directConversations.map(
-                                (conversation) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 2),
-                                  child: ChatListItem(
-                                    conversation: conversation,
-                                    unreadBadgeColor: appearance.unreadBadgeColor,
-                                    currentUserId: currentUserId,
-                                    typingPreviewText:
-                                        typingPreviewByConversationId[conversation.id],
-                                    selected: selectedConversationId == conversation.id,
-                                    onTap: () => onConversationSelected(conversation),
-                                    onTogglePin: () => onTogglePin(conversation),
-                                    onToggleMute: () => onToggleMute(conversation),
-                                    onToggleArchive: () => onToggleArchive(conversation),
-                                    onToggleFavorite: () => onToggleFavorite(conversation),
-                                    onDeleteConversation: () => onDeleteConversation(conversation),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 14),
-                            ],
+                            const SizedBox(height: 14),
                           ],
 
                           // 2. DIRECT FILTER
@@ -1024,8 +975,7 @@ class ChatSidebar extends ConsumerWidget {
                         ],
 
                         // ── DIRECTORY: DEPARTMENTS ─────────────────────────────────
-                        if (currentFilter == ChatSidebarFilter.all ||
-                            currentFilter == ChatSidebarFilter.departments ||
+                        if (currentFilter == ChatSidebarFilter.departments ||
                             (currentFilter == ChatSidebarFilter.direct && query.isEmpty)) ...[
                           _SidebarSectionHeader(
                             title: 'أقسام وموظفو الشركة (${orderedDepartmentEntries.length})',
@@ -1072,8 +1022,7 @@ class ChatSidebar extends ConsumerWidget {
                         ],
 
                         // ── DIRECTORY: BRANCHES ────────────────────────────────────
-                        if (currentFilter == ChatSidebarFilter.all ||
-                            currentFilter == ChatSidebarFilter.branches) ...[
+                        if (currentFilter == ChatSidebarFilter.branches) ...[
                           _SidebarSectionHeader(
                             title: 'فروع وموظفو الشركة (${orderedBranchEntries.length})',
                             subtitle:
@@ -1129,6 +1078,7 @@ class ChatSidebar extends ConsumerWidget {
                             isDark: isDark,
                           )
                         else if (query.isEmpty &&
+                            currentFilter != ChatSidebarFilter.all &&
                             departmentRooms.isEmpty &&
                             groupConversations.isEmpty &&
                             directConversations.isEmpty &&
