@@ -369,12 +369,6 @@ class ChatSidebar extends ConsumerWidget {
         .where((c) => c.type == 'direct')
         .toList();
 
-    final branchDirectConversations = directConversations.where((c) {
-      final peer = c.members.where((m) => m.id != currentUserId).firstOrNull;
-      if (peer == null) return false;
-      return resolveBranch(peer) != null;
-    }).toList();
-
     final favoriteConversations = unarchivedConversations
         .where((c) => c.isFavorite)
         .toList();
@@ -862,39 +856,6 @@ class ChatSidebar extends ConsumerWidget {
                                 ),
                               ),
                             const SizedBox(height: 14),
-                          ],
-
-                          // 5. BRANCHES FILTER: Branch chats if any
-                          if (currentFilter == ChatSidebarFilter.branches) ...[
-                            if (branchDirectConversations.isNotEmpty) ...[
-                              _SidebarSectionHeader(
-                                title: 'محادثات زملاء الفروع (${branchDirectConversations.length})',
-                                subtitle: 'محادثات فردية مفتوحة مع موظفي الفروع.',
-                                appearance: appearance,
-                                isDark: isDark,
-                              ),
-                              const SizedBox(height: 8),
-                              ...branchDirectConversations.map(
-                                (conversation) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 2),
-                                  child: ChatListItem(
-                                    conversation: conversation,
-                                    unreadBadgeColor: appearance.unreadBadgeColor,
-                                    currentUserId: currentUserId,
-                                    typingPreviewText:
-                                        typingPreviewByConversationId[conversation.id],
-                                    selected: selectedConversationId == conversation.id,
-                                    onTap: () => onConversationSelected(conversation),
-                                    onTogglePin: () => onTogglePin(conversation),
-                                    onToggleMute: () => onToggleMute(conversation),
-                                    onToggleArchive: () => onToggleArchive(conversation),
-                                    onToggleFavorite: () => onToggleFavorite(conversation),
-                                    onDeleteConversation: () => onDeleteConversation(conversation),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                            ],
                           ],
 
                           // 6. FAVORITES FILTER
