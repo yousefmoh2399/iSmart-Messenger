@@ -185,6 +185,7 @@ async function ensureDefaultRoles() {
     const existing = await Role.findOne({ roleName });
     if (!existing) {
       await Role.create({ roleName, permissions });
+      invalidateRoleCache(roleName);
       continue;
     }
 
@@ -193,16 +194,101 @@ async function ensureDefaultRoles() {
       ...(existing.permissions?.toObject?.() || existing.permissions || {}),
     };
     await existing.save();
+    invalidateRoleCache(roleName);
   }
+}
+
+const ROLE_CACHE_TTL_MS = Math.max(
+  1000,
+  Number(process.env.ROLE_CACHE_TTL_MS) || 60 * 1000,
+);
+const rolePermissionsCache = new Map();
+const roleLookupInFlight = new Map();
+
+function invalidateRoleCache(roleName = null) {
+  if (!roleName) {
+    rolePermissionsCache.clear();
+    return;
+  }
+  rolePermissionsCache.delete(String(roleName).trim().toLowerCase());
 }
 
 async function getPermissionsForRole(roleName) {
   const normalizedRoleName = String(roleName || "user").trim().toLowerCase();
-  const role = await Role.findOne({ roleName: normalizedRoleName }).lean();
-  return {
-    ...(DEFAULT_ROLES[normalizedRoleName] || DEFAULT_ROLES.user),
-    ...(role?.permissions || {}),
-  };
+  const cached = rolePermissionsCache.get(normalizedRoleName);
+  const now = Date.now();
+  if (cached && now - cached.at < ROLE_CACHE_TTL_MS) {
+    return { ...cached.permissions };
+  }
+
+  if (roleLookupInFlight.has(normalizedRoleName)) {
+    const permissions = await roleLookupInFlight.get(normalizedRoleName);
+    return { ...permissions };
+  }
+
+  const lookupPromise = (async () => {
+    const role = await Role.findOne({ roleName: normalizedRoleName }).lean();
+    const resolved = {
+      ...(DEFAULT_ROLES[normalizedRoleName] || DEFAULT_ROLES.user),
+      ...(role?.permissions || {}),
+    };
+    rolePermissionsCache.set(normalizedRoleName, {
+      permissions: resolved,
+      at: Date.now(),
+    });
+    return resolved;
+  })().finally(() => {
+    roleLookupInFlight.delete(normalizedRoleName);
+  });
+
+  roleLookupInFlight.set(normalizedRoleName, lookupPromise);
+  const permissions = await lookupPromise;
+  return { ...permissions };
+}
+
+async function preloadPermissionsForRoles(roleNames = []) {
+  const normalized = Array.from(
+    new Set(
+      (roleNames || [])
+        .map((r) => String(r || "user").trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+  const now = Date.now();
+  const missing = normalized.filter((roleName) => {
+    const cached = rolePermissionsCache.get(roleName);
+    return !cached || now - cached.at >= ROLE_CACHE_TTL_MS;
+  });
+
+  if (missing.length > 0) {
+    const docs = await Role.find({ roleName: { $in: missing } }).lean();
+    const docMap = new Map(
+      docs.map((doc) => [String(doc.roleName || "").trim().toLowerCase(), doc]),
+    );
+    const loadedAt = Date.now();
+    for (const roleName of missing) {
+      const doc = docMap.get(roleName);
+      rolePermissionsCache.set(roleName, {
+        permissions: {
+          ...(DEFAULT_ROLES[roleName] || DEFAULT_ROLES.user),
+          ...(doc?.permissions || {}),
+        },
+        at: loadedAt,
+      });
+    }
+  }
+
+  const result = new Map();
+  for (const roleName of normalized) {
+    const cached = rolePermissionsCache.get(roleName);
+    result.set(
+      roleName,
+      cached
+        ? { ...cached.permissions }
+        : { ...(DEFAULT_ROLES[roleName] || DEFAULT_ROLES.user) },
+    );
+  }
+  return result;
 }
 
 function normalizePermissionOverrides(value) {
@@ -262,6 +348,7 @@ async function createRole(actor, payload) {
       ...(payload.permissions || {}),
     },
   });
+  invalidateRoleCache(roleName);
 
   return serializeRole(role);
 }
@@ -281,6 +368,7 @@ async function updateRolePermissions(actor, roleId, permissions) {
     ...permissions,
   };
   await role.save();
+  invalidateRoleCache(role.roleName);
   return serializeRole(role);
 }
 
@@ -329,11 +417,33 @@ async function userHasPermission(user, permissionName) {
   return Boolean(permissions?.[permissionName]);
 }
 
+async function getEffectivePermissionsMapForUsers(users = []) {
+  const roleMap = await preloadPermissionsForRoles(
+    (users || []).map((user) => user?.role || "user"),
+  );
+  const result = new Map();
+  for (const user of users || []) {
+    if (!user) continue;
+    const uid = String(user._id || user.id || "");
+    if (!uid) continue;
+    const roleName = String(user.role || "user").trim().toLowerCase();
+    const rolePermissions = roleMap.get(roleName) || DEFAULT_ROLES.user;
+    result.set(uid, {
+      ...rolePermissions,
+      ...normalizePermissionOverrides(user?.permissionOverrides),
+    });
+  }
+  return result;
+}
+
 module.exports = {
   DEFAULT_ROLES,
   ensureDefaultRoles,
   getPermissionsForRole,
+  preloadPermissionsForRoles,
   getEffectivePermissionsForUser,
+  getEffectivePermissionsMapForUsers,
+  invalidateRoleCache,
   normalizePermissionOverrides,
   listRoles,
   createRole,

@@ -46,4 +46,8 @@ const deviceSessionSchema = new mongoose.Schema(
   }
 );
 
+deviceSessionSchema.index({ userId: 1, ipAddress: 1, clientType: 1 });
+deviceSessionSchema.index({ userId: 1, "deviceInfo.hostname": 1 });
+deviceSessionSchema.index({ isOnline: 1, lastSeenAt: -1 });
+
 module.exports = mongoose.model("DeviceSession", deviceSessionSchema);

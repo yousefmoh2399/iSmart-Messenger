@@ -477,7 +477,11 @@ function serializeReceipt(entry) {
   };
 }
 
-async function serializeConversation(conversation, currentUserId) {
+async function serializeConversation(
+  conversation,
+  currentUserId,
+  prefetchedMemberState = undefined,
+) {
   const members = (conversation.members || [])
     .filter(Boolean)
     .map((member) =>
@@ -489,14 +493,17 @@ async function serializeConversation(conversation, currentUserId) {
       admin._id ? serializeUserLite(admin) : { id: admin.toString() },
     );
 
-  const memberState = await ConversationMemberState.findOne({
-    conversationId: conversation._id,
-    userId: currentUserId,
-  })
-    .select(
-      "unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt membershipStatus removedAt leftAt blockedAt"
-    )
-    .lean();
+  const memberState =
+    prefetchedMemberState !== undefined
+      ? prefetchedMemberState
+      : await ConversationMemberState.findOne({
+          conversationId: conversation._id,
+          userId: currentUserId,
+        })
+          .select(
+            "unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt membershipStatus removedAt leftAt blockedAt"
+          )
+          .lean();
 
   const currentUserIdStr = currentUserId ? String(currentUserId) : "";
   const memberIdsList = (conversation.members || []).map(getObjectIdString).filter(Boolean);
@@ -937,7 +944,11 @@ async function getVisibleUsersForChat(currentUser, options = {}) {
   };
 }
 
-async function assertConversationAccess(currentUser, conversation) {
+async function assertConversationAccess(
+  currentUser,
+  conversation,
+  prefetchedMemberState = undefined,
+) {
   if (!conversation || conversation.deletedAt) {
     throw new ApiError(404, "Conversation not found.");
   }
@@ -975,7 +986,10 @@ async function assertConversationAccess(currentUser, conversation) {
     ) {
       return;
     }
-    const memberState = await getConversationState(currentUserId, conversation._id);
+    const memberState =
+      prefetchedMemberState !== undefined
+        ? prefetchedMemberState
+        : await getConversationState(currentUserId, conversation._id);
     if (memberState && !memberState.isDeleted) {
       return;
     }
@@ -998,7 +1012,10 @@ async function assertConversationAccess(currentUser, conversation) {
   }
 
   if (!memberIds.includes(currentUserId)) {
-    const memberState = await getConversationState(currentUserId, conversation._id);
+    const memberState =
+      prefetchedMemberState !== undefined
+        ? prefetchedMemberState
+        : await getConversationState(currentUserId, conversation._id);
     if (memberState && !memberState.isDeleted) {
       return;
     }
@@ -1093,15 +1110,25 @@ function assertGroupOwnerAccess(currentUser, conversation) {
 async function listConversationsForUser(currentUser) {
   const currentUserId = getObjectIdString(currentUser.id || currentUser._id);
 
-  const userMemberStates = await ConversationMemberState.find({
+  const allUserMemberStates = await ConversationMemberState.find({
     userId: currentUserId,
-    isDeleted: { $ne: true },
   })
-    .select("conversationId")
+    .select(
+      "conversationId unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt membershipStatus removedAt leftAt blockedAt isDeleted",
+    )
     .lean();
-  const validMemberConvIds = userMemberStates
+  const validMemberConvIds = allUserMemberStates
+    .filter((s) => s.isDeleted !== true)
     .map((s) => s.conversationId)
     .filter(Boolean);
+  const memberStateMap = new Map();
+  const unreadByConversation = {};
+  for (const state of allUserMemberStates) {
+    if (!state?.conversationId) continue;
+    const convIdStr = state.conversationId.toString();
+    memberStateMap.set(convIdStr, state);
+    unreadByConversation[convIdStr] = state.unreadCount || 0;
+  }
 
   const query = {
     deletedAt: null,
@@ -1141,16 +1168,13 @@ async function listConversationsForUser(currentUser) {
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
 
-  const unreadByConversation = await getUnreadCountsForUser(currentUser.id);
   const visible = [];
 
   for (const conversation of conversations) {
     try {
-      await assertConversationAccess(currentUser, conversation);
-      const memberState = await getConversationState(
-        currentUser.id,
-        conversation._id,
-      );
+      const convIdStr = conversation._id.toString();
+      const memberState = memberStateMap.get(convIdStr) || null;
+      await assertConversationAccess(currentUser, conversation, memberState);
       if (memberState?.isDeleted) {
         continue;
       }
@@ -1174,6 +1198,7 @@ async function listConversationsForUser(currentUser) {
       const serialized = await serializeConversation(
         conversation,
         currentUser.id,
+        memberState,
       );
       if (
         conversation.type === "broadcast" &&
@@ -1253,13 +1278,33 @@ async function listManageableConversations(currentUser) {
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
 
+  const manageableConvIds = conversations
+    .filter((c) => c && c.type !== "direct")
+    .map((c) => c._id);
+  const prefetchedMemberStates = manageableConvIds.length > 0
+    ? await ConversationMemberState.find({
+        userId: currentUser.id,
+        conversationId: { $in: manageableConvIds },
+      })
+        .select(
+          "conversationId unreadCount isArchived isMuted mutedUntil isPinned isFavorite clearHistoryAt membershipStatus removedAt leftAt blockedAt isDeleted",
+        )
+        .lean()
+    : [];
+  const memberStateMap = new Map(
+    prefetchedMemberStates.map((s) => [s.conversationId.toString(), s]),
+  );
+
   const visible = [];
   for (const conversation of conversations) {
     if (!conversation || conversation.type === "direct") {
       continue;
     }
     try {
-      visible.push(await serializeConversation(conversation, currentUser.id));
+      const memberState = memberStateMap.get(conversation._id.toString()) || null;
+      visible.push(
+        await serializeConversation(conversation, currentUser.id, memberState),
+      );
     } catch (_) {
       // Skip malformed conversation without failing the entire manageable list
     }
@@ -2409,11 +2454,22 @@ async function markConversationSeen(currentUser, conversationId) {
     unseenQuery["deliveredTo.userId"] = currentUserId;
   }
 
-  const unseenMessages = await Message.find(unseenQuery).exec();
+  const unseenMessages = await Message.find(unseenQuery)
+    .select("_id")
+    .sort({ _id: 1 })
+    .lean();
 
-  for (const message of unseenMessages) {
-    message.seenBy.push({ userId: currentUser.id, at: new Date() });
-    await message.save();
+  const unseenIds = unseenMessages.map((message) => message._id);
+  if (unseenIds.length > 0) {
+    await Message.updateMany(
+      {
+        _id: { $in: unseenIds },
+        "seenBy.userId": { $ne: currentUser.id },
+      },
+      {
+        $push: { seenBy: { userId: currentUser.id, at: new Date() } },
+      },
+    );
   }
 
   const lastReadMessage = unseenMessages[unseenMessages.length - 1] || null;
@@ -2423,11 +2479,11 @@ async function markConversationSeen(currentUser, conversationId) {
     lastReadMessageId: lastReadMessage?._id || null,
   });
 
-  if (unseenMessages.length > 0) {
+  if (unseenIds.length > 0) {
     await refreshConversationLastMessage(conversationId);
   }
 
-  return unseenMessages.map((message) => message._id.toString());
+  return unseenIds.map((id) => id.toString());
 }
 
 async function markConversationDelivered(currentUser, conversationId) {
@@ -2439,7 +2495,14 @@ async function markConversationDelivered(currentUser, conversationId) {
     isDeleted: { $ne: true },
     senderId: { $ne: currentUser.id },
     "deliveredTo.userId": { $ne: currentUser.id },
-  }).exec();
+  })
+    .select("_id metadata.broadcastTargets")
+    .lean();
+
+  const deliveredIds = [];
+  const currentUserIdStr = String(currentUser.id || currentUser._id);
+  const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
+  const userDeptIds = (currentUser.departmentIds || []).map(String);
 
   for (const message of undeliveredMessages) {
     if (conversation.type === "broadcast" && message.metadata && message.metadata.broadcastTargets) {
@@ -2447,10 +2510,7 @@ async function markConversationDelivered(currentUser, conversationId) {
       if (targets && targets.sentToAllDepartments === false) {
         const targetDeptIds = (targets.departmentIds || []).map(String);
         const targetUserIds = (targets.userIds || []).map(String);
-        const currentUserId = String(currentUser.id || currentUser._id);
-        const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
-        const userDeptIds = (currentUser.departmentIds || []).map(String);
-        const isUserMatch = targetUserIds.includes(currentUserId);
+        const isUserMatch = targetUserIds.includes(currentUserIdStr);
         const isDeptMatch = targetDeptIds.length > 0 && (
           (userDeptId && targetDeptIds.includes(userDeptId)) ||
           userDeptIds.some((id) => targetDeptIds.includes(id))
@@ -2460,15 +2520,23 @@ async function markConversationDelivered(currentUser, conversationId) {
         }
       }
     }
-    message.deliveredTo.push({ userId: currentUser.id, at: new Date() });
-    await message.save();
+    deliveredIds.push(message._id);
   }
 
-  if (undeliveredMessages.length > 0) {
+  if (deliveredIds.length > 0) {
+    await Message.updateMany(
+      {
+        _id: { $in: deliveredIds },
+        "deliveredTo.userId": { $ne: currentUser.id },
+      },
+      {
+        $push: { deliveredTo: { userId: currentUser.id, at: new Date() } },
+      },
+    );
     await refreshConversationLastMessage(conversationId);
   }
 
-  return undeliveredMessages.map((message) => message._id.toString());
+  return deliveredIds.map((id) => id.toString());
 }
 
 async function markMessageDeliveredForUser(messageId, userId) {
@@ -2527,9 +2595,16 @@ async function markPendingDeliveriesForUser(currentUser) {
     isDeleted: { $ne: true },
     senderId: { $ne: currentUser.id },
     "deliveredTo.userId": { $ne: currentUser.id },
-  }).exec();
+  })
+    .select("_id conversationId metadata.broadcastTargets")
+    .lean();
 
   const grouped = new Map();
+  const deliverableIds = [];
+  const currentUserIdStr = String(currentUser.id || currentUser._id);
+  const userDeptIdStr = currentUser.departmentId ? String(currentUser.departmentId) : null;
+  const userDeptIdList = (currentUser.departmentIds || []).map(String);
+
   for (const message of undeliveredMessages) {
     const type = conversationTypeMap.get(message.conversationId.toString());
     if (type === "broadcast" && message.metadata && message.metadata.broadcastTargets) {
@@ -2537,13 +2612,10 @@ async function markPendingDeliveriesForUser(currentUser) {
       if (targets && targets.sentToAllDepartments === false) {
         const targetDeptIds = (targets.departmentIds || []).map(String);
         const targetUserIds = (targets.userIds || []).map(String);
-        const currentUserId = String(currentUser.id || currentUser._id);
-        const userDeptId = currentUser.departmentId ? String(currentUser.departmentId) : null;
-        const userDeptIds = (currentUser.departmentIds || []).map(String);
-        const isUserMatch = targetUserIds.includes(currentUserId);
+        const isUserMatch = targetUserIds.includes(currentUserIdStr);
         const isDeptMatch = targetDeptIds.length > 0 && (
-          (userDeptId && targetDeptIds.includes(userDeptId)) ||
-          userDeptIds.some((id) => targetDeptIds.includes(id))
+          (userDeptIdStr && targetDeptIds.includes(userDeptIdStr)) ||
+          userDeptIdList.some((id) => targetDeptIds.includes(id))
         );
         if (!isUserMatch && !isDeptMatch) {
           continue;
@@ -2551,13 +2623,24 @@ async function markPendingDeliveriesForUser(currentUser) {
       }
     }
 
-    message.deliveredTo.push({ userId: currentUser.id, at: new Date() });
-    await message.save();
+    deliverableIds.push(message._id);
     const key = message.conversationId.toString();
     if (!grouped.has(key)) {
       grouped.set(key, []);
     }
     grouped.get(key).push(message._id.toString());
+  }
+
+  if (deliverableIds.length > 0) {
+    await Message.updateMany(
+      {
+        _id: { $in: deliverableIds },
+        "deliveredTo.userId": { $ne: currentUser.id },
+      },
+      {
+        $push: { deliveredTo: { userId: currentUser.id, at: new Date() } },
+      },
+    );
   }
 
   return [...grouped.entries()].map(([conversationId, messageIds]) => ({

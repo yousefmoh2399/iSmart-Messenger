@@ -27,13 +27,19 @@ function serializeBranch(branch, membersCount = branch.membersCount || 0) {
 }
 
 async function listBranches() {
-  const branches = await Branch.find({ deletedAt: null })
-    .sort({ name: 1 })
-    .lean();
-  const counts = await Promise.all(
-    branches.map((branch) => User.countDocuments({ branchId: branch._id })),
+  const [branches, aggregatedCounts] = await Promise.all([
+    Branch.find({ deletedAt: null }).sort({ name: 1 }).lean(),
+    User.aggregate([
+      { $match: { branchId: { $ne: null } } },
+      { $group: { _id: "$branchId", count: { $sum: 1 } } },
+    ]),
+  ]);
+  const countMap = new Map(
+    aggregatedCounts.map((row) => [String(row._id), row.count]),
   );
-  return branches.map((branch, index) => serializeBranch(branch, counts[index]));
+  return branches.map((branch) =>
+    serializeBranch(branch, countMap.get(branch._id.toString()) || 0),
+  );
 }
 
 async function createBranch(actor, payload) {

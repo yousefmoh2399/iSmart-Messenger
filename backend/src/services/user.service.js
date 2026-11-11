@@ -15,6 +15,7 @@ const {
 } = require("../utils/storage-paths");
 const {
   getEffectivePermissionsForUser,
+  getEffectivePermissionsMapForUsers,
   normalizePermissionOverrides,
 } = require("../chat/services/role.service");
 const { logAuditEvent } = require("../chat/services/audit.service");
@@ -315,9 +316,11 @@ async function listUsers(actor = null, filters = {}) {
       .lean(),
     User.countDocuments(query),
   ]);
-  const serializedUsers = await Promise.all(
-    users.map(async (user) =>
-      serializeUser(user, await getEffectivePermissionsForUser(user)),
+  const permissionsMap = await getEffectivePermissionsMapForUsers(users);
+  const serializedUsers = users.map((user) =>
+    serializeUser(
+      user,
+      permissionsMap.get(String(user._id || user.id)) || null,
     ),
   );
   return {

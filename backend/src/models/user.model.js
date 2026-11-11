@@ -234,4 +234,9 @@ const userSchema = new mongoose.Schema(
   },
 );
 
+userSchema.index({ isActive: 1, createdAt: -1 });
+userSchema.index({ isOnline: 1, presenceStatus: 1 });
+userSchema.index({ departmentIds: 1 });
+userSchema.index({ isActive: 1, fullName: 1, username: 1, _id: 1 });
+
 module.exports = mongoose.model("User", userSchema);

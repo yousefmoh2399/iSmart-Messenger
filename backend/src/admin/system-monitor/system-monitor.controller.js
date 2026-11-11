@@ -165,14 +165,16 @@ const getConnections = asyncHandler(async (req, res) => {
   try {
     const UpdateDevice = require("../updates/device.model");
     const regDevices = await UpdateDevice.find({}).lean();
+    const bulkOps = [];
     for (const dev of regDevices) {
-      if (dev.lastKnownUserId) {
-        await DeviceSession.findOneAndUpdate(
-          {
+      if (!dev.lastKnownUserId) continue;
+      bulkOps.push({
+        updateOne: {
+          filter: {
             userId: dev.lastKnownUserId,
             "deviceInfo.hostname": dev.hostName || dev.deviceName,
           },
-          {
+          update: {
             $set: {
               ipAddress: dev.localIp || "-",
               clientType: dev.platform?.includes("mobile") ? "mobile" : "desktop",
@@ -191,9 +193,12 @@ const getConnections = asyncHandler(async (req, res) => {
               startedAt: dev.createdAt || new Date(),
             },
           },
-          { upsert: true }
-        );
-      }
+          upsert: true,
+        },
+      });
+    }
+    if (bulkOps.length > 0) {
+      await DeviceSession.bulkWrite(bulkOps, { ordered: false });
     }
   } catch (_) {}
 
@@ -208,6 +213,8 @@ const getConnections = asyncHandler(async (req, res) => {
 
   // Reconcile each session against real-time live socket metrics
   const reconciledSessions = [];
+  const staleOfflineIds = [];
+  const staleOnlineIds = [];
   for (const s of rawSessions) {
     if (s.userId && typeof s.userId === "object") {
       s.userId.department = s.userId.departmentId?.name || (typeof s.userId.department === "string" ? s.userId.department : null);
@@ -219,12 +226,12 @@ const getConnections = asyncHandler(async (req, res) => {
         ? liveMetrics.isUserOnline(s.userId._id || s.userId)
         : false;
 
-    // Fix database if out of sync
+    // Collect out-of-sync flags for batched update below
     if (s.isOnline && !isLive) {
-      DeviceSession.findByIdAndUpdate(s._id, { isOnline: false }).catch(() => {});
+      staleOfflineIds.push(s._id);
       s.isOnline = false;
     } else if (!s.isOnline && isLive) {
-      DeviceSession.findByIdAndUpdate(s._id, { isOnline: true }).catch(() => {});
+      staleOnlineIds.push(s._id);
       s.isOnline = true;
     }
 
@@ -237,6 +244,19 @@ const getConnections = asyncHandler(async (req, res) => {
     }
 
     reconciledSessions.push(s);
+  }
+
+  if (staleOfflineIds.length > 0) {
+    DeviceSession.updateMany(
+      { _id: { $in: staleOfflineIds } },
+      { $set: { isOnline: false } },
+    ).catch(() => {});
+  }
+  if (staleOnlineIds.length > 0) {
+    DeviceSession.updateMany(
+      { _id: { $in: staleOnlineIds } },
+      { $set: { isOnline: true } },
+    ).catch(() => {});
   }
 
   const total = reconciledSessions.length;

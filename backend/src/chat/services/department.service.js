@@ -36,21 +36,37 @@ function serializeDepartment(department, membersCount = department.membersCount 
 }
 
 async function listDepartments() {
-  const departments = await Department.find({ deletedAt: null })
-    .sort({ name: 1 })
-    .lean();
-  const counts = await Promise.all(
-    departments.map((department) =>
-      User.countDocuments({
-        $or: [
-          { departmentId: department._id },
-          { departmentIds: department._id },
-        ],
-      }),
-    ),
+  const [departments, aggregatedCounts] = await Promise.all([
+    Department.find({ deletedAt: null }).sort({ name: 1 }).lean(),
+    User.aggregate([
+      {
+        $project: {
+          deptSet: {
+            $setUnion: [
+              {
+                $cond: [
+                  { $ne: ["$departmentId", null] },
+                  ["$departmentId"],
+                  [],
+                ],
+              },
+              { $ifNull: ["$departmentIds", []] },
+            ],
+          },
+        },
+      },
+      { $unwind: "$deptSet" },
+      { $group: { _id: "$deptSet", count: { $sum: 1 } } },
+    ]),
+  ]);
+  const countMap = new Map(
+    aggregatedCounts.map((row) => [String(row._id), row.count]),
   );
-  return departments.map((department, index) =>
-    serializeDepartment(department, counts[index]),
+  return departments.map((department) =>
+    serializeDepartment(
+      department,
+      countMap.get(department._id.toString()) || 0,
+    ),
   );
 }
 
