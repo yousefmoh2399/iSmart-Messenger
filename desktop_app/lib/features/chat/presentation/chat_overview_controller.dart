@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:path/path.dart' as p;
 
 import 'package:flutter/foundation.dart';
@@ -29,6 +30,20 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   final _processedIncomingMessageIds = <String>{};
   // Throttle: last time socket_connected triggered a full refresh
   DateTime? _lastSocketRefreshAt;
+  Future<void>? _refreshInFlight;
+  Timer? _directoryRefreshTimer;
+  Timer? _presenceBatchTimer;
+  final Map<
+    String,
+    ({
+      bool isOnline,
+      String presenceStatus,
+      DateTime? lastSeen,
+      DateTime? lastActiveAt,
+    })
+  >
+  _pendingPresenceUpdates = {};
+  static const Duration presenceBatchWindow = Duration(milliseconds: 250);
 
   static ChatDirectoryUser _mergeChatDirectoryUsers(
     ChatDirectoryUser primary,
@@ -131,6 +146,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     ref.onDispose(() {
       _disposed = true;
       _overviewCacheDebounceTimer?.cancel();
+      _directoryRefreshTimer?.cancel();
+      _presenceBatchTimer?.cancel();
+      _pendingPresenceUpdates.clear();
       _eventsSubscription?.cancel();
       _outboxSubscription?.cancel();
     });
@@ -160,6 +178,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
         // Stale-While-Revalidate: Return cached overview immediately so the UI is responsive
         // (<50ms) even over high-latency branch VPNs, and trigger a fresh network fetch in the background.
+        _lastSocketRefreshAt = DateTime.now();
         unawaited(Future.microtask(() async {
           if (_disposed) return;
           try {
@@ -542,7 +561,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       if (event.type == 'users_updated' ||
           event.type == 'departments_updated' ||
           event.type == 'branches_updated') {
-        unawaited(refresh(showLoader: false));
+        _scheduleDirectoryRefresh();
         return;
       }
 
@@ -551,6 +570,15 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
           event.type == 'user_offline') {
         _applyPresenceUpdate(event);
       }
+    });
+  }
+
+  void _scheduleDirectoryRefresh() {
+    _directoryRefreshTimer?.cancel();
+    final jitterMs = 1500 + Random().nextInt(3501);
+    _directoryRefreshTimer = Timer(Duration(milliseconds: jitterMs), () {
+      if (_disposed) return;
+      unawaited(refresh(showLoader: false));
     });
   }
 
@@ -796,7 +824,7 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
 
   void _applyPresenceUpdate(ChatSocketEvent event) {
     final current = state.valueOrNull;
-    if (current == null) {
+    if (current == null || _disposed) {
       return;
     }
 
@@ -817,69 +845,114 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         ? DateTime.tryParse(event.payload['lastActiveAt'] as String)
         : null;
 
-    final matchingUser = current.users.cast<ChatDirectoryUser?>().firstWhere(
-      (u) => u?.id == userId,
-      orElse: () => null,
+    final pending = _pendingPresenceUpdates[userId];
+    if (pending == null) {
+      final matchingUser = current.users.cast<ChatDirectoryUser?>().firstWhere(
+        (u) => u?.id == userId,
+        orElse: () => null,
+      );
+      if (matchingUser != null &&
+          matchingUser.isOnline == isOnline &&
+          matchingUser.presenceStatus == presenceStatus &&
+          lastSeen == null &&
+          lastActiveAt == null) {
+        return;
+      }
+    }
+
+    _pendingPresenceUpdates[userId] = (
+      isOnline: isOnline,
+      presenceStatus: presenceStatus,
+      lastSeen: lastSeen ?? pending?.lastSeen,
+      lastActiveAt: lastActiveAt ?? pending?.lastActiveAt,
     );
-    if (matchingUser != null &&
-        matchingUser.isOnline == isOnline &&
-        matchingUser.presenceStatus == presenceStatus) {
+
+    if (!(_presenceBatchTimer?.isActive ?? false)) {
+      _presenceBatchTimer = Timer(presenceBatchWindow, flushPresenceUpdates);
+    }
+  }
+
+  @visibleForTesting
+  void flushPresenceUpdates() {
+    _presenceBatchTimer?.cancel();
+    _presenceBatchTimer = null;
+    if (_disposed || _pendingPresenceUpdates.isEmpty) {
+      _pendingPresenceUpdates.clear();
+      return;
+    }
+    final current = state.valueOrNull;
+    if (current == null) {
+      _pendingPresenceUpdates.clear();
+      return;
+    }
+
+    final updates = Map<
+      String,
+      ({
+        bool isOnline,
+        String presenceStatus,
+        DateTime? lastSeen,
+        DateTime? lastActiveAt,
+      })
+    >.from(_pendingPresenceUpdates);
+    _pendingPresenceUpdates.clear();
+
+    bool anyChanged = false;
+
+    List<ChatDirectoryUser> applyToUsers(List<ChatDirectoryUser> list) {
+      bool listChanged = false;
+      final updatedList = list.map((user) {
+        final patch = updates[user.id];
+        if (patch == null) {
+          return user;
+        }
+        if (user.isOnline == patch.isOnline &&
+            user.presenceStatus == patch.presenceStatus &&
+            patch.lastSeen == null &&
+            patch.lastActiveAt == null) {
+          return user;
+        }
+        listChanged = true;
+        anyChanged = true;
+        return _copyPresenceUser(
+          user,
+          isOnline: patch.isOnline,
+          presenceStatus: patch.presenceStatus,
+          lastSeen: patch.lastSeen,
+          lastActiveAt: patch.lastActiveAt,
+        );
+      }).toList(growable: false);
+      return listChanged ? updatedList : list;
+    }
+
+    List<ChatConversation> applyToConversations(List<ChatConversation> convs) {
+      bool listChanged = false;
+      final updatedConvs = convs.map((conv) {
+        final nextMembers = applyToUsers(conv.members);
+        if (identical(nextMembers, conv.members)) {
+          return conv;
+        }
+        listChanged = true;
+        return conv.copyWith(members: nextMembers);
+      }).toList(growable: false);
+      return listChanged ? updatedConvs : convs;
+    }
+
+    final nextUsers = applyToUsers(current.users);
+    final nextConversations = applyToConversations(current.conversations);
+    final nextManageable = applyToConversations(
+      current.manageableConversations,
+    );
+
+    if (!anyChanged) {
       return;
     }
 
     state = AsyncData(
       ChatOverviewData(
-        conversations: current.conversations
-            .map(
-              (conversation) => conversation.copyWith(
-                members: conversation.members
-                    .map(
-                      (member) => member.id == userId
-                          ? _copyPresenceUser(
-                              member,
-                              isOnline: isOnline,
-                              presenceStatus: presenceStatus,
-                              lastSeen: lastSeen,
-                              lastActiveAt: lastActiveAt,
-                            )
-                          : member,
-                    )
-                    .toList(),
-              ),
-            )
-            .toList(),
-        users: current.users
-            .map(
-              (user) => user.id == userId
-                  ? _copyPresenceUser(
-                      user,
-                      isOnline: isOnline,
-                      presenceStatus: presenceStatus,
-                      lastSeen: lastSeen,
-                      lastActiveAt: lastActiveAt,
-                    )
-                  : user,
-            )
-            .toList(),
-        manageableConversations: current.manageableConversations
-            .map(
-              (conversation) => conversation.copyWith(
-                members: conversation.members
-                    .map(
-                      (member) => member.id == userId
-                          ? _copyPresenceUser(
-                              member,
-                              isOnline: isOnline,
-                              presenceStatus: presenceStatus,
-                              lastSeen: lastSeen,
-                              lastActiveAt: lastActiveAt,
-                            )
-                          : member,
-                    )
-                    .toList(),
-              ),
-            )
-            .toList(),
+        conversations: nextConversations,
+        manageableConversations: nextManageable,
+        users: nextUsers,
         departments: current.departments,
         branches: current.branches,
         roles: current.roles,
@@ -1373,13 +1446,31 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     );
   }
 
-  Future<void> refresh({bool showLoader = false}) async {
+  Future<void> refresh({bool showLoader = false}) {
+    if (_disposed) {
+      return Future<void>.value();
+    }
+    final existing = _refreshInFlight;
+    if (existing != null && !showLoader) {
+      return existing;
+    }
+    final future = _performRefresh(showLoader: showLoader);
+    _refreshInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_refreshInFlight, future)) {
+        _refreshInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _performRefresh({bool showLoader = false}) async {
     if (_disposed) {
       return;
     }
     if (!await _waitForAuthenticatedSession()) {
       return;
     }
+    _lastSocketRefreshAt = DateTime.now();
     final previous = state.valueOrNull;
     if (showLoader || previous == null) {
       state = const AsyncLoading();
@@ -1823,6 +1914,7 @@ class ConversationMessagesController
   bool _isRefreshing = false;
   bool _disposed = false;
   bool _isInitialBuildFetchingNetwork = false;
+  bool _staleOnReconnect = false;
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
@@ -1881,9 +1973,16 @@ class ConversationMessagesController
     _chatRepository = ref.read(chatRepositoryProvider);
     _chatOutboxService = ref.read(chatOutboxServiceProvider);
     _disposed = false;
+    _staleOnReconnect = false;
     _socketService?.joinConversation(arg);
     _listenToSocket(arg);
     _listenToOutbox(arg);
+    ref.listen<String?>(activeConversationIdProvider, (previous, next) {
+      if (next == arg && _staleOnReconnect && !_disposed && !_isRefreshing) {
+        _staleOnReconnect = false;
+        unawaited(refresh());
+      }
+    });
     ref.onDispose(() {
       _disposed = true;
       if (_messagesCacheDebounceTimer?.isActive ?? false) {
@@ -2026,8 +2125,17 @@ class ConversationMessagesController
       }
 
       if (event.type == 'socket_connected') {
-        if (!_isRefreshing && state.valueOrNull != null && !_disposed) {
-          unawaited(refresh());
+        if (_disposed || state.valueOrNull == null) {
+          return;
+        }
+        final activeId = ref.read(activeConversationIdProvider);
+        if (activeId == conversationId) {
+          _staleOnReconnect = false;
+          if (!_isRefreshing) {
+            unawaited(refresh());
+          }
+        } else {
+          _staleOnReconnect = true;
         }
         return;
       }
@@ -2246,6 +2354,7 @@ class ConversationMessagesController
     if (!await _waitForAuthenticatedSession()) {
       return;
     }
+    _staleOnReconnect = false;
     _isRefreshing = true;
     try {
       final page = await _guardAuth(() => _repository().fetchMessages(arg));

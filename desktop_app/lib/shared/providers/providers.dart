@@ -568,12 +568,22 @@ final cachedAppServerDefaultsProvider = FutureProvider<AppServerDefaults>((
 });
 
 final appSettingsSocketSyncProvider = Provider<void>((ref) {
+  DateTime? lastSocketSyncAt;
   final subscription = ref.read(chatSocketServiceProvider).events.listen((
     event,
   ) {
-    if (event.type == 'app_settings_updated' ||
-        event.type == 'socket_connected') {
+    if (event.type == 'app_settings_updated') {
+      lastSocketSyncAt = DateTime.now();
       ref.read(appSettingsRevisionProvider.notifier).state++;
+      return;
+    }
+    if (event.type == 'socket_connected') {
+      final now = DateTime.now();
+      if (lastSocketSyncAt == null ||
+          now.difference(lastSocketSyncAt!) >= const Duration(minutes: 5)) {
+        lastSocketSyncAt = now;
+        ref.read(appSettingsRevisionProvider.notifier).state++;
+      }
     }
   });
   ref.onDispose(subscription.cancel);

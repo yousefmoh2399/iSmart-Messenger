@@ -10,6 +10,9 @@ import '../models/ticket_models.dart';
 class TicketsController extends AsyncNotifier<TicketOverviewData> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
   TicketRepository? _repositoryInstance;
+  Timer? _socketRefreshTimer;
+  Future<void>? _refreshInFlight;
+  bool _disposed = false;
 
   TicketRepository _repository() =>
       _repositoryInstance ?? ref.read(ticketRepositoryProvider);
@@ -22,9 +25,14 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
     } catch (_) {
       // Keep tickets usable even when realtime socket fails temporarily.
     }
+    _disposed = false;
     _repositoryInstance = ref.read(ticketRepositoryProvider);
     _listenToSocket();
-    ref.onDispose(() => _eventsSubscription?.cancel());
+    ref.onDispose(() {
+      _disposed = true;
+      _socketRefreshTimer?.cancel();
+      _eventsSubscription?.cancel();
+    });
     return _repository().fetchOverview();
   }
 
@@ -35,17 +43,41 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
       if (event.type == 'ticket_updated' ||
           event.type == 'tickets_updated' ||
           event.type == 'ticket_settings_updated') {
-        Future<void>.microtask(refresh);
+        _socketRefreshTimer?.cancel();
+        _socketRefreshTimer = Timer(const Duration(milliseconds: 1200), () {
+          if (_disposed) return;
+          unawaited(refresh());
+        });
       }
     });
   }
 
-  Future<void> refresh({bool showLoader = false}) async {
+  Future<void> refresh({bool showLoader = false}) {
+    if (_disposed) {
+      return Future<void>.value();
+    }
+    final existing = _refreshInFlight;
+    if (existing != null && !showLoader) {
+      return existing;
+    }
+    final future = _performRefresh(showLoader: showLoader);
+    _refreshInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_refreshInFlight, future)) {
+        _refreshInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _performRefresh({bool showLoader = false}) async {
     final previous = state.valueOrNull;
     if (showLoader || previous == null) {
       state = const AsyncLoading();
     }
     final next = await AsyncValue.guard(() => _repository().fetchOverview());
+    if (_disposed) {
+      return;
+    }
     if (next.hasError && previous != null) {
       state = AsyncData(previous);
       return;
@@ -137,6 +169,9 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
 class ClosedTicketsController extends AsyncNotifier<TicketOverviewData> {
   StreamSubscription<ChatSocketEvent>? _eventsSubscription;
   TicketRepository? _repositoryInstance;
+  Timer? _socketRefreshTimer;
+  Future<void>? _refreshInFlight;
+  bool _disposed = false;
 
   TicketRepository _repository() =>
       _repositoryInstance ?? ref.read(ticketRepositoryProvider);
@@ -147,9 +182,14 @@ class ClosedTicketsController extends AsyncNotifier<TicketOverviewData> {
     try {
       await ref.watch(chatSocketConnectionProvider.future);
     } catch (_) {}
+    _disposed = false;
     _repositoryInstance = ref.read(ticketRepositoryProvider);
     _listenToSocket();
-    ref.onDispose(() => _eventsSubscription?.cancel());
+    ref.onDispose(() {
+      _disposed = true;
+      _socketRefreshTimer?.cancel();
+      _eventsSubscription?.cancel();
+    });
     return _repository().fetchOverview(status: 'closed', limit: 200);
   }
 
@@ -160,12 +200,33 @@ class ClosedTicketsController extends AsyncNotifier<TicketOverviewData> {
       if (event.type == 'ticket_updated' ||
           event.type == 'tickets_updated' ||
           event.type == 'ticket_settings_updated') {
-        Future<void>.microtask(refresh);
+        _socketRefreshTimer?.cancel();
+        _socketRefreshTimer = Timer(const Duration(milliseconds: 1200), () {
+          if (_disposed) return;
+          unawaited(refresh());
+        });
       }
     });
   }
 
-  Future<void> refresh({bool showLoader = false}) async {
+  Future<void> refresh({bool showLoader = false}) {
+    if (_disposed) {
+      return Future<void>.value();
+    }
+    final existing = _refreshInFlight;
+    if (existing != null && !showLoader) {
+      return existing;
+    }
+    final future = _performRefresh(showLoader: showLoader);
+    _refreshInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_refreshInFlight, future)) {
+        _refreshInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _performRefresh({bool showLoader = false}) async {
     final previous = state.valueOrNull;
     if (showLoader || previous == null) {
       state = const AsyncLoading();
@@ -173,6 +234,9 @@ class ClosedTicketsController extends AsyncNotifier<TicketOverviewData> {
     final next = await AsyncValue.guard(
       () => _repository().fetchOverview(status: 'closed', limit: 200),
     );
+    if (_disposed) {
+      return;
+    }
     if (next.hasError && previous != null) {
       state = AsyncData(previous);
       return;

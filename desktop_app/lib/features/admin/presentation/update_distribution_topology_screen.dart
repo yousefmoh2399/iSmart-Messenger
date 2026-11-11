@@ -127,11 +127,13 @@ class _UpdateDistributionTopologyScreenState
   late final AnimationController _pulseController;
   Timer? _countdownTicker;
   Timer? _backendSyncTicker;
+  Timer? _onReloadDebounceTimer;
 
   StreamSubscription<ChatSocketEvent>? _socketSub;
   bool _isSocketConnected = false;
   bool _isAutoRolloutActive = false;
   bool _isReloading = false;
+  bool _isSyncInFlight = false;
 
   String _targetVersion = '1.1.22';
   ManagedUpdateRelease? _activeRelease;
@@ -227,8 +229,8 @@ class _UpdateDistributionTopologyScreenState
       _tickDeviceCountdowns();
     });
 
-    // Periodic real backend sync to keep device statuses 100% fresh without closing/reopening the page
-    _backendSyncTicker = Timer.periodic(const Duration(seconds: 4), (_) {
+    // Periodic real backend sync to keep device statuses 100% fresh without flooding over branch VPN
+    _backendSyncTicker = Timer.periodic(const Duration(seconds: 20), (_) {
       if (!mounted) return;
       unawaited(_reloadRealData(silent: true));
     });
@@ -264,6 +266,7 @@ class _UpdateDistributionTopologyScreenState
     _interactiveController.dispose();
     _countdownTicker?.cancel();
     _backendSyncTicker?.cancel();
+    _onReloadDebounceTimer?.cancel();
     _socketSub?.cancel();
     super.dispose();
   }
@@ -320,6 +323,15 @@ class _UpdateDistributionTopologyScreenState
     });
   }
 
+  void _scheduleParentReload() {
+    if (widget.onReload == null || !mounted) return;
+    _onReloadDebounceTimer?.cancel();
+    _onReloadDebounceTimer = Timer(const Duration(milliseconds: 800), () {
+      if (!mounted) return;
+      unawaited(widget.onReload?.call() ?? Future.value());
+    });
+  }
+
   void _handleLiveTelemetryEvent(Map<String, dynamic> data) {
     if (!mounted) return;
 
@@ -327,7 +339,7 @@ class _UpdateDistributionTopologyScreenState
     if (action == 'release_created' ||
         action == 'release_updated' ||
         action == 'job_created') {
-      unawaited(widget.onReload?.call());
+      _scheduleParentReload();
       if (action == 'job_created') {
         return;
       }
@@ -387,7 +399,7 @@ class _UpdateDistributionTopologyScreenState
         isUpdated: status == 'completed',
       );
       _allFleetDevices.add(match);
-      unawaited(widget.onReload?.call());
+      _scheduleParentReload();
     }
 
     _ActivePullingDevice? onCanvas;
@@ -430,7 +442,7 @@ class _UpdateDistributionTopologyScreenState
         });
         _logEvent('SUCCESS', match.hostname,
             '✅ [بيانات حقيقية] اكتمل سحب وتثبيت التحديث v$targetVer للجهاز ${match.hostname} بنجاح!');
-        unawaited(widget.onReload?.call());
+        _scheduleParentReload();
       } else if (status == 'failed' || status == 'cancelled') {
         setState(() {
           onCanvas!.phase = 'failed';
@@ -443,7 +455,7 @@ class _UpdateDistributionTopologyScreenState
         });
         _logEvent('ERROR', match.hostname,
             '❌ [بيانات حقيقية] فشل تحديث الجهاز ${match.hostname}: ${onCanvas.statusMessage}');
-        unawaited(widget.onReload?.call());
+        _scheduleParentReload();
       } else {
         setState(() {
           onCanvas!.phase = 'pulling';
@@ -627,7 +639,8 @@ class _UpdateDistributionTopologyScreenState
   }
 
   Future<void> _reloadRealData({bool silent = false}) async {
-    if (_isReloading) return;
+    if (_isSyncInFlight || _isReloading) return;
+    _isSyncInFlight = true;
     if (!silent && mounted) setState(() => _isReloading = true);
     try {
       final repository = ref.read(updateManagementRepositoryProvider);
@@ -655,7 +668,8 @@ class _UpdateDistributionTopologyScreenState
         _logEvent('WARN', 'Server', 'تعذر جلب التحديثات من السيرفر: $e');
       }
     } finally {
-      if (mounted) {
+      _isSyncInFlight = false;
+      if (mounted && _isReloading) {
         setState(() => _isReloading = false);
       }
     }

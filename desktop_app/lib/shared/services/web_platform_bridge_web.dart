@@ -1231,6 +1231,8 @@ Future<Map<String, dynamic>> startElectronUpdate({
   String? fileName,
   String? silentInstallArgs,
   String? installerKind,
+  String? branchCode,
+  String? deviceUid,
 }) async {
   final result = await _callElectron('startUpdate', {
     'downloadUrl': downloadUrl,
@@ -1239,6 +1241,10 @@ Future<Map<String, dynamic>> startElectronUpdate({
     if (fileName != null) 'fileName': fileName,
     if (silentInstallArgs != null) 'silentInstallArgs': silentInstallArgs,
     if (installerKind != null) 'installerKind': installerKind,
+    if (branchCode != null && branchCode.trim().isNotEmpty)
+      'branchCode': branchCode.trim().toUpperCase(),
+    if (deviceUid != null && deviceUid.trim().isNotEmpty)
+      'deviceUid': deviceUid.trim(),
   });
   return _asStringMap(result);
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
@@ -59,6 +60,7 @@ class _AuthenticatedNetworkImageState
   int _loadGeneration = 0;
   StreamSubscription? _socketSub;
   StreamSubscription? _windowOnlineSub;
+  Timer? _reconnectTimer;
 
   @override
   void initState() {
@@ -67,14 +69,30 @@ class _AuthenticatedNetworkImageState
     unawaited(_load());
   }
 
+  void _scheduleReconnectedLoad() {
+    if (!mounted || (_reconnectTimer?.isActive ?? false)) {
+      return;
+    }
+    final jitterMs = 150 + Random().nextInt(1051);
+    _reconnectTimer = Timer(Duration(milliseconds: jitterMs), () {
+      _reconnectTimer = null;
+      if (!mounted) {
+        return;
+      }
+      if (_error != null || (_bytes == null && _webImageUrl == null)) {
+        _error = null;
+        unawaited(_load());
+      }
+    });
+  }
+
   void _subscribeToReconnection() {
     try {
       final socketService = ref.read(chatSocketServiceProvider);
       _socketSub = socketService.events.listen((event) {
         if (event.type == 'socket_connected' && mounted) {
           if (_error != null || (_bytes == null && _webImageUrl == null)) {
-            _error = null;
-            unawaited(_load());
+            _scheduleReconnectedLoad();
           }
         }
       });
@@ -84,8 +102,7 @@ class _AuthenticatedNetworkImageState
     if (onOnline != null) {
       _windowOnlineSub = onOnline.listen((_) {
         if (mounted && (_error != null || (_bytes == null && _webImageUrl == null))) {
-          _error = null;
-          unawaited(_load());
+          _scheduleReconnectedLoad();
         }
       });
     }
@@ -93,6 +110,7 @@ class _AuthenticatedNetworkImageState
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     _socketSub?.cancel();
     _windowOnlineSub?.cancel();
     _revokeElectronObjectUrl();
@@ -104,6 +122,7 @@ class _AuthenticatedNetworkImageState
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrl != widget.imageUrl ||
         oldWidget.httpHeaders.toString() != widget.httpHeaders.toString()) {
+      _reconnectTimer?.cancel();
       _activeKey = '';
       _resolvedHeaders = null;
       _bytes = null;
@@ -146,7 +165,7 @@ class _AuthenticatedNetworkImageState
     _activeKey = cacheKey;
     final cachedBytes = _memoryCache[cacheKey];
 
-    if (keyChanged) {
+    if (keyChanged || (kIsWeb && _bytes == null && cachedBytes != null)) {
       _revokeElectronObjectUrl();
       setState(() {
         _webImageUrl = null;
@@ -162,70 +181,46 @@ class _AuthenticatedNetworkImageState
 
     if (kIsWeb) {
       if (web_bridge.isElectron()) {
-        if (mounted &&
-            generation == _loadGeneration &&
-            _electronObjectUrl == null) {
+        if (mounted && generation == _loadGeneration && _bytes == null) {
           setState(() => _error = null);
         }
 
         try {
-          final objectUrl = await web_bridge.fetchElectronObjectUrl(
-            url: url,
-            headers: headers,
+          final bytes = await _inFlight.putIfAbsent(
+            cacheKey,
+            () => _fetchWithAuthRetry(
+              url,
+              headers,
+              authRepository,
+            ).whenComplete(() => _inFlight.remove(cacheKey)),
           );
+          _remember(cacheKey, bytes);
           if (mounted &&
               generation == _loadGeneration &&
               _activeKey == cacheKey) {
             _revokeElectronObjectUrl();
             setState(() {
-              _electronObjectUrl = objectUrl;
-              _webImageUrl = objectUrl;
+              _bytes = bytes;
+              _error = null;
+              _webImageUrl = null;
+              _resolvedHeaders = null;
+            });
+          }
+        } catch (fallbackError) {
+          debugPrint(
+            'Electron memory image fetch failed: $url -> $fallbackError',
+          );
+          final webUrl = _urlWithAccessToken(url, headers);
+          if (mounted &&
+              generation == _loadGeneration &&
+              _activeKey == cacheKey) {
+            _revokeElectronObjectUrl();
+            setState(() {
+              _webImageUrl = webUrl;
               _bytes = null;
               _error = null;
               _resolvedHeaders = null;
             });
-          } else {
-            web_bridge.revokeObjectUrl(objectUrl);
-          }
-        } catch (error) {
-          debugPrint('Electron object-url image fetch failed: $url -> $error');
-          try {
-            final bytes = await _inFlight.putIfAbsent(
-              cacheKey,
-              () => _fetchWithAuthRetry(
-                url,
-                headers,
-                authRepository,
-              ).whenComplete(() => _inFlight.remove(cacheKey)),
-            );
-            _remember(cacheKey, bytes);
-            if (mounted &&
-                generation == _loadGeneration &&
-                _activeKey == cacheKey) {
-              _revokeElectronObjectUrl();
-              setState(() {
-                _bytes = bytes;
-                _error = null;
-                _webImageUrl = null;
-                _resolvedHeaders = null;
-              });
-            }
-          } catch (fallbackError) {
-            debugPrint(
-              'Electron memory image fetch failed: $url -> $fallbackError',
-            );
-            final webUrl = _urlWithAccessToken(url, headers);
-            if (mounted &&
-                generation == _loadGeneration &&
-                _activeKey == cacheKey) {
-              _revokeElectronObjectUrl();
-              setState(() {
-                _webImageUrl = webUrl;
-                _bytes = null;
-                _error = null;
-                _resolvedHeaders = null;
-              });
-            }
           }
         }
       } else {

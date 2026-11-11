@@ -134,6 +134,22 @@ class DesktopUpdateAgent {
   String? get deviceUid => _deviceUid;
   AppUser? get currentUser => _currentUser;
 
+  /// Deterministic per-device spread (3..45s) for automatic background update
+  /// downloads so dozens of PCs in one branch do not saturate the VPN at once.
+  @visibleForTesting
+  static Duration computeAutoUpdateStagger(
+    String deviceUid, {
+    int? jitterSecondsOverride,
+  }) {
+    final hash = deviceUid.codeUnits.fold<int>(
+      17,
+      (acc, code) => ((acc * 31) + code) & 0x7fffffff,
+    );
+    final baseSeconds = 3 + (hash % 38);
+    final jitterSeconds = jitterSecondsOverride ?? Random().nextInt(6);
+    return Duration(seconds: (baseSeconds + jitterSeconds).clamp(3, 45));
+  }
+
   void attachUser(AppUser user) {
     _currentUser = user;
   }
@@ -351,6 +367,14 @@ class DesktopUpdateAgent {
         return;
       }
 
+      // Deterministic per-device stagger before initiating automatic update
+      // download so all PCs in a branch do not flood the VPN tunnel together.
+      final stagger = computeAutoUpdateStagger(_deviceUid ?? task.id);
+      await Future<void>.delayed(stagger);
+      if (_disposed || _currentUser == null) {
+        return;
+      }
+
       await _stateStore.markDownloading(
         taskId: task.id,
         releaseId: task.release.id,
@@ -422,6 +446,8 @@ class DesktopUpdateAgent {
         fileName: task.release.fileName,
         silentInstallArgs: task.release.silentInstallArgs,
         installerKind: task.release.installerKind,
+        branchCode: _currentUser?.branchCode,
+        deviceUid: _deviceUid,
       );
 
       if (downloadResult['success'] != true) {
@@ -578,6 +604,8 @@ class DesktopUpdateAgent {
         fileName: release.fileName,
         silentInstallArgs: release.silentInstallArgs,
         installerKind: release.installerKind,
+        branchCode: _currentUser?.branchCode,
+        deviceUid: _deviceUid,
       );
 
       if (downloadResult['success'] != true) {

@@ -28,6 +28,7 @@ class DesktopWorkspaceShell extends ConsumerStatefulWidget {
 class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
   StreamSubscription? _updateEventsSub;
   final Set<int> _mountedTabIndices = <int>{0};
+  int? _lastTaskbarBadgeCount;
 
   @override
   void initState() {
@@ -36,6 +37,7 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
       _initUpdateListener();
       final initialUnread =
           ref.read(chatOverviewControllerProvider).valueOrNull?.totalUnread ?? 0;
+      _lastTaskbarBadgeCount = initialUnread;
       unawaited(web_bridge.setTaskbarBadgeCount(initialUnread));
     });
   }
@@ -43,6 +45,7 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
   @override
   void dispose() {
     _updateEventsSub?.cancel();
+    _lastTaskbarBadgeCount = 0;
     unawaited(web_bridge.setTaskbarBadgeCount(0));
     super.dispose();
   }
@@ -205,6 +208,10 @@ class _DesktopWorkspaceShellState extends ConsumerState<DesktopWorkspaceShell> {
       chatOverviewControllerProvider,
       (previous, next) {
         final unread = next.valueOrNull?.totalUnread ?? 0;
+        if (_lastTaskbarBadgeCount == unread) {
+          return;
+        }
+        _lastTaskbarBadgeCount = unread;
         unawaited(web_bridge.setTaskbarBadgeCount(unread));
       },
     );

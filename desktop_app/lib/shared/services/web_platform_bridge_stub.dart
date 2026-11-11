@@ -295,6 +295,8 @@ Future<Map<String, dynamic>> startElectronUpdate({
   String? fileName,
   String? silentInstallArgs,
   String? installerKind,
+  String? branchCode,
+  String? deviceUid,
 }) async {
   throw UnsupportedError('Electron is not available on this platform.');
 }

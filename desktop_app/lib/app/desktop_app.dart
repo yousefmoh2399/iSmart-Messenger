@@ -1,5 +1,6 @@
-import 'dart:ui';
 import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -155,6 +156,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   bool _lastKnownWindowMinimized = false;
   // Throttle: last time we fired a health-ping from updates_updated event
   DateTime? _lastUpdatesRefreshAt;
+  Timer? _updatesCheckTimer;
   String? _lastNotifiedUpdateVersion;
   Timer? _updateBannerAutoDismissTimer;
 
@@ -268,6 +270,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       _updateAgentUserId = null;
       _isEstablishingConnection = true;
       _connectionEstablishTimer?.cancel();
+      _updatesCheckTimer?.cancel();
       _isUpdateInProgress = false;
       _isUpdateDialogMinimized = false;
       _isPendingRestart = false;
@@ -311,6 +314,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   Future<void> _syncAdminServerDefaults() async {
     if (!mounted) return;
     try {
+      final currentBaseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull;
       final appSettingsService = ref.read(appSettingsServiceProvider);
       final apiBaseUrlCtrl = ref.read(apiBaseUrlControllerProvider.notifier);
       final serverConnCtrl = ref.read(
@@ -323,7 +327,10 @@ class _AuthGateState extends ConsumerState<_AuthGate>
       }
       await apiBaseUrlCtrl.applyAdminDefault(desktopUrl);
       if (!mounted) return;
-      await serverConnCtrl.refresh();
+      final nextBaseUrl = ref.read(apiBaseUrlControllerProvider).valueOrNull;
+      if (nextBaseUrl != currentBaseUrl) {
+        await serverConnCtrl.refresh();
+      }
     } catch (_) {}
   }
 
@@ -558,6 +565,7 @@ class _AuthGateState extends ConsumerState<_AuthGate>
   @override
   void dispose() {
     _updateBannerAutoDismissTimer?.cancel();
+    _updatesCheckTimer?.cancel();
     _desktopEventsSubscription?.cancel();
     _updateAgentEventsSubscription?.cancel();
     _lanIncomingSubscription?.cancel();
@@ -943,6 +951,10 @@ class _AuthGateState extends ConsumerState<_AuthGate>
         return;
       }
       if (event.type == 'updates_updated') {
+        final action = (event.payload['action'] ?? '').toString().trim();
+        if (action == 'telemetry') {
+          return;
+        }
         // Debounce: skip health-ping if we refreshed within the last 8 seconds
         final now = DateTime.now();
         if (_lastUpdatesRefreshAt == null ||
@@ -951,7 +963,13 @@ class _AuthGateState extends ConsumerState<_AuthGate>
           unawaited(_refreshServerConnectionState());
         }
         if (!kIsWeb || web_bridge.isElectron()) {
-          unawaited(ref.read(desktopUpdateAgentProvider).checkNow());
+          _updatesCheckTimer?.cancel();
+          final jitterMs = 1000 + Random().nextInt(5001);
+          _updatesCheckTimer = Timer(Duration(milliseconds: jitterMs), () {
+            if (!mounted) return;
+            if (ref.read(currentUserProvider) == null) return;
+            unawaited(ref.read(desktopUpdateAgentProvider).checkNow());
+          });
         }
         return;
       }

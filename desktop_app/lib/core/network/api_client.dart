@@ -118,12 +118,12 @@ class ApiClient {
               options.sendTimeout = const Duration(minutes: 30);
             }
           } else {
-            // Generous connectTimeout (25s) for branch VPNs with high latency/jitter,
-            // while keeping receive/send timeouts reasonable (25s) so dead connections fail over to cache.
-            options.connectTimeout ??= const Duration(seconds: 25);
-            options.receiveTimeout = const Duration(seconds: 25);
+            // Bounded connect/receive/send timeouts for branch VPNs with high jitter
+            // so dead connections fail over to local cache promptly.
+            options.connectTimeout ??= const Duration(seconds: 15);
+            options.receiveTimeout = const Duration(seconds: 20);
             if (!kIsWeb) {
-              options.sendTimeout = const Duration(seconds: 25);
+              options.sendTimeout = const Duration(seconds: 20);
             }
           }
 
@@ -219,15 +219,14 @@ class ApiClient {
             }
           }
 
-          // Transient network failure auto-retry (especially for branch VPN packet drops and latency spikes)
+          // Transient network failure auto-retry (especially for branch VPN packet drops and latency spikes).
+          // Keep 503 out of automatic retry so backend backpressure queue/rate-limit signals work properly.
           final isTransientNetworkError =
               error.type == DioExceptionType.connectionTimeout ||
               error.type == DioExceptionType.connectionError ||
               error.type == DioExceptionType.sendTimeout ||
               (statusCode != null &&
-                  (statusCode == 502 ||
-                      statusCode == 503 ||
-                      statusCode == 504));
+                  (statusCode == 502 || statusCode == 504));
           final isIdempotentMethod =
               requestOptions.method.toUpperCase() == 'GET' ||
               requestOptions.method.toUpperCase() == 'HEAD' ||
@@ -237,7 +236,7 @@ class ApiClient {
 
           if (isTransientNetworkError &&
               isIdempotentMethod &&
-              networkRetryCount < 2 &&
+              networkRetryCount < 1 &&
               _isReplayableRequestData(requestOptions.data)) {
             final retryDelay =
                 Duration(milliseconds: 600 * (networkRetryCount + 1));

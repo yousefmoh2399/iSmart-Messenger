@@ -249,11 +249,11 @@ class _LiveOperationsTopologyScreenState
     _wireFlowController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..addListener(_onAnimationFrame)
-     ..repeat();
+    )..addListener(_onAnimationFrame);
 
     _initCoreNodesAndFleet();
     _buildInitialLogs();
+    _syncWireFlowAnimation();
 
     // 1-Second Ticker for active devices 5-second countdown & fadeout after completion
     _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -291,6 +291,20 @@ class _LiveOperationsTopologyScreenState
         oldWidget.state.sessions != widget.state.sessions ||
         oldWidget.state.stats != widget.state.stats) {
       _initCoreNodesAndFleet();
+      _syncWireFlowAnimation();
+    }
+  }
+
+  void _syncWireFlowAnimation() {
+    if (!mounted) return;
+    if (_activeDevices.isEmpty) {
+      if (_wireFlowController.isAnimating) {
+        _wireFlowController.stop();
+      }
+    } else {
+      if (!_wireFlowController.isAnimating) {
+        _wireFlowController.repeat();
+      }
     }
   }
 
@@ -1306,6 +1320,7 @@ class _LiveOperationsTopologyScreenState
       });
       if (_liveLogs.length > 80) _liveLogs.removeLast();
     });
+    _syncWireFlowAnimation();
   }
 
   void _triggerDeviceActionOnCanvas(_FleetDeviceModel dev,
@@ -1515,6 +1530,7 @@ class _LiveOperationsTopologyScreenState
 
     if (changed) {
       setState(() {});
+      _syncWireFlowAnimation();
     }
   }
 
