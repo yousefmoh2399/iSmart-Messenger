@@ -3,6 +3,7 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/user.model");
 const DeviceSession = require("../../models/device-session.model");
+const Conversation = require("../models/conversation.model");
 const { jwtSecret, corsOrigin } = require("../../config/env");
 const { resolveStoredUploadPath } = require("../../utils/storage-paths");
 const logger = require("../../utils/logger");
@@ -44,6 +45,11 @@ const userSockets = new Map();
 const socketPresence = new Map();
 const socketClientType = new Map();
 const publishedPresenceState = new Map();
+const pendingOfflineTimers = new Map();
+const PRESENCE_OFFLINE_GRACE_MS = Math.max(
+  0,
+  Number(process.env.PRESENCE_OFFLINE_GRACE_MS) || 4000,
+);
 const printerCatalogByUser = new Map();
 const printJobOwnerById = new Map();
 const desktopStorageByUser = new Map();
@@ -80,7 +86,54 @@ function emitPresence(io, userId, isOnline, status, extra = {}) {
   io.to("lobby").emit(isOnline ? "user_online" : "user_offline", payload);
 }
 
+function cancelPendingOfflinePublish(userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) return false;
+  const existing = pendingOfflineTimers.get(uid);
+  if (existing) {
+    clearTimeout(existing);
+    pendingOfflineTimers.delete(uid);
+    return true;
+  }
+  return false;
+}
+
+function scheduleOfflineGracePublish(
+  io,
+  userId,
+  graceMs = PRESENCE_OFFLINE_GRACE_MS,
+  extra = {},
+) {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  cancelPendingOfflinePublish(uid);
+
+  const runPublish = () => {
+    pendingOfflineTimers.delete(uid);
+    const activeSockets = pruneUserSockets(io, uid);
+    if (activeSockets.size > 0) {
+      return Promise.resolve();
+    }
+    return publishAggregatedPresence(io, uid, {
+      lastSeen: new Date().toISOString(),
+      ...extra,
+    }).catch(() => {});
+  };
+
+  if (graceMs <= 0) {
+    runPublish();
+    return;
+  }
+
+  const timer = setTimeout(runPublish, graceMs);
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+  pendingOfflineTimers.set(uid, timer);
+}
+
 function registerUserSocket(userId, socketId) {
+  cancelPendingOfflinePublish(userId);
   const sockets = userSockets.get(userId) || new Set();
   sockets.add(socketId);
   userSockets.set(userId, sockets);
@@ -96,7 +149,8 @@ function unregisterUserSocket(userId, socketId) {
   sockets.delete(socketId);
   if (!sockets.size) {
     userSockets.delete(userId);
-    publishedPresenceState.delete(userId);
+    // Keep publishedPresenceState until publishAggregatedPresence actually
+    // transitions the user offline after the VPN flap grace window.
   }
 }
 
@@ -128,7 +182,6 @@ function pruneUserSockets(io, userId) {
   }
   if (!sockets.size) {
     userSockets.delete(userId);
-    publishedPresenceState.delete(userId);
   } else {
     userSockets.set(userId, sockets);
   }
@@ -262,7 +315,11 @@ async function publishAggregatedPresence(io, userId, extra = {}) {
     isOnline: aggregated.isOnline,
     status: aggregated.status,
   });
-  publishedPresenceState.set(userId, nextSignature);
+  if (aggregated.isOnline) {
+    publishedPresenceState.set(userId, nextSignature);
+  } else {
+    publishedPresenceState.delete(userId);
+  }
 
   const payload = { ...extra };
   if (aggregated.isOnline) {
@@ -731,7 +788,12 @@ function initializeChatSocketServer(httpServer) {
       for (const userId of [...userSockets.keys()]) {
         pruneUserSockets(io, userId);
       }
-      const activeSocketUserIds = [...userSockets.keys()];
+      const activeSocketUserIds = [
+        ...new Set([
+          ...userSockets.keys(),
+          ...pendingOfflineTimers.keys(),
+        ]),
+      ];
       const staleFilter = activeSocketUserIds.length
         ? { isOnline: true, _id: { $nin: activeSocketUserIds } }
         : { isOnline: true };
@@ -751,6 +813,7 @@ function initializeChatSocketServer(httpServer) {
         },
       );
       for (const userId of staleIds) {
+        publishedPresenceState.delete(userId);
         emitPresence(io, userId, false, "offline", {
           lastSeen: new Date().toISOString(),
         });
@@ -779,6 +842,16 @@ function initializeChatSocketServer(httpServer) {
     const currentUser = socket.user;
     socket.join(`user:${currentUser.id}`);
     socket.join("lobby");
+    const canViewMonitor =
+      currentUser.permissions?.canViewSystemMonitor === true ||
+      currentUser.role === "admin";
+    const canManageUpdates = currentUser.permissions?.canManageUpdates === true;
+    if (canViewMonitor) {
+      socket.join("admin:monitor");
+    }
+    if (canViewMonitor || canManageUpdates) {
+      socket.join("admin:updates");
+    }
     registerUserSocket(currentUser.id, socket.id);
     socketPresence.set(socket.id, "online");
     socketClientType.set(socket.id, currentUser.clientType || "unknown");
@@ -812,16 +885,30 @@ function initializeChatSocketServer(httpServer) {
         lastActiveAt: new Date().toISOString(),
       });
       const pendingDeliveries = await markPendingDeliveriesForUser(currentUser);
-      for (const entry of pendingDeliveries) {
-        let deliveryTarget = io.to(getConversationRoom(entry.conversationId));
-        const conv = await getConversationById(entry.conversationId).catch(() => null);
-        if (conv?.members) {
-          for (const m of conv.members) {
-            const mId = m._id ? m._id.toString() : m.toString();
-            deliveryTarget = deliveryTarget.to(`user:${mId}`);
+      if (pendingDeliveries.length > 0) {
+        const pendingConvIds = Array.from(
+          new Set(pendingDeliveries.map((e) => e.conversationId).filter(Boolean)),
+        );
+        const pendingConvs = pendingConvIds.length
+          ? await Conversation.find({ _id: { $in: pendingConvIds } })
+              .select("_id members")
+              .lean()
+              .catch(() => [])
+          : [];
+        const convMembersMap = new Map(
+          pendingConvs.map((c) => [c._id.toString(), c.members || []]),
+        );
+        for (const entry of pendingDeliveries) {
+          let deliveryTarget = io.to(getConversationRoom(entry.conversationId));
+          const members = convMembersMap.get(String(entry.conversationId));
+          if (members) {
+            for (const m of members) {
+              const mId = m._id ? m._id.toString() : m.toString();
+              deliveryTarget = deliveryTarget.to(`user:${mId}`);
+            }
           }
+          deliveryTarget.emit("message_delivered", entry);
         }
-        deliveryTarget.emit("message_delivered", entry);
       }
       try {
         recordSocketTelemetry(io, socket, "connection", 6, {
@@ -2211,9 +2298,14 @@ function initializeChatSocketServer(httpServer) {
         }
       }
 
-      await publishAggregatedPresence(io, currentUser.id, {
-        lastSeen: new Date().toISOString(),
-      });
+      const remainingSockets = userSockets.get(currentUser.id);
+      if (remainingSockets && remainingSockets.size > 0) {
+        await publishAggregatedPresence(io, currentUser.id, {
+          lastSeen: new Date().toISOString(),
+        });
+      } else {
+        scheduleOfflineGracePublish(io, currentUser.id);
+      }
     });
   });
 
@@ -2356,4 +2448,14 @@ module.exports = {
   emitConversationToUsers,
   emitConversationToMembers,
   leaveUserFromConversationRoom,
+  _presenceGrace: {
+    registerUserSocket,
+    unregisterUserSocket,
+    scheduleOfflineGracePublish,
+    cancelPendingOfflinePublish,
+    publishAggregatedPresence,
+    pendingOfflineTimers,
+    publishedPresenceState,
+    userSockets,
+  },
 };

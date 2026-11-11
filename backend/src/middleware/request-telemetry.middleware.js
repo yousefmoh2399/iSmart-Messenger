@@ -24,10 +24,12 @@ function recordTelemetryEntry(io, entry) {
     recentRequests.pop();
   }
 
-  // Real-time Socket.IO emission to connected admin monitors
+  // Telemetry is consumed by the admin operations monitor only. Broadcasting
+  // each API/socket event to every connected client multiplies traffic by the
+  // number of online devices and can saturate branch VPN links at peak hours.
   try {
     if (io && typeof io.emit === "function") {
-      io.emit("api_request_telemetry", entry);
+      io.to("admin:monitor").emit("api_request_telemetry", entry);
     }
   } catch (_) {}
 }

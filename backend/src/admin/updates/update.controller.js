@@ -21,6 +21,128 @@ const {
   checkForMobileUpdates,
 } = require("./update.service");
 
+const MAX_CONCURRENT_UPDATES_GLOBAL = Math.max(
+  1,
+  Number(process.env.UPDATE_MAX_CONCURRENT_GLOBAL) || 6,
+);
+const MAX_CONCURRENT_UPDATES_PER_BRANCH = Math.max(
+  1,
+  Number(process.env.UPDATE_MAX_CONCURRENT_PER_BRANCH) || 2,
+);
+const STALE_DOWNLOAD_SLOT_MS = 15 * 60 * 1000;
+const activeDownloadSlots = new Map();
+let downloadSlotSequence = 0;
+
+function extractIpv4SubnetBucket(clientIp) {
+  const clean = String(clientIp || "")
+    .split(",")[0]
+    .trim()
+    .replace(/^::ffff:/i, "");
+  const match = clean.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/);
+  if (!match) {
+    return null;
+  }
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  const c = Number(match[3]);
+  if (a === 127 && b === 0 && c === 0) {
+    return null;
+  }
+  return `${a}.${b}.${c}`;
+}
+
+function extractBranchDownloadBucket({ branchCode, clientIp }) {
+  const normalizedBranch = String(branchCode || "")
+    .trim()
+    .toUpperCase();
+  if (normalizedBranch && normalizedBranch !== "MAIN") {
+    return `branch:${normalizedBranch}`;
+  }
+  const subnet = extractIpv4SubnetBucket(clientIp);
+  if (subnet) {
+    return `subnet:${subnet}`;
+  }
+  return "branch:MAIN";
+}
+
+function pruneStaleDownloadSlots(now = Date.now()) {
+  for (const [slotId, slot] of activeDownloadSlots.entries()) {
+    if (now - slot.startedAt > STALE_DOWNLOAD_SLOT_MS) {
+      activeDownloadSlots.delete(slotId);
+    }
+  }
+}
+
+function tryAcquireDownloadSlot({ branchCode, clientIp, deviceKey } = {}) {
+  const now = Date.now();
+  pruneStaleDownloadSlots(now);
+
+  // If the exact same device starts a fresh attempt (e.g., reconnect), free any
+  // previous lingering slot belonging to it before evaluating capacity.
+  if (deviceKey) {
+    for (const [slotId, slot] of activeDownloadSlots.entries()) {
+      if (slot.deviceKey && slot.deviceKey === deviceKey) {
+        activeDownloadSlots.delete(slotId);
+      }
+    }
+  }
+
+  const branchBucket = extractBranchDownloadBucket({ branchCode, clientIp });
+  let branchActive = 0;
+  for (const slot of activeDownloadSlots.values()) {
+    if (slot.branchBucket === branchBucket) {
+      branchActive += 1;
+    }
+  }
+
+  if (
+    activeDownloadSlots.size >= MAX_CONCURRENT_UPDATES_GLOBAL ||
+    branchActive >= MAX_CONCURRENT_UPDATES_PER_BRANCH
+  ) {
+    const retryAfterSeconds = 15 + Math.floor(Math.random() * 25);
+    return {
+      acquired: false,
+      branchBucket,
+      branchActive,
+      globalActive: activeDownloadSlots.size,
+      retryAfterSeconds,
+    };
+  }
+
+  const slotId = `dl_${now}_${++downloadSlotSequence}`;
+  activeDownloadSlots.set(slotId, {
+    slotId,
+    branchBucket,
+    deviceKey: deviceKey || null,
+    startedAt: now,
+  });
+  return {
+    acquired: true,
+    slotId,
+    branchBucket,
+    branchActive: branchActive + 1,
+    globalActive: activeDownloadSlots.size,
+  };
+}
+
+function releaseDownloadSlot(slotId) {
+  if (!slotId) return;
+  activeDownloadSlots.delete(slotId);
+}
+
+function resetDownloadSlots() {
+  activeDownloadSlots.clear();
+}
+
+function getActiveDownloadStats() {
+  pruneStaleDownloadSlots();
+  return {
+    globalActive: activeDownloadSlots.size,
+    maxGlobal: MAX_CONCURRENT_UPDATES_GLOBAL,
+    maxPerBranch: MAX_CONCURRENT_UPDATES_PER_BRANCH,
+  };
+}
+
 function emitUpdatesUpdated(req, payload = {}) {
   const io = req.app?.get ? req.app.get("io") : null;
   if (!io) {
@@ -41,11 +163,9 @@ function emitUpdateTelemetry(req, payload = {}) {
     at: new Date().toISOString(),
     ...payload,
   };
-  io.emit("update_telemetry", eventPayload);
-  io.emit("updates_updated", {
-    action: "telemetry",
-    ...eventPayload,
-  });
+  // Scope update telemetry strictly to admin monitor / update manager rooms so
+  // hundreds of branch clients do not wake up and poll /heartbeat on every tick.
+  io.to("admin:updates").to("admin:monitor").emit("update_telemetry", eventPayload);
 }
 
 const heartbeatDevice = asyncHandler(async (req, res) => {
@@ -194,20 +314,6 @@ const downloadReleaseArtifact = (req, res, next) => {
       const clientIp = req.ip || req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "-";
       const targetIdentifier = clientDeviceUid || (hostName ? `host_${hostName}` : (clientIp !== "-" ? `ip_${clientIp}` : "POS-Terminal"));
 
-      emitUpdateTelemetry(req, {
-        action: "download_started",
-        releaseId: req.params.id,
-        deviceUid: clientDeviceUid || targetIdentifier,
-        hostName: hostName || null,
-        deviceName: hostName || null,
-        branchCode: branchCode,
-        clientIp: clientIp,
-        status: "downloading",
-        phase: "pulling",
-        progress: 5,
-        message: "بدأ سحب حزمة التحديث من السيرفر",
-      });
-
       const info = await getReleaseDownloadInfo(req.params.id);
       if (info.mode === "redirect") {
         res.redirect(info.externalDownloadUrl);
@@ -223,6 +329,44 @@ const downloadReleaseArtifact = (req, res, next) => {
           error: "Release artifact file not found.",
         });
       }
+
+      const slot = tryAcquireDownloadSlot({
+        branchCode,
+        clientIp,
+        deviceKey: targetIdentifier,
+      });
+      if (!slot.acquired) {
+        res.setHeader("Retry-After", String(slot.retryAfterSeconds));
+        return res.status(503).json({
+          success: false,
+          code: "UPDATE_DOWNLOAD_BUSY",
+          error: "Update server download queue is busy. Retry after delay.",
+          retryAfterSeconds: slot.retryAfterSeconds,
+        });
+      }
+
+      let slotReleased = false;
+      const releaseSlotOnce = () => {
+        if (slotReleased) return;
+        slotReleased = true;
+        releaseDownloadSlot(slot.slotId);
+      };
+      res.once("close", releaseSlotOnce);
+      res.once("finish", releaseSlotOnce);
+
+      emitUpdateTelemetry(req, {
+        action: "download_started",
+        releaseId: req.params.id,
+        deviceUid: clientDeviceUid || targetIdentifier,
+        hostName: hostName || null,
+        deviceName: hostName || null,
+        branchCode: branchCode,
+        clientIp: clientIp,
+        status: "downloading",
+        phase: "pulling",
+        progress: 5,
+        message: "بدأ سحب حزمة التحديث من السيرفر",
+      });
 
       const stat = fsSync.statSync(filePath);
       const fileSize = stat.size;
@@ -260,6 +404,7 @@ const downloadReleaseArtifact = (req, res, next) => {
           end < start ||
           end >= fileSize
         ) {
+          releaseSlotOnce();
           res.status(416);
           res.setHeader("Content-Range", `bytes */${fileSize}`);
           res.end();
@@ -274,7 +419,8 @@ const downloadReleaseArtifact = (req, res, next) => {
           start,
           end,
         });
-        stream.on("error", (err) => {
+        stream.once("error", (err) => {
+          releaseSlotOnce();
           console.error(
             `[UpdateController] Stream error for ${req.params.id}:`,
             err.message,
@@ -284,7 +430,8 @@ const downloadReleaseArtifact = (req, res, next) => {
           }
           stream.destroy();
         });
-        res.on("error", (err) => {
+        res.once("error", () => {
+          releaseSlotOnce();
           stream.destroy();
         });
         stream.pipe(res);
@@ -315,7 +462,8 @@ const downloadReleaseArtifact = (req, res, next) => {
             }
           }
         });
-        stream.on("error", (err) => {
+        stream.once("error", (err) => {
+          releaseSlotOnce();
           console.error(
             `[UpdateController] Stream error for ${req.params.id}:`,
             err.message,
@@ -325,7 +473,8 @@ const downloadReleaseArtifact = (req, res, next) => {
           }
           stream.destroy();
         });
-        res.on("error", (err) => {
+        res.once("error", () => {
+          releaseSlotOnce();
           stream.destroy();
         });
         stream.pipe(res);
@@ -547,4 +696,13 @@ module.exports = {
   getManagedUpdateJob,
   cancelManagedUpdateJob,
   cancelAllManagedUpdates,
+  emitUpdateTelemetry,
+  emitUpdatesUpdated,
+  _downloadAdmission: {
+    extractBranchDownloadBucket,
+    tryAcquireDownloadSlot,
+    releaseDownloadSlot,
+    resetDownloadSlots,
+    getActiveDownloadStats,
+  },
 };
