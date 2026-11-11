@@ -76,7 +76,7 @@ const pendingLanTransfers = new Map();
 const pendingLanReceiveRequests = new Map();
 const MAX_ELECTRON_FETCH_BYTES = 512 * 1024 * 1024;
 const LAN_DISCOVERY_TIMEOUT_MS = 750;
-const LAN_DISCOVERY_BATCH_SIZE = 96;
+const LAN_DISCOVERY_BATCH_SIZE = 20;
 const DEFAULT_TRANSFER_POLICY = {
   maxFileSizeBytes: 500 * 1024 * 1024,
   allowedExtensions: [],
@@ -165,9 +165,14 @@ function localStorageRootPath(preferredPath) {
   return path.join(localAppData, APP_NAME, "Storage");
 }
 
+const _ensuredStorageDirs = new Set();
+
 function localStorageChildPath(name, preferredPath) {
   const directory = path.join(localStorageRootPath(preferredPath), name);
-  fs.mkdirSync(directory, { recursive: true });
+  if (!_ensuredStorageDirs.has(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
+    _ensuredStorageDirs.add(directory);
+  }
   return directory;
 }
 
@@ -498,6 +503,7 @@ app.commandLine.appendSwitch("js-flags", "--max-old-space-size=512");
 // Limit disk cache to prevent thrashing slow mechanical 5400rpm hard drives
 app.commandLine.appendSwitch("disk-cache-size", "67108864");
 app.commandLine.appendSwitch("font-render-hinting", "medium");
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 // Graphics Performance Tuning:
 // On Windows 7 (NT 6.1), disabling hardware acceleration forces CPU software emulation (SwiftShader),
@@ -582,6 +588,50 @@ function resolveWebFile(root, requestUrl) {
   return requested;
 }
 
+const _staticWebCache = new Map();
+let _staticWebCacheBytes = 0;
+const MAX_STATIC_WEB_CACHE_BYTES = 48 * 1024 * 1024;
+const MAX_STATIC_WEB_CACHE_ENTRY_BYTES = 16 * 1024 * 1024;
+
+function _shouldCacheStaticWebAsset(filePath, ext) {
+  const base = path.basename(filePath).toLowerCase();
+  if (
+    ext === ".html" ||
+    base === "flutter_service_worker.js" ||
+    base === "version.json"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function _cacheStaticWebAsset(filePath, ext, data) {
+  if (
+    !_shouldCacheStaticWebAsset(filePath, ext) ||
+    !data ||
+    data.length > MAX_STATIC_WEB_CACHE_ENTRY_BYTES ||
+    _staticWebCache.has(filePath)
+  ) {
+    return;
+  }
+  while (
+    _staticWebCacheBytes + data.length > MAX_STATIC_WEB_CACHE_BYTES &&
+    _staticWebCache.size > 0
+  ) {
+    const oldestKey = _staticWebCache.keys().next().value;
+    const oldest = _staticWebCache.get(oldestKey);
+    _staticWebCache.delete(oldestKey);
+    if (oldest) {
+      _staticWebCacheBytes -= oldest.data.length;
+    }
+  }
+  _staticWebCache.set(filePath, {
+    contentType: mimeTypes[ext] || "application/octet-stream",
+    data,
+  });
+  _staticWebCacheBytes += data.length;
+}
+
 function startWebAppServer() {
   if (webAppServer) {
     const address = webAppServer.address();
@@ -589,7 +639,7 @@ function startWebAppServer() {
   }
 
   const root = webRoot();
-  webAppServer = http.createServer((request, response) => {
+  webAppServer = http.createServer(async (request, response) => {
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405);
       response.end("Method not allowed");
@@ -602,12 +652,31 @@ function startWebAppServer() {
       response.end("Forbidden");
       return;
     }
+
     try {
-      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      const cached = _staticWebCache.get(filePath);
+      if (cached) {
+        response.writeHead(200, {
+          "Content-Type": cached.contentType,
+          "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        });
+        if (request.method === "HEAD") {
+          response.end();
+          return;
+        }
+        response.end(cached.data);
+        return;
+      }
+
+      const stat = await fs.promises.stat(filePath).catch(() => null);
+      if (!stat || stat.isDirectory()) {
         filePath = path.join(root, "index.html");
       }
       const ext = path.extname(filePath).toLowerCase();
-      const data = fs.readFileSync(filePath);
+      const data = await fs.promises.readFile(filePath);
+      _cacheStaticWebAsset(filePath, ext, data);
       response.writeHead(200, {
         "Content-Type": mimeTypes[ext] || "application/octet-stream",
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -698,11 +767,11 @@ function getRankedIpv4Addresses() {
       let score = 100;
       const lowerName = name.toLowerCase();
       const mac = (entry.mac || "").toLowerCase();
+      const isVirtual =
+        VIRTUAL_ADAPTER_REGEX.test(lowerName) ||
+        VIRTUAL_MAC_PREFIXES.some((prefix) => mac.startsWith(prefix));
 
-      if (VIRTUAL_ADAPTER_REGEX.test(lowerName)) {
-        score -= 90;
-      }
-      if (VIRTUAL_MAC_PREFIXES.some((prefix) => mac.startsWith(prefix))) {
+      if (isVirtual) {
         score -= 90;
       }
       if (PHYSICAL_ADAPTER_REGEX.test(lowerName)) {
@@ -718,12 +787,28 @@ function getRankedIpv4Addresses() {
         score += 15;
       }
 
-      candidates.push({ name, ip, mac, score });
+      candidates.push({ name, ip, mac, score, isVirtual });
     }
   }
 
   candidates.sort((a, b) => b.score - a.score);
   return candidates;
+}
+
+function localPhysicalLanIpv4s() {
+  const ranked = getRankedIpv4Addresses();
+  const seen = new Set();
+  const result = [];
+  for (const c of ranked) {
+    if (c.isVirtual) {
+      continue;
+    }
+    if (!seen.has(c.ip)) {
+      seen.add(c.ip);
+      result.push(c.ip);
+    }
+  }
+  return result;
 }
 
 function localIpv4s() {
@@ -813,7 +898,11 @@ async function probeLanPeerWithRetry(targetIp, { attempts = 3, timeoutMs = 2500 
 }
 
 async function discoverLanPeersOnLocalNetworks() {
-  const ownIps = uniqueLanIps(localIpv4s());
+  // Never scan VPN TAP/TUN or VM virtual adapter subnets with /24 probes.
+  const ownIps = uniqueLanIps(localPhysicalLanIpv4s());
+  if (ownIps.length === 0) {
+    return [];
+  }
   const ownIpSet = new Set(ownIps);
   const subnets = Array.from(new Set(ownIps.map(lanSubnetKey).filter(Boolean))).sort();
   const candidates = [];
@@ -1607,8 +1696,21 @@ function uniqueOutputPath(directory, fileName) {
   return candidate;
 }
 
+const _resolvedWebAssetCache = new Map();
+const _extractedAudioPathCache = new Map();
+const AUDIO_WORKER_IDLE_TIMEOUT_MS = 45000;
+const AUDIO_WORKER_PLAY_TIMEOUT_MS = 10000;
+const AUDIO_WORKER_MAX_QUEUE = 6;
+let _audioWorkerState = null;
+const _audioPlayQueue = [];
+let _audioQueueActive = false;
+
 function resolveWebAssetPath(assetPath) {
-  const normalized = String(assetPath || "")
+  const rawKey = String(assetPath || "").trim();
+  if (_resolvedWebAssetCache.has(rawKey)) {
+    return _resolvedWebAssetCache.get(rawKey);
+  }
+  const normalized = rawKey
     .replace(/\\/g, "/")
     .replace(/^\/+/, "");
   if (!normalized || normalized.includes("..")) {
@@ -1646,6 +1748,7 @@ function resolveWebAssetPath(assetPath) {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
+      _resolvedWebAssetCache.set(rawKey, candidate);
       return candidate;
     }
   }
@@ -1653,56 +1756,276 @@ function resolveWebAssetPath(assetPath) {
   return null;
 }
 
-function playWavFile(filePath) {
-  return new Promise((resolve, reject) => {
-    if (process.platform !== "win32") {
-      reject(new Error("Audio preview is only implemented for Windows."));
-      return;
+async function resolvePlayableAudioPath(filePath) {
+  if (!filePath || !filePath.includes("app.asar")) {
+    return filePath;
+  }
+  const cached = _extractedAudioPathCache.get(filePath);
+  if (cached) {
+    return cached;
+  }
+  const tempDir = path.join(app.getPath("temp"), APP_NAME, "sounds");
+  await fs.promises.mkdir(tempDir, { recursive: true });
+  let pathHash = 2166136261;
+  for (let i = 0; i < filePath.length; i += 1) {
+    pathHash ^= filePath.charCodeAt(i);
+    pathHash = Math.imul(pathHash, 16777619) >>> 0;
+  }
+  const tempFilePath = path.join(tempDir, `${pathHash.toString(16)}_${path.basename(filePath)}`);
+  const alreadyExists = await fs.promises
+    .access(tempFilePath)
+    .then(() => true)
+    .catch(() => false);
+  if (!alreadyExists) {
+    const buffer = await fs.promises.readFile(filePath);
+    await fs.promises.writeFile(tempFilePath, buffer);
+  }
+  _extractedAudioPathCache.set(filePath, tempFilePath);
+  return tempFilePath;
+}
+
+function destroyAudioWorker(reason) {
+  const state = _audioWorkerState;
+  _audioWorkerState = null;
+  if (!state) {
+    return;
+  }
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+    state.idleTimer = null;
+  }
+  if (state.itemTimer) {
+    clearTimeout(state.itemTimer);
+    state.itemTimer = null;
+  }
+  if (state.currentItem) {
+    const item = state.currentItem;
+    state.currentItem = null;
+    item.reject(new Error(reason || "Audio worker stopped."));
+  }
+  try {
+    state.proc.stdin.end();
+  } catch (_) {}
+  try {
+    state.proc.kill();
+  } catch (_) {}
+}
+
+function _scheduleAudioWorkerIdleShutdown(state) {
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+  }
+  state.idleTimer = setTimeout(() => {
+    if (_audioWorkerState === state && !state.currentItem && _audioPlayQueue.length === 0) {
+      destroyAudioWorker("Idle audio worker shutdown.");
     }
+  }, AUDIO_WORKER_IDLE_TIMEOUT_MS);
+  if (typeof state.idleTimer.unref === "function") {
+    state.idleTimer.unref();
+  }
+}
 
-    let playPath = filePath;
-    let isTemp = false;
+function _ensureAudioWorker() {
+  if (_audioWorkerState) {
+    return _audioWorkerState;
+  }
+  const psScript = [
+    "[Console]::InputEncoding = [System.Text.Encoding]::UTF8;",
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;",
+    "$ErrorActionPreference = 'Stop';",
+    "Add-Type -AssemblyName System.Windows.Forms;",
+    "while (($b64 = [Console]::In.ReadLine()) -ne $null) {",
+    "  if ([string]::IsNullOrWhiteSpace($b64)) { continue }",
+    "  try {",
+    "    $p = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64));",
+    "    $player = New-Object System.Media.SoundPlayer($p);",
+    "    try {",
+    "      $player.Load();",
+    "      $player.PlaySync();",
+    "    } finally {",
+    "      $player.Dispose();",
+    "    }",
+    "    [Console]::Out.WriteLine('OK');",
+    "  } catch {",
+    "    [Console]::Out.WriteLine('ERR:' + $_.Exception.Message);",
+    "  }",
+    "  [Console]::Out.Flush();",
+    "}",
+  ].join(" ");
 
-    if (filePath && filePath.includes("app.asar")) {
-      try {
-        const tempDir = path.join(app.getPath("temp"), APP_NAME, "sounds");
-        fs.mkdirSync(tempDir, { recursive: true });
-        const tempFilePath = path.join(tempDir, path.basename(filePath));
-        fs.writeFileSync(tempFilePath, fs.readFileSync(filePath));
-        playPath = tempFilePath;
-        isTemp = true;
-      } catch (err) {
-        console.error("[electron] failed to extract sound from asar", err);
+  const proc = spawn(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", psScript],
+    { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+  );
+
+  const state = {
+    proc,
+    stdoutBuffer: "",
+    currentItem: null,
+    itemTimer: null,
+    idleTimer: null,
+  };
+  _audioWorkerState = state;
+
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (chunk) => {
+    state.stdoutBuffer += chunk;
+    let newlineIndex = state.stdoutBuffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      const line = state.stdoutBuffer.slice(0, newlineIndex).trim();
+      state.stdoutBuffer = state.stdoutBuffer.slice(newlineIndex + 1);
+      newlineIndex = state.stdoutBuffer.indexOf("\n");
+      if (!line || !state.currentItem) {
+        continue;
+      }
+      if (state.itemTimer) {
+        clearTimeout(state.itemTimer);
+        state.itemTimer = null;
+      }
+      const item = state.currentItem;
+      state.currentItem = null;
+      if (line.startsWith("ERR:")) {
+        item.reject(new Error(line.slice(4) || "PowerShell SoundPlayer error"));
+      } else {
+        item.resolve();
       }
     }
+  });
 
-    const escapedPath = String(playPath || "").replace(/'/g, "''");
-    execFile(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.Windows.Forms; $player = New-Object System.Media.SoundPlayer('${escapedPath}'); $player.Load(); $player.PlaySync();`,
-      ],
-      { windowsHide: true },
-      (error) => {
-        if (isTemp) {
-          try {
-            fs.unlinkSync(playPath);
-          } catch (_) {}
+  proc.once("error", (err) => {
+    if (_audioWorkerState === state) {
+      destroyAudioWorker(err.message);
+    }
+  });
+
+  proc.once("exit", (code) => {
+    if (_audioWorkerState === state) {
+      destroyAudioWorker(`Audio worker exited (${code}).`);
+    }
+  });
+
+  return state;
+}
+
+async function _drainAudioQueue() {
+  if (_audioQueueActive) {
+    return;
+  }
+  _audioQueueActive = true;
+  try {
+    while (_audioPlayQueue.length > 0 && !isQuitting) {
+      const next = _audioPlayQueue.shift();
+      let state;
+      try {
+        state = _ensureAudioWorker();
+      } catch (err) {
+        next.reject(err);
+        continue;
+      }
+      if (state.idleTimer) {
+        clearTimeout(state.idleTimer);
+        state.idleTimer = null;
+      }
+      try {
+        await new Promise((resolve, reject) => {
+          state.currentItem = { resolve, reject };
+          state.itemTimer = setTimeout(() => {
+            if (_audioWorkerState === state && state.currentItem) {
+              destroyAudioWorker("Audio worker playback timed out.");
+            }
+          }, AUDIO_WORKER_PLAY_TIMEOUT_MS);
+          const encodedPath = Buffer.from(String(next.playPath || ""), "utf8").toString("base64");
+          state.proc.stdin.write(`${encodedPath}\n`, "utf8");
+        });
+        next.resolve();
+      } catch (err) {
+        next.reject(err);
+      }
+    }
+  } finally {
+    _audioQueueActive = false;
+    if (_audioWorkerState && !_audioWorkerState.currentItem && _audioPlayQueue.length === 0) {
+      _scheduleAudioWorkerIdleShutdown(_audioWorkerState);
+    }
+  }
+}
+
+async function _tryPlayAudioInRenderer(filePath) {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    !mainWindow.isVisible() ||
+    mainWindow.isMinimized() ||
+    mainWindow.webContents.isDestroyed()
+  ) {
+    return false;
+  }
+  const root = webRoot();
+  const rel = path.relative(root, filePath).replace(/\\/g, "/");
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    return false;
+  }
+  try {
+    const js = `(() => {
+      try {
+        const audio = new Audio(${JSON.stringify(`/${rel}`)});
+        audio.volume = 1.0;
+        const p = audio.play();
+        if (p && typeof p.then === 'function') {
+          return Promise.race([
+            p.then(() => true).catch(() => false),
+            new Promise((r) => setTimeout(() => r(false), 600)),
+          ]);
         }
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      },
-    );
+        return true;
+      } catch (_) {
+        return false;
+      }
+    })()`;
+    const played = await mainWindow.webContents.executeJavaScript(js, true);
+    return played === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function playWavFile(filePath, { fromNotification = false } = {}) {
+  if (process.platform !== "win32") {
+    throw new Error("Audio preview is only implemented for Windows.");
+  }
+  if (await _tryPlayAudioInRenderer(filePath)) {
+    return;
+  }
+  const playPath = await resolvePlayableAudioPath(filePath);
+  if (fromNotification && _audioPlayQueue.length >= 2) {
+    return;
+  }
+  while (_audioPlayQueue.length >= AUDIO_WORKER_MAX_QUEUE) {
+    const dropped = _audioPlayQueue.shift();
+    dropped?.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    _audioPlayQueue.push({ playPath, resolve, reject });
+    unawaitedDrainAudioQueue();
   });
 }
 
-const _httpsAgentNoVerify = new https.Agent({ rejectUnauthorized: false });
+function unawaitedDrainAudioQueue() {
+  _drainAudioQueue().catch(() => {});
+}
+
+const _httpAgentKeepAlive = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 6,
+});
+const _httpsAgentNoVerify = new https.Agent({
+  rejectUnauthorized: false,
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 6,
+});
 
 function _doFetchOnce(targetUrl, headers, redirectCount) {
   return new Promise((resolve, reject) => {
@@ -1733,10 +2056,8 @@ function _doFetchOnce(targetUrl, headers, redirectCount) {
         ...headers,
       },
       timeout: 12000, // reduced from 30s to 12s to avoid blocking main thread on slow VPN
+      agent: isHttps ? _httpsAgentNoVerify : _httpAgentKeepAlive,
     };
-    if (isHttps) {
-      requestOptions.agent = _httpsAgentNoVerify;
-    }
 
     const request = transport.request(
       parsed,
@@ -1790,11 +2111,41 @@ function _doFetchOnce(targetUrl, headers, redirectCount) {
   });
 }
 
-// Concurrency semaphore: limit simultaneous image fetches to 4 to avoid
-// saturating the Electron main-thread on slow VPN connections.
+// Concurrency semaphore + in-flight deduplication + bounded LRU cache:
+// prevents duplicate avatar/image downloads from flooding slow branch VPNs.
 let _fetchUrlBufferActive = 0;
 const _fetchUrlBufferQueue = [];
 const _FETCH_URL_BUFFER_CONCURRENCY = 4;
+const _fetchUrlBufferInFlight = new Map();
+const _fetchUrlBufferCache = new Map();
+const _FETCH_URL_BUFFER_CACHE_MAX_ENTRIES = 64;
+const _FETCH_URL_BUFFER_CACHE_MAX_ITEM_BYTES = 512 * 1024;
+const _FETCH_URL_BUFFER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function _rememberFetchedBuffer(cacheKey, result) {
+  if (
+    !result ||
+    !Buffer.isBuffer(result.buffer) ||
+    result.buffer.length === 0 ||
+    result.buffer.length > _FETCH_URL_BUFFER_CACHE_MAX_ITEM_BYTES
+  ) {
+    return;
+  }
+  const contentType = String(result.contentType || "").toLowerCase();
+  if (!contentType.startsWith("image/")) {
+    return;
+  }
+  _fetchUrlBufferCache.delete(cacheKey);
+  while (_fetchUrlBufferCache.size >= _FETCH_URL_BUFFER_CACHE_MAX_ENTRIES) {
+    const oldestKey = _fetchUrlBufferCache.keys().next().value;
+    _fetchUrlBufferCache.delete(oldestKey);
+  }
+  _fetchUrlBufferCache.set(cacheKey, {
+    buffer: result.buffer,
+    contentType: result.contentType,
+    cachedAt: Date.now(),
+  });
+}
 
 function _runNextFetch() {
   while (_fetchUrlBufferActive < _FETCH_URL_BUFFER_CONCURRENCY && _fetchUrlBufferQueue.length > 0) {
@@ -1808,14 +2159,40 @@ function _runNextFetch() {
 }
 
 async function fetchUrlBuffer(targetUrl, headers = {}) {
-  return new Promise((resolve, reject) => {
+  const authHeader = String(headers?.Authorization || headers?.authorization || "").trim();
+  const fetchKey = `${targetUrl}\n${authHeader}`;
+
+  const cached = _fetchUrlBufferCache.get(fetchKey);
+  if (cached) {
+    if (Date.now() - cached.cachedAt < _FETCH_URL_BUFFER_CACHE_TTL_MS) {
+      _fetchUrlBufferCache.delete(fetchKey);
+      _fetchUrlBufferCache.set(fetchKey, cached);
+      return { buffer: cached.buffer, contentType: cached.contentType };
+    }
+    _fetchUrlBufferCache.delete(fetchKey);
+  }
+
+  const existingPromise = _fetchUrlBufferInFlight.get(fetchKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const promise = new Promise((resolve, reject) => {
     _fetchUrlBufferQueue.push({
       task: () => _fetchUrlBufferCore(targetUrl, headers),
       resolve,
       reject,
     });
     _runNextFetch();
+  }).then((result) => {
+    _rememberFetchedBuffer(fetchKey, result);
+    return result;
+  }).finally(() => {
+    _fetchUrlBufferInFlight.delete(fetchKey);
   });
+
+  _fetchUrlBufferInFlight.set(fetchKey, promise);
+  return promise;
 }
 
 async function _fetchUrlBufferCore(targetUrl, headers = {}) {
@@ -2813,6 +3190,9 @@ ipcMain.handle("printers:list", async () => {
   }));
 });
 
+const NOTIFICATION_AUDIO_COOLDOWN_MS = 750;
+let _lastNotificationAudioAt = 0;
+
 ipcMain.handle("notifications:show", async (_event, payload = {}) => {
   const title = String(payload.title || APP_NAME);
   const body = String(payload.body || "");
@@ -2827,15 +3207,19 @@ ipcMain.handle("notifications:show", async (_event, payload = {}) => {
       soundAssetPath,
     });
     if (soundAssetPath) {
-      const filePath = resolveWebAssetPath(soundAssetPath);
-      if (filePath) {
-        playWavFile(filePath).catch((error) =>
-          console.error("[electron] notification sound failed", error),
-        );
-      } else {
-        console.warn(
-          `[electron] notification sound asset was not found: ${soundAssetPath}`,
-        );
+      const now = Date.now();
+      if (now - _lastNotificationAudioAt >= NOTIFICATION_AUDIO_COOLDOWN_MS) {
+        const filePath = resolveWebAssetPath(soundAssetPath);
+        if (filePath) {
+          _lastNotificationAudioAt = now;
+          playWavFile(filePath, { fromNotification: true }).catch((error) =>
+            console.error("[electron] notification sound failed", error),
+          );
+        } else {
+          console.warn(
+            `[electron] notification sound asset was not found: ${soundAssetPath}`,
+          );
+        }
       }
     }
     console.log(
@@ -3735,6 +4119,7 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
         const fileStream = fs.createReadStream(filePath, { highWaterMark: 64 * 1024 });
         activeRecord.fileStream = fileStream;
         let sentBytes = headBuf.length;
+        let lastUploadProgressAt = 0;
 
         fileStream.on("data", (chunk) => {
           sentBytes += chunk.length;
@@ -3742,7 +4127,14 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
           if (!ok) {
             fileStream.pause();
           }
-          if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+          const now = Date.now();
+          if (
+            mainWindow &&
+            !mainWindow.isDestroyed() &&
+            transferId &&
+            (sentBytes >= totalLength || now - lastUploadProgressAt >= 150)
+          ) {
+            lastUploadProgressAt = now;
             mainWindow.webContents.send("upload-progress", {
               transferId,
               sent: sentBytes,
@@ -3756,6 +4148,13 @@ ipcMain.handle("chat:upload-attachment", async (_event, payload = {}) => {
         });
 
         fileStream.on("end", () => {
+          if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+            mainWindow.webContents.send("upload-progress", {
+              transferId,
+              sent: totalLength,
+              total: totalLength,
+            });
+          }
           req.write(tailBuf);
           req.end();
         });
@@ -3812,8 +4211,16 @@ ipcMain.handle("files:download-chat-attachment", async (_event, payload = {}) =>
     if (!fs.existsSync(dir)) {
       await fs.promises.mkdir(dir, { recursive: true });
     }
+    let lastDownloadProgressAt = 0;
     await downloadFile(url, destinationPath, token, (received, total) => {
-      if (mainWindow && !mainWindow.isDestroyed() && transferId) {
+      const now = Date.now();
+      if (
+        mainWindow &&
+        !mainWindow.isDestroyed() &&
+        transferId &&
+        ((total > 0 && received >= total) || now - lastDownloadProgressAt >= 150)
+      ) {
+        lastDownloadProgressAt = now;
         mainWindow.webContents.send("download-progress", {
           transferId,
           received,
@@ -3880,30 +4287,40 @@ ipcMain.handle("files:calculate-sha256", async (_event, payload = {}) => {
   });
 });
 
-function scanDirectoryStorage(dirPath) {
+async function scanDirectoryStorage(dirPath) {
   let appCache = 0;
   let media = 0;
   let audio = 0;
   let docs = 0;
+  let scannedCount = 0;
 
-  if (!fs.existsSync(dirPath)) {
+  const rootExists = await fs.promises
+    .access(dirPath)
+    .then(() => true)
+    .catch(() => false);
+  if (!rootExists) {
     return { appCache, media, audio, docs };
   }
 
-  function walk(current) {
+  async function walk(current) {
     let entries;
     try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
     } catch (_) {
       return;
     }
     for (const entry of entries) {
+      scannedCount += 1;
+      if (scannedCount % 64 === 0) {
+        await new Promise((r) => setImmediate(r));
+      }
       const full = path.join(current, entry.name);
       try {
         if (entry.isDirectory()) {
-          walk(full);
+          await walk(full);
         } else if (entry.isFile()) {
-          const size = fs.statSync(full).size;
+          const stat = await fs.promises.stat(full);
+          const size = stat.size;
           const ext = path.extname(entry.name).toLowerCase();
           if (STORAGE_IMAGE_EXTS.has(ext)) {
             media += size;
@@ -3919,7 +4336,7 @@ function scanDirectoryStorage(dirPath) {
     }
   }
 
-  walk(dirPath);
+  await walk(dirPath);
   return { appCache, media, audio, docs };
 }
 
@@ -3928,8 +4345,10 @@ ipcMain.handle("storage:get-breakdown", async (_event, payload = {}) => {
     const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
     const tempDir = path.join(app.getPath("temp"), APP_NAME);
 
-    const s1 = scanDirectoryStorage(cacheDir);
-    const s2 = scanDirectoryStorage(tempDir);
+    const [s1, s2] = await Promise.all([
+      scanDirectoryStorage(cacheDir),
+      scanDirectoryStorage(tempDir),
+    ]);
 
     const appCacheBytes = s1.appCache + s2.appCache;
     const mediaBytes = s1.media + s2.media;
@@ -3963,21 +4382,33 @@ ipcMain.handle("storage:clear-cache", async (_event, payload = {}) => {
     const cacheDir = localStorageChildPath(path.join("Chat", "cache"), payload.directoryPath);
     const tempDir = path.join(app.getPath("temp"), APP_NAME);
 
-    function cleanDir(dirPath) {
-      if (!fs.existsSync(dirPath)) return;
-      function walkDelete(current) {
+    async function cleanDir(dirPath) {
+      const exists = await fs.promises
+        .access(dirPath)
+        .then(() => true)
+        .catch(() => false);
+      if (!exists) return;
+      let processedCount = 0;
+
+      async function walkDelete(current) {
         let entries;
         try {
-          entries = fs.readdirSync(current, { withFileTypes: true });
+          entries = await fs.promises.readdir(current, { withFileTypes: true });
         } catch (_) {
           return;
         }
         for (const entry of entries) {
+          processedCount += 1;
+          if (processedCount % 64 === 0) {
+            await new Promise((r) => setImmediate(r));
+          }
           const full = path.join(current, entry.name);
           try {
             if (entry.isDirectory()) {
-              walkDelete(full);
-              try { fs.rmdirSync(full); } catch (_) {}
+              await walkDelete(full);
+              try {
+                await fs.promises.rmdir(full);
+              } catch (_) {}
             } else if (entry.isFile()) {
               const ext = path.extname(entry.name).toLowerCase();
               let del = false;
@@ -3987,17 +4418,18 @@ ipcMain.handle("storage:clear-cache", async (_event, payload = {}) => {
               else if (category === "audio" && STORAGE_AUDIO_EXTS.has(ext)) del = true;
               else if (category === "documents" && STORAGE_DOC_EXTS.has(ext)) del = true;
               if (del) {
-                fs.unlinkSync(full);
+                await fs.promises.unlink(full);
               }
             }
           } catch (_) {}
         }
       }
-      walkDelete(dirPath);
+      await walkDelete(dirPath);
     }
 
-    cleanDir(cacheDir);
-    cleanDir(tempDir);
+    await cleanDir(cacheDir);
+    await cleanDir(tempDir);
+    _ensuredStorageDirs.clear();
 
     if (category === "all" || category === "appcache") {
       try {
@@ -4095,7 +4527,7 @@ function downloadFileAndValidate(url, destinationPath, token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      request = protocol.get(parsedUrl, { headers }, (response) => {
+      request = protocol.get(parsedUrl, { headers, timeout: 30000 }, (response) => {
         const statusCode = response.statusCode || 0;
 
         if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
@@ -4140,6 +4572,9 @@ function downloadFileAndValidate(url, destinationPath, token) {
         });
       });
 
+      request.setTimeout(30000, () => {
+        request.destroy(new Error("Download request timed out after 30s."));
+      });
       request.on("error", (err) => {
         fileStream.close();
         try { fs.unlinkSync(destinationPath); } catch (_) {}
@@ -4294,11 +4729,28 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
     const partPath = destinationPath + ".part";
     const partMetaPath = destinationPath + ".part.meta.json";
     const expectedChecksum = options && options.checksumSha256 ? String(options.checksumSha256).trim().toLowerCase() : "";
+    const branchCodeHeader = options && options.branchCode ? String(options.branchCode).trim().toUpperCase() : "";
+    const deviceUidHeader = options && options.deviceUid ? String(options.deviceUid).trim() : "";
     let isCancelled = false;
+    let isSettled = false;
     let currentRequest = null;
     let currentStream = null;
+    let retryTimer = null;
     let attempt = 0;
+    let busyWaitCount = 0;
     const maxAttempts = 10;
+    const maxBusyWaits = 20;
+
+    const settleResolve = (value) => {
+      if (isSettled) return;
+      isSettled = true;
+      resolve(value);
+    };
+    const settleReject = (err) => {
+      if (isSettled) return;
+      isSettled = true;
+      reject(err);
+    };
 
     const getUrlKey = (u) => {
       try {
@@ -4348,17 +4800,22 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
         partPath,
         cancel: () => {
           isCancelled = true;
+          if (retryTimer) {
+            clearTimeout(retryTimer);
+            retryTimer = null;
+          }
           try { if (currentRequest) currentRequest.destroy(); } catch (_) {}
           try { if (currentStream) currentStream.destroy(); } catch (_) {}
           clearPartialArtifacts();
           try { if (fs.existsSync(destinationPath)) fs.unlinkSync(destinationPath); } catch (_) {}
+          settleReject(new Error("Download cancelled by user."));
         }
       });
     }
 
     const runAttempt = (targetUrl) => {
       if (isCancelled) {
-        return reject(new Error("Download cancelled by user."));
+        return settleReject(new Error("Download cancelled by user."));
       }
 
       let attemptSettled = false;
@@ -4384,6 +4841,12 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
       };
       if (token) {
         headers["Authorization"] = "Bearer " + token;
+      }
+      if (branchCodeHeader) {
+        headers["X-Branch-Code"] = branchCodeHeader;
+      }
+      if (deviceUidHeader) {
+        headers["X-Device-Uid"] = deviceUidHeader;
       }
       if (existingBytes > 0) {
         headers["Range"] = "bytes=" + existingBytes + "-";
@@ -4424,7 +4887,7 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
 
       resetInactivityTimer();
 
-      currentRequest = protocol.get(parsedUrl, { headers }, (response) => {
+      currentRequest = protocol.get(parsedUrl, { headers, timeout: 30000 }, (response) => {
         if (attemptSettled) {
           response.resume();
           return;
@@ -4439,6 +4902,43 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
           response.resume();
           const redirectUrl = new URL(response.headers.location, parsedUrl).toString();
           return runAttempt(redirectUrl);
+        }
+
+        // Handle 429 / 503 update download admission queue without burning fatal retries or deleting .part
+        if (statusCode === 429 || statusCode === 503) {
+          attemptSettled = true;
+          if (timeoutTimer) {
+            clearTimeout(timeoutTimer);
+            timeoutTimer = null;
+          }
+          response.resume();
+          busyWaitCount += 1;
+          if (busyWaitCount > maxBusyWaits) {
+            attemptSettled = false;
+            return failAttempt(
+              new Error("Download server busy too long. Status code: " + statusCode),
+            );
+          }
+          const rawRetryAfter = parseInt(String(response.headers["retry-after"] || ""), 10);
+          const baseWaitSec =
+            Number.isFinite(rawRetryAfter) && rawRetryAfter > 0
+              ? Math.min(Math.max(rawRetryAfter, 5), 90)
+              : 15;
+          const jitterMs = Math.floor(Math.random() * 9000) + 1000;
+          const waitMs = baseWaitSec * 1000 + jitterMs;
+          console.warn(
+            `[downloadFile] Server busy (HTTP ${statusCode}), keeping partial file and retrying in ${waitMs}ms (wait ${busyWaitCount}/${maxBusyWaits})...`,
+          );
+          if (retryTimer) {
+            clearTimeout(retryTimer);
+          }
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (!isCancelled) {
+              runAttempt(url);
+            }
+          }, waitMs);
+          return;
         }
 
         // Handle 416 Range Not Satisfiable (file size changed on server or corrupted .part)
@@ -4600,20 +5100,24 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
             fs.renameSync(partPath, destinationPath);
             try { if (fs.existsSync(partMetaPath)) fs.unlinkSync(partMetaPath); } catch (_) {}
             if (downloadKey) activeDownloadRequests.delete(downloadKey);
-            resolve({
+            settleResolve({
               filePath: destinationPath,
               totalBytes: totalBytes || actualSize,
               actualSize,
               checksumHeader: serverChecksum,
             });
           } catch (renameErr) {
-            reject(renameErr);
+            settleReject(renameErr);
           }
         });
 
         currentStream.on("error", (err) => {
           failAttempt(err);
         });
+      });
+
+      currentRequest.setTimeout(30000, () => {
+        failAttempt(new Error("Download request socket timed out"));
       });
 
       currentRequest.on("error", (err) => {
@@ -4623,14 +5127,18 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
 
     const handleRetryOrReject = (err, targetUrl) => {
       if (isCancelled) {
-        return reject(new Error("Download cancelled by user."));
+        return settleReject(new Error("Download cancelled by user."));
       }
 
       attempt++;
       if (attempt < maxAttempts) {
         const delay = Math.min(1000 * Math.pow(1.5, attempt - 1), 10000);
         console.warn("[downloadFile] Download attempt " + attempt + "/" + maxAttempts + " failed (" + err.message + "). Resuming in " + delay + "ms...");
-        setTimeout(() => {
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+        }
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
           if (!isCancelled) {
             runAttempt(targetUrl);
           }
@@ -4639,7 +5147,7 @@ function downloadFile(url, destinationPath, token, onProgress, transferId, optio
         console.error("[downloadFile] Download permanently failed after " + maxAttempts + " attempts:", err);
         clearPartialArtifacts();
         if (downloadKey) activeDownloadRequests.delete(downloadKey);
-        reject(err);
+        settleReject(err);
       }
     };
 
@@ -4676,7 +5184,16 @@ function detectFileType(filePath) {
 }
 
 ipcMain.handle("updater:start-update", async (event, payload = {}) => {
-  const { downloadUrl, token, checksumSha256, fileName, silentInstallArgs, installerKind } = payload;
+  const {
+    downloadUrl,
+    token,
+    checksumSha256,
+    fileName,
+    silentInstallArgs,
+    installerKind,
+    branchCode,
+    deviceUid,
+  } = payload;
   if (!downloadUrl) {
     throw new Error("Missing download URL");
   }
@@ -4756,7 +5273,7 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
         });
       },
       null,
-      { checksumSha256 }
+      { checksumSha256, branchCode, deviceUid }
     );
 
     const effectiveChecksum =
@@ -5262,6 +5779,10 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+
+  destroyAudioWorker("Application quitting.");
+  try { _httpAgentKeepAlive.destroy(); } catch (_) {}
+  try { _httpsAgentNoVerify.destroy(); } catch (_) {}
 
   // Cleanup window resources without clearing Chromium storage/cache.
   if (mainWindow) {
