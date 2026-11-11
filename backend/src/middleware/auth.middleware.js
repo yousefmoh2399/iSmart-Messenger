@@ -10,7 +10,7 @@ function resolveTokenVersion(value) {
 }
 
 const AUTH_USER_PROJECTION =
-  "_id username role permissionOverrides fullName departmentId departmentIds branchId branchCode isOnline presenceStatus isActive avatarUrl lastSeen lastActiveAt maxAttachmentSizeMB +tokenVersion +refreshSessions";
+  "_id username role permissionOverrides fullName departmentId departmentIds branchId branchCode isOnline presenceStatus isActive avatarUrl lastSeen lastActiveAt maxAttachmentSizeMB tokenVersion +refreshSessions";
 
 function buildUserPayload(user, permissions, deviceUid = null) {
   return {

@@ -237,16 +237,7 @@ async function loginUser({
 
   return {
     token: buildToken(user, normalizedDeviceUid),
-    refreshToken: jwt.sign(
-      {
-        sub: user._id.toString(),
-        type: "refresh",
-        rn: refreshNonce,
-        did: normalizedDeviceUid,
-      },
-      jwtSecret,
-      { expiresIn: defaultRefreshExpiresIn },
-    ),
+    refreshToken: buildRefreshToken(user, refreshNonce, normalizedDeviceUid),
     user: await buildUserResponse(user),
   };
 }
@@ -263,7 +254,7 @@ async function refreshAccessToken(
     }
 
     const user = await User.findById(decoded.sub)
-      .select("+refreshTokenNonce +refreshSessions +tokenVersion")
+      .select("_id username role isActive tokenVersion +refreshTokenNonce +refreshSessions")
       .exec();
     if (!user || user.isActive === false) {
       throw new ApiError(401, "User not found or inactive");
@@ -337,17 +328,7 @@ async function refreshAccessToken(
       // Return fresh access token and existing active refresh token without re-rotating
       return {
         token: buildToken(user, resolvedDeviceUid),
-        refreshToken: jwt.sign(
-          {
-            sub: user._id.toString(),
-            type: "refresh",
-            rn: storedSessionRn,
-            did: resolvedDeviceUid,
-            tokenVersion: resolveTokenVersion(user.tokenVersion),
-          },
-          jwtSecret,
-          { expiresIn: defaultRefreshExpiresIn },
-        ),
+        refreshToken: buildRefreshToken(user, storedSessionRn, resolvedDeviceUid),
       };
     }
 
@@ -403,17 +384,7 @@ async function refreshAccessToken(
 
     return {
       token: buildToken(user, resolvedDeviceUid),
-      refreshToken: jwt.sign(
-        {
-          sub: user._id.toString(),
-          type: "refresh",
-          rn: newNonce,
-          did: resolvedDeviceUid,
-          tokenVersion: resolveTokenVersion(user.tokenVersion),
-        },
-        jwtSecret,
-        { expiresIn: defaultRefreshExpiresIn },
-      ),
+      refreshToken: buildRefreshToken(user, newNonce, resolvedDeviceUid),
     };
   } catch (error) {
     if (error instanceof ApiError) {
