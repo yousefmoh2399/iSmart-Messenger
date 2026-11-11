@@ -768,7 +768,7 @@ async function createSystemConversationMessage(conversation, actor, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -783,7 +783,7 @@ async function refreshConversationLastMessage(conversationId) {
     .sort({ createdAt: -1, _id: -1 })
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -851,15 +851,15 @@ async function getConversationById(conversationId) {
   })
     .populate(
       "members",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "blockedMembers",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .exec();
@@ -1132,11 +1132,11 @@ async function listConversationsForUser(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -1244,11 +1244,11 @@ async function listManageableConversations(currentUser) {
     .sort({ updatedAt: -1 })
     .populate(
       "members",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate(
       "admins",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .populate("departmentId", "name code defaultConversationId")
     .lean({ getters: true });
@@ -1827,7 +1827,7 @@ async function listMessagesForConversation(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -1870,7 +1870,7 @@ async function createMessage(currentUser, payload, file) {
     })
       .populate(
         "senderId",
-        "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
     if (existing) {
@@ -2379,7 +2379,7 @@ async function createMessage(currentUser, payload, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2683,7 +2683,7 @@ async function updateMessage(currentUser, messageId, payload) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2748,7 +2748,7 @@ async function toggleMessageReaction(currentUser, messageId, emoji) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -2788,7 +2788,7 @@ async function toggleMessageFavorite(currentUser, messageId) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -3443,7 +3443,7 @@ async function searchMessages(
     .limit(pageSize + 1)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -3521,7 +3521,7 @@ async function listFavoriteMessages(
       .limit(batchSize)
       .populate(
         "senderId",
-        "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+        "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
       )
       .exec();
 
@@ -3726,7 +3726,7 @@ async function restoreAttachmentFromSender(currentUser, messageId, file) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
   return serializeMessage(populated, populated.senderId);
@@ -3787,7 +3787,7 @@ async function togglePollMessage(currentUser, messageId) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 
@@ -3862,7 +3862,7 @@ async function votePollMessage(currentUser, messageId, optionIds) {
   const populated = await Message.findById(message._id)
     .populate(
       "senderId",
-      "username fullName role jobTitle departmentId departmentIds branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
+      "username fullName role jobTitle departmentId departmentIds branchId branchCode isOnline presenceStatus avatarUrl isActive lastSeen lastActiveAt",
     )
     .exec();
 

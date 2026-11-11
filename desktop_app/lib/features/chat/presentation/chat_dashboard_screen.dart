@@ -663,7 +663,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
             ChatSidebarFilter.all => true,
             ChatSidebarFilter.direct => c.type == 'direct',
             ChatSidebarFilter.departments => c.type == 'department',
-            ChatSidebarFilter.branches => false,
+            ChatSidebarFilter.branches => true,
             ChatSidebarFilter.rooms =>
               c.type == 'group' || c.type == 'broadcast',
             ChatSidebarFilter.favorites => c.isFavorite,

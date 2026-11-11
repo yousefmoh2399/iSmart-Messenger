@@ -30,6 +30,42 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
   // Throttle: last time socket_connected triggered a full refresh
   DateTime? _lastSocketRefreshAt;
 
+  static ChatDirectoryUser _mergeChatDirectoryUsers(
+    ChatDirectoryUser primary,
+    ChatDirectoryUser fallback,
+  ) {
+    return primary.copyWith(
+      fullName: primary.fullName.trim().isNotEmpty
+          ? primary.fullName
+          : fallback.fullName,
+      username: primary.username.trim().isNotEmpty
+          ? primary.username
+          : fallback.username,
+      jobTitle: primary.jobTitle.trim().isNotEmpty
+          ? primary.jobTitle
+          : fallback.jobTitle,
+      departmentId: (primary.departmentId != null &&
+              primary.departmentId!.trim().isNotEmpty)
+          ? primary.departmentId
+          : fallback.departmentId,
+      departmentIds: primary.departmentIds.isNotEmpty
+          ? primary.departmentIds
+          : fallback.departmentIds,
+      branchId: (primary.branchId != null &&
+              primary.branchId!.trim().isNotEmpty)
+          ? primary.branchId
+          : fallback.branchId,
+      branchCode: (primary.branchCode.isNotEmpty &&
+              primary.branchCode.toLowerCase() != 'main')
+          ? primary.branchCode
+          : fallback.branchCode,
+      avatarUrl: primary.avatarUrl ?? fallback.avatarUrl,
+      isOnline: primary.isOnline || fallback.isOnline,
+      presenceStatus:
+          primary.isOnline ? primary.presenceStatus : fallback.presenceStatus,
+    );
+  }
+
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
@@ -184,8 +220,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       if (current != null && users.isNotEmpty) {
         final mergedUsersMap = <String, ChatDirectoryUser>{
           for (final u in current.users) u.id: u,
-          for (final u in users) u.id: u,
         };
+        for (final u in users) {
+          final existing = mergedUsersMap[u.id];
+          mergedUsersMap[u.id] =
+              existing != null ? _mergeChatDirectoryUsers(u, existing) : u;
+        }
         _setStateAndCache(
           _copyOverview(
             source: current,
@@ -202,7 +242,12 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     };
     for (final conv in conversations) {
       for (final member in conv.members) {
-        userMap.putIfAbsent(member.id, () => member);
+        final existing = userMap[member.id];
+        if (existing == null) {
+          userMap[member.id] = member;
+        } else {
+          userMap[member.id] = _mergeChatDirectoryUsers(existing, member);
+        }
       }
     }
     final users = userMap.values.toList();
