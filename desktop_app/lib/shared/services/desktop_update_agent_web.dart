@@ -330,8 +330,7 @@ class DesktopUpdateAgent {
     _lastReportedStatus = null;
 
     try {
-      final electronInfo = await web_bridge.getElectronDeviceInfo();
-      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
+      final currentVersion = await getCurrentAppVersion();
       final currentState = await _stateStore.load();
 
       if (_areVersionsEqual(currentVersion, task.release.version)) {
@@ -351,17 +350,52 @@ class DesktopUpdateAgent {
         return;
       }
 
+      final preparedInfo = await _getPreparedPackageInfo(
+        checksumSha256: task.release.checksumSha256 ?? currentState.artifactSha256,
+        targetVersion: task.release.version,
+        fileName: task.release.fileName ?? currentState.fileName,
+      );
+      final preparedOnDisk = preparedInfo['prepared'] == true;
+      final isMatchingState =
+          currentState.targetVersion != null &&
+          _areVersionsEqual(currentState.targetVersion!, task.release.version);
+
+      if (currentState.status == 'rolled_back' &&
+          isMatchingState &&
+          currentState.taskId == task.id) {
+        if (preparedOnDisk) {
+          hasPreparedUpdateNotifier.value = true;
+          hasUpdateAvailableNotifier.value = true;
+          downloadProgressNotifier.value = 1.0;
+          statusMessageNotifier.value =
+              'تعذر التثبيت التلقائي في المحاولة السابقة؛ حزمة التحديث محفوظة وجاهزة لإعادة المحاولة.';
+          _eventsController.add(
+            DesktopUpdateEvent.readyToRestart(
+              taskId: task.id,
+              message: statusMessageNotifier.value!,
+              version: task.release.version,
+            ),
+          );
+        }
+        return;
+      }
+
       final hasPreparedArtifact =
-          currentState.taskId == task.id &&
-          currentState.targetVersion == task.release.version &&
-          currentState.status == 'downloaded';
+          isMatchingState &&
+          currentState.status == 'downloaded' &&
+          preparedOnDisk;
 
       if (hasPreparedArtifact) {
+        hasPreparedUpdateNotifier.value = true;
+        hasUpdateAvailableNotifier.value = true;
+        downloadProgressNotifier.value = 1.0;
+        statusMessageNotifier.value = 'جاهز لإعادة التشغيل والتثبيت';
         _eventsController.add(
           DesktopUpdateEvent.readyToRestart(
             taskId: task.id,
             message:
                 'تم تنزيل التحديث ${task.release.version}. أعد تشغيل التطبيق عندما يناسبك لإكمال التثبيت.',
+            version: task.release.version,
           ),
         );
         return;
@@ -550,26 +584,131 @@ class DesktopUpdateAgent {
     }
   }
 
+  Future<Map<String, dynamic>> _getPreparedPackageInfo({
+    String? checksumSha256,
+    String? targetVersion,
+    String? fileName,
+  }) async {
+    return web_bridge.getPreparedElectronUpdate(<String, dynamic>{
+      if (checksumSha256 != null && checksumSha256.trim().isNotEmpty)
+        'checksumSha256': checksumSha256.trim(),
+      if (targetVersion != null && targetVersion.trim().isNotEmpty)
+        'targetVersion': targetVersion.trim(),
+      if (fileName != null && fileName.trim().isNotEmpty)
+        'fileName': fileName.trim(),
+    });
+  }
+
+  Future<String> getCurrentAppVersion() async {
+    try {
+      final electronInfo = await web_bridge.getElectronDeviceInfo();
+      final v = electronInfo['appVersion']?.toString().trim();
+      if (v != null && v.isNotEmpty) {
+        return v;
+      }
+    } catch (_) {}
+    return '1.1.23';
+  }
+
   Future<bool> hasPreparedUpdate() async {
     final taskState = await _stateStore.load();
-    final isReady = taskState.status == 'downloaded';
+    final canRecoverPrepared =
+        taskState.status == 'downloaded' ||
+        taskState.status == 'rolled_back' ||
+        taskState.status == 'installing';
+    if (!canRecoverPrepared) {
+      hasPreparedUpdateNotifier.value = false;
+      return false;
+    }
+    final preparedInfo = await _getPreparedPackageInfo(
+      checksumSha256: taskState.artifactSha256,
+      targetVersion: taskState.targetVersion,
+      fileName: taskState.fileName,
+    );
+    final isReady = preparedInfo['prepared'] == true;
+    if (!isReady && taskState.status == 'downloaded') {
+      await _stateStore.clear();
+    }
     hasPreparedUpdateNotifier.value = isReady;
     return isReady;
+  }
+
+  Future<void> _savePreparedPackageAndNotify({
+    required String taskId,
+    required ManagedUpdateRelease release,
+    required String currentVersion,
+    required String artifactPath,
+    required String readyMessage,
+  }) async {
+    await _stateStore.markDownloading(
+      taskId: taskId,
+      releaseId: release.id,
+      targetVersion: release.version,
+      packageType: release.packageType,
+      installerKind: release.installerKind,
+      packageLayout: release.packageLayout,
+      entryExecutable: release.entryExecutable,
+      silentInstallArgs: release.silentInstallArgs,
+      fileName: release.fileName ?? ('release-' + release.version + '.zip'),
+      currentVersion: currentVersion,
+    );
+    await _stateStore.markDownloaded(
+      artifactPath: artifactPath,
+      artifactSha256: release.checksumSha256 ?? '',
+    );
+    hasPreparedUpdateNotifier.value = true;
+    hasUpdateAvailableNotifier.value = true;
+    downloadProgressNotifier.value = 1.0;
+    statusMessageNotifier.value = readyMessage;
   }
 
   Future<void> downloadRelease(ManagedUpdateRelease release) async {
     if (_isTaskRunning) return;
     _isTaskRunning = true;
     try {
-      final electronInfo = await web_bridge.getElectronDeviceInfo();
-      final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
+      final currentVersion = await getCurrentAppVersion();
+      if (_areVersionsEqual(currentVersion, release.version)) {
+        statusMessageNotifier.value =
+            'هذا الجهاز محدث بالفعل للإصدار ' + release.version + '.';
+        return;
+      }
+
+      final manualTaskId = 'manual_' + release.id;
+      final preparedCheck = await _getPreparedPackageInfo(
+        checksumSha256: release.checksumSha256,
+        targetVersion: release.version,
+        fileName: release.fileName,
+      );
+      if (preparedCheck['prepared'] == true &&
+          ((release.checksumSha256 != null &&
+                  release.checksumSha256!.trim().isNotEmpty) ||
+              (preparedCheck['version']?.toString().trim() ==
+                  release.version.trim()))) {
+        await _savePreparedPackageAndNotify(
+          taskId: manualTaskId,
+          release: release,
+          currentVersion: currentVersion,
+          artifactPath:
+              preparedCheck['filePath']?.toString() ?? 'update-installer.exe',
+          readyMessage: 'حزمة التحديث محملة ومفحوصة مسبقاً وجاهزة للتثبيت.',
+        );
+        _eventsController.add(
+          DesktopUpdateEvent.readyToRestart(
+            taskId: manualTaskId,
+            message:
+                'الإصدار ' + release.version + ' جاهز بالفعل للتثبيت على هذا الجهاز.',
+            version: release.version,
+          ),
+        );
+        return;
+      }
 
       hasUpdateAvailableNotifier.value = true;
       downloadProgressNotifier.value = 0.0;
       statusMessageNotifier.value = 'جاري بدء تحميل التحديث...';
 
       await _stateStore.markDownloading(
-        taskId: 'manual_' + release.id,
+        taskId: manualTaskId,
         releaseId: release.id,
         targetVersion: release.version,
         packageType: release.packageType,
@@ -645,12 +784,30 @@ class DesktopUpdateAgent {
       rethrow;
     } finally {
       _isTaskRunning = false;
+      web_bridge.setElectronUpdaterProgressHandler(null);
     }
   }
 
   Future<void> restartToApplyPreparedUpdate() async {
     final state = await _stateStore.load();
-    if (state.status != 'downloaded') {
+    final preparedInfo = await _getPreparedPackageInfo(
+      checksumSha256: state.artifactSha256,
+      targetVersion: state.targetVersion,
+      fileName: state.fileName,
+    );
+    final hasDiskArtifact = preparedInfo['prepared'] == true;
+    final canApplyFromState =
+        state.status == 'downloaded' ||
+        ((state.status == 'rolled_back' ||
+                state.status == 'failed' ||
+                state.status == 'installing' ||
+                state.status == 'awaiting_healthcheck') &&
+            hasDiskArtifact);
+    if (!canApplyFromState || !hasDiskArtifact) {
+      hasPreparedUpdateNotifier.value = false;
+      if (state.status == 'downloaded') {
+        await _stateStore.clear();
+      }
       throw StateError('لا توجد حزمة تحديث جاهزة للتثبيت على هذا الجهاز.');
     }
     final taskId = state.taskId?.trim();
@@ -662,20 +819,34 @@ class DesktopUpdateAgent {
         message: 'يتم الآن إغلاق التطبيق لتثبيت التحديث تلقائياً.',
       );
     }
-    await _stateStore.markInstalling();
+    // Persist awaiting_healthcheck BEFORE Electron destroys the renderer/session.
+    await _stateStore.markAwaitingHealthcheck();
 
     final installResult = await web_bridge.applyElectronUpdate({
-      'targetVersion': state.targetVersion,
-      'fileName': state.fileName,
-      'silentInstallArgs': state.silentInstallArgs,
+      'targetVersion': state.targetVersion ?? preparedInfo['version'],
+      'fileName': state.fileName ?? preparedInfo['fileName'],
+      'silentInstallArgs': state.silentInstallArgs ?? preparedInfo['silentInstallArgs'],
       'installerKind': state.installerKind,
-      'packageType': state.packageType,
+      'packageType': state.packageType ?? preparedInfo['packageType'],
     });
     if (installResult['success'] != true) {
       final errMsg =
           installResult['error']?.toString() ?? 'فشل تطبيق التحديث في إلكترون.';
-      hasPreparedUpdateNotifier.value = false;
-      await _stateStore.markFailed(errMsg);
+      final stillPrepared = await _getPreparedPackageInfo(
+        checksumSha256: state.artifactSha256,
+        targetVersion: state.targetVersion,
+        fileName: state.fileName,
+      );
+      if (stillPrepared['prepared'] == true) {
+        hasPreparedUpdateNotifier.value = true;
+        await _stateStore.markDownloaded(
+          artifactPath: stillPrepared['filePath']?.toString() ?? state.artifactPath ?? 'update-installer.exe',
+          artifactSha256: state.artifactSha256 ?? stillPrepared['checksumSha256']?.toString() ?? '',
+        );
+      } else {
+        hasPreparedUpdateNotifier.value = false;
+        await _stateStore.markFailed(errMsg);
+      }
       if (taskId != null && taskId.isNotEmpty && !taskId.startsWith('manual_')) {
         await _reportTaskProgress(
           taskId: taskId,
@@ -689,17 +860,12 @@ class DesktopUpdateAgent {
       );
       return;
     }
-
-    await _stateStore.markAwaitingHealthcheck();
   }
 
   Future<void> retryFailedUpdate() async {
-    final state = await _stateStore.load();
-    if (state.status == 'failed' || state.status == 'downloaded') {
-      if (state.status == 'downloaded') {
-        await restartToApplyPreparedUpdate();
-        return;
-      }
+    if (await hasPreparedUpdate()) {
+      await restartToApplyPreparedUpdate();
+      return;
     }
     await checkNow();
   }
@@ -715,10 +881,10 @@ class DesktopUpdateAgent {
       return;
     }
 
-    final electronInfo = await web_bridge.getElectronDeviceInfo();
-    final currentVersion = electronInfo['appVersion']?.toString() ?? '1.1.21';
+    final currentVersion = await getCurrentAppVersion();
 
-    if (taskState.status == 'awaiting_healthcheck') {
+    if (taskState.status == 'awaiting_healthcheck' ||
+        taskState.status == 'installing') {
       if (_areVersionsEqual(currentVersion, targetVersion)) {
         await _reportTaskProgress(
           taskId: taskId,
@@ -728,6 +894,7 @@ class DesktopUpdateAgent {
               'Update $targetVersion was confirmed successfully after restart.',
         );
         await _stateStore.markCompleted(currentVersion);
+        hasPreparedUpdateNotifier.value = false;
         _eventsController.add(
           DesktopUpdateEvent.completed(
             taskId: taskId,
@@ -735,8 +902,21 @@ class DesktopUpdateAgent {
           ),
         );
       } else {
-        final message =
-            'تمت إعادة تشغيل التطبيق ولكن لم يتم الانتقال للإصدار المستهدف $targetVersion. الإصدار الحالي: $currentVersion.';
+        final preparedInfo = await _getPreparedPackageInfo(
+          checksumSha256: taskState.artifactSha256,
+          targetVersion: targetVersion,
+          fileName: taskState.fileName,
+        );
+        final lastInstall = preparedInfo['lastInstallResult'];
+        String detailReason = '';
+        if (lastInstall is Map && lastInstall['reason'] != null) {
+          final exitCode = lastInstall['exitCode'];
+          detailReason = ' (رمز الخروج: ${exitCode ?? '-'} - ${lastInstall['reason']})';
+        }
+        final preparedOnDisk = preparedInfo['prepared'] == true;
+        final message = preparedOnDisk
+            ? 'تعذر تفعيل الإصدار $targetVersion تلقائياً؛ الحزمة ما زالت محفوظة على الجهاز للمحاولة مباشرة دون إعادة تحميل$detailReason.'
+            : 'تمت إعادة تشغيل التطبيق ولكن لم يتم الانتقال للإصدار المستهدف $targetVersion. الإصدار الحالي: $currentVersion$detailReason.';
         await _reportTaskProgress(
           taskId: taskId,
           status: 'failed',
@@ -744,6 +924,11 @@ class DesktopUpdateAgent {
           message: message,
         );
         await _stateStore.markRolledBack(message);
+        hasPreparedUpdateNotifier.value = preparedOnDisk;
+        statusMessageNotifier.value = message;
+        _eventsController.add(
+          DesktopUpdateEvent.failed(taskId: taskId, message: message),
+        );
       }
     }
   }
@@ -755,12 +940,26 @@ class DesktopUpdateAgent {
       return;
     }
 
-    if (taskState.status == 'downloaded') {
+    if (taskState.status == 'downloaded' || taskState.status == 'rolled_back') {
+      final preparedInfo = await _getPreparedPackageInfo(
+        checksumSha256: taskState.artifactSha256,
+        targetVersion: taskState.targetVersion,
+        fileName: taskState.fileName,
+      );
+      if (preparedInfo['prepared'] != true) {
+        if (taskState.status == 'downloaded') {
+          await _stateStore.clear();
+        }
+        hasPreparedUpdateNotifier.value = false;
+        return;
+      }
+      hasPreparedUpdateNotifier.value = true;
       _eventsController.add(
         DesktopUpdateEvent.readyToRestart(
           taskId: taskId,
-          message:
-              'يوجد تحديث جاهز للتثبيت بالفعل. أعد تشغيل التطبيق عندما يناسبك.',
+          message: taskState.status == 'rolled_back'
+              ? 'حزمة التحديث (${taskState.targetVersion ?? ''}) محفوظة وجاهزة لإعادة محاولة التثبيت.'
+              : 'يوجد تحديث جاهز للتثبيت بالفعل. أعد تشغيل التطبيق عندما يناسبك.',
           version: taskState.targetVersion,
         ),
       );

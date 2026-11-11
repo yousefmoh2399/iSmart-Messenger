@@ -305,6 +305,10 @@ Future<Map<String, dynamic>> applyElectronUpdate([Map<String, dynamic>? options]
   throw UnsupportedError('Electron is not available on this platform.');
 }
 
+Future<Map<String, dynamic>> getPreparedElectronUpdate([Map<String, dynamic>? options]) async {
+  return const <String, dynamic>{'prepared': false};
+}
+
 Future<File> _resolveDownloadFile(
   String fileName, {
   String? preferredDirectoryPath,

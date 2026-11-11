@@ -24,6 +24,7 @@
                                   },
                   "files":  [
                                 "main.js",
+                                "updater_helpers.js",
                                 "preload.js",
                                 "receive-preload.js",
                                 "printing/**/*",

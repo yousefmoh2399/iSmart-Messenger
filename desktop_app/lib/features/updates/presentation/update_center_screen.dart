@@ -68,10 +68,23 @@ class _UpdateCenterScreenState extends ConsumerState<UpdateCenterScreen> {
       info = PackageInfo(
         appName: 'iSmart Messenger',
         packageName: 'workplace.chat.desktop',
-        version: '1.1.21',
+        version: '1.1.23',
         buildNumber: '2',
       );
     }
+    try {
+      final resolvedVersion = await ref
+          .read(desktopUpdateAgentProvider)
+          .getCurrentAppVersion();
+      if (resolvedVersion.trim().isNotEmpty) {
+        info = PackageInfo(
+          appName: info.appName,
+          packageName: info.packageName,
+          version: resolvedVersion.trim(),
+          buildNumber: info.buildNumber,
+        );
+      }
+    } catch (_) {}
     if (!mounted) return;
     setState(() => _packageInfo = info);
   }

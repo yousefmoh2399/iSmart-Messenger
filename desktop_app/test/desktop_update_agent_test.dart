@@ -127,7 +127,30 @@ class FakeDesktopUpdateStateStore implements DesktopUpdateStateStore {
 
   @override
   Future<void> markInstalling() async {
-    state = DesktopUpdateState(status: 'installing');
+    state = state.copyWith(status: 'installing', clearLastError: true);
+  }
+
+  @override
+  Future<void> markRolledBack(String error) async {
+    state = state.copyWith(status: 'rolled_back', lastError: error);
+  }
+
+  @override
+  Future<void> markDownloaded({
+    required String artifactPath,
+    required String artifactSha256,
+  }) async {
+    state = state.copyWith(
+      status: 'downloaded',
+      artifactPath: artifactPath,
+      artifactSha256: artifactSha256,
+      clearLastError: true,
+    );
+  }
+
+  @override
+  Future<void> clear() async {
+    state = DesktopUpdateState.idle();
   }
 
   @override
@@ -224,6 +247,87 @@ void main() {
       final agent = DesktopUpdateAgent(fakeRepo, fakeStore);
 
       expect(() => agent.checkNowDetailed(), throwsA(isA<Exception>()));
+    });
+
+    test('getCurrentAppVersion resolves non-empty application version', () async {
+      final fakeRepo = FakeUpdateManagementRepository();
+      final fakeStore = FakeDesktopUpdateStateStore();
+      final agent = DesktopUpdateAgent(fakeRepo, fakeStore);
+
+      final version = await agent.getCurrentAppVersion();
+      expect(version.trim(), isNotEmpty);
+    });
+
+    test('hasPreparedUpdate returns false when downloaded artifact path is missing', () async {
+      final fakeRepo = FakeUpdateManagementRepository();
+      final fakeStore = FakeDesktopUpdateStateStore();
+      fakeStore.state = const DesktopUpdateState(
+        status: 'downloaded',
+        taskId: 't-missing',
+        targetVersion: '9.9.9',
+        artifactPath: 'C:/nonexistent/ismart-missing-installer.exe',
+      );
+      final agent = DesktopUpdateAgent(fakeRepo, fakeStore);
+
+      final hasPrepared = await agent.hasPreparedUpdate();
+      expect(hasPrepared, isFalse);
+      expect(agent.hasPreparedUpdateNotifier.value, isFalse);
+    });
+
+    AppUser buildTestUser({String branchCode = 'main'}) {
+      return AppUser(
+        id: 'u1',
+        username: 'user1',
+        fullName: 'User One',
+        role: 'user',
+        departmentId: null,
+        branchId: null,
+        branchCode: branchCode,
+        isOnline: true,
+        presenceStatus: 'online',
+        isActive: true,
+        avatarUrl: null,
+        lastSeen: null,
+        lastActiveAt: null,
+        maxAttachmentSizeMB: 20,
+        permissions: const {},
+        chatPreferences: ChatPreferences.defaults,
+      );
+    }
+
+    test('start reconciles awaiting_healthcheck into rolled_back when version did not change', () async {
+      final fakeRepo = FakeUpdateManagementRepository();
+      final fakeStore = FakeDesktopUpdateStateStore();
+      final agent = DesktopUpdateAgent(fakeRepo, fakeStore);
+
+      fakeStore.state = const DesktopUpdateState(
+        status: 'awaiting_healthcheck',
+        taskId: 'manual_rel_fail',
+        targetVersion: '99.0.0',
+      );
+      await agent.start(buildTestUser());
+
+      expect(fakeStore.state.status, 'rolled_back');
+      expect(fakeStore.state.lastError, contains('99.0.0'));
+      agent.dispose();
+    });
+
+    test('start reconciles awaiting_healthcheck into completed when target matches current version', () async {
+      final fakeRepo = FakeUpdateManagementRepository();
+      final fakeStore = FakeDesktopUpdateStateStore();
+      final agent = DesktopUpdateAgent(fakeRepo, fakeStore);
+      final currentVersion = await agent.getCurrentAppVersion();
+      fakeStore.state = DesktopUpdateState(
+        status: 'awaiting_healthcheck',
+        taskId: 'manual_rel_ok',
+        targetVersion: currentVersion,
+      );
+
+      await agent.start(buildTestUser());
+
+      expect(fakeStore.state.status, 'completed');
+      expect(fakeStore.state.targetVersion, currentVersion);
+      agent.dispose();
     });
   });
 

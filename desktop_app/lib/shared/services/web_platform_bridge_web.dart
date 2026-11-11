@@ -1288,6 +1288,19 @@ Future<String?> electronCaptureWindow(int windowId) async {
 }
 
 /// Returns base64-encoded PNG data or null on failure.
+Future<Map<String, dynamic>> getPreparedElectronUpdate([Map<String, dynamic>? options]) async {
+  if (!isElectron()) {
+    return const <String, dynamic>{'prepared': false};
+  }
+  try {
+    return _asStringMap(
+      await _callElectron('getPreparedUpdate', options ?? const <String, dynamic>{}),
+    );
+  } catch (_) {
+    return const <String, dynamic>{'prepared': false};
+  }
+}
+
 Future<String?> electronCaptureScreen() async {
   final result = _asStringMap(await _callElectron('captureScreen'));
   if (result['success'] != true) return null;

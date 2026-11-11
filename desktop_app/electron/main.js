@@ -5201,22 +5201,6 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
 
-  // Clean up previous update output artifacts (keep matching .part ONLY if verified in downloadFile)
-  const cleanups = [
-    "update-download.tmp",
-    "update-installer.exe",
-    "update-installer.msi",
-    "update-package.zip",
-    "app-update.zip",
-    "update-meta.json",
-  ];
-  for (const c of cleanups) {
-    try {
-      const p = path.join(tempDir, c);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    } catch (_) {}
-  }
-
   const tempDownloadPath = path.join(tempDir, "update-download.tmp");
 
   try {
@@ -5242,6 +5226,80 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       lastProgressEventAt = now;
       mainWindow.webContents.send("updater-progress", payload);
     };
+
+    // Reuse an already-downloaded and cryptographically verified update package if present
+    const reuseCheck = await updaterHelpers.validatePreparedPackage({
+      tempDir,
+      downloadUrl,
+      checksumSha256,
+      fileName,
+      detectFileType,
+      calculateFileSha256,
+      requireMatchForReuse: true,
+    });
+    if (reuseCheck.prepared) {
+      try {
+        const refreshedMeta = {
+          ...(reuseCheck.meta || {}),
+          packagePath: reuseCheck.packagePath,
+          packageType: reuseCheck.packageType,
+          fileName:
+            fileName ||
+            (reuseCheck.meta && reuseCheck.meta.fileName) ||
+            path.basename(reuseCheck.packagePath),
+          downloadUrl:
+            downloadUrl || (reuseCheck.meta && reuseCheck.meta.downloadUrl) || "",
+          checksumSha256:
+            reuseCheck.checksumSha256 ||
+            (reuseCheck.meta && reuseCheck.meta.checksumSha256) ||
+            null,
+          expectedSize: reuseCheck.fileSize,
+          silentInstallArgs:
+            silentInstallArgs ||
+            (reuseCheck.meta && reuseCheck.meta.silentInstallArgs) ||
+            "",
+          installerKind:
+            installerKind || (reuseCheck.meta && reuseCheck.meta.installerKind) || "",
+          previousVersion: app.getVersion(),
+        };
+        fs.writeFileSync(
+          path.join(tempDir, "update-meta.json"),
+          JSON.stringify(refreshedMeta, null, 2),
+          "utf8"
+        );
+        updaterHelpers.clearUpdateResult(tempDir);
+      } catch (_) {}
+
+      sendUpdaterProgress({
+        status: "downloaded",
+        progress: 100,
+        message: "حزمة التحديث محملة ومفحوصة مسبقاً وجاهزة للتثبيت.",
+      }, { force: true });
+
+      return {
+        success: true,
+        reused: true,
+        filePath: reuseCheck.packagePath,
+        packageType: reuseCheck.packageType,
+      };
+    }
+
+    // Clean up previous mismatched/incomplete update output artifacts (keep matching .part ONLY if verified in downloadFile)
+    const cleanups = [
+      "update-download.tmp",
+      "update-installer.exe",
+      "update-installer.msi",
+      "update-package.zip",
+      "app-update.zip",
+      "update-meta.json",
+      "update-result.json",
+    ];
+    for (const c of cleanups) {
+      try {
+        const p = path.join(tempDir, c);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch (_) {}
+    }
 
     sendUpdaterProgress({
       status: "downloading",
@@ -5341,9 +5399,11 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
       expectedSize: finalStats.size,
       silentInstallArgs: silentInstallArgs || "",
       installerKind: installerKind || "",
+      previousVersion: app.getVersion(),
       downloadedAt: new Date().toISOString(),
     };
     fs.writeFileSync(path.join(tempDir, "update-meta.json"), JSON.stringify(meta, null, 2), "utf8");
+    updaterHelpers.clearUpdateResult(tempDir);
 
     sendUpdaterProgress({
       status: "downloaded",
@@ -5366,6 +5426,36 @@ ipcMain.handle("updater:start-update", async (event, payload = {}) => {
   }
 });
 
+const updaterHelpers = require("./updater_helpers");
+
+ipcMain.handle("updater:get-prepared-update", async (_event, payload = {}) => {
+  const tempDir = path.join(app.getPath("temp"), APP_NAME);
+  if (!fs.existsSync(tempDir)) {
+    return { prepared: false, reason: "missing", lastInstallResult: null };
+  }
+  const check = await updaterHelpers.validatePreparedPackage({
+    tempDir,
+    checksumSha256: payload && payload.checksumSha256 ? String(payload.checksumSha256) : "",
+    fileName: payload && payload.fileName ? String(payload.fileName) : "",
+    version: payload && (payload.targetVersion || payload.version) ? String(payload.targetVersion || payload.version) : "",
+    detectFileType,
+    calculateFileSha256,
+    requireMatchForReuse: false,
+  });
+  return {
+    prepared: Boolean(check.prepared),
+    reason: check.reason || null,
+    filePath: check.packagePath || null,
+    packageType: check.packageType || null,
+    fileSize: check.fileSize || 0,
+    checksumSha256: check.checksumSha256 || null,
+    version: check.version || null,
+    fileName: check.fileName || null,
+    silentInstallArgs: check.silentInstallArgs || "",
+    lastInstallResult: check.lastInstallResult || null,
+  };
+});
+
 ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   const tempDir = path.join(app.getPath("temp"), APP_NAME);
   fs.mkdirSync(tempDir, { recursive: true });
@@ -5380,69 +5470,43 @@ ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   writeLog("=== Starting JS apply-update handler ===");
 
   // Read metadata if available
-  let meta = {};
+  let meta = updaterHelpers.readUpdateMeta(tempDir) || {};
   const metaPath = path.join(tempDir, "update-meta.json");
-  if (fs.existsSync(metaPath)) {
-    try {
-      meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
-    } catch (_) {}
-  }
 
   // Merge any runtime payload options
   if (payload && typeof payload === "object") {
     meta = { ...meta, ...payload };
   }
 
-  // Locate the update package file
-  let packagePath = meta.packagePath;
-  if (!packagePath || !fs.existsSync(packagePath)) {
-    const candidates = [
-      path.join(tempDir, "update-installer.exe"),
-      path.join(tempDir, "update-installer.msi"),
-      path.join(tempDir, "update-package.zip"),
-      path.join(tempDir, "app-update.zip"),
-    ];
-    for (const c of candidates) {
-      if (fs.existsSync(c)) {
-        packagePath = c;
-        break;
-      }
-    }
-  }
+  const check = await updaterHelpers.validatePreparedPackage({
+    tempDir,
+    checksumSha256: meta.checksumSha256 || "",
+    fileName: meta.fileName || "",
+    version: meta.targetVersion || meta.version || "",
+    detectFileType,
+    calculateFileSha256,
+    requireMatchForReuse: false,
+  });
 
-  if (!packagePath || !fs.existsSync(packagePath)) {
-    writeLog("ERROR: update package file does not exist in tempDir!");
-    throw new Error("ملف التحديث غير موجود! يرجى تحميله أولاً.");
-  }
-
-  const detectedType = detectFileType(packagePath);
-  const isExe = detectedType === "exe" || packagePath.toLowerCase().endsWith(".exe");
-  const isMsi = detectedType === "msi" || packagePath.toLowerCase().endsWith(".msi");
-
-  // Pre-launch integrity check: refuse to launch a truncated or corrupted NSIS installer
-  try {
-    const pkgStat = fs.statSync(packagePath);
-    if (pkgStat.size < 1024 || (meta.expectedSize && Number(meta.expectedSize) > 0 && pkgStat.size !== Number(meta.expectedSize))) {
-      throw new Error(`File size mismatch: actual=${pkgStat.size}, expected=${meta.expectedSize || 'unknown'}`);
+  if (!check.prepared) {
+    if (check.reason === "missing") {
+      writeLog("ERROR: update package file does not exist in tempDir!");
+      throw new Error("ملف التحديث غير موجود! يرجى تحميله أولاً.");
     }
-    if (isExe && detectedType !== "exe") {
-      throw new Error(`Invalid Windows PE executable header (detectedType=${detectedType})`);
-    }
-    if (meta.checksumSha256 && String(meta.checksumSha256).trim()) {
-      const actualHash = await calculateFileSha256(packagePath);
-      if (actualHash.toLowerCase() !== String(meta.checksumSha256).trim().toLowerCase()) {
-        throw new Error(`SHA-256 mismatch before launch: expected=${meta.checksumSha256}, actual=${actualHash}`);
-      }
-    }
-  } catch (integrityErr) {
-    writeLog(`FATAL INTEGRITY ERROR: ${integrityErr.message}. Removing damaged package so updater can re-download cleanly.`);
-    try { if (fs.existsSync(packagePath)) fs.unlinkSync(packagePath); } catch (_) {}
+    writeLog(`FATAL INTEGRITY ERROR (${check.reason}). Removing damaged package so updater can re-download cleanly.`);
+    try { if (check.packagePath && fs.existsSync(check.packagePath)) fs.unlinkSync(check.packagePath); } catch (_) {}
     try { if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath); } catch (_) {}
+    updaterHelpers.clearUpdateResult(tempDir);
     return {
       success: false,
       error: "ملف التحديث تالف أو غير مكتمل. تم حذفه بأمان لمنع خطأ NSIS، يرجى إعادة المحاولة.",
     };
   }
+
+  const packagePath = check.packagePath;
+  const detectedType = check.packageType;
+  const isExe = detectedType === "exe" || packagePath.toLowerCase().endsWith(".exe");
+  const isMsi = detectedType === "msi" || packagePath.toLowerCase().endsWith(".msi");
 
   const appDir = path.dirname(process.execPath);
   const exePath = process.execPath;
@@ -5452,285 +5516,65 @@ ipcMain.handle("updater:apply-update", async (event, payload = {}) => {
   writeLog(`Found update package: ${packagePath} (type: ${detectedType}, isExe: ${isExe}, isMsi: ${isMsi})`);
   writeLog(`appDir: ${appDir}, exePath: ${exePath}, procName: ${procName}, PID: ${parentPid}`);
 
-  const packagePathNormalized = packagePath.replace(/\\/g, "/");
-  const appDirNormalized = appDir.replace(/\\/g, "/");
-  const exePathNormalized = exePath.replace(/\\/g, "/");
-  const logPathNormalized = path.join(tempDir, "update_log.txt").replace(/\\/g, "/");
   const silentArgs = (meta.silentInstallArgs || (payload && payload.silentInstallArgs) || "/S").trim();
+  const targetVersion = String(meta.targetVersion || meta.version || "").trim();
+  const previousVersion = String(app.getVersion() || meta.previousVersion || "").trim();
+  const resultPath = path.join(tempDir, "update-result.json");
+  const psScriptPath = path.join(tempDir, "apply_update.ps1");
 
-  const psScriptPath = path.join(app.getPath("temp"), "apply_update.ps1");
-  let psScriptContent = "";
+  try {
+    const updatedMeta = {
+      ...meta,
+      packagePath,
+      packageType: detectedType,
+      targetVersion: targetVersion || meta.targetVersion || null,
+      previousVersion: previousVersion || meta.previousVersion || null,
+      lastApplyStartedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(metaPath, JSON.stringify(updatedMeta, null, 2), "utf8");
+  } catch (_) {}
+  updaterHelpers.clearUpdateResult(tempDir);
 
-  if (isExe) {
-    // -------------------------------------------------------------
-    // Direct Executable Installer (.exe) - Electron NSIS setup
-    // Runs in user context without UAC or admin elevation prompts.
-    // -------------------------------------------------------------
-    writeLog(`Generating PowerShell script for Executable Installer (Silent: "${silentArgs}")...`);
-    psScriptContent = `
-$logPath = "${logPathNormalized}"
-$installerPath = "${packagePathNormalized}"
-$procName = "${procName}"
-$parentPid = ${parentPid}
-$exePath = "${exePathNormalized}"
-$silentArgs = "${silentArgs}"
-
-function Log-Msg($msg) {
-    $logParent = [System.IO.Path]::GetDirectoryName($logPath)
-    if (-not (Test-Path "$logParent")) {
-        New-Item -ItemType Directory -Path "$logParent" -Force | Out-Null
-    }
-    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
-}
-
-Log-Msg "=== Starting Electron Setup Installer Update ==="
-Log-Msg "Installer path: $installerPath"
-Log-Msg "Parent PID: $parentPid"
-Log-Msg "Process Name: $procName"
-Log-Msg "Exe Path: $exePath"
-Log-Msg "Silent Args: $silentArgs"
-
-# 1. Wait for current Electron application to exit
-Log-Msg "Waiting for parent process $parentPid to exit..."
-$timeout = 25
-while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
-    Start-Sleep -m 200
-    $timeout--
-}
-if (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {
-    Log-Msg "Terminating parent PID $parentPid forcefully..."
-    Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue
-}
-
-# Ensure all instances of the application are terminated so no files are locked
-Log-Msg "Terminating any lingering instances of $procName or electron..."
-Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -m 600
-
-# 2. Launch the installer executable without UAC elevation (No -Verb RunAs)
-Log-Msg "Launching installer in silent per-user mode..."
-try {
-    if ($silentArgs) {
-        $inst = Start-Process -FilePath "$installerPath" -ArgumentList "$silentArgs" -PassThru -Wait
-    } else {
-        $inst = Start-Process -FilePath "$installerPath" -ArgumentList "/S" -PassThru -Wait
-    }
-    Log-Msg "Silent installer process finished with exit code: $($inst.ExitCode)"
-} catch {
-    Log-Msg "Silent installer notice: $($_.Exception.Message). Falling back to direct user launch..."
-    try {
-        $inst = Start-Process -FilePath "$installerPath" -PassThru -Wait
-        Log-Msg "Standard installer process finished with exit code: $($inst.ExitCode)"
-    } catch {
-        Log-Msg "All installer attempts failed: $($_.Exception.Message)"
-    }
-}
-
-# 2.5 Clean up legacy Public Desktop shortcut (without executing any uninstaller)
-Log-Msg "Cleaning up legacy public shortcuts..."
-$publicDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::CommonDesktopDirectory)
-$pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
-
-if ($publicDesktop) {
-    Remove-Item (Join-Path $publicDesktop "iSmart Messenger.lnk") -Force -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $publicDesktop "$procName.lnk") -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path (Join-Path $pf32 "iSmart Messenger")) {
-    Remove-Item (Join-Path $pf32 "iSmart Messenger") -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# 3. Verify application launch and relaunch if not already started by installer
-Start-Sleep -s 2
-$running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
-if (-not $running) {
-    Log-Msg "Application not running yet. Searching for installed executable..."
-    $localApp = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::LocalApplicationData)
-    $pf32 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFilesX86)
-    $pf64 = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::ProgramFiles)
-
-    $candidates = @(
-        (Join-Path $localApp "Programs\iSmart Messenger\$procName.exe"),
-        (Join-Path $localApp "iSmart Messenger\$procName.exe"),
-        (Join-Path $pf32 "iSmart Messenger\$procName.exe"),
-        (Join-Path $pf64 "iSmart Messenger\$procName.exe"),
-        (Join-Path $pf32 "$procName\$procName.exe"),
-        (Join-Path $pf64 "$procName\$procName.exe"),
-        "$exePath"
-    )
-    $launched = $false
-    foreach ($cand in $candidates) {
-        if ($cand -and (Test-Path "$cand")) {
-            Log-Msg "Relaunching application from: $cand"
-            Start-Process -FilePath "$cand"
-            $launched = $true
-            break
-        }
-    }
-    if (-not $launched) {
-        Log-Msg "Could not find installed executable, attempting original exePath: $exePath"
-        if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
-    }
-} else {
-    Log-Msg "Application is already running after installer execution."
-}
-
-# 4. Clean up installer file
-Start-Sleep -s 3
-Remove-Item -Path "$installerPath" -Force -ErrorAction SilentlyContinue
-Log-Msg "=== Installer update completed ==="
-
-# Self-destruct script
-Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-`.trim();
-  } else if (isMsi) {
-    // -------------------------------------------------------------
-    // MSI Package
-    // -------------------------------------------------------------
-    writeLog("Generating PowerShell script for MSI installer...");
-    psScriptContent = `
-$logPath = "${logPathNormalized}"
-$installerPath = "${packagePathNormalized}"
-$procName = "${procName}"
-$parentPid = ${parentPid}
-$exePath = "${exePathNormalized}"
-
-function Log-Msg($msg) {
-    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    "[$ts] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
-}
-
-Log-Msg "=== Starting MSI Package Update ==="
-$timeout = 25
-while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
-    Start-Sleep -m 200
-    $timeout--
-}
-Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -m 600
-
-try {
-    $inst = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i \`"$installerPath\`" /qn /norestart" -PassThru -Wait
-    Log-Msg "msiexec finished with exit code: $($inst.ExitCode)"
-} catch {
-    Log-Msg "MSI install error: $($_.Exception.Message)"
-}
-
-Start-Sleep -s 2
-$running = Get-Process -Name "$procName" -ErrorAction SilentlyContinue
-if (-not $running) {
-    if (Test-Path "$exePath") { Start-Process -FilePath "$exePath" }
-}
-Remove-Item -Path "$installerPath" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-`.trim();
-  } else {
-    // -------------------------------------------------------------
-    // Zip Archive Package (Portable / Loose files)
-    // -------------------------------------------------------------
-    writeLog("Generating PowerShell script for Zip Archive (clean extract without COM popups)...");
-    const extractedPath = path.join(tempDir, "extracted");
-    const extractedPathNormalized = extractedPath.replace(/\\/g, "/");
-
-    psScriptContent = `
-$logPath = "${logPathNormalized}"
-$zipPath = "${packagePathNormalized}"
-$extractedPath = "${extractedPathNormalized}"
-$appDir = "${appDirNormalized}"
-$exePath = "${exePathNormalized}"
-$procName = "${procName}"
-$parentPid = ${parentPid}
-
-function Log-Msg($msg) {
-    $logParent = [System.IO.Path]::GetDirectoryName($logPath)
-    if (-not (Test-Path "$logParent")) {
-        New-Item -ItemType Directory -Path "$logParent" -Force | Out-Null
-    }
-    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    "[$timestamp] $msg" | Out-File -FilePath $logPath -Append -Encoding UTF8
-}
-
-Log-Msg "=== Starting Zip Update Process ==="
-$timeout = 25
-while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and ($timeout -gt 0)) {
-    Start-Sleep -m 200
-    $timeout--
-}
-Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -m 800
-
-if (Test-Path "$extractedPath") {
-    Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-}
-New-Item -ItemType Directory -Path "$extractedPath" -Force | Out-Null
-
-$extractedOk = $false
-try {
-    Add-Type -Assembly "System.IO.Compression.FileSystem"
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractedPath)
-    $extractedOk = $true
-    Log-Msg "Extraction completed via .NET ZipFile."
-} catch {
-    Log-Msg "Extraction via .NET failed: $($_.Exception.Message)."
-}
-
-if (-not $extractedOk) {
-    try {
-        Expand-Archive -Path "$zipPath" -DestinationPath "$extractedPath" -Force
-        $extractedOk = $true
-        Log-Msg "Extraction completed via Expand-Archive."
-    } catch {
-        Log-Msg "Expand-Archive failed: $($_.Exception.Message)"
-    }
-}
-
-$sourceDir = "$extractedPath"
-if (Test-Path "$extractedPath\\app") {
-    $sourceDir = "$extractedPath\\app"
-} elseif (Test-Path "$extractedPath\\resources") {
-    $sourceDir = "$extractedPath"
-}
-
-Log-Msg "Copying updated files from $sourceDir to $appDir..."
-$copied = $false
-for ($i = 1; $i -le 10; $i++) {
-    try {
-        Get-Process -Name "$procName" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        Copy-Item -Path "$sourceDir\\*" -Destination "$appDir" -Recurse -Force -ErrorAction Stop
-        $copied = $true
-        Log-Msg "Files copied successfully on attempt $i."
-        break
-    } catch {
-        Log-Msg "Attempt $i failed: $($_.Exception.Message). Retrying..."
-        Start-Sleep -s 1
-    }
-}
-
-Start-Sleep -s 1
-if (Test-Path "$exePath") {
-    Start-Process "$exePath"
-}
-Remove-Item -Path "$zipPath" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "$extractedPath" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
-`.trim();
-  }
+  const psScriptContent = updaterHelpers.buildApplyUpdatePsScript({
+    packageType: isExe ? "exe" : isMsi ? "msi" : "zip",
+    packagePath,
+    appDir,
+    exePath,
+    procName,
+    parentPid,
+    logPath: path.join(tempDir, "update_log.txt"),
+    metaPath,
+    resultPath,
+    silentArgs,
+    targetVersion,
+    previousVersion,
+    tempDir,
+  });
+  writeLog(`Generated PowerShell updater script (type=${isExe ? "exe" : isMsi ? "msi" : "zip"}, target=${targetVersion || "unknown"}).`);
 
   writeLog(`Writing psScriptPath: ${psScriptPath}...`);
   fs.writeFileSync(psScriptPath, psScriptContent, "utf8");
   writeLog("psScriptPath written successfully.");
 
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    try {
+      if (typeof mainWindow.webContents.session.flushStorageData === "function") {
+        await Promise.race([
+          Promise.resolve(mainWindow.webContents.session.flushStorageData()),
+          new Promise((resolve) => setTimeout(resolve, 600)),
+        ]);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    } catch (_) {}
+  }
+
   const { spawn } = require("child_process");
+  const psExecutable = updaterHelpers.resolvePowerShellExecutable();
   try {
-    writeLog("Spawning powershell.exe via cmd.exe start command...");
+    writeLog(`Spawning PowerShell updater directly (${psExecutable})...`);
     const child = spawn(
-      "cmd.exe",
+      psExecutable,
       [
-        "/c",
-        "start",
-        "",
-        "/min",
-        "powershell.exe",
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -5745,21 +5589,47 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
         windowsHide: true,
       }
     );
-    writeLog(`cmd.exe child process spawned successfully (PID: ${child.pid}).`);
+    if (!child || !child.pid) {
+      throw new Error("PowerShell process failed to start (no PID).");
+    }
+    child.on("error", (spawnErr) => {
+      writeLog(`WARNING: PowerShell child error event: ${spawnErr.message}`);
+    });
+    writeLog(`PowerShell updater process spawned successfully (PID: ${child.pid}).`);
     child.unref();
   } catch (err) {
-    writeLog(`ERROR: Exception spawning child process: ${err.message}`);
+    writeLog(`ERROR: Exception spawning updater process: ${err.message}`);
+    return {
+      success: false,
+      error: `تعذر بدء برنامج التثبيت تلقائياً: ${err.message}`,
+    };
   }
 
   writeLog("Quitting application so installer can proceed...");
   setTimeout(() => {
     writeLog("Quitting Electron app now...");
     isQuitting = true;
+    try {
+      if (webAppServer && typeof webAppServer.closeAllConnections === "function") {
+        webAppServer.closeAllConnections();
+      }
+    } catch (_) {}
+    try {
+      if (lanServer && typeof lanServer.closeAllConnections === "function") {
+        lanServer.closeAllConnections();
+      }
+    } catch (_) {}
     if (mainWindow && !mainWindow.isDestroyed()) {
       try { mainWindow.destroy(); } catch (_) {}
     }
     app.quit();
-  }, 1000);
+    const forceExitTimer = setTimeout(() => {
+      try { app.exit(0); } catch (_) {}
+    }, 600);
+    if (typeof forceExitTimer.unref === "function") {
+      forceExitTimer.unref();
+    }
+  }, 300);
 
   return { success: true };
 });

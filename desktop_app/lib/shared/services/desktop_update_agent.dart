@@ -652,6 +652,8 @@ class DesktopUpdateAgent {
     }
   }
 
+    Future<String> getCurrentAppVersion() => _resolveAppVersion();
+
     Future<bool> hasPreparedUpdate() async {
     final taskState = await _stateStore.load();
     final isReady = taskState.status == 'downloaded' &&
