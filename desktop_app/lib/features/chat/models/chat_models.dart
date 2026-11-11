@@ -312,6 +312,18 @@ class DepartmentSummary {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'description': description,
+      'managers': managers,
+      'membersCount': membersCount,
+      if (defaultConversationId != null) 'defaultConversationId': defaultConversationId,
+    };
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -346,6 +358,16 @@ class BranchSummary {
       description: json['description'] as String? ?? '',
       membersCount: json['membersCount'] as int? ?? 0,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'description': description,
+      'membersCount': membersCount,
+    };
   }
 
   @override

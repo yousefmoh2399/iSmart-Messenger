@@ -85,6 +85,44 @@ class ChatLocalCache {
         .toList();
   }
 
+  Future<void> saveDepartments(List<DepartmentSummary> departments) async {
+    await saveRawJson('departments', {
+      'departments': departments.map((d) => d.toJson()).toList(),
+    });
+  }
+
+  Future<List<DepartmentSummary>?> loadDepartments() async {
+    final cached = await loadRawJson('departments');
+    final raw = cached?['departments'];
+    if (raw is! List) return null;
+    return raw
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              DepartmentSummary.fromJson(Map<String, dynamic>.from(entry)),
+        )
+        .toList();
+  }
+
+  Future<void> saveBranches(List<BranchSummary> branches) async {
+    await saveRawJson('branches', {
+      'branches': branches.map((b) => b.toJson()).toList(),
+    });
+  }
+
+  Future<List<BranchSummary>?> loadBranches() async {
+    final cached = await loadRawJson('branches');
+    final raw = cached?['branches'];
+    if (raw is! List) return null;
+    return raw
+        .whereType<Map>()
+        .map(
+          (entry) =>
+              BranchSummary.fromJson(Map<String, dynamic>.from(entry)),
+        )
+        .toList();
+  }
+
   Future<void> saveMessages(
     String conversationId,
     ChatMessagesPage page,

@@ -185,6 +185,34 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       return collectedUsers.values.toList();
     }
 
+    Future<List<DepartmentSummary>> loadDepartmentsWithCacheFallback() async {
+      final cached = await repository.cache.loadDepartments();
+      try {
+        final fresh = await _guardAuth(repository.fetchDepartments);
+        if (fresh.isNotEmpty) {
+          unawaited(repository.cache.saveDepartments(fresh));
+          return fresh;
+        }
+      } catch (e) {
+        if (_isUnauthorized(e)) rethrow;
+      }
+      return cached ?? const <DepartmentSummary>[];
+    }
+
+    Future<List<BranchSummary>> loadBranchesWithCacheFallback() async {
+      final cached = await repository.cache.loadBranches();
+      try {
+        final fresh = await _guardAuth(repository.fetchBranches);
+        if (fresh.isNotEmpty) {
+          unawaited(repository.cache.saveBranches(fresh));
+          return fresh;
+        }
+      } catch (e) {
+        if (_isUnauthorized(e)) rethrow;
+      }
+      return cached ?? const <BranchSummary>[];
+    }
+
     final conversationsFuture = _guardAuth(repository.fetchConversations);
     unawaited(conversationsFuture.then((conversations) {
       if (_disposed) return;
@@ -206,8 +234,8 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
     // fresh users are fetched in the background and merged in once ready.
     final results = await Future.wait([
       conversationsFuture,
-      safeList(repository.fetchDepartments),
-      safeList(repository.fetchBranches),
+      loadDepartmentsWithCacheFallback(),
+      loadBranchesWithCacheFallback(),
       safeList(repository.fetchManageableConversations),
       safeList(repository.fetchRoles),
       cachedUsersFuture,
@@ -266,6 +294,21 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       manageableMap.values.toList(),
     );
 
+    if (departments.isNotEmpty) {
+      unawaited(repository.cache.saveDepartments(departments));
+    }
+    if (branches.isNotEmpty) {
+      unawaited(repository.cache.saveBranches(branches));
+    }
+
+    if (departments.isEmpty || branches.isEmpty) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (!_disposed) {
+          unawaited(ensureDepartmentsAndBranchesLoaded());
+        }
+      });
+    }
+
     return ChatOverviewData(
       conversations: conversations,
       manageableConversations: manageableConversations,
@@ -274,6 +317,48 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
       branches: branches,
       roles: roles,
     );
+  }
+
+  Future<void> ensureDepartmentsAndBranchesLoaded() async {
+    final current = state.valueOrNull;
+    if (current == null || _disposed) return;
+    if (current.departments.isNotEmpty && current.branches.isNotEmpty) return;
+
+    try {
+      final repository = _repository();
+      final freshDeptsFuture = current.departments.isEmpty
+          ? _guardAuth(repository.fetchDepartments).catchError((_) => <DepartmentSummary>[])
+          : Future.value(current.departments);
+      final freshBranchesFuture = current.branches.isEmpty
+          ? _guardAuth(repository.fetchBranches).catchError((_) => <BranchSummary>[])
+          : Future.value(current.branches);
+
+      final depts = await freshDeptsFuture;
+      final branches = await freshBranchesFuture;
+
+      if (_disposed) return;
+      final latest = state.valueOrNull;
+      if (latest != null && (depts.isNotEmpty || branches.isNotEmpty)) {
+        final nextDepts = depts.isNotEmpty ? depts : latest.departments;
+        final nextBranches = branches.isNotEmpty ? branches : latest.branches;
+        if (nextDepts.isNotEmpty) {
+          unawaited(repository.cache.saveDepartments(nextDepts));
+        }
+        if (nextBranches.isNotEmpty) {
+          unawaited(repository.cache.saveBranches(nextBranches));
+        }
+        _setStateAndCache(
+          ChatOverviewData(
+            conversations: latest.conversations,
+            manageableConversations: latest.manageableConversations,
+            users: latest.users,
+            departments: nextDepts,
+            branches: nextBranches,
+            roles: latest.roles,
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> loadMoreUsers() async {
@@ -418,7 +503,9 @@ class ChatOverviewController extends AsyncNotifier<ChatOverviewData> {
         return;
       }
 
-      if (event.type == 'users_updated') {
+      if (event.type == 'users_updated' ||
+          event.type == 'departments_updated' ||
+          event.type == 'branches_updated') {
         unawaited(refresh(showLoader: false));
         return;
       }
@@ -1665,6 +1752,12 @@ Future<ChatConversation> uploadConversationAvatar({
       });
       if (data.users.isNotEmpty) {
         await _repository().cache.saveUsers(data.users);
+      }
+      if (data.departments.isNotEmpty) {
+        await _repository().cache.saveDepartments(data.departments);
+      }
+      if (data.branches.isNotEmpty) {
+        await _repository().cache.saveBranches(data.branches);
       }
     } catch (_) {}
   }
