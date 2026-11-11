@@ -96,6 +96,8 @@ class UpdateManagementRepository {
     String? minWindowsBuild,
     int rolloutPercentage = 100,
     String silentInstallArgs = '',
+    String targetType = 'job_only',
+    List<String> targetBranches = const [],
     String? externalDownloadUrl,
     String? artifactFilePath,
     Uint8List? artifactBytes,
@@ -141,6 +143,8 @@ class UpdateManagementRepository {
         'minWindowsBuild': minWindowsBuild.trim(),
       'rolloutPercentage': rolloutPercentage,
       'silentInstallArgs': silentInstallArgs.trim(),
+      'targetType': targetType.trim(),
+      if (targetBranches.isNotEmpty) 'targetBranches': targetBranches,
       if (externalDownloadUrl != null && externalDownloadUrl.trim().isNotEmpty)
         'externalDownloadUrl': externalDownloadUrl.trim(),
       if (artifactBytes != null && resolvedArtifactName != null)
@@ -182,6 +186,8 @@ class UpdateManagementRepository {
     String? targetArchitecture,
     String? minWindowsBuild,
     int? rolloutPercentage,
+    String? targetType,
+    List<String>? targetBranches,
   }) async {
     final response = await _apiClient.dio.patch<Map<String, dynamic>>(
       '/api/admin/updates/releases/$releaseId',
@@ -201,6 +207,8 @@ class UpdateManagementRepository {
           'targetArchitecture': targetArchitecture,
         if (minWindowsBuild != null) 'minWindowsBuild': minWindowsBuild,
         if (rolloutPercentage != null) 'rolloutPercentage': rolloutPercentage,
+        if (targetType != null) 'targetType': targetType,
+        if (targetBranches != null) 'targetBranches': targetBranches,
       },
     );
     final payload = _extractData(response.data);

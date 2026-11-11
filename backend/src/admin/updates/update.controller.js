@@ -13,6 +13,7 @@ const {
   listUpdateJobs,
   getUpdateJobDetails,
   cancelUpdateJob,
+  cancelAllActiveUpdates,
   reportTaskProgress,
   getReleaseDownloadInfo,
   validateReleaseDownloadAccess,
@@ -496,6 +497,23 @@ const cancelManagedUpdateJob = asyncHandler(async (req, res) => {
   });
 });
 
+const cancelAllManagedUpdates = asyncHandler(async (req, res) => {
+  const result = await cancelAllActiveUpdates(req.user);
+  emitUpdatesUpdated(req, {
+    action: "all_updates_cancelled",
+    ...result,
+  });
+  emitUpdateTelemetry(req, {
+    action: "all_updates_cancelled",
+    ...result,
+  });
+  res.status(200).json({
+    success: true,
+    data: result,
+    message: "All active update jobs, tasks, and pulling states were successfully cancelled.",
+  });
+});
+
 module.exports = {
   heartbeatDevice,
   reportTaskState,
@@ -512,4 +530,5 @@ module.exports = {
   listManagedUpdateJobs,
   getManagedUpdateJob,
   cancelManagedUpdateJob,
+  cancelAllManagedUpdates,
 };

@@ -39,10 +39,14 @@ class _UpdateManagementScreenState
   List<BranchSummary> _availableBranches = const [];
 
   String? _selectedReleaseId;
-  String _targetType = 'all';
+  String _targetType = 'branch';
   final Set<String> _selectedDeviceIds = <String>{};
   final Set<String> _selectedBranchCodes = <String>{};
   String _targetDeviceSearch = '';
+
+  String _releaseTargetType = 'job_only';
+  final Set<String> _releaseTargetBranchCodes = <String>{};
+  final _releaseTargetBranchesController = TextEditingController();
 
   final _versionController = TextEditingController();
   final _notesController = TextEditingController();
@@ -73,6 +77,7 @@ class _UpdateManagementScreenState
     _externalUrlController.dispose();
     _silentArgsController.dispose();
     _targetBranchesController.dispose();
+    _releaseTargetBranchesController.dispose();
     _noteController.dispose();
     super.dispose();
   }
@@ -160,6 +165,20 @@ class _UpdateManagementScreenState
       return;
     }
 
+    final textBranches = _releaseTargetBranchesController.text
+        .split(',')
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty);
+    final branches = <String>{
+      ..._releaseTargetBranchCodes,
+      ...textBranches,
+    }.toList();
+
+    if (_releaseTargetType == 'branch' && branches.isEmpty) {
+      _showSnack('اختر فرعاً واحداً على الأقل لإتاحة التحديث له.', isError: true);
+      return;
+    }
+
     setState(() {
       _busy = true;
       _uploadProgress = 0;
@@ -175,6 +194,8 @@ class _UpdateManagementScreenState
             notes: _notesController.text,
             mandatory: _releaseMandatory,
             isEnabled: _releaseEnabled,
+            targetType: _releaseTargetType,
+            targetBranches: branches,
             silentInstallArgs: _releasePlatform == 'desktop_windows'
                 ? _silentArgsController.text
                 : '',
@@ -212,6 +233,9 @@ class _UpdateManagementScreenState
     _versionController.clear();
     _notesController.clear();
     _externalUrlController.clear();
+    _releaseTargetBranchesController.clear();
+    _releaseTargetBranchCodes.clear();
+    _releaseTargetType = 'job_only';
     _artifactPath = null;
     _artifactBytes = null;
     _artifactFileName = null;
@@ -945,6 +969,62 @@ class _UpdateManagementScreenState
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
+          const SizedBox(height: 14),
+
+          // Distribution Target Scope (Branch-by-Branch control)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Iconsax.routing, size: 18, color: Color(0xFF8B5CF6)),
+                    SizedBox(width: 8),
+                    Text(
+                      'نطاق توزيع هذا الإصدار (التحكم بالفروع):',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _releaseTargetType,
+                  decoration: InputDecoration(
+                    labelText: 'طريقة إتاحة التحديث للأجهزة',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'job_only',
+                      child: Text('يدوي عبر مهام التوزيع فقط (موصى به - تحكم فرع فرع)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'branch',
+                      child: Text('فروع محددة فقط (متاح لأجهزة هذه الفروع)'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'all',
+                      child: Text('كافة فروع المنظومة (متاح للجميع فوراً)'),
+                    ),
+                  ],
+                  onChanged: (val) => setState(() => _releaseTargetType = val ?? 'job_only'),
+                ),
+                if (_releaseTargetType == 'branch') ...[
+                  const SizedBox(height: 12),
+                  _buildReleaseBranchSelector(isDark),
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 12),
 
           // Toggles: Mandatory & Enabled
@@ -1109,7 +1189,64 @@ class _UpdateManagementScreenState
                     style: TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ),
+              const SizedBox(width: 8),
+              // Target scope badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: release.targetType == 'all'
+                      ? const Color(0xFF10B981).withValues(alpha: 0.15)
+                      : (release.targetType == 'branch'
+                          ? const Color(0xFF3B82F6).withValues(alpha: 0.15)
+                          : const Color(0xFF8B5CF6).withValues(alpha: 0.15)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      release.targetType == 'all'
+                          ? Iconsax.global
+                          : (release.targetType == 'branch'
+                              ? Iconsax.buildings
+                              : Iconsax.routing),
+                      size: 13,
+                      color: release.targetType == 'all'
+                          ? const Color(0xFF10B981)
+                          : (release.targetType == 'branch'
+                              ? const Color(0xFF3B82F6)
+                              : const Color(0xFF8B5CF6)),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      release.targetType == 'all'
+                          ? 'كافة الفروع'
+                          : (release.targetType == 'branch'
+                              ? (release.targetBranches.isEmpty
+                                  ? 'فروع محددة'
+                                  : 'فروع: ${release.targetBranches.join(", ")}')
+                              : 'يدوي (فرع فرع عبر المهام)'),
+                      style: TextStyle(
+                        color: release.targetType == 'all'
+                            ? const Color(0xFF10B981)
+                            : (release.targetType == 'branch'
+                                ? const Color(0xFF3B82F6)
+                                : const Color(0xFF8B5CF6)),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const Spacer(),
+              Tooltip(
+                message: 'تعديل نطاق وتوزيع الفروع لهذا الإصدار',
+                child: IconButton(
+                  icon: const Icon(Iconsax.edit_2, size: 18, color: Color(0xFF8B5CF6)),
+                  onPressed: _busy ? null : () => _editReleaseScope(release),
+                ),
+              ),
               Tooltip(
                 message: release.isEnabled ? 'الإصدار مفعل' : 'الإصدار متوقف',
                 child: Switch(
@@ -1154,6 +1291,7 @@ class _UpdateManagementScreenState
                         setState(() {
                           _selectedReleaseId = release.id;
                           _selectedSection = 'jobs';
+                          _targetType = 'branch';
                         });
                       },
                 style: FilledButton.styleFrom(
@@ -1232,11 +1370,11 @@ class _UpdateManagementScreenState
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   items: const [
-                    DropdownMenuItem(value: 'all', child: Text('كل أجهزة المنظومة')),
-                    DropdownMenuItem(value: 'branch', child: Text('فروع محددة')),
-                    DropdownMenuItem(value: 'devices', child: Text('أجهزة محددة')),
+                    DropdownMenuItem(value: 'branch', child: Text('فروع محددة (توزيع فرع فرع)')),
+                    DropdownMenuItem(value: 'all', child: Text('كل أجهزة المنظومة (كافة الفروع)')),
+                    DropdownMenuItem(value: 'devices', child: Text('أجهزة مخصصة')),
                   ],
-                  onChanged: (val) => setState(() => _targetType = val ?? 'all'),
+                  onChanged: (val) => setState(() => _targetType = val ?? 'branch'),
                 ),
               ),
             ],
@@ -1676,6 +1814,334 @@ class _UpdateManagementScreenState
         ],
       ),
     );
+  }
+
+  Widget _buildReleaseBranchSelector(bool isDark) {
+    final branchMap = <String, String>{};
+    for (final b in _availableBranches) {
+      if (b.code.isNotEmpty) {
+        branchMap[b.code] = b.name.isNotEmpty ? b.name : b.code;
+      }
+    }
+    for (final d in _devices) {
+      if (d.branchCode.isNotEmpty && !branchMap.containsKey(d.branchCode)) {
+        branchMap[d.branchCode] = d.branchCode;
+      }
+    }
+    if (branchMap.isEmpty) {
+      branchMap['main'] = 'الفرع الرئيسي (main)';
+    }
+
+    final allCodes = branchMap.keys.toList();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFCBD5E1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Iconsax.buildings, size: 16, color: Color(0xFF8B5CF6)),
+              const SizedBox(width: 8),
+              const Text(
+                'اختر الفروع المسموح لها بسحب هذا التحديث:',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    if (_releaseTargetBranchCodes.length == allCodes.length) {
+                      _releaseTargetBranchCodes.clear();
+                    } else {
+                      _releaseTargetBranchCodes.addAll(allCodes);
+                    }
+                  });
+                },
+                child: Text(
+                  _releaseTargetBranchCodes.length == allCodes.length
+                      ? 'إلغاء تحديد الكل'
+                      : 'تحديد كل الفروع (${allCodes.length})',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: allCodes.map((code) {
+              final name = branchMap[code]!;
+              final deviceCount = _devices.where((d) => d.branchCode == code).length;
+              final isSelected = _releaseTargetBranchCodes.contains(code);
+              return FilterChip(
+                selected: isSelected,
+                selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                checkmarkColor: const Color(0xFF8B5CF6),
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name == code ? code : '$name ($code)',
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? const Color(0xFF8B5CF6) : null,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (deviceCount > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF8B5CF6)
+                              : (isDark ? Colors.white12 : Colors.black12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '$deviceCount',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isSelected ? Colors.white : null,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                onSelected: (selected) {
+                  setState(() {
+                    if (selected) {
+                      _releaseTargetBranchCodes.add(code);
+                    } else {
+                      _releaseTargetBranchCodes.remove(code);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _releaseTargetBranchesController,
+            decoration: InputDecoration(
+              labelText: 'إضافة فروع إضافية يدويًا (اختياري، مفصولة بفاصلة)',
+              hintText: 'مثال: branch1, branch2',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editReleaseScope(ManagedUpdateRelease release) async {
+    String selectedScope = release.targetType;
+    final selectedBranches = Set<String>.from(release.targetBranches);
+    final customController = TextEditingController();
+
+    final branchMap = <String, String>{};
+    for (final b in _availableBranches) {
+      if (b.code.isNotEmpty) {
+        branchMap[b.code] = b.name.isNotEmpty ? b.name : b.code;
+      }
+    }
+    for (final d in _devices) {
+      if (d.branchCode.isNotEmpty && !branchMap.containsKey(d.branchCode)) {
+        branchMap[d.branchCode] = d.branchCode;
+      }
+    }
+    if (branchMap.isEmpty) {
+      branchMap['main'] = 'الفرع الرئيسي (main)';
+    }
+    final allCodes = branchMap.keys.toList();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  const Icon(Iconsax.routing, size: 20, color: Color(0xFF8B5CF6)),
+                  const SizedBox(width: 8),
+                  Text('تعديل نطاق وتوزيع الإصدار v${release.version}', style: const TextStyle(fontSize: 16)),
+                ],
+              ),
+              content: SizedBox(
+                width: 520,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'حدد كيف يتم إتاحة وتوزيع هذا الإصدار على أجهزة الفروع:',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedScope,
+                        decoration: InputDecoration(
+                          labelText: 'نطاق التوزيع',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'job_only',
+                            child: Text('يدوي عبر مهام التوزيع فقط (فرع فرع - موصى به)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'branch',
+                            child: Text('فروع محددة فقط (متاح لأجهزة هذه الفروع)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'all',
+                            child: Text('كافة فروع المنظومة (متاح للجميع فوراً)'),
+                          ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() => selectedScope = val);
+                          }
+                        },
+                      ),
+                      if (selectedScope == 'branch') ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Text('الفروع المحددة:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () {
+                                setDialogState(() {
+                                  if (selectedBranches.length == allCodes.length) {
+                                    selectedBranches.clear();
+                                  } else {
+                                    selectedBranches.addAll(allCodes);
+                                  }
+                                });
+                              },
+                              child: Text(
+                                selectedBranches.length == allCodes.length
+                                    ? 'إلغاء تحديد الكل'
+                                    : 'تحديد كل الفروع (${allCodes.length})',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: allCodes.map((code) {
+                            final name = branchMap[code]!;
+                            final isSel = selectedBranches.contains(code);
+                            return FilterChip(
+                              selected: isSel,
+                              selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                              checkmarkColor: const Color(0xFF8B5CF6),
+                              label: Text(
+                                name == code ? code : '$name ($code)',
+                                style: TextStyle(
+                                  fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                  color: isSel ? const Color(0xFF8B5CF6) : null,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              onSelected: (selected) {
+                                setDialogState(() {
+                                  if (selected) {
+                                    selectedBranches.add(code);
+                                  } else {
+                                    selectedBranches.remove(code);
+                                  }
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: customController,
+                          decoration: InputDecoration(
+                            labelText: 'فروع إضافية يدويًا (مفصولة بفاصلة)',
+                            hintText: 'مثال: branch1, branch2',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            isDense: true,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(false),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B5CF6),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => Navigator.of(dialogCtx).pop(true),
+                  child: const Text('حفظ التعديلات'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    if (confirmed == true) {
+      final textBranches = customController.text
+          .split(',')
+          .map((entry) => entry.trim())
+          .where((entry) => entry.isNotEmpty);
+      final finalBranches = <String>{
+        ...selectedBranches,
+        ...textBranches,
+      }.toList();
+
+      if (selectedScope == 'branch' && finalBranches.isEmpty) {
+        _showSnack('اختر فرعاً واحداً على الأقل.', isError: true);
+        return;
+      }
+
+      setState(() => _busy = true);
+      try {
+        await ref.read(updateManagementRepositoryProvider).updateRelease(
+              releaseId: release.id,
+              targetType: selectedScope,
+              targetBranches: finalBranches,
+            );
+        await _reload();
+        _showSnack('تم تحديث نطاق وتوزيع الإصدار بنجاح.');
+      } catch (err) {
+        _showSnack(err.toString(), isError: true);
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+    }
   }
 
   Widget _buildDeviceSelector(bool isDark) {

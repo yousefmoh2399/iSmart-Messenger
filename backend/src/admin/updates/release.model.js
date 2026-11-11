@@ -92,6 +92,16 @@ const releaseSchema = new mongoose.Schema(
       min: 1,
       max: 100,
     },
+    targetType: {
+      type: String,
+      enum: ["all", "branch", "job_only"],
+      default: "job_only",
+      index: true,
+    },
+    targetBranches: {
+      type: [String],
+      default: [],
+    },
     silentInstallArgs: {
       type: String,
       default: "",
