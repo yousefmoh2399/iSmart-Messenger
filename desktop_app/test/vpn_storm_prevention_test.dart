@@ -116,6 +116,10 @@ class _FakeAuthController extends Notifier<AuthState> implements AuthController 
 
 class _FakeChatSocketService implements ChatSocketService {
   final _controller = StreamController<ChatSocketEvent>.broadcast();
+  int connectCount = 0;
+  int disconnectCount = 0;
+  final List<String> updatedTokens = <String>[];
+  bool fakeConnected = true;
 
   void emit(ChatSocketEvent event) {
     if (!_controller.isClosed) {
@@ -124,7 +128,29 @@ class _FakeChatSocketService implements ChatSocketService {
   }
 
   @override
-  bool get isConnected => true;
+  bool get isConnected => fakeConnected;
+
+  @override
+  Future<void> connect({
+    required String baseUrl,
+    required String token,
+    String clientType = 'desktop',
+    dynamic socketOverride,
+  }) async {
+    connectCount++;
+    fakeConnected = true;
+  }
+
+  @override
+  void disconnect({bool clearJoined = true}) {
+    disconnectCount++;
+    fakeConnected = false;
+  }
+
+  @override
+  void updateAuthToken(String token) {
+    updatedTokens.add(token);
+  }
 
   @override
   Stream<ChatSocketEvent> get events => _controller.stream;
@@ -160,10 +186,12 @@ class _FakeStormChatRepository implements ChatRepository {
   _FakeStormChatRepository({
     this.conversations = const [],
     this.users = const [],
+    this.cachedMessagesCompleter,
   });
 
   final List<ChatConversation> conversations;
   final List<ChatDirectoryUser> users;
+  final Completer<ChatMessagesPage?>? cachedMessagesCompleter;
   final Map<String, int> fetchMessagesCounts = {};
   int fetchConversationsCount = 0;
 
@@ -225,7 +253,9 @@ class _FakeStormChatRepository implements ChatRepository {
 
   @override
   Future<ChatMessagesPage?> getCachedMessages(String conversationId) async =>
-      null;
+      cachedMessagesCompleter != null
+          ? cachedMessagesCompleter!.future
+          : null;
 
   @override
   Future<ChatMessagesPage> fetchMessages(
@@ -612,6 +642,144 @@ void main() {
         );
         expect(fakeRepo.fetchMessagesCounts['conv_1'], 1);
         expect(fakeRepo.fetchMessagesCounts['conv_2'], 1);
+      },
+    );
+
+    test(
+      'Real chatSocketConnectionProvider updates token without disconnecting live socket on silent JWT refresh',
+      () async {
+        SharedPreferences.setMockInitialValues(<String, Object>{
+          'desktop_api_base_url_v2': 'http://127.0.0.2:15100',
+          'desktop_api_base_url_override_v1': true,
+        });
+        final fakeSocket = _FakeChatSocketService();
+        addTearDown(fakeSocket.dispose);
+
+        final container = ProviderContainer(
+          overrides: [
+            chatSocketServiceProvider.overrideWithValue(fakeSocket),
+            appSettingsSocketSyncProvider.overrideWith((ref) {}),
+            authControllerProvider.overrideWith(_FakeAuthController.new),
+            currentUserProvider.overrideWithValue(_buildTestUser()),
+            authTokenProvider.overrideWith((ref) async {
+              final rev = ref.watch(authCredentialsRevisionProvider);
+              return 'jwt_generation_$rev';
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(chatSocketConnectionProvider.future);
+        expect(fakeSocket.connectCount, 1);
+        expect(fakeSocket.disconnectCount, 0);
+
+        // Rotate silent JWT token twice while socket stays healthy.
+        container.read(authCredentialsRevisionProvider.notifier).state++;
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+        container.read(authCredentialsRevisionProvider.notifier).state++;
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+
+        expect(
+          fakeSocket.connectCount,
+          1,
+          reason: 'Live socket must NOT disconnect/reconnect on silent JWT rotation',
+        );
+        expect(fakeSocket.disconnectCount, 0);
+        expect(
+          fakeSocket.updatedTokens,
+          ['jwt_generation_1', 'jwt_generation_2'],
+        );
+      },
+    );
+
+    test(
+      'ConversationMessagesController skips redundant skipIfFresh refresh right after initial fetch',
+      () async {
+        final fakeRepo = _FakeStormChatRepository(
+          conversations: [_buildConversation('conv_dup')],
+        );
+        final fakeSocket = _FakeChatSocketService();
+        addTearDown(fakeSocket.dispose);
+
+        final container = ProviderContainer(
+          overrides: [
+            chatRepositoryProvider.overrideWithValue(fakeRepo),
+            chatSocketServiceProvider.overrideWithValue(fakeSocket),
+            chatSocketConnectionProvider.overrideWith(
+              (ref) => Future<void>.value(),
+            ),
+            authControllerProvider.overrideWith(_FakeAuthController.new),
+            currentUserProvider.overrideWithValue(_buildTestUser()),
+            authTokenProvider.overrideWith((ref) async => 'tok_1'),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(
+          conversationMessagesControllerProvider('conv_dup').future,
+        );
+        expect(fakeRepo.fetchMessagesCounts['conv_dup'], 1);
+
+        // ChatScreen postFrameCallback calls refresh(skipIfFresh: true)
+        await container
+            .read(conversationMessagesControllerProvider('conv_dup').notifier)
+            .refresh(skipIfFresh: true);
+        expect(fakeRepo.fetchMessagesCounts['conv_dup'], 1);
+
+        // Explicit forced refresh still executes cleanly
+        await container
+            .read(conversationMessagesControllerProvider('conv_dup').notifier)
+            .refresh();
+        expect(fakeRepo.fetchMessagesCounts['conv_dup'], 2);
+      },
+    );
+
+    test(
+      'ConversationMessagesController skips refresh(skipIfFresh: true) called during async build prologue',
+      () async {
+        final cacheGate = Completer<ChatMessagesPage?>();
+        final fakeRepo = _FakeStormChatRepository(
+          conversations: [_buildConversation('conv_async')],
+          cachedMessagesCompleter: cacheGate,
+        );
+        final fakeSocket = _FakeChatSocketService();
+        addTearDown(fakeSocket.dispose);
+
+        final container = ProviderContainer(
+          overrides: [
+            chatRepositoryProvider.overrideWithValue(fakeRepo),
+            chatSocketServiceProvider.overrideWithValue(fakeSocket),
+            chatSocketConnectionProvider.overrideWith(
+              (ref) => Future<void>.value(),
+            ),
+            authControllerProvider.overrideWith(_FakeAuthController.new),
+            currentUserProvider.overrideWithValue(_buildTestUser()),
+            authTokenProvider.overrideWith((ref) async => 'tok_1'),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        // Start initial build; it pauses at getCachedMessages('conv_async').
+        final buildFuture = container.read(
+          conversationMessagesControllerProvider('conv_async').future,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Simulate ChatScreen.initState addPostFrameCallback firing while build awaits cache.
+        await container
+            .read(conversationMessagesControllerProvider('conv_async').notifier)
+            .refresh(skipIfFresh: true);
+        expect(fakeRepo.fetchMessagesCounts['conv_async'] ?? 0, 0);
+
+        cacheGate.complete(null);
+        await buildFuture;
+
+        expect(
+          fakeRepo.fetchMessagesCounts['conv_async'],
+          1,
+          reason:
+              'Initial build prologue must shield against duplicate Frame-1 skipIfFresh refresh',
+        );
       },
     );
   });

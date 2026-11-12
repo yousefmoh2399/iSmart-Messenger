@@ -20,11 +20,9 @@ class TicketsController extends AsyncNotifier<TicketOverviewData> {
   @override
   Future<TicketOverviewData> build() async {
     ref.watch(serverRecoveryRevisionProvider);
-    try {
-      await ref.watch(chatSocketConnectionProvider.future);
-    } catch (_) {
-      // Keep tickets usable even when realtime socket fails temporarily.
-    }
+    unawaited(
+      ref.read(chatSocketConnectionProvider.future).catchError((_) {}),
+    );
     _disposed = false;
     _repositoryInstance = ref.read(ticketRepositoryProvider);
     _listenToSocket();
@@ -179,9 +177,9 @@ class ClosedTicketsController extends AsyncNotifier<TicketOverviewData> {
   @override
   Future<TicketOverviewData> build() async {
     ref.watch(serverRecoveryRevisionProvider);
-    try {
-      await ref.watch(chatSocketConnectionProvider.future);
-    } catch (_) {}
+    unawaited(
+      ref.read(chatSocketConnectionProvider.future).catchError((_) {}),
+    );
     _disposed = false;
     _repositoryInstance = ref.read(ticketRepositoryProvider);
     _listenToSocket();
@@ -257,11 +255,9 @@ class TicketDetailsController
   @override
   Future<TicketDetailsData> build(String arg) async {
     ref.watch(serverRecoveryRevisionProvider);
-    try {
-      await ref.watch(chatSocketConnectionProvider.future);
-    } catch (_) {
-      // Keep ticket details usable even when realtime socket fails temporarily.
-    }
+    unawaited(
+      ref.read(chatSocketConnectionProvider.future).catchError((_) {}),
+    );
     _repositoryInstance = ref.read(ticketRepositoryProvider);
     _listenToSocket(arg);
     ref.onDispose(() => _eventsSubscription?.cancel());

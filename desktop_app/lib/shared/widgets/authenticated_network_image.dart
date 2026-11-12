@@ -24,7 +24,11 @@ bool shouldReloadAuthenticatedImage({
   required bool hasRenderedImage,
   required bool hasBytes,
   required bool hasResolvedHeaders,
+  bool terminalHttpError = false,
 }) {
+  if (terminalHttpError) {
+    return false;
+  }
   if (error != null || fallbackFailed) {
     return true;
   }
@@ -35,6 +39,27 @@ bool shouldReloadAuthenticatedImage({
     return !hasRenderedImage;
   }
   return !hasResolvedHeaders || !hasRenderedImage;
+}
+
+bool isTerminalMissingHttpError(Object? error) {
+  if (error == null) return false;
+  final text = error.toString().toLowerCase();
+  return text.contains('status 404') ||
+      text.contains('statuscode: 404') ||
+      text.contains('status 403') ||
+      text.contains('statuscode: 403') ||
+      text.contains('status 410') ||
+      text.contains('statuscode: 410');
+}
+
+String _redactUrlTokenForLog(String rawUrl) {
+  final uri = Uri.tryParse(rawUrl);
+  if (uri == null || !uri.queryParameters.containsKey('accessToken')) {
+    return rawUrl;
+  }
+  final redacted = Map<String, String>.from(uri.queryParameters)
+    ..['accessToken'] = '[redacted]';
+  return uri.replace(queryParameters: redacted).toString();
 }
 
 class AuthenticatedNetworkImage extends ConsumerStatefulWidget {
@@ -108,6 +133,7 @@ class _AuthenticatedNetworkImageState
     hasRenderedImage: _hasRenderedImage,
     hasBytes: _bytes != null,
     hasResolvedHeaders: _resolvedHeaders != null,
+    terminalHttpError: isTerminalMissingHttpError(_error),
   );
 
   @override
@@ -237,7 +263,7 @@ class _AuthenticatedNetworkImageState
     final generation = ++_loadGeneration;
     final imageUrl = widget.imageUrl.trim();
     final explicitHeaders = widget.httpHeaders;
-    final authRepository = explicitHeaders == null
+    final authRepository = widget.byteLoaderOverride == null
         ? ref.read(authRepositoryProvider)
         : null;
     final url = resolveApiUrl(imageUrl);
@@ -342,10 +368,11 @@ class _AuthenticatedNetworkImageState
             });
           }
         } catch (fallbackError) {
+          final isElectronRuntime = web_bridge.isElectron();
           debugPrint(
-            'Electron memory image fetch failed: $url -> $fallbackError',
+            'Electron memory image fetch failed: ${_redactUrlTokenForLog(url)} -> $fallbackError',
           );
-          if (widget.byteLoaderOverride != null) {
+          if (widget.byteLoaderOverride != null || isElectronRuntime) {
             if (mounted &&
                 generation == _loadGeneration &&
                 _activeKey == cacheKey) {
@@ -356,7 +383,7 @@ class _AuthenticatedNetworkImageState
                 _hasRenderedImage = false;
                 _networkFallbackFailed = true;
               });
-              if (fromReconnect) {
+              if (fromReconnect && !isTerminalMissingHttpError(fallbackError)) {
                 _scheduleFollowUpRetryIfNeeded();
               }
             }
@@ -597,7 +624,9 @@ class _AuthenticatedNetworkImageState
             return placeholder;
           },
           errorBuilder: (_, error, __) {
-            debugPrint('Image.network decode failed: $activeWebUrl -> $error');
+            debugPrint(
+              'Image.network decode failed: ${_redactUrlTokenForLog(activeWebUrl)} -> $error',
+            );
             _handleFallbackLoadError(activeWebUrl);
             return errorWidget;
           },

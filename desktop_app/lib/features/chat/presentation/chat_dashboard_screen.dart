@@ -711,7 +711,7 @@ class _ChatDashboardScreenState extends ConsumerState<ChatDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final authUser = ref.watch(authControllerProvider).valueOrNull;
-    final authToken = ref.watch(authTokenProvider).valueOrNull;
+    final authToken = ref.read(authTokenProvider).valueOrNull;
     final usersState = ref.watch(usersControllerProvider);
     final chatState = ref.watch(chatOverviewControllerProvider);
     final themeMode =

@@ -137,6 +137,33 @@ void main() {
         isFalse,
       );
     });
+
+    test('returns false when terminalHttpError is true (e.g. HTTP 404/403/410)', () {
+      expect(
+        shouldReloadAuthenticatedImage(
+          usesMemoryOrWebFallback: true,
+          error: StateError('Image request failed with status 404.'),
+          fallbackFailed: true,
+          hasRenderedImage: false,
+          hasBytes: false,
+          hasResolvedHeaders: false,
+          terminalHttpError: true,
+        ),
+        isFalse,
+      );
+      expect(
+        isTerminalMissingHttpError(
+          StateError('Image request failed with status 404.'),
+        ),
+        isTrue,
+      );
+      expect(
+        isTerminalMissingHttpError(
+          StateError('Image request failed with status 502.'),
+        ),
+        isFalse,
+      );
+    });
   });
 
   group('AuthenticatedNetworkImage offline recovery', () {

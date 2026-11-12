@@ -36,6 +36,33 @@ class ChatSocketService implements PrintStatusEmitter {
 
   String? get socketId => _socket?.id;
 
+  /// Updates the handshake token stored for future auto-reconnects without
+  /// disconnecting an already-healthy socket connection during silent refresh.
+  void updateAuthToken(String token) {
+    final normalized = token.trim();
+    if (normalized.isEmpty || _connectedToken == normalized) {
+      return;
+    }
+    _connectedToken = normalized;
+    final socket = _socket;
+    if (socket == null) {
+      return;
+    }
+    try {
+      final options = socket.io.options;
+      if (options is Map) {
+        final auth = options['auth'];
+        if (auth is Map) {
+          auth['token'] = normalized;
+        }
+        final headers = options['extraHeaders'];
+        if (headers is Map) {
+          headers['Authorization'] = 'Bearer $normalized';
+        }
+      }
+    } catch (_) {}
+  }
+
   bool _isSessionExpiredError(Object? error) {
     final message = error?.toString().toLowerCase() ?? '';
     return message.contains('session expired') ||

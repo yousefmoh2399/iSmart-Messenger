@@ -93,9 +93,7 @@ class ServerConnectionState {
 class ServerConnectionController extends AsyncNotifier<ServerConnectionState> {
   @override
   Future<ServerConnectionState> build() async {
-    final baseUrl =
-        ref.watch(apiBaseUrlControllerProvider).valueOrNull ??
-        AppConfig.defaultApiBaseUrl;
+    final baseUrl = await ref.watch(apiBaseUrlControllerProvider.future);
     return _check(baseUrl);
   }
 
@@ -616,24 +614,42 @@ final activeConversationIdProvider = StateProvider<String?>((ref) => null);
 
 final chatSocketConnectionProvider = FutureProvider<void>((ref) async {
   ref.watch(appSettingsSocketSyncProvider);
-  final authState = ref.watch(authControllerProvider);
+  final authUserId = ref.watch(
+    authControllerProvider.select((state) => state.valueOrNull?.id),
+  );
+  final authStatus = ref.watch(
+    authControllerProvider.select((state) => state.status),
+  );
   ref.watch(serverRecoveryRevisionProvider);
-  final authUser = authState.user;
   final socketService = ref.read(chatSocketServiceProvider);
-
-  if (authState.status == AuthStatus.initializing) {
+  if (authStatus == AuthStatus.initializing) {
     return;
   }
 
-  final token = await ref.watch(authTokenProvider.future);
-  if (authUser == null || token == null || token.isEmpty) {
+  String? lastAppliedToken;
+  ref.listen<AsyncValue<String?>>(authTokenProvider, (_, next) {
+    if (lastAppliedToken == null || next.isLoading || !next.hasValue) {
+      return;
+    }
+    final nextToken = next.valueOrNull?.trim() ?? '';
+    if (nextToken.isEmpty || nextToken == lastAppliedToken) {
+      return;
+    }
+    lastAppliedToken = nextToken;
+    if (socketService.isConnected) {
+      socketService.updateAuthToken(nextToken);
+    } else if (authUserId != null && authUserId.isNotEmpty) {
+      ref.invalidateSelf();
+    }
+  });
+
+  final baseUrl = await ref.watch(apiBaseUrlControllerProvider.future);
+  final token = await ref.read(authTokenProvider.future);
+  if (authUserId == null || authUserId.isEmpty || token == null || token.isEmpty) {
     socketService.disconnect();
     return;
   }
-
-  final baseUrl =
-      ref.watch(apiBaseUrlControllerProvider).valueOrNull ??
-      AppConfig.defaultApiBaseUrl;
+  lastAppliedToken = token.trim();
 
   try {
     await socketService.connect(

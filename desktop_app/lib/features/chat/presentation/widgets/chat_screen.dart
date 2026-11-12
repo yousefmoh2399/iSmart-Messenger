@@ -220,7 +220,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
         conversationMessagesControllerProvider(_conversationId).notifier,
       );
       controller.markSeen();
-      controller.refresh();
+      controller.refresh(skipIfFresh: true);
       _messageFocusNode.requestFocus();
       if (widget.initialTargetMessageId != null) {
         _scrollToTargetWithRetry(widget.initialTargetMessageId!);
@@ -269,7 +269,7 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
           conversationMessagesControllerProvider(_conversationId).notifier,
         );
         controller.markSeen();
-        controller.refresh();
+        controller.refresh(skipIfFresh: true);
         _messageFocusNode.requestFocus();
         if (widget.initialTargetMessageId != null) {
           _scrollToTargetWithRetry(widget.initialTargetMessageId!);
@@ -544,15 +544,6 @@ class ChatScreenState extends ConsumerState<ChatScreen> {
             userId: peer.id,
             includeSelf: true,
           );
-      if (peers.isEmpty && peer.branchCode.trim().isNotEmpty) {
-        peers = await ref
-            .read(updateManagementRepositoryProvider)
-            .listBranchPeerDevices(
-              branchCode: peer.branchCode,
-              userId: peer.id,
-              includeSelf: true,
-            );
-      }
       final resolved = peers.isNotEmpty ? peers.first : null;
       if (mounted) {
         setState(() {

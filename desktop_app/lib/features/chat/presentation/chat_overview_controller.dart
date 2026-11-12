@@ -1904,6 +1904,7 @@ class ConversationMessagesController
   bool _disposed = false;
   bool _isInitialBuildFetchingNetwork = false;
   bool _staleOnReconnect = false;
+  DateTime? _lastNetworkFetchAt;
   ChatRepository _repository() =>
       _chatRepository ?? ref.read(chatRepositoryProvider);
 
@@ -1934,6 +1935,15 @@ class ConversationMessagesController
   @override
   Future<ConversationMessagesState> build(String arg) async {
     ref.keepAlive();
+    _isInitialBuildFetchingNetwork = true;
+    try {
+      return await _buildInitialState(arg);
+    } finally {
+      _isInitialBuildFetchingNetwork = false;
+    }
+  }
+
+  Future<ConversationMessagesState> _buildInitialState(String arg) async {
     final hasSession = await _waitForAuthenticatedSession(listen: true);
     if (!hasSession) {
       return const ConversationMessagesState(
@@ -1977,19 +1987,15 @@ class ConversationMessagesController
 
     final cached = await _repository().getCachedMessages(arg);
     if (cached != null) {
-      Future.microtask(() => refresh());
+      Future.microtask(() => refresh(skipIfFresh: true));
       return ConversationMessagesState.initial(
         _dedupePage(_markPendingAsFailed(cached)),
       );
     }
 
-    _isInitialBuildFetchingNetwork = true;
-    try {
-      final page = await _guardAuth(() => _repository().fetchMessages(arg));
-      return ConversationMessagesState.initial(_dedupePage(page));
-    } finally {
-      _isInitialBuildFetchingNetwork = false;
-    }
+    final page = await _guardAuth(() => _repository().fetchMessages(arg));
+    _lastNetworkFetchAt = DateTime.now();
+    return ConversationMessagesState.initial(_dedupePage(page));
   }
 
   void _listenToOutbox(String conversationId) {
@@ -2325,8 +2331,14 @@ class ConversationMessagesController
     return message.copyWith(metadata: metadata, updatedAt: DateTime.now());
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh({bool skipIfFresh = false}) async {
     if (_isRefreshing || _disposed || _isInitialBuildFetchingNetwork) {
+      return;
+    }
+    if (skipIfFresh &&
+        _lastNetworkFetchAt != null &&
+        DateTime.now().difference(_lastNetworkFetchAt!) <
+            const Duration(seconds: 4)) {
       return;
     }
     if (!await _waitForAuthenticatedSession(listen: false)) {
@@ -2336,6 +2348,7 @@ class ConversationMessagesController
     _isRefreshing = true;
     try {
       final page = await _guardAuth(() => _repository().fetchMessages(arg));
+      _lastNetworkFetchAt = DateTime.now();
       if (_disposed) {
         return;
       }
